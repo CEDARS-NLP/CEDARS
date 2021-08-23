@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: ./app
+      args:
+        - ENV=dev
+    restart: always
+    ports:
+      - 8050:8050
+    environment:
+      - ENV=dev
+    depends_on:
+      - redis
+
+  redis:
+    build: ./redis

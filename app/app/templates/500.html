@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Internal Server Error{% endblock %}
+
+{% block content %}
+    <div class="w-75 mx-auto">
+        <h1>Internal Server Error</h1>
+        <p>Oops... we seem to have made a mistake, sorry!</p>
+        <div class="alert alert-danger w-50" role="alert">
+            <strong>{{ type }}</strong> {{ args|join('\n') }}
+        </div>
+        <p><a href="{{ url_for('home') }}" style="text-decoration: none">Go somewhere nice instead</a>
+    </div>
+{% endblock %}
