@@ -29,6 +29,13 @@ $ source venv/bin/activate
 (venv) $ python -m app.wsgi
 ```
 
+If you are using Poetry
+```shell
+$ poetry install
+$ cd app
+$ poetry run python -m app.wsgi
+```
+
 and navigate to http://localhost:5000
 
 ## Run on Docker
