@@ -1,83 +1,134 @@
-import re
+"""
+Abstract Class to interact with the spacy model for the CEDARS project.
+"""
+import logging
+from nltk.tokenize import sent_tokenize
 import spacy
+from spacy.matcher import Matcher
+from negspacy.termsets import termset
 
-class NLP_processor:
+
+
+class NLPPipeline:
     """
-    This class stores a sci-spacy model and functions needed to run it on medical notes.
+    Class to store nlp models and functions to abstract the pipelines
     """
-    def __init__(self, model_name = "en_core_sci_lg"):
+    def __init__(self, model_name):
         """
-        Loads the model
-        """
-        self.nlp_model = spacy.load(model_name)
+        Loads spacy model and expression matcher.
 
-    def process_note(self, note, regex_query):
-        """
-        This function takes a medical note and a regex query as input and annotates the relevant sections of the text.
-        ------
-        ARGS
-        note (str) :- This is a string representing the doctor's note.
-        regex_query (str) :- This string is a regex pattern for information a doctor may want.
-        ----
-        Return type
-        This returs a list of dictionaries. Each dictionary contains the annotation and location of where this occurrence can be found.
-        """
-        doc = self.nlp_model(note)
-        pattern = re.compile(regex_query)
-       
-        marked_flags = []
-       
-        for sent_no, sentence_annotation in enumerate(doc.sents):
-            tokens = list(sentence_annotation.subtree)
-            start_index = tokens[0].idx
-       
-           
-           
-            for token in tokens:
-                has_negation = self.is_negated(token)
-                if bool(pattern.match(token.lemma_)):                
-                    start = token.idx - start_index
-                    end = start + len(token.text)
-                    marked_flags.append({"sentence" : sentence_annotation.text, "token" : token.text,
-                                        "lemma" : token.lemma_, "isNegated" : has_negation,
-                                        "start_index" : start, "end_index" : end,
-                                        "sentence_number" : sent_no})
-                   
-        return marked_flags
-   
+        Args:
+            model_name (str) : Name of a downloaded spacy model.
 
-    def is_negated(self, token):
-        """
-        This function takes a spacy token and determines if it has been negated in this sentence.
+        Returns:
+            None
 
-        Ex.
-        This is not an apple.
-        In the above sentence, the token apple is negated.
-        ------
-        ARGS
-        token (spacy token) :- This is a token of a single word after spacy runs a model on some text.
-        ----
-        Return type
-        Boolean
+        Raises:
+            Exception: Spacy model loading raised an error due to invalid model name.
         """
-        neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing','neither','nowhere','noone',
-                            'no-one','hardly','scarcely','barely']
-       
-        parents = [i for i in token.ancestors]
-       
-        children = list(token.children)
-       
-        for parent in token.ancestors:
-            children.extend([i for i in parent.children])
-       
-        if ("neg" in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
-            return True
-       
-        parents_text = [par.text for par in parents]
-        children_text = [child.text for child in children]
-       
-        for word in neg_words:
-            if word in parents_text or word in children_text:
-                return True
-           
-        return False
+        try:
+            self.spacy_model = spacy.load(model_name)
+        except Exception as exc:
+            logging.critical('Spacy model loading raised an error due to invalid model name.')
+
+            raise exc
+
+        term_set = termset("en")
+
+        self.spacy_model.add_pipe("negex", config={
+        "neg_termset":term_set.get_patterns()
+    })
+
+
+        self.expression_matcher = Matcher(self.spacy_model.vocab)
+
+    def add_regex_pattern(self, reg_pattern, pattern_name, pattern_type = "TEXT"):
+        """
+        Stores a regex pattern with the type of event it is supposed to match to
+
+        Args:
+            reg_pattern (str) : Query in regex format.
+            pattern_name (str) : Name of this query.
+            pattern_type (str) : Type of pattern we are looking for.
+                    For more info look at https://spacy.io/usage/rule-based-matching#phrasematcher
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+
+        pattern = [{pattern_type: {"REGEX": reg_pattern}}]
+
+        self.expression_matcher.add(pattern_name, [pattern])
+
+
+    def annotate_text(self, text):
+        """
+        Runs the core NLP pipeline to convert plain-text to annotated format
+
+        Args:
+            text (str) : String of a doctor's note.
+
+        Returns:
+            annotations (list) : A list of all annotations found in the text.
+
+        Raises:
+            None
+        """
+
+        tokens = self.tokenize(text)
+        annotations = []
+        for sent in tokens:
+            for annotation in self.spacy_model(sent):
+                annotations.append(annotation)
+
+        return annotations
+
+    def run_matcher(self, text):
+        """
+        Runs and stores output of the token matcher
+
+        Args:
+            text (str) : String of a sentence from a doctor's note.
+
+        Returns:
+            annotations (list) : A list of all annotations found in the text.
+
+        Raises:
+            None
+        """
+
+        doc = self.spacy_model(text)
+        matches = self.expression_matcher(doc)
+
+        annotations = []
+
+        for match_id, start, end in matches:
+            string_id = self.spacy_model.vocab.strings[match_id]  # Get string representation
+            span = doc[start:end]  # The matched span
+
+            annotation = {"alert_type" : string_id, # "id" : match_id,
+                          "start_index" : start,
+                          "end_index" : end,
+                          "flagged_word" : span.text}
+
+            annotations.append(annotation)
+
+        return annotations
+
+    def tokenize(self, text):
+        """
+        Tokenizes the text into sentences
+
+        Args:
+            text (str) : String of a doctor's note.
+
+        Returns:
+           sentences (list) : A list of all sentences in the text.
+
+        Raises:
+            None
+        """
+        return sent_tokenize(text)

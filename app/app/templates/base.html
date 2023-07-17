@@ -2,33 +2,95 @@
 
 {% block container %}
 
-    <nav class="navbar navbar-light bg-light mb-5 nav-tabs d-flex">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('home') }}">
-                <img src="{{ url_for('static', filename='msk-logo.svg') }}" alt="" width="24" height="24"
-                     class="d-inline-block align-text-top">
-                CEDARS
-            </a>
-            <div class="flex-fill mx-5">
-                <form class="d-flex" action="#" method="post">
-                    <input type="search" class="form-control"
-                           placeholder="Enter query"
-                           aria-label="Search" name="query" value="{{ query or '' }}">
-                    <button class="btn btn-outline-secondary" type="submit" id="button-addon2">Search</button>
-                </form>
-            </div>
-            <ul class="nav nav-pills">
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="" role="button"
-                       aria-expanded="false">{{ session.user.initials }}</a>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
-                    </ul>
-                </li>
-            </ul>
+<nav class="navbar navbar-light bg-light mb-5 nav-tabs d-flex">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <img src="static/icon.png" alt="" width="24" height="24"
+                 class="d-inline-block align-text-top">
+            CEDARS
+        </a>
+        <div class="flex-fill mx-5">
+            <form class="d-flex" action="/search_patient" method="post">
+                <input type="search" class="form-control"
+                       placeholder="Enter Patient ID"
+                       aria-label="Search" name="patient_id" id="patient_id" value="">
+                <button class="btn btn-outline-secondary" type="submit" value = "search patient" id="button-addon2">Search</button>
+            </form>
         </div>
-    </nav>
+        <ul class="nav nav-pills">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
+                   aria-expanded="false">{{ user_initials }}</a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="#">Upload Data</a></li>
+                    <li><a class="dropdown-item" href="#">Profile</a></li>
+                    <li><a class="dropdown-item" href="#">Help</a></li>
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
+                    <li><a class="dropdown-item" href="#">Logout</a></li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</nav>
 
     {% block content %} {% endblock %}
+
+    <div class="position-fixed" style="bottom: 0; right: 0">
+        <div class="d-flex flex-column align-items-end m-4">
+            <a href="#feedback" data-bs-toggle="modal" data-bs-target="#exampleModal">
+                <img src="static/chat-left.svg" alt="" width="32" height="32">
+            </a>
+            <div class="text-muted" style="width: 80px; font-size: 14px; text-align: end">
+                Share your feedback!
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exampleModalLabel">Share your feedback</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form class="needs-validation" novalidate action="/" method="post"
+                      enctype=multipart/form-data>
+                    <div class="modal-body">
+                        <div class="form-floating">
+                        <textarea class="form-control" placeholder="Leave a comment here" id="floatingTextarea2"
+                                  style="height: 100px" name="content" required></textarea>
+                            <label for="floatingTextarea2">Comments</label>
+                            <div class="invalid-feedback">
+                                Please enter some feedback.
+                            </div>
+                        </div>
+                        <div class="col-md-12 mt-3">
+                            <label class="form-label">Add a screenshot</label>
+                            <div class="input-group">
+                                <input type="file" class="form-control" value="Upload" name="screenshot">
+                            </div>
+                            <div class="form-text">
+                                To take a screenshot use (Shift + Command + 4)
+                                <a href="https://support.apple.com/en-us/HT201361a" style="text-decoration: none">
+                                    on a Mac
+                                </a> or (Alt + PrtScn) on Windows 10.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary">Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+
+    <footer>
+        <div class="p-5"></div>
+    </footer>
 
 {% endblock %}

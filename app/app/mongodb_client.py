@@ -1,296 +1,550 @@
 """
-Loading Libraries
+This file contatins an abstract class for CEDARS to interact with mongodb.
 """
+
+from datetime import datetime
+import logging
 import pymongo
 import pandas as pd
-from datetime import datetime
 from NLP_processor import NLP_processor
 
+# Pylint disabled as the class has more than 20 public methods.
+class DatabaseConnector: #pylint: disable=R0904
+    """
+    Abstract class to connect to a mongodb database.
+    """
 
-class DatabaseConnector:
-   def __init__(self, db_name, model_name, db_url = "mongodb://localhost:27017/"):
-      """
-      This function loads and stores the database and nlp processer for future use.
-      ------
-      ARGS
-      db_name (str) :- Name of the mongodb database
-      model_name (str) :- Name of the spacy model to load. In this instance, we are only using sci-spacy models.
-      db_url (str) :- URL for the mongodb server.
-      ----
-      Return type
-      None
-      """
-      myclient = pymongo.MongoClient(db_url)
+    def __init__(self, db_name, model_name, db_url = "mongodb://localhost:27017/"):
+        """
+        This function loads and stores the database and nlp processer for future use.
 
-      self.database_connector = myclient[db_name] # create / open database
+        Args:
+        db_name (str) : Name of the mongodb database
+        model_name (str) : Name of the spacy model to load.
+            In this instance, we are only using sci-spacy models.
+        db_url (str) : URL for the mongodb server.
+       
+        Returns:
+            None
 
-      self.nlp_processor = NLP_processor(model_name)
+        Raises:
+            None
+        """
+        myclient = pymongo.MongoClient(db_url)
 
-   def create_project(self, project_name, investigator_name, cedars_version):
-      """
-      This function creates all the collections in the mongodb database that CEDARS will require for it's operations.
-      ------
-      ARGS
-      project_name (str) :- Name of the research project
-      investigator_name (str) :- Name of the investigator on this project
-      cedars_version (str) :- Version of CEDARS used for this project
-      ----
-      Return type
-      None
-      """
-      self.create_info_col(project_name, investigator_name, cedars_version)
+        self.database_connector = myclient[db_name] # create / open database
 
-      self.populate_annotations()
-      self.populate_notes()
-      self.populate_users()
-      self.populate_query()
+        self.nlp_processor = NLP_processor(model_name)
 
-      print("Database creation successful!")
-   
-   def create_info_col(self, project_name, investigator_name, cedars_version):
-      """
-      This function creates the info collection in the mongodb database.
-      The info collection is used to store meta-data regarding the current project.
-      ------
-      ARGS
-      project_name (str) :- Name of the research project
-      investigator_name (str) :- Name of the investigator on this project
-      cedars_version (str) :- Version of CEDARS used for this project
-      ----
-      Return type
-      None
-      """
-      collection = self.database_connector["INFO"]
-      info = {"creation_time" : datetime.now(), "project" : project_name,
-              "investigator" : investigator_name, "CEDARS_version" : cedars_version}
-     
-      collection.insert_one(info)
+    def create_project(self, project_name, investigator_name, cedars_version):
+        """
+        This function creates all the collections in the mongodb database for CEDARS.
+       
+        Args:
+            project_name (str) : Name of the research project
+            investigator_name (str) : Name of the investigator on this project
+            cedars_version (str) : Version of CEDARS used for this project
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        self.create_info_col(project_name, investigator_name, cedars_version)
+
+        self.populate_annotations()
+        self.populate_notes()
+        self.populate_users()
+        self.populate_query()
+
+        logging.info("Database creation successful!")
+
+    def create_info_col(self, project_name, investigator_name, cedars_version):
+        """
+        This function creates the info collection in the mongodb database.
+        The info collection is used to store meta-data regarding the current project.
+       
+        Args:
+            project_name (str) : Name of the research project
+            investigator_name (str) : Name of the investigator on this project
+            cedars_version (str) : Version of CEDARS used for this project
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        collection = self.database_connector["INFO"]
+        info = {"creation_time" : datetime.now(), "project" : project_name,
+                "investigator" : investigator_name, "CEDARS_version" : cedars_version}
+
+        collection.insert_one(info)
+        logging.info("Created INFO collection.")
 
 
-   def populate_annotations(self):
-      """
-      This function creates the annotations and patients collections in the mongodb database.
-      The annotations collection is used to store the NLP annotations generated by our NLP model.
-      The patients collection is used to store the patient ids as well as their current status.
-      ------
-      ARGS
-      None
-      ----
-      Return type
-      None
-      """
-      annotations = self.database_connector["ANNOTATIONS"]
+    def populate_annotations(self):
+        """
+        This function creates the annotations and patients collections in the mongodb database.
+        The annotations collection is used to store the NLP annotations generated by our NLP model.
+        The patients collection is used to store the patient ids as well as their current status.
+       
+        Args:
+            None
+       
+        Returns:
+            None
 
-      index_columns = ["patient_id", "note_id", "text_id", "sentence_number", "start_index"]
+        Raises:
+            None
+        """
+        annotations = self.database_connector["ANNOTATIONS"]
 
-      annotations.create_index("patient_id", unique = False)
-      annotations.create_index("note_id", unique = False)
-      annotations.create_index("text_id", unique = False)
-      annotations.create_index("sentence_number", unique = False)
-      annotations.create_index("start_index", unique = False)
 
-      # annotations.create_index(index_columns, unique = True, name = "annotations_index")
+        annotations.create_index("patient_id", unique = False)
+        annotations.create_index("note_id", unique = False)
+        annotations.create_index("text_id", unique = False)
+        annotations.create_index("sentence_number", unique = False)
+        annotations.create_index("start_index", unique = False)
 
-      patients = self.database_connector["PATIENTS"]
-      # To force mongodb to create an empty collection with only the default index, we create and drop a dummy ID
-      patients.create_index("id", unique = True)
-      patients.drop_index("id_1")
+        logging.info("Created ANNOTATIONS collection.")
 
-   def populate_notes(self):
-      """
-      This function creates the notes collection in the mongodb database.
-      The notes collection is used to store the patient's medical records.
-      ------
-      ARGS
-      None
-      ----
-      Return type
-      None
-      """
-      notes = self.database_connector["NOTES"]
+        # Pylint disabled for pointless statement.
+        # This statement is used to create a collection.
+        self.database_connector["PATIENTS"] #pylint: disable=W0104
+        logging.info("Created PATIENTS collection.")
 
-      notes.create_index("patient_id", unique = False)
-      notes.create_index("doc_id", unique = False)
-      notes.create_index("text_id", unique = True)
+    def populate_notes(self):
+        """
+        This function creates the notes collection in the mongodb database.
+        The notes collection is used to store the patient's medical records.
+       
+        Args:
+            None
 
-   def populate_users(self):
-      """
-      This function creates the users collection in the mongodb database.
-      The users collection is used to store the credentials of users logging into the CEDARS system.
-      ------
-      ARGS
-      None
-      ----
-      Return type
-      None
-      """
-      users = self.database_connector["USERS"]
+        Returns:
+            None
 
-      users.create_index("user", unique = True)
+        Raises:
+            None
+        """
+        notes = self.database_connector["NOTES"]
 
-   def populate_query(self):
-      """
-      This function creates the query collection in the mongodb database.
-      The query collection is used to store the regex queries that researchrs are using.
-      ------
-      ARGS
-      None
-      ----
-      Return type
-      None
-      """
-      query_col = self.database_connector["QUERY"]
-      # To force mongodb to create an empty collection with only the default index, we create and drop a dummy ID
-      query_col.create_index("id", unique = True)
-      query_col.drop_index("id_1")
+        notes.create_index("patient_id", unique = False)
+        notes.create_index("doc_id", unique = False)
+        notes.create_index("text_id", unique = True)
 
-   def add_end_user(self, username, password):
-      """
-      This function is used to add a new user to the database. All this data is kept in the USERS collection.
-      ------
-      ARGS
-      username (str) :- The name of this user.
-      password (str) :- The password this user will need to login to the system.
-      ----
-      Return type
-      None
-      """
-      info = {"user" : username, "password" : password, "date_created" : datetime.now()}
+        logging.info("Created NOTES collection.")
 
-      collection = self.database_connector["USERS"]
-      collection.insert_one(info)
+    def populate_users(self):
+        """
+        This function creates the users collection in the mongodb database.
+        The users collection is used to store the credentials of users of the CEDARS system.
+       
+        Args:
+            None
+       
+        Returns:
+            None
 
-   def save_query(self, query, exclude_negated, hide_duplicates, skip_after_event, tag_query, date_min = None, date_max = None):
-      """
-      This function is used to save a regex query to the database. All this data is kept in the QUERY collection.
-      ------
-      ARGS
-      query (str) :- The regex query.
-      exclude_negated (bool) :- True if we want to exclude negated tokens.
-      hide_duplicates (bool) :- True if we want to restrict duplicate queries.
-      skip_after_event (bool) :- True if sentences occurring after a recorded clinical event are to be skipped.
-      tag_query (dict of mapping [str : list]) :- Key words to include or exclude in the search.
-      date_min (str) :- Smallest date for valid query.
-      date_max (str) :- Greatest date for valid query.
-      ----
-      Return type
-      None
-      """
-      info = {"query" : query,
+        Raises:
+            None
+        """
+        users = self.database_connector["USERS"]
+
+        users.create_index("user", unique = True)
+        logging.info("Created USERS collection.")
+
+    def populate_query(self):
+        """
+        This function creates the query collection in the mongodb database.
+        The query collection is used to store the regex queries that researchrs are using.
+       
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        # Pylint disabled for pointless statement.
+        # This statement is used to create a collection.
+        self.database_connector["QUERY"] #pylint: disable=W0104
+        logging.info("Created QUERY collection.")
+
+    def add_end_user(self, username, password):
+        """
+        This function is used to add a new user to the database.
+        All this data is kept in the USERS collection.
+       
+        Args:
+            username (str) : The name of this user.
+            password (str) : The password this user will need to login to the system.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        info = {"user" : username, "password" : password, "date_created" : datetime.now()}
+
+        collection = self.database_connector["USERS"]
+        collection.insert_one(info)
+        logging.info("Added user %s to database.", username)
+
+    # Pylint disabled due to too many arguments
+    def save_query(self, query, exclude_negated, hide_duplicates, #pylint: disable=R0913
+                   skip_after_event, tag_query, date_min = None, date_max = None):
+
+        """
+        This function is used to save a regex query to the database.
+        All this data is kept in the QUERY collection.
+       
+        Args:
+            query (str) : The regex query.
+            exclude_negated (bool) : True if we want to exclude negated tokens.
+            hide_duplicates (bool) : True if we want to restrict duplicate queries.
+            skip_after_event (bool) : True if sentences occurring
+                                        after a recorded clinical event are to be skipped.
+            tag_query (dict of mapping [str : list]) :
+                                        Key words to include or exclude in the search.
+            date_min (str) : Smallest date for valid query.
+            date_max (str) : Greatest date for valid query.
+           
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        info = {"query" : query,
             "exclude_negated" : exclude_negated,
             "hide_duplicates" : hide_duplicates,
             "skip_after_event" : skip_after_event,
             "tag_query" : tag_query,
             "date_min" : date_min,
             "date_max" : date_max}
-     
-      collection = self.database_connector["QUERY"]
-      collection.insert_one(info)
 
-   def EMR_to_mongodb(self, csv_name):
-      """
-      This function is used to open a csv file and load it's contents into the mongodb database.
-      ------
-      ARGS
-      csv_name (str) :- The name of the csv file to load data from.
-      ----
-      Return type
-      None
-      """
-      df = pd.read_csv(csv_name)
+        collection = self.database_connector["QUERY"]
+        collection.insert_one(info)
 
-      id_list = df["patient_id"].unique()
+        logging.info("Saved query : %s.", query)
 
-      for i, p_id in enumerate(id_list):
-         documents = df[df["patient_id"] == p_id]
+    # Pylint disabled due to naming convention.
+    def EMR_to_mongodb(self, csv_name): #pylint: disable=C0103
+        """
+        This function is used to open a csv file and load it's contents into the mongodb database.
+       
+        Args:
+            csv_name (str) : The name of the csv file to load data from.
 
-         self.upload_notes(documents)
+        Returns:
+            None
 
-         print(f"Documents uploaded for patient #{i + 1}")
+        Raises:
+            None
+        """
+        data_frame = pd.read_csv(csv_name)
 
-   def upload_notes(self, documents):
-      """
-      This function is used to take a dataframe of all a patient's records and save it to the mongodb database.
-      ------
-      ARGS
-      documents (pandas dataframe) :- Dataframe with all the records of a paticular patient.
-      ----
-      Return type
-      None
-      """
-      notes_collection = self.database_connector["NOTES"]
-      patient_ids = set()
-      for i in range(len(documents)):
-         note_info = documents.iloc[i].to_dict()
-         notes_collection.insert_one(note_info)
+        id_list = data_frame["patient_id"].unique()
+        logging.info("Starting document migration to mongodb database.")
+        for i, p_id in enumerate(id_list):
+            documents = data_frame[data_frame["patient_id"] == p_id]
 
-         patient_ids.add(note_info["patient_id"])
+            self.upload_notes(documents)
 
-      patients_collection = self.database_connector["PATIENTS"]
-      for p_id in patient_ids:
-         patient_info = {"patient_id": p_id,
-                           "reviewed": False,
-                           "locked": False,
-                           "updated": False,
-                           "admin_locked": False}
-         
-         patients_collection.insert_one(patient_info)
+            logging.info("Documents uploaded for patient #%s", str(i + 1))
+
+        logging.info("Completed document migration to mongodb database.")
 
 
-   
-   def automatic_NLP_processor(self, query, patient_id = None):
-      """
-      This function is used to perform and save NLP annotations on one or all patients saved in the database.
-      If patient_id == None we will do this for all patients in the database.
-      ------
-      ARGS
-      query (str) :- Regex query of all what terms the researcher is looking for.
-      patient_id (int) :- The ID of a patient we want to perform these annotations for.
-      ----
-      Return type
-      None
-      """
-      if patient_id != None:
-         patient_ids = set([patient_id])
-      else:
-         patients = self.database_connector["PATIENTS"].find()
+    def upload_notes(self, documents):
+        """
+        This function is used to take a dataframe of patient records
+        and save it to the mongodb database.
+       
+        Args:
+            documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
 
-         patient_ids = set([patient["patient_id"] for patient in patients])
+        Returns:
+            None
 
-      for p_id in patient_ids:
-         print(f"Annotating patient #{p_id}.")
-         self.annotate_single(query, p_id)
-     
-   
-   def annotate_single(self, query, patient_id):
-      """
-      This function is used to perform and save NLP annotations on a single patient saved in the database.
-      The patient information in the PATIENTS collection is also appropriately updated during this process.
-      ------
-      ARGS
-      query (str) :- Regex query of all what terms the researcher is looking for.
-      patient_id (int) :- The ID of a patient we want to perform these annotations for.
-      ----
-      Return type
-      None
-      """
-      patients_collection = self.database_connector["PATIENTS"]
-      patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "locked": True } })
+        Raises:
+            None
+        """
+        notes_collection = self.database_connector["NOTES"]
+        patient_ids = set()
+        for i in range(len(documents)):
+            note_info = documents.iloc[i].to_dict()
 
-      annotations_collection = self.database_connector["ANNOTATIONS"]
-      mongodb_search_query = { "patient_id": patient_id }
+            date_format = '%Y-%m-%d'
+            datetime_obj = datetime.strptime(note_info["text_date"], date_format)
+            note_info["text_date"] = datetime_obj
 
-      for note in self.database_connector["NOTES"].find(mongodb_search_query):    
-         note["note_id"] = note["_id"]
-         del note["_id"]
+            notes_collection.insert_one(note_info)
 
-         instances = self.nlp_processor.process_note(note["text"], query)
+            patient_ids.add(note_info["patient_id"])
 
-         for inst in instances:
-            annotation = note.copy()
-            annotation.update(inst)
+        patients_collection = self.database_connector["PATIENTS"]
+        for p_id in patient_ids:
+            patient_info = {"patient_id": p_id,
+                            "reviewed": False,
+                            "locked": False,
+                            "updated": False,
+                            "admin_locked": False}
 
-            annotations_collection.insert_one(annotation)
-         
-      patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "locked": False } })
-      patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "reviewed": True } })
+            patients_collection.insert_one(patient_info)
+
+
+
+    def automatic_nlp_processor(self, query, patient_id = None):
+        """
+        This function is used to perform and save NLP annotations
+        on one or all patients saved in the database.
+        If patient_id == None we will do this for all patients in the database.
+       
+        Args:
+            query (str) : Regex query of all what terms the researcher is looking for.
+            patient_id (int) : The ID of a patient we want to perform these annotations for.
+           
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        if patient_id is not None:
+            patient_ids = [patient_id]
+        else:
+            patients = self.database_connector["PATIENTS"].find()
+
+            patient_ids = [patient["patient_id"] for patient in patients]
+
+        logging.info("Starting annotation of patients for query : %s.", query)
+        for p_id in patient_ids:
+            logging.info("Annotating patient #%s.", str(p_id))
+            self.annotate_single(query, p_id)
+
+        logging.info("Completed annotation of patients for query : %s.", query)
+
+    def annotate_single(self, query, patient_id):
+        """
+        This function is used to perform and save NLP annotations on a
+        single patient saved in the database.
+        The patient information in the PATIENTS collection is also
+        appropriately updated during this process.
+       
+        Args:
+            query (str) : Regex query of all what terms the researcher is looking for.
+            patient_id (int) : The ID of a patient we want to perform these annotations for.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        patients_collection = self.database_connector["PATIENTS"]
+        patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "locked": True } })
+
+        annotations_collection = self.database_connector["ANNOTATIONS"]
+        mongodb_search_query = { "patient_id": patient_id }
+
+        for note in self.database_connector["NOTES"].find(mongodb_search_query):
+            note_id = note["_id"]
+            instances = self.nlp_processor.process_note(note["text"], query)
+
+            for inst in instances:
+                annotation = inst.copy()
+                annotation['note_id'] = note_id
+                annotation["patient_id"] = note["patient_id"]
+                annotation["event_date"] = None
+                annotation["comments"] = []
+                annotation["reviewed"] = False
+
+                annotations_collection.insert_one(annotation)
+
+        patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "locked": False } })
+
+    def get_annotation(self, annotation_id):
+        """
+        Retrives annotation from mongodb.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+
+        Returns:
+            annotation (dict) : Dictionary for an annotation from mongodb.
+                The keys are the attribute names.
+                The values are the values of the attribute in that record.
+
+        Raises:
+            None
+        """
+        annotation = self.database_connector["ANNOTATIONS"].find_one({ "_id" : annotation_id })
+
+        return annotation
+
+    def get_annotaion_note(self, annotation_id):
+        """
+        Retrives note linked to a paticular annotation.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+
+        Returns:
+            note (dict) : Dictionary for a note from mongodb.
+                The keys are the attribute names.
+                The values are the values of the attribute in that record.
+
+        Raises:
+            None
+        """
+        logging.debug("Retriving annotation #%s from database.", annotation_id)
+        annotation = self.database_connector["ANNOTATIONS"].find_one({ "_id" : annotation_id })
+        note = self.database_connector["NOTES"].find_one({ "_id" : annotation["note_id"] })
+
+        return note
+
+
+    def get_patient(self):
+        """
+        Retrives a single patient ID who has not yet been reviewed.
+        The chosen patient is simply the first one in the database that has not yet been reviewed.
+
+        Args:
+            None
+
+        Returns:
+            patient_id (int) : Unique ID for a patient.
+
+        Raises:
+            None
+        """
+
+        patient = self.database_connector["PATIENTS"].find_one({"reviewed" : False})
+
+        if patient is not None and "patient_id" in patient.keys():
+            logging.debug("Retriving patient #%s from database.", patient['patient_id'])
+            return patient["patient_id"]
+
+        logging.debug("Failed to retrive any further un-reviewed patients from the database.")
+        return None
+
+    def get_patient_annotation_ids(self, p_id):
+        """
+        Retrives all annotation IDs for annotations linked to a patient.
+
+        Args:
+            p_id (int) : Unique ID for a patient.
+
+        Returns:
+            annotations (list) : A list of all annotation IDs linked to that patient.
+
+        Raises:
+            None
+        """
+        logging.debug("Retriving annotations for patient #%s from database.", str(p_id))
+        annotation_ids = self.database_connector["ANNOTATIONS"].find({ "patient_id": p_id,
+                                                                      "reviewed" : False})
+
+        return [id["_id"] for id in annotation_ids]
+
+    def mark_annotation_reviewed(self, annotation_id):
+        """
+        Updates the annotation in the database to mark it as reviewed.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        logging.debug("Marking annotation #%s as reviewed.", annotation_id)
+        self.database_connector["ANNOTATIONS"].update_one({"_id" : annotation_id},
+                                                          { "$set": { "reviewed": True } })
+
+    def update_annotation_date(self, annotation_id, new_date):
+        """
+        Enters a new event date for an annotation.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+            new_date (str) : The new value to update the event date of an annotation with.
+                Must be in the format YYYY-MM-DD .
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        logging.debug("Updating date on annotation #%s to %s.", annotation_id, new_date)
+        date_format = '%Y-%m-%d'
+        datetime_obj = datetime.strptime(new_date, date_format)
+        self.database_connector["ANNOTATIONS"].update_one({"_id" : annotation_id},
+                                                        { "$set": { "event_date" : datetime_obj } })
+
+    def delete_annotation_date(self, annotation_id):
+        """
+        Deletes the event date for an annotation.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        logging.debug("Deleting date on annotation #%s.", annotation_id)
+        self.database_connector["ANNOTATIONS"].update_one({"_id" : annotation_id},
+                                                          { "$set": { "event_date" : None } })
+
+
+
+    def mark_patient_reviewed(self, patient_id):
+        """
+        Updates the patient's status to reviewed in the database.
+
+        Args:
+            patient_id (int) : Unique ID for a patient.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        logging.debug("Marking patient #%s as reviewed.", patient_id)
+        self.database_connector["PATIENTS"].update_one({"patient_id" : patient_id},
+                                                       { "$set": { "reviewed": True } })
+
+    def add_annotation_comment(self, annotation_id, comment):
+        """
+        Stores a new comment for an annotation.
+
+        Args:
+            annotation_id (str) : Unique ID for the annotation.
+            comment (str) : Text of the comment on this annotation.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        logging.debug("Adding comment to annotation #%s.", annotation_id)
+        annotation = self.database_connector["ANNOTATIONS"].find_one({ "_id" : annotation_id })
+        comments = annotation["comments"]
+        comments.append(comment)
+        self.database_connector["ANNOTATIONS"].update_one({"_id" : annotation_id},
+                                                          { "$set": { "comments" : comments } })
