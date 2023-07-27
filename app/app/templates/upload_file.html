@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<div class="w-75 mx-auto">
+  <form action="/upload_data" class="form-inline" method="POST" enctype="multipart/form-data">
+
+    <div class="mb-4">
+      <h2>Data Upload</h2>
+
+      <div class="mb-3">
+        <label for="formFile" class="form-label">Upload a file with patient data (.csv).</label>
+        <input class="form-control" type="file" id="formFile" name = "data_file1">
+      </div>
+
+      <div id="holder"class="holder_default">
+        <input value="" id="file" style="border: 3px dashed #7A97FC;" class=" hidden"/>
+        <input type="file" id="File-selected" name = "data_file2">
+    </div>
+
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+    <br>
+      <div class="btn-group me-2" role="group" aria-label="Second group">
+        <button class="btn btn-primary" type="submit" name="submit_button">Upload file</button>
+    </div>
+
+  </form>
+
+  
+  
+</div>
+
+<style>
+  .panel-default {
+    border-color: #0b0b0b !important;
+  }
+
+  #File-selected{
+      position: absolute;
+      left: 38%;
+      top: 54%;
+    }
+    .holder_default {
+        position: absolute;
+        
+        width:26%;
+        height:15.5%;
+        border: 3px dashed #ccc;
+    }
+
+
+    #holder.hover {
+        position: absolute;
+        width:26%;
+        height:15.5%;
+        border: 3px dashed #0c0 !important;
+    }
+
+
+
+    .hidden {
+        visibility: hidden;
+    }
+
+    .visible {
+        visibility: visible;
+    }
+
+</style>
+
+
+
+{% endblock %}

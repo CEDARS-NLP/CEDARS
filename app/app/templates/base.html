@@ -2,37 +2,55 @@
 
 {% block container %}
 
-<nav class="navbar navbar-light bg-light mb-5 nav-tabs d-flex">
+<nav class="navbar navbar-light bg-light mb-5  nav-tabs d-flex">
     <div class="container-fluid">
+        
         <a class="navbar-brand" href="/">
-            <img src="static/icon.png" alt="" width="24" height="24"
+            <img src="static/proj_logo.png" alt="" width="24" height="24"
                  class="d-inline-block align-text-top">
             CEDARS
         </a>
-        <div class="flex-fill mx-5">
-            <form class="d-flex" action="/search_patient" method="post">
-                <input type="search" class="form-control"
-                       placeholder="Enter Patient ID"
-                       aria-label="Search" name="patient_id" id="patient_id" value="">
-                <button class="btn btn-outline-secondary" type="submit" value = "search patient" id="button-addon2">Search</button>
-            </form>
+
+        <div class="proj_name d-inline-block align-text-top" id="proj_name">
+                Project Name : {{ proj_name }}
+            
         </div>
-        <ul class="nav nav-pills">
-            <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
-                   aria-expanded="false">{{ user_initials }}</a>
-                <ul class="dropdown-menu dropdown-menu-end">
-                    <li><a class="dropdown-item" href="#">Upload Data</a></li>
-                    <li><a class="dropdown-item" href="#">Profile</a></li>
-                    <li><a class="dropdown-item" href="#">Help</a></li>
-                    <li>
-                        <hr class="dropdown-divider">
-                    </li>
-                    <li><a class="dropdown-item" href="#">Logout</a></li>
-                </ul>
-            </li>
-        </ul>
+
+        
+        {% block search_bar %} {% endblock %}
+
+        {% if user_initials is defined %}
+            <ul class="nav nav-pills">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
+                    aria-expanded="false">
+                    
+                    {{ user_initials }}
+                    
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="/">Homepage</a></li>
+                        <li><a class="dropdown-item" href="/proj_details">Project Details</a></li>
+                        <li><a class="dropdown-item" href="/stats">Project Statistics</a></li>
+                        <li><a class="dropdown-item" href="/add_user">Add User</a></li>
+                        <li><a class="dropdown-item" href="/upload_data">Upload Data</a></li>
+                        <li><a class="dropdown-item" href="/upload_query">Search Query</a></li>
+                        <li><a class="dropdown-item" href="/adjudicate_records">Adjudicate Annotations</a></li>
+                        <li><a class="dropdown-item" href="download_annotations">Download Annotations</a></li>
+                        <li>
+                            <hr class="dropdown-divider">
+                        </li>
+                        <li><a class="dropdown-item" href="/logout">Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+        {% endif %}
+
+
     </div>
+
+
+
 </nav>
 
     {% block content %} {% endblock %}
@@ -87,6 +105,17 @@
             </div>
         </div>
     </div>
+
+    <style>
+
+        .search_div {
+            width: 55%;
+        }
+
+        .proj_name {
+            font-size: 20px;
+        }
+    </style>
 
 
     <footer>
