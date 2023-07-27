@@ -17,7 +17,7 @@ class DatabaseConnector(object): #pylint: disable=R0904
 
 
     def __new__(self, db_name = None, project_name = None, investigator_name = None, 
-                 cedars_version = None, db_url = "mongodb://localhost:27017/"):
+                 cedars_version = None, db_url = "db"):
         """
         This function loads and stores the database and nlp processer for future use.
 
@@ -38,7 +38,7 @@ class DatabaseConnector(object): #pylint: disable=R0904
             db_names = client.list_database_names()
             if db_name not in db_names:
                 self.database_connector = client[db_name] # create / open database
-                self.create_project(project_name, investigator_name, cedars_version)
+                self.create_project(self, project_name, investigator_name, cedars_version)
 
 
             self.database_connector = client[db_name] # create / open database
@@ -61,12 +61,12 @@ class DatabaseConnector(object): #pylint: disable=R0904
         Raises:
             None
         """
-        self.create_info_col(project_name, investigator_name, cedars_version)
+        self.create_info_col(self, project_name, investigator_name, cedars_version)
 
-        self.populate_annotations()
-        self.populate_notes()
-        self.populate_users()
-        self.populate_query()
+        self.populate_annotations(self)
+        self.populate_notes(self)
+        self.populate_users(self)
+        self.populate_query(self)
 
         logging.info("Database creation successful!")
 

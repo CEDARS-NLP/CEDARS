@@ -1,5 +1,0 @@
-flask==2.0.1
-flask-caching==1.10.1
-flask-login==0.5.0
-python-dotenv==0.19.0
-redis==3.5.3
