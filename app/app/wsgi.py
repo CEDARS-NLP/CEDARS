@@ -1,10 +1,11 @@
 import os
+from flask_application import create_app
 
-from app import create_app
+app = create_app("PYCEDARS")
 
-environment = os.getenv('ENV', 'local')
 
-app = create_app(f"app.config.{environment.title()}")
+if not os.path.isdir('static/csv_files'):
+    os.mkdir('static/csv_files')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0')

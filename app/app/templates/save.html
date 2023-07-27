@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}
+    Clinical Event Detection and Recording System
+{% endblock %}
+
+{% block head %}
+Clinical Event Detection and Recording System
+{% endblock %}
+
+
+{% block lead %}
+    LDAP User Name 
+        {{name}}
+{% endblock %}
+
+{% block content %}
+
+
+    <h3>Event Date <br>
+        {{stored_date}}
+    </h3>
+
+    <br>
+    <br>   
+
+
+    <form action="/" method="post">
+
+
+        <h3>
+            Comments:
+        </h3>
+        <p>
+            {{comments}}
+        </p>
+        <label>New Comment:</label><br>
+        <input type="text" name="comment">
+
+        <br>
+        <br>
+        <br>
+
+        <label>Selected Note:</label><br>
+        <textarea  rows="10" cols="200" disabled>
+            {{full_note}}
+        </textarea>
+
+
+        
+    </form>
+
+ 
+
+      
+
+{% endblock %}

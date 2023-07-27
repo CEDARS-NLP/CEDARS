@@ -7,11 +7,11 @@
   <form action="/login" class="form-inline" method="POST">
 
     <div class="mb-4">
-      <h2>User Login</h2>
+      <h2>This form is used to create an administrator for the {{ proj_name }} CEDARS project.</h2>
 
       <div class="form-group">
-        <label for="exampleInputEmail1">Enter Your username</label>
-        <input type="text" class="form-control" name="username">
+        <label>Enter Your username</label>
+        <input type="text" class="form-control" name="admin_username">
       </div>
 
       <br>
@@ -20,8 +20,6 @@
         <label>Enter Your password</label>
         <input type="password" class="form-control" name="password">
       </div>
-
-      <br>
 
       <br>
      
@@ -41,7 +39,7 @@
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Invalid Login</h5>
+          <h5 class="modal-title">Modal title</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
