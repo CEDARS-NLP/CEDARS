@@ -32,22 +32,23 @@ def upload_query():
     proj_name = db_conn.get_proj_name()
 
     if request.method == "GET":
-        return render_template("upload_query.html", user_initials = user_initials, 
-                            proj_name = proj_name)
+        return render_template("upload_query.html",
+                               user_initials=user_initials,
+                               proj_name=proj_name)
     else:
         tag_query = {"exact": [False],
-        "nlp_apply": [False],
-        "include": [None],
-        "exclude": [None]}
+                     "nlp_apply": [False],
+                     "include": [None],
+                     "exclude": [None]
+                     }
 
         search_query = request.form.get("regex_query")
         use_negation = bool(request.form.get("view_negations"))
         hide_duplicates = not bool(request.form.get("keep_duplicates"))
         skip_after_event = bool(request.form.get("skip_after_event"))
         
-
         db_conn.save_query(search_query, use_negation,
-                        hide_duplicates, skip_after_event, tag_query)
+                           hide_duplicates, skip_after_event, tag_query)
         
         db_conn.empty_annotations()
 

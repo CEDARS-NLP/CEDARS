@@ -6,9 +6,13 @@ from mongodb_client import DatabaseConnector
 
 download_annotations_page = Blueprint("download_annotations", __name__)
 
+
 @download_annotations_page.route('/download_annotations')
 @login_required
-def downloadFile ():
+def download_file():
+    """
+    TODO: Add docstring
+    """
     db_conn = DatabaseConnector()
 
     data = db_conn.get_reviewed_annotations()

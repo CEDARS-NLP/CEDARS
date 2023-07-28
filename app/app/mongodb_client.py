@@ -2,22 +2,30 @@
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
+import os
 from datetime import datetime
 import logging
 import pymongo
 from werkzeug.security import check_password_hash, generate_password_hash
-import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Pylint disabled as the class has more than 20 public methods.
-class DatabaseConnector(object): #pylint: disable=R0904
+class DatabaseConnector(object):  # pylint: disable=R0904
     """
     Abstract class to connect to a mongodb database.
-    We define and use this as a singleton class in order to access it from different flask blueprints.
+    We define and use this as a singleton class in order to access it 
+    from different flask blueprints.
     """
 
-
-    def __new__(self, db_name = None, project_name = None, investigator_name = None, 
-                 cedars_version = None, db_url = "db"):
+    def __new__(cls,
+                db_name=None,
+                project_name=None,
+                investigator_name=None,
+                cedars_version="0.1",
+                db_url=os.getenv("DB_HOST")):
         """
         This function loads and stores the database and nlp processer for future use.
 
@@ -26,27 +34,28 @@ class DatabaseConnector(object): #pylint: disable=R0904
         db_url (str) : URL for the mongodb server.
         
         Returns:
-            None
+            Instance of DatabaseConnector
 
         Raises:
             None
         """
-        if not hasattr(self, 'instance'):
-            self.instance = super(DatabaseConnector, self).__new__(self)
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(DatabaseConnector, cls).__new__(cls)
             client = pymongo.MongoClient(db_url)
 
             db_names = client.list_database_names()
             if db_name not in db_names:
-                self.database_connector = client[db_name] # create / open database
-                self.create_project(self, project_name, investigator_name, cedars_version)
+                # create / open database
+                cls.database_connector = client[db_name]
+                cls.instance.create_project(project_name,
+                                            investigator_name,
+                                            cedars_version)
+            else:
+                # create / open database
+                cls.database_connector = client[db_name] 
+        return cls.instance
 
-
-            self.database_connector = client[db_name] # create / open database
-        return self.instance
-
-    
-
-    def create_project(self, project_name, investigator_name, cedars_version):
+    def create_project(self, project_name, investigator_name, cedars_version="0.1"):
         """
         This function creates all the collections in the mongodb database for CEDARS.
         
@@ -61,12 +70,12 @@ class DatabaseConnector(object): #pylint: disable=R0904
         Raises:
             None
         """
-        self.create_info_col(self, project_name, investigator_name, cedars_version)
+        self.create_info_col(project_name, investigator_name, cedars_version)
 
-        self.populate_annotations(self)
-        self.populate_notes(self)
-        self.populate_users(self)
-        self.populate_query(self)
+        self.populate_annotations()
+        self.populate_notes()
+        self.populate_users()
+        self.populate_query()
 
         logging.info("Database creation successful!")
 
@@ -87,12 +96,13 @@ class DatabaseConnector(object): #pylint: disable=R0904
             None
         """
         collection = self.database_connector["INFO"]
-        info = {"creation_time" : datetime.now(), "project" : project_name,
-                "investigator" : investigator_name, "CEDARS_version" : cedars_version}
+        info = {"creation_time": datetime.now(),
+                "project": project_name,
+                "investigator": investigator_name,
+                "CEDARS_version": cedars_version}
 
         collection.insert_one(info)
         logging.info("Created INFO collection.")
-
 
     def populate_annotations(self):
         """
@@ -111,12 +121,11 @@ class DatabaseConnector(object): #pylint: disable=R0904
         """
         annotations = self.database_connector["ANNOTATIONS"]
 
-
-        annotations.create_index("patient_id", unique = False)
-        annotations.create_index("note_id", unique = False)
-        annotations.create_index("text_id", unique = False)
-        annotations.create_index("sentence_number", unique = False)
-        annotations.create_index("start_index", unique = False)
+        annotations.create_index("patient_id", unique=False)
+        annotations.create_index("note_id", unique=False)
+        annotations.create_index("text_id", unique=False)
+        annotations.create_index("sentence_number", unique=False)
+        annotations.create_index("start_index", unique=False)
 
         logging.info("Created ANNOTATIONS collection.")
 
@@ -162,7 +171,7 @@ class DatabaseConnector(object): #pylint: disable=R0904
         """
         users = self.database_connector["USERS"]
 
-        users.create_index("user", unique = True)
+        users.create_index("user", unique=True)
         logging.info("Created USERS collection.")
 
     def populate_query(self):
@@ -199,15 +208,19 @@ class DatabaseConnector(object): #pylint: disable=R0904
         Raises:
             None
         """
-        info = {"user" : username, "password" : password, "date_created" : datetime.now()}
+        info = {"user": username, "password": password,
+                "date_created": datetime.now()}  # todo UTC
 
         collection = self.database_connector["USERS"]
         collection.insert_one(info)
         logging.info("Added user %s to database.", username)
 
     # Pylint disabled due to too many arguments
-    def save_query(self, query, exclude_negated, hide_duplicates, #pylint: disable=R0913
-                   skip_after_event, tag_query, date_min = None, date_max = None):
+    def save_query(self, query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
+                   skip_after_event,
+                   tag_query,
+                   date_min=None,
+                   date_max=None):
 
         """
         This function is used to save a regex query to the database.
@@ -242,7 +255,6 @@ class DatabaseConnector(object): #pylint: disable=R0904
         collection.insert_one(info)
 
         logging.info("Saved query : %s.", query)
-
 
     def upload_notes(self, documents):
         """

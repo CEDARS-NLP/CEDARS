@@ -6,13 +6,18 @@ from mongodb_client import DatabaseConnector
 
 
 def allowed_image_file(filename):
+    """
+    TODO: Add docstring
+    """
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
     
     extension = filename.split(".")[-1]
 
     return extension in ALLOWED_EXTENSIONS
 
+
 proj_details_page = Blueprint("proj_details", __name__)
+
 
 @proj_details_page.route("/proj_details", methods=["GET", "POST"])
 @login_required
@@ -45,12 +50,14 @@ def proj_details():
         db_conn.update_proj_name(proj_name)
 
         return redirect("/proj_details")
-    else:
-        proj_name = db_conn.get_proj_name()
-        user_name = session["user"]
-        user_initials = get_initials(user_name)
 
-        cedars_version = db_conn.get_curr_version()
+    proj_name = db_conn.get_proj_name()
+    user_name = session["user"]
+    user_initials = get_initials(user_name)
 
-        return render_template("proj_details.html", proj_name = proj_name,
-                            user_initials = user_initials, cedars_version = cedars_version)
+    cedars_version = db_conn.get_curr_version()
+
+    return render_template("proj_details.html",
+                           proj_name=proj_name,
+                           user_initials=user_initials,
+                           cedars_version=cedars_version)

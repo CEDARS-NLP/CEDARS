@@ -1,12 +1,17 @@
+"""
+TODO: Add docstring
+"""
+
 import re
 import logging
 import spacy
+
 
 class NLP_processor:
     """
     This class stores a sci-spacy model and functions needed to run it on medical notes.
     """
-    def __new__(self, model_name = "en_core_sci_lg"):
+    def __new__(self, model_name="en_core_sci_lg"):
         """
         Loads the model
         """
@@ -35,20 +40,21 @@ class NLP_processor:
             tokens = list(sentence_annotation.subtree)
             start_index = tokens[0].idx
         
-            
-            
             for token in tokens:
                 has_negation = self.is_negated(token)
-                if bool(pattern.match(token.lemma_)):                
+                if bool(pattern.match(token.lemma_)):   
                     start = token.idx - start_index
                     end = start + len(token.text)
-                    marked_flags.append({"sentence" : sentence_annotation.text, "token" : token.text, 
-                                        "lemma" : token.lemma_, "isNegated" : has_negation, 
-                                        "start_index" : start, "end_index" : end, 
-                                        "sentence_number" : sent_no})
+                    marked_flags.append({
+                        "sentence": sentence_annotation.text,
+                        "token": token.text,
+                        "lemma": token.lemma_,
+                        "isNegated": has_negation,
+                        "start_index": start,
+                        "end_index": end, 
+                        "sentence_number": sent_no})
                     
         return marked_flags
-    
 
     def is_negated(self, token):
         """
@@ -64,8 +70,10 @@ class NLP_processor:
         Return type 
         Boolean
         """
-        neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing','neither','nowhere','noone',
-                            'no-one','hardly','scarcely','barely']
+        neg_words = ['no', 'not', "n't", "wouldn't", 'never',
+                     'nobody', 'nothing', 'neither', 'nowhere',
+                     'noone', 'no-one', 'hardly', 'scarcely',
+                     'barely']
         
         parents = [i for i in token.ancestors]
         
@@ -74,7 +82,10 @@ class NLP_processor:
         for parent in token.ancestors:
             children.extend([i for i in parent.children])
         
-        if ("neg" in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
+        if (
+              ("neg" in [child.dep_ for child in children]) or
+              ("neg" in [par.dep_ for par in parents])
+        ):
             return True
         
         parents_text = [par.text for par in parents]
@@ -85,9 +96,11 @@ class NLP_processor:
                 return True
             
         return False
-    
 
-    def automatic_nlp_processor(self, database_connector, query, patient_id = None):
+    def automatic_nlp_processor(self, 
+                                database_connector,
+                                query,
+                                patient_id=None):
         """
         This function is used to perform and save NLP annotations
         on one or all patients saved in the database.
@@ -136,7 +149,6 @@ class NLP_processor:
         """
         database_connector.set_patient_lock_status(patient_id, True)
         foundAnyAnnotations = False
-
 
         for note in database_connector.get_patient_notes(patient_id):
             try:

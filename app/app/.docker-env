@@ -1,0 +1,3 @@
+SECRET_KEY=cedars
+HOST=0.0.0.0
+DB_HOST=db

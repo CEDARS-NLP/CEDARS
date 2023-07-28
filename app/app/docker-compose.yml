@@ -5,7 +5,7 @@ services:
     ports:
       - 5001:5000
     volumes:
-      - .:app/
+      - .:/app/
     depends_on:
       - db
   
@@ -13,3 +13,4 @@ services:
     image: mongo:4.4.6
     ports:
       - 27018:27017
+
