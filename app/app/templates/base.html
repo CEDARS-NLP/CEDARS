@@ -30,11 +30,15 @@
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><a class="dropdown-item" href="/">Homepage</a></li>
-                        <li><a class="dropdown-item" href="/proj_details">Project Details</a></li>
                         <li><a class="dropdown-item" href="/stats">Project Statistics</a></li>
-                        <li><a class="dropdown-item" href="/add_user">Add User</a></li>
-                        <li><a class="dropdown-item" href="/upload_data">Upload Data</a></li>
-                        <li><a class="dropdown-item" href="/upload_query">Search Query</a></li>
+
+                        {% if is_admin == true %}
+                            <li><a class="dropdown-item" href="/proj_details">Project Details</a></li>        
+                            <li><a class="dropdown-item" href="/add_user">Add User</a></li>
+                            <li><a class="dropdown-item" href="/upload_data">Upload Data</a></li>
+                            <li><a class="dropdown-item" href="/upload_query">Search Query</a></li>
+                        {% endif %}
+
                         <li><a class="dropdown-item" href="/adjudicate_records">Adjudicate Annotations</a></li>
                         <li><a class="dropdown-item" href="download_annotations">Download Annotations</a></li>
                         <li>

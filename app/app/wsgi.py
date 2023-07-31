@@ -1,10 +1,18 @@
+"""
+This file runs the flask backend server.
+"""
 import os
-from flask_application import create_app
 from dotenv import load_dotenv
+from flask_application import create_app
+from mongodb_client import DatabaseConnector
+
 
 load_dotenv()
 
-app = create_app("PYCEDARS")
+app = create_app(os.getenv("DB_NAME"))
+
+db_conn = DatabaseConnector()
+db_conn.remove_all_locked()
 
 
 if not os.path.isdir('static/csv_files'):

@@ -4,6 +4,7 @@
 
 {% block content %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
 
 
 <div class="w-75 mx-auto">
@@ -23,8 +24,15 @@
 
     <div class="col-7">
       <div class="mb-4">
-        <h6 class="text-muted">Found Sentence</h6>
+        <h6 class="text-muted">Project Progress</h6>
         <canvas id="number_reviewed_pichart" style="width:100%;max-width:600px"></canvas>
+
+        <br>
+        <br>
+        <br>
+
+        <h6 class="text-muted">Lemma Distribution</h6>
+        <canvas id="Lemma Distribution" style="width:100%;max-width:600px"></canvas>
 
       </div>
 
@@ -34,51 +42,9 @@
   </div>
 </div>
 
-<style>
-  #proj_name {
-    left : 12.35%;
-    position:absolute;
-  }
-
-  #search_bar {
-    left : 37.8%;
-    position:absolute;
-    width: 40%;
-  }
-
-
-  .panel-default {
-    border-color: #0b0b0b !important;
-  }
-
-  mark { 
-    
-    color: red;
-  }
-
-  .save-comment-btn {
-    background-color: #007bff; /* Use a primary color for the button */
-    color: #ffffff; /* Text color on the button */
-    border: none;
-    border-radius: 4px;
-    padding: 8px 16px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: background-color 0.2s ease; /* Add a smooth transition on hover */
-  }
-
-  .save-comment-btn:disabled {
-    opacity: 0.7; /* Reduce the opacity of the button when disabled */
-    cursor: not-allowed; /* Change cursor to indicate it's not clickable */
-  }
-
-  .save-comment-btn:hover {
-    background-color: #0056b3; /* Darken the button color on hover */
-  }
-</style>
 
 <script>
-
+  // Script for the PIE Chart
   const not_in_anno = {{ number_of_patients }} - {{ number_of_annotated_patients }} ;
   const num_reviewed = {{ number_of_reviewed }} ;
   const num_unreviewed = {{ number_of_annotated_patients }} - {{ number_of_reviewed }}
@@ -113,6 +79,66 @@
 };
   
   new Chart("number_reviewed_pichart", config);
+  </script>
+
+  <script>
+    // Script for the BAR Chart
+    var lemma_dist = JSON.parse('{{lemma_dist | tojson}}');
+
+
+  var labels = [];
+  var bar_heights = [];
+  var max_height = 0;
+  for (lemma in lemma_dist) {
+    labels.push(lemma);
+    bar_heights.push(lemma_dist[lemma]);
+
+    if (lemma_dist[lemma] > max_height) {
+      max_height = lemma_dist[lemma];
+    }
+  }
+
+  const bar_data = {
+    labels: labels,
+    datasets: [
+      {
+        label: 'Lemmas',
+        data: bar_heights,
+        borderColor: "rgba(0,0,255,1)",
+        backgroundColor: "rgba(0,0,255,0.5)",
+        fill: false,
+        borderWidth: 0.5,
+        borderRadius: 100,
+      }
+    ]
+  };
+
+    const bar_config = {
+      type: 'bar',
+      data: bar_data,
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+          },
+          title: {
+            display: true,
+            text: 'Chart.js Bar Chart'
+          }
+        },
+        scales : {
+            yAxes: [{
+                    ticks : {
+                        max : max_height * 1.1,    
+                        min : 0
+                    }
+                }]
+        }        
+      },
+    };
+
+    new Chart("Lemma Distribution", bar_config);
   </script>
   
 
