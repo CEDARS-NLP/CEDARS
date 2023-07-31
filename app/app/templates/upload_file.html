@@ -10,21 +10,10 @@
       <h2>Data Upload</h2>
 
       <div class="mb-3">
-        <label for="formFile" class="form-label">Upload a file with patient data (.csv).</label>
+        <label for="formFile" class="form-label">Upload a file with patient data.</label>
         <input class="form-control" type="file" id="formFile" name = "data_file1">
       </div>
 
-      <div id="holder"class="holder_default">
-        <input value="" id="file" style="border: 3px dashed #7A97FC;" class=" hidden"/>
-        <input type="file" id="File-selected" name = "data_file2">
-    </div>
-
-    <br>
-    <br>
-    <br>
-    <br>
-    <br>
-    <br>
     <br>
       <div class="btn-group me-2" role="group" aria-label="Second group">
         <button class="btn btn-primary" type="submit" name="submit_button">Upload file</button>
@@ -32,47 +21,56 @@
 
   </form>
 
-  
+  <br>
+  <br>
+  <br>
+
+  <b>
+    <label>Note that to upload data, your file must be in one of the following formats :</label>
+  </b>
+
+  <ul class="list-group list-group-flush">
+    <li class="list-group-item">CSV (.csv)</li>
+    <li class="list-group-item">Excel (.xlsx)</li>
+    <li class="list-group-item">Json (.json)</li>
+    <li class="list-group-item">Parquet (.parquet)</li>
+    <li class="list-group-item">Pickle (.pickle or .pkl)</li>
+    <li class="list-group-item">XML (.xml)</li>
+  </ul>
+    
   
 </div>
 
-<style>
-  .panel-default {
-    border-color: #0b0b0b !important;
-  }
 
-  #File-selected{
-      position: absolute;
-      left: 38%;
-      top: 54%;
-    }
-    .holder_default {
-        position: absolute;
-        
-        width:26%;
-        height:15.5%;
-        border: 3px dashed #ccc;
-    }
+{% if invalid_format is defined %}
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
 
+  <div class="modal fade" id="invalidLoginModal" tabindex="-1"aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Invalid File Format</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          Invalid File Format!
+          <br>
+          To check for allowed file formats, you may refer to the list below the upload button.
+        </div>
+        <div class="modal-footer">
+         
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
 
-    #holder.hover {
-        position: absolute;
-        width:26%;
-        height:15.5%;
-        border: 3px dashed #0c0 !important;
-    }
+$(window).on('load', function() {
+        $('#invalidLoginModal').modal('show');
+    });
+</script>
 
-
-
-    .hidden {
-        visibility: hidden;
-    }
-
-    .visible {
-        visibility: visible;
-    }
-
-</style>
+{% endif %}
 
 
 

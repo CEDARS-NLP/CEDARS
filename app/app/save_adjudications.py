@@ -1,3 +1,6 @@
+"""
+This page contatins the flask blueprint for the /save_adjudications route.
+"""
 from flask import Blueprint
 from flask import redirect, session, request
 from login_page import login_required
@@ -8,6 +11,20 @@ save_adjudications_page = Blueprint("save_adjudications", __name__)
 @save_adjudications_page.route("/save_adjudications", methods=["POST"])
 @login_required
 def save_adjudications():
+    """
+    This is a flask function for the backend logic 
+                    for the save_adjudications route.
+    It is used to edit and review annotations.
+    
+    Args:
+        None
+
+    Returns:
+        None
+
+    Raises:
+        None
+    """
     db_conn = DatabaseConnector()
     if request.form['submit_button'] == "new_date":
         new_date = request.form['date_entry']

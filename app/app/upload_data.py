@@ -1,3 +1,6 @@
+"""
+This page contatins the functions and the flask blueprint for the /upload_data route.
+"""
 import logging
 from flask import Blueprint, render_template
 from flask import redirect, session, request
@@ -8,15 +11,41 @@ from mongodb_client import DatabaseConnector
 
 
 def allowed_data_file(filename):
-    ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
+    """
+    This function is used to check if a file has a valid extension for us to load tabular data from.
     
+    Args:
+        filepath (str) : The path to the file.
+
+    Returns:
+        (bool) : True if the file is of a supported type.
+
+    Raises:
+        None
+    """
+    ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
+
     extension = filename.split(".")[-1]
 
     return extension in ALLOWED_EXTENSIONS
 
 
 def load_pandas_dataframe(filepath):
+    """
+    This function is used to load tabular data from a file into a pandas DataFrame.
+    
+    Args:
+        filepath (str) : The path to the file to load data from. 
+            For valid file extensions refer to the allowed_data_file function above.
+
+    Returns:
+        (pandas DataFrame) : This is a dataframe with the data from the file.
+
+    Raises:
+        None
+    """
     extension = filepath.split(".")[-1]
+
     if extension == 'csv':
         return pd.read_csv(filepath)
     elif extension == 'xlsx':
@@ -29,6 +58,8 @@ def load_pandas_dataframe(filepath):
         return pd.read_pickle(filepath)
     elif extension == 'xml':
         return pd.read_xml(filepath)
+    
+    return None
 
  # Pylint disabled due to naming convention.
 def EMR_to_mongodb(db_conn, filepath): #pylint: disable=C0103
@@ -46,8 +77,8 @@ def EMR_to_mongodb(db_conn, filepath): #pylint: disable=C0103
         None
     """
     if not allowed_data_file(filepath):
-        return 
-    
+        return
+
     data_frame = load_pandas_dataframe(filepath)
     if data_frame is None:
         return
@@ -70,7 +101,7 @@ upload_page = Blueprint("upload_data", __name__)
 def upload_data():
     """
     This is a flask function for the backend logic 
-                    to upload a csv file to the database.
+                    to upload a file to the database.
 
     Args:
         None
@@ -82,15 +113,18 @@ def upload_data():
         None
     """
 
+    if not (session.get('is_admin') is True):
+        return redirect("/")
+
     db_conn = DatabaseConnector()
-    
+
     user_name = session["user"]
     user_initials = get_initials(user_name)
     proj_name = db_conn.get_proj_name()
 
     if request.method == "GET":
-        return render_template("upload_file.html", user_initials = user_initials, 
-                            proj_name = proj_name)
+        return render_template("upload_file.html", user_initials = user_initials,
+                            proj_name = proj_name, is_admin = session.get('is_admin'))
     else:
         if "data_file1" not in request.files and "data_file2" not in request.files:
             return redirect("/upload_data")
@@ -98,12 +132,19 @@ def upload_data():
         if "data_file1" in request.files:
             file = request.files["data_file1"]
             filename = user_name + "_" + secure_filename(file.filename)
+
+            if not allowed_data_file(filename):
+                return render_template("upload_file.html", user_initials = user_initials,
+                        proj_name = proj_name, invalid_format = True,
+                        is_admin = session.get('is_admin'))
+            
             file_path = "static/csv_files/" + filename
             file.save(file_path)
+
+            
 
             EMR_to_mongodb(db_conn, file_path)
             return redirect("/upload_query")
 
-        return render_template("upload_file.html", user_initials = user_initials, 
-                        proj_name = proj_name)
-
+        return render_template("upload_file.html", user_initials = user_initials,
+                        proj_name = proj_name, is_admin = session.get('is_admin'))

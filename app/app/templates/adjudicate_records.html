@@ -206,4 +206,35 @@
   });
 </script>
 
+{% if isLocked == true %}
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+
+  <div class="modal fade" id="invalidLoginModal" tabindex="-1"aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Invalid Patient ID</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          Invalid Patient ID!
+          <br>
+          This patient is not currently accessible. The records may be locked or there may be no record in the database.
+        </div>
+        <div class="modal-footer">
+         
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
+
+$(window).on('load', function() {
+        $('#invalidLoginModal').modal('show');
+    });
+</script>
+
+{% endif %}
+
+
 {% endblock %}

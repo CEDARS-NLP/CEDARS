@@ -2,23 +2,44 @@
 This file contatins the flask backend code to run the CEDARS web interface.
 """
 from tempfile import mkdtemp
-import os
 from flask import Flask, render_template, session
-from flask import request, redirect, url_for, send_file
+from flask import request, redirect
 from flask_session import Session
-from werkzeug.utils import secure_filename
-import pandas as pd
 from mongodb_client import DatabaseConnector
-from NLP_processor import NLP_processor
 from session_functions import update_session_variables
 from login_page import get_initials, login_required
 
+# Importing relevant flask blueprints
+from login_page import login_page, login_manager
+from upload_data import upload_page
+from upload_query import upload_query_page
+from add_user_page import add_user_page
+from project_details_page import proj_details_page
+from adjudicate_records_page import adjudicate_records_page
+from save_adjudications import save_adjudications_page
+from stats import stats_page
+from download_annotations import download_annotations_page
+from NLP_processor import NLP_processor
 
 def create_app(db_name):
     """
+    This function creates and returns the flask application after combining all the blueprints.
+
+    Args:
+        db_name (str) : The name of the mongodb database we will interact with.
+
+    Returns:
+        app (flask application) : The application with all the blue prints
+
+    Raises:
+        None
     """
-    db_conn = DatabaseConnector(db_name, "CEDARS demo", "", 0.1)
-    nlp_processor = NLP_processor("en_core_sci_lg")
+
+    # We initialize singleton classes so we will not need to re-load them later
+    db_conn = DatabaseConnector(db_name = db_name)
+    nlp_processor = NLP_processor()
+
+
     app = Flask(__name__)
 
     # Ensure templates are auto-reloaded
@@ -41,56 +62,18 @@ def create_app(db_name):
     app.config["SESSION_TYPE"] = "filesystem"
     Session(app)
 
-    from login_page import login_page, login_manager
     login_manager.init_app(app)
+
+    # Registering all blueprints with flask
     app.register_blueprint(login_page)
-
-    from upload_data import upload_page
     app.register_blueprint(upload_page)
-
-    from upload_query import upload_query_page
     app.register_blueprint(upload_query_page)
-
-    from add_user_page import add_user_page
     app.register_blueprint(add_user_page)
-
-    from project_details_page import proj_details_page
     app.register_blueprint(proj_details_page)
-
-    from adjudicate_records_page import adjudicate_records_page
     app.register_blueprint(adjudicate_records_page)
-
-    from save_adjudications import save_adjudications_page
     app.register_blueprint(save_adjudications_page)
-
-    from stats import stats_page
     app.register_blueprint(stats_page)
-
-    from download_annotations import download_annotations_page
     app.register_blueprint(download_annotations_page)
-    
-    @app.route("/no_remaining_annotations", methods=["GET", "POST"])
-    @login_required
-    def no_remaining_annotations():
-        """
-        This is a flask function for the backend logic 
-                        for the no_remaining_annotations page.
-        Runs if all annotations of a patient have been completed.
-
-        Args:
-            None
-
-        Returns:
-            None
-
-        Raises:
-            None
-        """
-
-        update_session_variables(db_conn)
-        return redirect("/")
-        
-    
 
     @app.route("/search_patient", methods=["POST"])
     @login_required
@@ -111,9 +94,26 @@ def create_app(db_name):
         Raises:
             None
         """
-        update_session_variables(db_conn, int(request.form["patient_id"]))
-        return redirect("/")
-    
+
+        # Checks if the patient ID is valid
+        # If not redirects to adjudicate_records with error msg
+        try:
+            int(request.form["patient_id"])
+        except:
+            session["hasBeenLocked"] = True
+            return redirect("/adjudicate_records")
+
+        # makes sure that the current patient is not locked
+        status = db_conn.get_patient_lock_status(int(request.form["patient_id"]))
+        print(status, flush=True)
+        if status is None or status is True:
+            # Set to True if patient that has been searched for is locked
+            session["hasBeenLocked"] = True
+        else:
+            update_session_variables(db_conn, int(request.form["patient_id"]))
+
+        return redirect("/adjudicate_records")
+
     @app.route('/', methods=["GET"])
     @login_required
     def homepage():
@@ -122,6 +122,6 @@ def create_app(db_name):
         user_initials = get_initials(user_name)
 
         return render_template('index.html', proj_name = proj_name,
-                                user_initials = user_initials)
+                                user_initials = user_initials, is_admin = session.get('is_admin'))
 
     return app

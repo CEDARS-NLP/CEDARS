@@ -2,8 +2,8 @@
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
-import os
 from datetime import datetime
+import os
 import logging
 import pymongo
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -11,30 +11,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
-# Pylint disabled as the class has more than 20 public methods.
-class DatabaseConnector(object):  # pylint: disable=R0904
+class DatabaseConnector:
     """
     Abstract class to connect to a mongodb database.
-    We define and use this as a singleton class in order to access it 
-    from different flask blueprints.
+    We define and use this as a singleton class in order to 
+        access it from different flask blueprints.
     """
 
-    def __new__(cls,
-                db_name=None,
-                project_name=None,
-                investigator_name=None,
-                cedars_version="0.1",
-                db_url=os.getenv("DB_HOST")):
+
+    def __new__(cls, db_name = None, project_name = "CEDARS", investigator_name = "",
+                 cedars_version = 1, db_url = os.getenv("DB_HOST")): # mongodb://localhost:27017/
         """
         This function loads and stores the database and nlp processer for future use.
 
         Args:
         db_name (str) : Name of the mongodb database
-        db_url (str) : URL for the mongodb server.
+        project_name (str) : Name of the CEDARS project
+        investigator_name (str) : Name of the project investigator
+        cedars_version (str) : Version of current CEDARS
+        db_url (str) : URL for the mongodb server
         
         Returns:
-            Instance of DatabaseConnector
+            None
 
         Raises:
             None
@@ -45,17 +43,16 @@ class DatabaseConnector(object):  # pylint: disable=R0904
 
             db_names = client.list_database_names()
             if db_name not in db_names:
-                # create / open database
-                cls.database_connector = client[db_name]
-                cls.instance.create_project(project_name,
-                                            investigator_name,
-                                            cedars_version)
+                cls.database_connector = client[db_name] # create / open database
+                cls.instance.create_project(project_name, investigator_name, cedars_version)
+
             else:
-                # create / open database
-                cls.database_connector = client[db_name] 
+                cls.database_connector = client[db_name] # create / open database
         return cls.instance
 
-    def create_project(self, project_name, investigator_name, cedars_version="0.1"):
+
+
+    def create_project(self, project_name, investigator_name, cedars_version):
         """
         This function creates all the collections in the mongodb database for CEDARS.
         
@@ -96,13 +93,12 @@ class DatabaseConnector(object):  # pylint: disable=R0904
             None
         """
         collection = self.database_connector["INFO"]
-        info = {"creation_time": datetime.now(),
-                "project": project_name,
-                "investigator": investigator_name,
-                "CEDARS_version": cedars_version}
+        info = {"creation_time" : datetime.now(), "project" : project_name,
+                "investigator" : investigator_name, "CEDARS_version" : cedars_version}
 
         collection.insert_one(info)
         logging.info("Created INFO collection.")
+
 
     def populate_annotations(self):
         """
@@ -121,11 +117,12 @@ class DatabaseConnector(object):  # pylint: disable=R0904
         """
         annotations = self.database_connector["ANNOTATIONS"]
 
-        annotations.create_index("patient_id", unique=False)
-        annotations.create_index("note_id", unique=False)
-        annotations.create_index("text_id", unique=False)
-        annotations.create_index("sentence_number", unique=False)
-        annotations.create_index("start_index", unique=False)
+
+        annotations.create_index("patient_id", unique = False)
+        annotations.create_index("note_id", unique = False)
+        annotations.create_index("text_id", unique = False)
+        annotations.create_index("sentence_number", unique = False)
+        annotations.create_index("start_index", unique = False)
 
         logging.info("Created ANNOTATIONS collection.")
 
@@ -171,7 +168,7 @@ class DatabaseConnector(object):  # pylint: disable=R0904
         """
         users = self.database_connector["USERS"]
 
-        users.create_index("user", unique=True)
+        users.create_index("user", unique = True)
         logging.info("Created USERS collection.")
 
     def populate_query(self):
@@ -208,19 +205,15 @@ class DatabaseConnector(object):  # pylint: disable=R0904
         Raises:
             None
         """
-        info = {"user": username, "password": password,
-                "date_created": datetime.now()}  # todo UTC
+        info = {"user" : username, "password" : password, "date_created" : datetime.now()}
 
         collection = self.database_connector["USERS"]
         collection.insert_one(info)
         logging.info("Added user %s to database.", username)
 
     # Pylint disabled due to too many arguments
-    def save_query(self, query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
-                   skip_after_event,
-                   tag_query,
-                   date_min=None,
-                   date_max=None):
+    def save_query(self, query, exclude_negated, hide_duplicates, #pylint: disable=R0913
+                   skip_after_event, tag_query, date_min = None, date_max = None):
 
         """
         This function is used to save a regex query to the database.
@@ -256,6 +249,7 @@ class DatabaseConnector(object):  # pylint: disable=R0904
 
         logging.info("Saved query : %s.", query)
 
+
     def upload_notes(self, documents):
         """
         This function is used to take a dataframe of patient records
@@ -279,7 +273,10 @@ class DatabaseConnector(object):  # pylint: disable=R0904
             datetime_obj = datetime.strptime(note_info["text_date"], date_format)
             note_info["text_date"] = datetime_obj
 
-            notes_collection.insert_one(note_info)
+            try:
+                notes_collection.insert_one(note_info)
+            except:
+                logging.error("Cancelling duplicate note entry")
 
             patient_ids.add(note_info["patient_id"])
 
@@ -291,7 +288,11 @@ class DatabaseConnector(object):  # pylint: disable=R0904
                             "updated": False,
                             "admin_locked": False}
 
-            patients_collection.insert_one(patient_info)
+            try:
+                patients_collection.insert_one(patient_info)
+            except:
+                logging.error("""Cancelling duplicate patient 
+                              entry for patient ID #%s""", str(p_id))
 
 
     def get_annotation(self, annotation_id):
@@ -337,7 +338,7 @@ class DatabaseConnector(object):  # pylint: disable=R0904
 
     def get_patient(self):
         """
-        Retrives a single patient ID who has not yet been reviewed.
+        Retrives a single patient ID who has not yet been reviewed and is not currently locked.
         The chosen patient is simply the first one in the database that has not yet been reviewed.
 
         Args:
@@ -350,7 +351,8 @@ class DatabaseConnector(object):  # pylint: disable=R0904
             None
         """
 
-        patient = self.database_connector["PATIENTS"].find_one({"reviewed" : False})
+        patient = self.database_connector["PATIENTS"].find_one({"reviewed" : False,
+                                                                "locked" : False})
 
         if patient is not None and "patient_id" in patient.keys():
             logging.debug("Retriving patient #%s from database.", patient['patient_id'])
@@ -374,7 +376,8 @@ class DatabaseConnector(object):  # pylint: disable=R0904
         """
         logging.debug("Retriving annotations for patient #%s from database.", str(p_id))
         annotation_ids = self.database_connector["ANNOTATIONS"].find({ "patient_id": p_id,
-                                                                      "reviewed" : False, "isNegated" : False})
+                                                                      "reviewed" : False,
+                                                                      "isNegated" : False})
 
         return [id["_id"] for id in annotation_ids]
 
@@ -435,12 +438,13 @@ class DatabaseConnector(object):  # pylint: disable=R0904
 
 
 
-    def mark_patient_reviewed(self, patient_id, isReviewed = True):
+    def mark_patient_reviewed(self, patient_id, is_reviewed = True):
         """
         Updates the patient's status to reviewed in the database.
 
         Args:
             patient_id (int) : Unique ID for a patient.
+            is_reviewed (bool) : True if patient's annotations have been reviewed.
 
         Returns:
             None
@@ -450,7 +454,7 @@ class DatabaseConnector(object):  # pylint: disable=R0904
         """
         logging.debug("Marking patient #%s as reviewed.", patient_id)
         self.database_connector["PATIENTS"].update_one({"patient_id" : patient_id},
-                                                       { "$set": { "reviewed": isReviewed } })
+                                                       { "$set": { "reviewed": is_reviewed } })
 
     def add_annotation_comment(self, annotation_id, comment):
         """
@@ -474,92 +478,326 @@ class DatabaseConnector(object):  # pylint: disable=R0904
                                                           { "$set": { "comments" : comments } })
 
     def empty_annotations(self):
+        """
+        Deletes all annotations from the database.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+
         logging.info("Deleting all data in annotations collection.")
         annotations = self.database_connector["ANNOTATIONS"]
         annotations.delete_many({})
 
-    def get_reviewed_annotations(self):
-        annotations = self.database_connector["ANNOTATIONS"].find({"reviewed" : True})
+    def get_all_annotations(self):
+        """
+        Returns a list of all annotations from the database.
 
-        return [anno for anno in annotations]
-    
+        Args:
+            None
+
+        Returns:
+            Annotations (list) : This is a list of all annotations from the database.
+
+        Raises:
+            None
+        """
+        annotations = self.database_connector["ANNOTATIONS"].find()
+
+        return list(annotations)
+
     def get_proj_name(self):
-        proj_info = self.database_connector["INFO"].find_one()
+        """
+        Returns the name of the current project.
 
-        return proj_info["project"]
-    
+        Args:
+            None
+
+        Returns:
+            proj_name (str) : The name of the current CEDARS project.
+
+        Raises:
+            None
+        """
+
+        proj_info = self.database_connector["INFO"].find_one()
+        proj_name = proj_info["project"]
+        return proj_name
+
     def update_proj_name(self, new_name):
+        """
+        Updates the project name in the INFO collection of the database.
+
+        Args:
+            new_name (str) : New name of the project.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
         logging.debug("Updating project name to #%s.", new_name)
         self.database_connector["INFO"].update_one({},
                                                    { "$set": { "project": new_name } })
 
-    
+
     def get_curr_version(self):
+        """
+        Returns the name of the current project.
+
+        Args:
+            None
+
+        Returns:
+            proj_name (str) : The name of the current CEDARS project.
+
+        Raises:
+            None
+        """
+
         proj_info = self.database_connector["INFO"].find_one()
 
         return proj_info["CEDARS_version"]
-    
-    def add_project_user(self, username, password, isAdmin = False):
+
+    def add_project_user(self, username, password, is_admin = False):
+        """
+        Adds a new user to the project database.
+
+        Args:
+            username (str) : The name of the new user
+            password (str) : The user's password
+            is_admin (bool) : True if the new user is the project admin 
+                                            (used when initializing the project)
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
         password_hash = generate_password_hash(password)
-        data = {"user" : username, "password" : password_hash, "admin" : isAdmin}
+        data = {"user" : username, "password" : password_hash, "admin" : is_admin}
         self.database_connector["USERS"].insert_one(data.copy())
 
     def check_password(self, username, password):
+        """
+        Checks if the password matches the password of that user from the database.
+
+        Args:
+            username (str) : The name of the new user
+            password (str) : The password entered by the user.
+
+        Returns:
+            (bool) : True if the password matches the password of that user from the database.
+
+        Raises:
+            None
+        """
+
         user = self.database_connector["USERS"].find_one({"user" : username})
-        
-        if "password" in user and check_password_hash(user["password"], password):
-            return True
-        else:
-            return False
-    
+
+        return "password" in user and check_password_hash(user["password"], password)
+
 
     def get_project_users(self):
+        """
+        Returns all the usernames for approved users (including the admin) for this project
+
+        Args:
+            None
+
+        Returns:
+            usernames (list) : List of all usernames for approved users
+                                                (including the admin) for this project
+
+        Raises:
+            None
+        """
         users = self.database_connector["USERS"].find({})
 
         return [user["user"] for user in users]
-    
-    def get_users(self):
-        users = self.database_connector["USERS"].find()
 
-        return [user["user"] for user in users]
-    
 
     def get_curr_stats(self):
+        """
+        Returns basic statistics for the project
+
+        Args:
+            None
+
+        Returns:
+            stats (list) : List of basic statistics for the project. These include :
+                1. number_of_patients (number of unique patients in the database)
+                2. number_of_annotated_patients (number of patiens who had notes 
+                    in which key words were found)
+                3. number_of_reviewed
+                            (number of patients who have been reviewed for the current query)
+
+        Raises:
+            None
+        """
         stats = {}
-        patients = self.database_connector["PATIENTS"].find()
+        patients = self.get_all_patients()
 
-        stats["number_of_patients"] = len([patient for patient in patients])
+        stats["number_of_patients"] = len(list(patients))
 
-        annotations = self.database_connector["ANNOTATIONS"].find()
-        unique_patients = set([annotation["patient_id"] for annotation in annotations])
+        annotations = self.database_connector["ANNOTATIONS"].find({"isNegated" : False})
+        unique_patients = {annotation["patient_id"] for annotation in annotations}
 
         stats["number_of_annotated_patients"] = len(unique_patients)
 
-        reviewed_annotations = self.database_connector["ANNOTATIONS"].find({"reviewed" : True})
-        stats["number_of_reviewed"] = len([i for i in reviewed_annotations])
+        num_reviewed_annotations = 0
+
+        for p_id in unique_patients:
+            p_anno = self.database_connector["PATIENTS"].find_one({"patient_id" : p_id})
+
+            if p_anno["reviewed"] is True:
+                num_reviewed_annotations += 1
+
+        stats["number_of_reviewed"] = num_reviewed_annotations
+
+        lemma_dist = {}
+        for anno in self.database_connector["ANNOTATIONS"].find({"isNegated" : False}):
+            if anno['lemma'] in lemma_dist:
+                lemma_dist[anno['lemma']] += 1
+            else:
+                lemma_dist[anno['lemma']] = 1
+        
+        stats['lemma_dist'] = lemma_dist
 
         return stats
-    
+
     def get_all_patients(self):
+        """
+        Returns all the patients in this project
+
+        Args:
+            None
+
+        Returns:
+            patients (list) : List of all patients in this project
+
+        Raises:
+            None
+        """
         patients = self.database_connector["PATIENTS"].find()
 
-        return [patient for patient in patients]
-    
+        return list(patients)
+
     def set_patient_lock_status(self, patient_id, status):
+        """
+        Updates the status of the patient to be locked or unlocked.
+
+        Args:
+            patient_id (int) : ID for the patient we are locking / unlocking
+            status (bool) : True if the patient is being locked, False otherwise.
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+
+
         patients_collection = self.database_connector["PATIENTS"]
-        patients_collection.update_one({"patient_id" : patient_id}, { "$set": { "locked": status } })
+        patients_collection.update_one({"patient_id" : patient_id},
+                                       { "$set": { "locked": status } })
+
+    def get_patient_lock_status(self, patient_id):
+        """
+        Updates the status of the patient to be locked or unlocked.
+
+        Args:
+            patient_id (int) : ID for the patient we are locking / unlocking
+
+        Returns:
+            status (bool) : True if the patient is locked, False otherwise.
+                If no such patient is found, we return None.
+
+        Raises:
+            None
+        """
+        patient = self.database_connector["PATIENTS"].find_one({"patient_id" : patient_id})
+
+        try:
+            return patient["locked"]
+        except:
+            logging.error("""Failed to retrive information for patient #%s
+                        while trying to check lock_status""",
+                          str(patient_id) + " ")
+            return None
+
 
     def get_patient_notes(self, patient_id):
+        """
+        Returns all notes for that patient.
+
+        Args:
+            patient_id (int) : ID for the patient
+
+        Returns:
+            notes (list) : A list of all notes for that patient
+
+        Raises:
+            None
+        """
         mongodb_search_query = { "patient_id": patient_id }
 
-        notes = self.database_connector["NOTES"].find(mongodb_search_query)
+        notes = list(self.database_connector["NOTES"].find(mongodb_search_query))
 
         return notes
-    
+
     def insert_one_annotation(self, annotation):
+        """
+        Adds an annotation to the database.
+
+        Args:
+            annotation (dict) : The annotation we are inserting
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
         annotations_collection = self.database_connector["ANNOTATIONS"]
 
         annotations_collection.insert_one(annotation)
 
+
+    def remove_all_locked(self):
+        """
+        Sets the locked status of all patients to False.
+        This is done when the server is shutting down.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            None
+        """
+        patients_collection = self.database_connector["PATIENTS"]
+        patients_collection.update_many({},
+                                        { "$set": { "locked": False } })
+
+    def is_admin_user(self, username):
+        user = self.database_connector["USERS"].find_one({'user' : username})
+
+        if user is None:
+            return False
         
-    
+        if "admin" in user and user["admin"] == True:
+            return True
+
+        return False

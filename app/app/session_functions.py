@@ -1,4 +1,9 @@
+'''
+This module is used to store functions that interact with and 
+            perform logic on the session variables for the flask server.
+'''
 from flask import session
+from mongodb_client import DatabaseConnector
 
 def update_session_variables(db_conn, patient_id = None):
     '''
@@ -20,6 +25,9 @@ def update_session_variables(db_conn, patient_id = None):
         None
     '''
 
+
+    db_conn = DatabaseConnector()
+
     # If None, select random
     if patient_id is None:
         patient_id = db_conn.get_patient()
@@ -31,7 +39,12 @@ def update_session_variables(db_conn, patient_id = None):
             session["all_annotations_done"] = True
             return
 
+    if session.get("patient_id"):
+        db_conn.set_patient_lock_status(session.get("patient_id"), False)
+
     session["patient_id"] = patient_id
     session["annotation_ids"] = db_conn.get_patient_annotation_ids(session["patient_id"])
     session["annotation_number"] = 0
     session["all_annotations_done"] = False
+    
+    db_conn.set_patient_lock_status(patient_id, True)

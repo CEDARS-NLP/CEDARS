@@ -1,7 +1,0 @@
-,_id,sentence,token,lemma,isNegated,start_index,end_index,sentence_number,note_id,patient_id,event_date,comments,reviewed
-0,64ba92e7fdf57c26a32edf89,"Mr First is a 60 YO M with a history of metastatic colon CA, diagnosed in 1-2008, initially with stage III disease and s/p hemicolectomy followed by adjuvant chemo, with recurrence in the liver 6 months ago, evaluated today for management of pulmonary embolism.",embolism,embolism,False,252,260,0,64ba90dffdf57c26a32edf0c,1111111111,2023-07-12,[],True
-1,64ba92e7fdf57c26a32edf8a,"Two weeks ago he sustained sudden onset of chest pain and dyspnea, along with palpitations.",dyspnea,dyspnea,False,58,65,3,64ba90dffdf57c26a32edf0c,1111111111,2023-07-12,[],True
-2,64ba92e7fdf57c26a32edf8b,"
-
-Since discharge he has done well, with resolution of chest pain and substantial improvement of dyspnea.",dyspnea,dyspnea,False,97,104,8,64ba90dffdf57c26a32edf0c,1111111111,,[],True
-3,64ba92e7fdf57c26a32edf8d,"32 YO F G0 finance worker in her usual state of health until 1 month ago, when she presented with acute symptomatic pulmonary embolism.",embolism,embolism,False,126,134,0,64ba90dffdf57c26a32edf49,4444444444,,[],True
