@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+
+{% block search_bar %} 
+<div class="mx-10 search_div" id = "search_bar">
+  <form class="d-flex" action="/search_patient" method="post">
+      <input type="search" class="form-control"
+             placeholder="Enter Patient ID"
+             aria-label="Search" name="patient_id" id="patient_id" value="">
+      <button class="btn btn-outline-secondary" type="submit" value = "search patient" id="button-addon2">Search</button>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block content %}
+<div class="w-75 mx-auto">
+  <div class="row">
+    <div class="col-4">
+      <form class="form-inline" action="/ops/save_adjudications" method="POST">
+        <div class="mb-4">
+          <h2>Note & Patient Data</h2>
+          <ul class="list-group">
+            <li class="list-group-item">Position: {{pos_start}} of {{total_pos}}</li>
+            <li class="list-group-item">Patient ID: {{patient_id}}</li>
+            <li class="list-group-item">Note Date: {{note_date}}</li>
+          </ul>
+        </div>
+
+        <div class="mb-4">
+          <ul class="list-group">
+            <li class="list-group-item">Event Date: {{event_date}}</li>
+            <li class="list-group-item">
+              <label for="date_entry">Select New Date:</label>
+              <input type="date" name="date_entry" id="date_entry" value="{{ event_date }}">
+            </li>
+            <li class="list-group-item">
+              <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>
+              <button class="btn btn-outline-secondary" value="del_date" type="submit" name="submit_button">Delete the Old Date</button>
+            </li>
+          </ul>
+        </div>
+
+        
+
+        <div class="mb-4">
+          <h2>Comments</h2>
+          <div class="form-group">
+            <label for="comment" class="form-label">New Comment</label>
+            <textarea class="form-control" rows="4" name="comment" id="comment"></textarea>
+          </div>
+          <br>
+        
+          <button class="btn btn-primary save-comment-btn" value="comment" type="submit" name="submit_button">Save Comment</button>
+
+          <br>
+          <h5 class="mt-4">Existing Comments</h5>
+          <ul class="list-group">
+            {% for comment in comments %}
+            <li class="list-group-item">{{comment}}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </form>
+    </div>
+
+    <div class="col-7">
+      <div class="mb-4">
+        <h6 class="text-muted">Found Sentence</h6>
+        <table class="table table-hover">
+          <tbody>
+            <tr>
+              <td> 
+
+                {{pre_token_sentence}} 
+
+                <mark>
+                  <b>
+                  {{token_word}}
+                </b>
+                </mark> 
+
+                {{post_token_sentence}}
+
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mb-4">
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <form class="form-inline" action="/ops/save_adjudications" method="POST">
+                    <div class="btn-group me-2" role="group" aria-label="Second group">
+                        <button class="btn btn-primary" value="adjudicate" type="submit" name="submit_button">Adjudicate Sentence</button>
+                    </div>
+                    <div class="btn-group me-2" role="group" aria-label="First group">
+                        <button class="btn btn-outline-secondary" value="prev" type="submit" name="submit_button"><<</button> 
+                        <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>       
+                    </div>
+                </form>
+                
+              </div>
+         
+      </div>
+
+      <div class="mb-4">
+        <h6 class="text-muted">Full Note</h6>
+        <div class="well">{{full_note}}</div>
+      </div>
+
+      
+
+    </div>
+  </div>
+</div>
+
+<style>
+  #proj_name {
+    left : 12.35%;
+    position:absolute;
+  }
+
+  #search_bar {
+    left : 37.8%;
+    position:absolute;
+    width: 40%;
+  }
+
+
+  .panel-default {
+    border-color: #0b0b0b !important;
+  }
+
+  mark { 
+    
+    color: red;
+  }
+
+  .save-comment-btn {
+    background-color: #007bff; /* Use a primary color for the button */
+    color: #ffffff; /* Text color on the button */
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s ease; /* Add a smooth transition on hover */
+  }
+
+  .save-comment-btn:disabled {
+    opacity: 0.7; /* Reduce the opacity of the button when disabled */
+    cursor: not-allowed; /* Change cursor to indicate it's not clickable */
+  }
+
+  .save-comment-btn:hover {
+    background-color: #0056b3; /* Darken the button color on hover */
+  }
+</style>
+
+<script type="text/javascript">
+  var dropDowns = Array.prototype.slice.call(document.getElementsByClassName('form-select'), 0);
+
+  dropDowns.forEach(function (dd) {
+    dd.onchange = function () {
+      document.filters.submit();
+    };
+  });
+
+  var checkBoxes = Array.prototype.slice.call(document.getElementsByClassName('form-check-input'), 0);
+
+  checkBoxes.forEach(function (cb) {
+    cb.addEventListener('change', () => {
+      document.filters.submit();
+    });
+  });
+
+  var pageLinks = Array.prototype.slice.call(document.getElementsByClassName('page-link'), 0);
+
+  pageLinks.forEach(function (pl) {
+    pl.addEventListener('click', () => {
+      console.log(pl.text);
+      var input = document.createElement("input");
+      input.type = "text";
+      input.name = "page_number";
+      input.value = pl.text;
+
+      document.filters.appendChild(input);
+
+      document.filters.submit();
+    });
+  });
+
+  var showMoreToggles = Array.prototype.slice.call(document.getElementsByClassName('toggleShow'), 0);
+
+  showMoreToggles.forEach(function (t) {
+    t.addEventListener('click', () => {
+      if (t.text === 'Show more...') {
+        t.text = 'Show less...'
+      } else {
+        t.text = 'Show more...'
+      }
+    });
+  });
+</script>
+
+{% if isLocked == true %}
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+
+  <div class="modal fade" id="invalidLoginModal" tabindex="-1"aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Invalid Patient ID</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          Invalid Patient ID!
+          <br>
+          This patient is not currently accessible. The records may be locked or there may be no record in the database.
+        </div>
+        <div class="modal-footer">
+         
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
+
+$(window).on('load', function() {
+        $('#invalidLoginModal').modal('show');
+    });
+</script>
+
+{% endif %}
+
+
+{% endblock %}

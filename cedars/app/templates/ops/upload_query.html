@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<div class="w-75 mx-auto">
+  <form class="form-inline" method="POST">
+
+    <div class="mb-4">
+      <h2>Query Upload</h2>
+
+      <div class="form-group">
+        <label for="exampleInputEmail1">Search Query</label>
+        <input type="text" class="form-control" name="regex_query">
+        <small class="form-text text-muted">The query must be in regex format.</small>
+      </div>
+      
+
+      <br>
+
+      <button type="submit" class="btn btn-primary">Submit</button> 
+      
+  </form>
+
+</div>
+
+
+
+{% endblock %}

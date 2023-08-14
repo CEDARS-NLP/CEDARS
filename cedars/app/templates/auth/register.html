@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<div class="w-75 mx-auto">
+  <form class="form-inline" method="POST">
+
+    <div class="mb-4">
+      <h2>Registration</h2>
+
+      <div class="form-group">
+        <label for="exampleInputEmail1">Enter Your username</label>
+        <input type="text" class="form-control" name="username">
+      </div>
+
+      <br>
+
+      <div class="form-group">
+        <label>Enter Your password</label>
+        <input type="password" class="form-control" name="password">
+      </div>
+
+      <br>
+
+      <br>
+     
+      <input type="submit" class="btn btn-primary"></button> 
+      
+  </form>
+
+  
+  
+</div>
+
+{% endblock %}
