@@ -5,7 +5,7 @@
 
 {% block search_bar %} 
 <div class="mx-10 search_div" id = "search_bar">
-  <form class="d-flex" action="/search_patient" method="post">
+  <form class="d-flex" action="/ops/adjudicate_records" method="POST">
       <input type="search" class="form-control"
              placeholder="Enter Patient ID"
              aria-label="Search" name="patient_id" id="patient_id" value="">
@@ -34,7 +34,7 @@
             <li class="list-group-item">Event Date: {{event_date}}</li>
             <li class="list-group-item">
               <label for="date_entry">Select New Date:</label>
-              <input type="date" name="date_entry" id="date_entry" value="{{ event_date }}">
+              <input type="date" name="date_entry" id="date_entry" value="{{event_date}}">
             </li>
             <li class="list-group-item">
               <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>

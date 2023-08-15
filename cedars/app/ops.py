@@ -2,17 +2,20 @@
 This page contatins the functions and the flask blueprint for the /proj_details route.
 """
 import pandas as pd
+import os
 import logging
 from pathlib import Path
 from flask import (
-    Blueprint, render_template,
-    redirect, session, request, url_for, flash
+    Blueprint, render_template, send_file,
+    redirect, session, request, url_for, flash,
+    current_app
 )
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from .auth import admin_required, get_initials
 from app import db
-from . import NLP_processor
+from app import NLP_processor
+
 
 
 
@@ -180,7 +183,6 @@ def upload_query():
     This is a flask function for the backend logic 
     to upload a csv file to the database.
     """
-    nlp_processor = NLP_processor.NLP_processor()
 
     if request.method == "GET":
         return render_template("ops/upload_query.html", **db.get_info())
@@ -203,14 +205,22 @@ def upload_query():
 
     db.empty_annotations()
 
-    # TODO: use flask executor to run this in the background
+    #TODO: use flask executor to run this in the background
+    nlp_processor = NLP_processor.NLP_processor()
     nlp_processor.automatic_nlp_processor()
-
-    return redirect("/ops/adjudicate_records")
+    
+    if "annotation_ids" in session:
+        session.pop("annotation_ids")
+    if "annotation_number" in session:
+        session.pop("annotation_number")
+    if "patient_id" in session:
+        session.pop("patient_id")
+    return redirect(url_for("ops.adjudicate_records"))
 
 
 def _get_current_annotation_id():
-        return session["annotation_ids"][session["annotation_number"]]
+    return session["annotation_ids"][session["annotation_number"]]
+
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -235,16 +245,17 @@ def save_adjudications():
     def _move_to_previous_annotation():
         if session["annotation_number"] > 0:
             session["annotation_number"] -= 1
+            session.modified = True
 
     def _move_to_next_annotation():
         if session["annotation_number"] < (len(session["annotation_ids"]) - 1):
             session["annotation_number"] += 1
+            session.modified = True
 
     def _adjudicate_annotation():
         db.mark_annotation_reviewed(current_annotation_id)
         session["annotation_ids"].pop(session["annotation_number"])
-        if session["annotation_number"] >= len(session["annotation_ids"]):
-            session["annotation_number"] -= 1
+        session.modified = True
 
     actions = {
         'new_date': _update_annotation_date,
@@ -259,97 +270,45 @@ def save_adjudications():
     if action in actions:
         actions[action]()
 
-    return redirect("/ops/adjudicate_records")
-
-    
+    return redirect(url_for("ops.adjudicate_records"))
 
 
-# @bp.route("/save_adjudications", methods=["GET", "POST"])
-# @login_required
-# def save_adjudications():
-#     """
-#     This is a flask function for the backend logic 
-#     for the save_adjudications route.
-#     It is used to edit and review annotations.
-#     """
-#     if request.form['submit_button'] == "new_date":
-#         new_date = request.form['date_entry']
-#         current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#         db.update_annotation_date(current_annotation_id, new_date)
-
-#     elif request.form['submit_button'] == "del_date":
-#         current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#         db.delete_annotation_date(current_annotation_id)
-
-#     elif request.form['submit_button'] == "comment":
-#         current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#         db.add_annotation_comment(current_annotation_id, request.form['comment'])
-
-#     elif request.form['submit_button'] == "prev":
-#         if session["annotation_number"] > 0:
-#             session["annotation_number"] -= 1
-
-#     elif request.form['submit_button'] == "next":
-#         if session["annotation_number"] < (len(session["annotation_ids"]) - 1):
-#             session["annotation_number"] += 1
-
-#     elif request.form['submit_button'] == "adjudicate":
-#         current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#         db.mark_annotation_reviewed(session["annotation_id"])
-
-#         session["annotation_ids"].pop(session["annotation_number"])
-
-#         if session["annotation_number"] >= len(session["annotation_ids"]):
-#             session["annotation_number"] -= 1
-
-#     return redirect("/ops/adjudicate_records")
-
-def split_on_key_word(sentence, word_start, word_end):
-    """
-    Used to split a sentence to isolate it's key word.
-
-    Args:
-        sentence (str) : String for the full sentence.
-        word_start (int) : String index for the start of the key word.
-        word_end (int) : String index for the end of the key word.
-
-    Returns:
-        Split sentence (tuple) : A tuple with three contents :
-            1.  The sentence before the key word.
-            2.  The key word.
-            3.  The sentence after the key word.
-    """
-
-    return (sentence[:word_start], sentence[word_start : word_end], sentence[word_end:])
-
-@bp.route("/adjudicate_records", methods=["GET"])
+@bp.route("/adjudicate_records", methods=["GET", "POST"])
 @login_required
 def adjudicate_records():
     """
     Serve the 'adjudicate_records' page. 
     Handle the logic associated with the main CEDARS page.
     """
-    _initialize_session()
-    
-    if not session['annotation_ids']: 
+    pt_id = None
+    if request.method == "POST":
+        if request.form["patient_id"]:
+            pt_id = int(request.form["patient_id"])
+            print("Search patient: ", pt_id)
+
+    _initialize_session(pt_id)
+
+    if len(session['annotation_ids']) == 0:
         _prepare_for_next_patient()
-        
         if not session["patient_id"]:
-            session["all_annotations_done"] = True
             return render_template("ops/annotations_complete.html", **db.get_info())
 
-    print(session["annotation_ids"])
-    print(session["annotation_number"])
+    if len(session['annotation_ids']) == 0:
+        _prepare_for_next_patient()
+        return redirect(url_for("ops.adjudicate_records"))
+    
     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-    annotation, note = _get_annotation_and_note_details(current_annotation_id)
+
+    annotation = db.get_annotation(current_annotation_id)
+    note = db.get_annotation_note(current_annotation_id)
 
     context = {
         'name': current_user.username,
         'event_date': _format_date(annotation.get('event_date')),
         'note_date': _format_date(note['text_date']),
-        'pre_token_sentence': annotation['pre_token_sentence'],
-        'token_word': annotation['token_word'],
-        'post_token_sentence': annotation['post_token_sentence'],
+        'pre_token_sentence': annotation['sentence'][:annotation['start_index']],
+        'token_word': annotation['sentence'][annotation['start_index']:annotation['end_index']],
+        'post_token_sentence': annotation['sentence'][annotation['end_index']:],
         'pos_start': session["annotation_number"] + 1,
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
@@ -363,36 +322,22 @@ def adjudicate_records():
 
     return render_template("ops/adjudicate_records.html", **context)
 
-def _initialize_session():
-    if "patient_id" not in session:
+def _initialize_session(pt_id=None):
+    if "patient_id" not in session and not pt_id:
         pt_id = db.get_patient()
-        session.update({
-            "patient_id": pt_id,
-            "annotation_number": 0,
-            "annotation_ids": db.get_patient_annotation_ids(pt_id)
-        })
+    session.update({
+        "patient_id": pt_id,
+        "annotation_number": 0,
+        "annotation_ids": db.get_patient_annotation_ids(pt_id)
+    })
+    session.modified = True
 
 def _prepare_for_next_patient():
     db.mark_patient_reviewed(session['patient_id'])
-    session.clear()
+    session.pop("patient_id")
+    session.modified = True
     _initialize_session()
 
-def _get_annotation_and_note_details(annotation_id):
-    annotation = db.get_annotation(annotation_id)
-    note = db.get_annotation_note(annotation_id)
-    sentence = annotation["sentence"]
-    
-    pre_token_sentence, token_word, post_token_sentence = split_on_key_word(
-        sentence, annotation["start_index"], annotation["end_index"]
-    )
-    
-    annotation.update({
-        'pre_token_sentence': pre_token_sentence,
-        'token_word': token_word,
-        'post_token_sentence': post_token_sentence
-    })
-
-    return annotation, note
 
 def _format_date(date_obj):
     if date_obj:
@@ -400,130 +345,27 @@ def _format_date(date_obj):
     return "None"
 
 
-# @bp.route("/adjudicate_records", methods=["GET"])
-# @login_required
-# def adjudicate_records():
-#     patient_id = db.get_patient()
+@bp.route('/download_annotations')
+@admin_required
+def download_file ():
+    """
+    This is a flask function for the backend logic 
+                    for the download_annotations route.
+    It will create a csv file of the current annotations and send it to the user.
 
-#     if not patient_id:
-#         flash("All patients are reviewed")
-#         return redirect(url_for("ops.upload_data"))
+    Args:
+        None
 
-#     session['patient_id'] = patient_id
-#     index = request.args.get("index", 0, type=int)
-#     session["annotation_number"] = index
-#     session["annotation_ids"] = db.get_patient_annotation_ids(patient_id)
-#     current_annotation_id = db.get_patient_annotation_ids(session['patient_id'])[session["annotation_number"]]
-#     annotation = db.get_annotation(current_annotation_id)
-#     note = db.get_annotation_note(current_annotation_id)
+    Returns:
+        None
 
-#     sentence = annotation["sentence"]
-#     (pre_token_sentence,
-#      token_word,
-#      post_token_sentence) = split_on_key_word(sentence,
-#                                               annotation["start_index"],
-#                                               annotation["end_index"])
-    
-#     full_note = note["text"]
-#     note_date = str(note['text_date'].date())
-#     if annotation['event_date']:
-#         event_date = str(annotation['event_date'].date()) # Format : YYYY-MM-DD
-#     else:
-#         event_date = "None"
+    Raises:
+        None
+    """
 
-#     # session["annotation_id"] = annotation["_id"]
-#     comments = annotation["comments"]
-#     annotation_number = session["annotation_number"] + 1
-#     num_total_annotations = len(session["annotation_ids"])
+    data = db.get_all_annotations()
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], "annotations.csv")
+    df = pd.DataFrame(data)
+    df.to_csv(file_path)
 
-
-#     # isLocked will be True if the patient_id that has been searched for is not in the database
-#     if session.get("hasBeenLocked") is None or session.get("hasBeenLocked") is False:
-#         is_locked = False
-#     else:
-#         is_locked = True
-#     session["hasBeenLocked"] = False
-
-#     return render_template("ops/adjudicate_records.html", name = current_user.username,
-#                         event_date = event_date, note_date = note_date,
-#                         pre_token_sentence = pre_token_sentence, token_word = token_word,
-#                         post_token_sentence = post_token_sentence,
-#                         pos_start = annotation_number,
-#                         total_pos = num_total_annotations, patient_id = patient_id,
-#                         comments = comments, full_note = full_note,
-#                         isLocked = is_locked, **db.get_info())
-
-
-# @bp.route("/adjudicate_records", methods=["GET"])
-# @login_required
-# def adjudicate_records():
-#     """
-#     This is a flask function for the backend logic 
-#     for the  adjudicate_records page. Handels the backend logic
-#     for the main CEDARS page.
-#     """
-
-#     if "patient_id" not in session.keys():
-#         session["patient_id"] = db.get_patient()
-#         session["annotation_number"] = 0
-#         session["annotation_ids"] = db.get_patient_annotation_ids(session['patient_id'])
-
-#     while len(session['annotation_ids']) == 0: # all notes of that patient are annotated
-#         db.mark_patient_reviewed(session['patient_id'])
-#         # get next unreviewed patient
-#         session.clear()
-#         session["patient_id"] = db.get_patient()
-#         session["annotation_number"] = 0
-#         session["annotation_ids"] = db.get_patient_annotation_ids(session['patient_id'])
-
-#         if session["patient_id"] is None:
-#             session["annotation_ids"] = []
-#             session['patient_id'] = None
-#             session["annotation_number"] = 0
-#             session["all_annotations_done"] = True
-#             return render_template("ops/annotations_complete.html", **db.get_info())
-        
-#     # current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-#     annotation = db.get_annotation(current_annotation_id)
-#     print(current_annotation_id)
-#     note = db.get_annotation_note(current_annotation_id)
-#     patient_id = session['patient_id']
-
-#     sentence = annotation["sentence"]
-#     (pre_token_sentence,
-#      token_word,
-#      post_token_sentence) = split_on_key_word(sentence,
-#                                               annotation["start_index"],
-#                                               annotation["end_index"])
-#     full_note = note['text']
-
-#     note_date = str(note['text_date'].date()) # Format : YYYY-MM-DD
-#     if annotation['event_date']:
-#         event_date = str(annotation['event_date'].date()) # Format : YYYY-MM-DD
-#     else:
-#         event_date = "None"
-
-#     session["annotation_id"] = str(annotation["_id"])
-#     comments = annotation["comments"]
-
-
-#     annotation_number = session["annotation_number"] + 1
-#     num_total_annotations = len(session["annotation_ids"])
-
-
-#     # isLocked will be True if the patient_id that has been searched for is not in the database
-#     if session.get("hasBeenLocked") is None or session.get("hasBeenLocked") is False:
-#         is_locked = False
-#     else:
-#         is_locked = True
-#     session["hasBeenLocked"] = False
-
-#     return render_template("ops/adjudicate_records.html", name = current_user.username,
-#                         event_date = event_date, note_date = note_date,
-#                         pre_token_sentence = pre_token_sentence, token_word = token_word,
-#                         post_token_sentence = post_token_sentence,
-#                         pos_start = annotation_number,
-#                         total_pos = num_total_annotations, patient_id = patient_id,
-#                         comments = comments, full_note = full_note,
-#                         isLocked = is_locked, **db.get_info())
+    return send_file(file_path, as_attachment=True)

@@ -226,13 +226,15 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
     Raises:
         None
     """
-    info = {"query" : query,
+    info = {
+        "query" : query,
         "exclude_negated" : exclude_negated,
         "hide_duplicates" : hide_duplicates,
         "skip_after_event" : skip_after_event,
         "tag_query" : tag_query,
         "date_min" : date_min,
-        "date_max" : date_max}
+        "date_max" : date_max
+    }
 
     collection = mongo.db["QUERY"]
     # only one query is current at a time.
@@ -318,7 +320,7 @@ def get_annotation(annotation_id):
             The keys are the attribute names.
             The values are the values of the attribute in that record.
     """
-    annotation = mongo.db["ANNOTATIONS"].find_one_or_404({ "_id" : ObjectId(annotation_id) })
+    annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
 
     return annotation
 
@@ -338,8 +340,9 @@ def get_annotation_note(annotation_id):
         None
     """
     logging.debug("Retriving annotation #%s from database.", annotation_id)
-    annotation = mongo.db["ANNOTATIONS"].find_one_or_404({ "_id" : ObjectId(annotation_id) })
-    note = mongo.db["NOTES"].find_one({ "_id" : ObjectId(annotation["note_id"]) })
+    annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
+    print(annotation)
+    note = mongo.db["NOTES"].find_one({ "_id" : annotation["note_id"] })
 
     return note
 
@@ -395,8 +398,8 @@ def mark_annotation_reviewed(annotation_id):
         None
     """
     logging.debug("Marking annotation #%s as reviewed.", annotation_id)
-    mongo.db["ANNOTATIONS"].update_one({"_id" : annotation_id},
-                                              { "$set": { "reviewed": True } })
+    mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
+                                       {"$set": { "reviewed": True } })
 
 def update_annotation_date(annotation_id, new_date):
     """
@@ -433,8 +436,8 @@ def delete_annotation_date(annotation_id):
         None
     """
     logging.debug("Deleting date on annotation #%s.", ObjectId(annotation_id))
-    mongo.db["ANNOTATIONS"].update_one({"_id" : annotation_id},
-                                                        { "$set": { "event_date" : None } })
+    mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
+                                      { "$set": { "event_date" : None } })
 
 
 
@@ -474,8 +477,8 @@ def add_annotation_comment(annotation_id, comment):
     annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
     comments = annotation["comments"]
     comments.append(comment)
-    mongo.db["ANNOTATIONS"].update_one({"_id" : annotation_id},
-                                                        { "$set": { "comments" : comments } })
+    mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
+                                       { "$set": { "comments" : comments } })
 
 def empty_annotations():
     """
@@ -494,7 +497,7 @@ def empty_annotations():
     logging.info("Deleting all data in annotations collection.")
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
-    mongo.db["patients"].update_many({}, { "$set": { "reviewed": False } })
+
 
 def get_all_annotations():
     """
@@ -791,3 +794,8 @@ def is_admin_user(username):
         return True
 
     return False
+
+
+def drop_database(name):
+    """Clean Database"""
+    mongo.cx.drop_database(name)

@@ -1,0 +1,18 @@
+,_id,sentence,token,lemma,isNegated,start_index,end_index,sentence_number,note_id,patient_id,event_date,comments,reviewed
+0,64dabb85e4c120b76aed13f9,He was started on a blood thinner and is doin g better.,blood,blood,False,20,25,1,64daa6fc025e95277776e898,1111111111,,[],True
+1,64dabb85e4c120b76aed13fa,"She injects enoxaparin twice a day as prescribed on the abdomen, reports occasional small amounts of blood in the stools attributed to hemorrhoids, not worse on AC. She is a lifelong non-smoker and is a social drinker.",blood,blood,True,101,106,9,64daa6fc025e95277776e89b,2222222222,,[],False
+2,64dabb86e4c120b76aed13fb,"Pt called, reported blood in the urine, not passing clots, asking if this is a side effect of valganciclovir.",blood,blood,False,20,25,0,64daa6fc025e95277776e8b6,3333333333,,[],True
+3,64dabb86e4c120b76aed13fc,"Pt denies any red blood in the stools, melena or recent hematuria",blood,blood,False,18,23,0,64daa6fc025e95277776e8b9,3333333333,,['df'],True
+4,64dabb86e4c120b76aed13fd,"
+
+She denies any red blood in the stools, melena or hematuria.",blood,blood,False,21,26,10,64daa6fc025e95277776e8cb,4444444444,,[],True
+5,64dabb86e4c120b76aed13fe,"Pt is an only-child
+Mother had ""several blood clots"" in her 30's, has been on warfarin since then
+2/5 maternal cousins died suddenly, another one had recurrent lower extremity DVT's in his 20's and is now on warfarin
+No hx thromboembolism on the father's side",blood,blood,False,40,45,0,64daa6fc025e95277776e8d0,4444444444,,[],True
+6,64dabb86e4c120b76aed13ff,"This was discussed with her. She denies any rectorrhagia, black stools or blood in the urine.",blood,blood,False,74,79,3,64daa6fc025e95277776e8d5,4444444444,2023-08-07,[],True
+7,64dabb86e4c120b76aed1400,Blood loss: 50 cc,Blood,blood,False,0,5,0,64daa6fc025e95277776e8e7,4444444444,,[],True
+8,64dabb86e4c120b76aed1401,"His PCP me and at my request sent for flow cytometry of peripheral blood, which showed a population of abnormal cells co-expressing CD5 and CD19, c/w CLL.",blood,blood,False,67,72,2,64daa6fc025e95277776e8e9,5555555555,2023-08-02,[],True
+9,64dabb86e4c120b76aed1402,"
+
+Will draw blood today for genomic panel/FISH.",blood,blood,False,12,17,1,64daa6fc025e95277776e8f2,5555555555,,[],True

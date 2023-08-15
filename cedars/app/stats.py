@@ -13,17 +13,10 @@ bp = Blueprint("stats_page", __name__, url_prefix="/stats")
 def stats_route():
     """
     This is a flask function for the backend logic 
-                    for the stats route.
-    It is used by the admin to view statistics of the query in the current project.
+    for the stats route.
     
-    Args:
-        None
-
-    Returns:
-        None
-
-    Raises:
-        None
+    It is used by the admin to view statistics of the query in the current project.
+    The idea of the stats page is to give the reseacher an idea of the cohort.
     """
 
     stats = db.get_curr_stats()

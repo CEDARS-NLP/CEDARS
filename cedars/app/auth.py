@@ -75,30 +75,27 @@ def register():
     if request.method == 'POST':
         username = request.form.get("username")
         password = request.form.get("password")
-        print(username)
-        print(password)
-        if not username or not password:
-            flash("Username and password are required.")
-            return redirect(url_for('auth.register'))
-        
+        error = None
+        if not username or not password  or len(username.strip())==0 or len(password.strip())==0:
+            error = "Username and password are required."
 
         existing_user = db.get_user(username)
         
         if existing_user:
-            flash('Username already exists.')
-            return redirect(url_for('auth.register'))
+            error = 'Username already exists.'
 
-        hashed_password = generate_password_hash(password)
-        is_admin = False if len(db.get_project_users())>0 else True  # Making the first registered user an admin
-        
-        print("reach here")
-        db.add_user(
-            username=username,
-            password=hashed_password,
-            is_admin=is_admin)
+        if error is None:
+            hashed_password = generate_password_hash(password)
+            is_admin = False if len(db.get_project_users())>0 else True  # Making the first registered user an admin
 
-        flash('Registration successful.')
-        return redirect(url_for('auth.login'))
+            db.add_user(
+                username=username,
+                password=hashed_password,
+                is_admin=is_admin)
+
+            flash('Registration successful.')
+            return redirect(url_for('auth.login'))
+        flash(error)
     return render_template('auth/register.html', **db.get_info())
 
 

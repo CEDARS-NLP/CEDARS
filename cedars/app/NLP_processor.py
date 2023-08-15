@@ -159,8 +159,8 @@ class NLP_processor:
 
         try:
             db.set_patient_lock_status(patient_id, True)
+            has_relevant_notes = False
             for note in db.get_patient_notes(patient_id):
-
                 note_id = note["_id"]  # should be text_id
                 instances = self.process_note(note["text"], query)
 
@@ -174,8 +174,11 @@ class NLP_processor:
                         annotation["reviewed"] = False
 
                         db.insert_one_annotation(annotation)
-                    db.mark_patient_reviewed(patient_id, False)
-                else:
-                    db.mark_patient_reviewed(patient_id, True)
+                        has_relevant_notes = True
+    
+            if has_relevant_notes:
+                db.mark_patient_reviewed(patient_id, False)
+            else: 
+                db.mark_patient_reviewed(patient_id, True)
         finally:
             db.set_patient_lock_status(patient_id, False)

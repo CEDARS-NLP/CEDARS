@@ -16,6 +16,11 @@ class Local(Base):
     DEBUG = True
 
 
+class Test(Base):
+    CACHE_TYPE = 'SimpleCache'
+    TESTING = True
+    MONGO_URI = f'mongodb://{config["DB_HOST"]}:{config["DB_PORT"]}/Test'
+
 class Dev(Base):
     CACHE_TYPE = 'RedisCache'
     CACHE_REDIS_URL = 'redis://redis:6379/0'
