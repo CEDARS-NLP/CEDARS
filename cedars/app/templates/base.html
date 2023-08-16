@@ -4,7 +4,7 @@
 
 <nav class="navbar navbar-light bg-light mb-5  nav-tabs d-flex">
     <div class="container-fluid">
-        
+
         <a class="navbar-brand" href="/">
             <img src="{{ url_for('static', filename='project_logo.png') }}" alt="" width="24" height="24"
                  class="d-inline-block align-text-top">
@@ -12,10 +12,10 @@
         </a>
         <div class="proj_name d-inline-block align-text-top" id="proj_name">
                 Project Name : {{ project }}
-            
+
         </div>
 
-        
+
         {% block search_bar %} {% endblock %}
 
         {% if current_user.is_authenticated %}
@@ -23,16 +23,16 @@
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
                     aria-expanded="false">
-                    
+
                     {{ current_user.username }}
-                    
+
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><a class="dropdown-item" href="/">Homepage</a></li>
                         <li><a class="dropdown-item" href="/stats/">Project Statistics</a></li>
 
                         {% if current_user.is_admin == true %}
-                            <li><a class="dropdown-item" href="/ops/project_details">Project Details</a></li>        
+                            <li><a class="dropdown-item" href="/ops/project_details">Project Details</a></li>
                             <li><a class="dropdown-item" href="/auth/register">Add User</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_data">Upload Data</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_query">Search Query</a></li>
@@ -52,7 +52,7 @@
 
     </div>
 
-    <div class="container"> 
+    <div class="container">
         <!-- Flash messages block -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -63,10 +63,10 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        
+
         <!-- Rest of your content -->
     </div>
-    
+
 
 
 </nav>

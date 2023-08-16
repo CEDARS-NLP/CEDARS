@@ -5,7 +5,7 @@ Pytests
 
 def test_config(app):
     with app.app_context():
-        assert app.testing  
+        assert app.testing
 
 
 def test_index(client):

@@ -1,10 +1,10 @@
 """
 This page contatins the functions and the flask blueprint for the /proj_details route.
 """
-import pandas as pd
 import os
 import logging
 from pathlib import Path
+import pandas as pd
 from flask import (
     Blueprint, render_template, send_file,
     redirect, session, request, url_for, flash,
@@ -12,9 +12,10 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from .auth import admin_required, get_initials
 from app import db
 from app import NLP_processor
+from .auth import admin_required
+
 
 
 
@@ -25,17 +26,17 @@ bp = Blueprint("ops", __name__, url_prefix="/ops")
 def allowed_data_file(filename):
     """
     This function is used to check if a file has a valid extension for us to load tabular data from.
-    
+
     Args:
         filepath (str) : The path to the file.
     Returns:
         (bool) : True if the file is of a supported type.
     """
-    ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
+    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
 
     extension = filename.split(".")[-1]
 
-    return extension in ALLOWED_EXTENSIONS
+    return extension in allowed_extensions
 
 
 def allowed_image_file(filename):
@@ -47,21 +48,21 @@ def allowed_image_file(filename):
     Returns:
         (bool) : True if this is a supported image file type.
     """
-    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+    allowed_extensions = {'png', 'jpg', 'jpeg'}
 
     extension = filename.split(".")[-1]
 
-    return extension in ALLOWED_EXTENSIONS
+    return extension in allowed_extensions
 
 
 @bp.route("/project_details", methods=["GET", "POST"])
 @admin_required
 def project_details():
     """
-    This is a flask function for the backend logic 
+    This is a flask function for the backend logic
                     for the proj_details route.
     It is used by the admin to view and alter details of the current project.
-    
+
     Args:
         None
 
@@ -76,7 +77,7 @@ def project_details():
         project_name = request.form.get("project_name")
         db.update_project_name(project_name)
         flash(f"Project name updated to {project_name}.")
-           
+
         if "project_logo" in request.files:
             file = request.files["project_logo"]
             if allowed_image_file(secure_filename(file.filename)):
@@ -91,35 +92,35 @@ def project_details():
 def load_pandas_dataframe(filepath):
     """
     This function is used to load tabular data from a file into a pandas DataFrame.
-    
+
     Args:
-        filepath (str) : The path to the file to load data from. 
+        filepath (str) : The path to the file to load data from.
             For valid file extensions refer to the allowed_data_file function above.
     Returns:
         (pandas DataFrame) : This is a dataframe with the data from the file.
     """
-    extension = str(filepath).split(".")[-1]
+    extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
 
     if extension == 'csv':
         return pd.read_csv(filepath)
-    elif extension == 'xlsx':
+    if extension == 'xlsx':
         return pd.read_excel(filepath)
-    elif extension == 'json':
+    if extension == 'json':
         return pd.read_json(filepath)
-    elif extension == 'parquet':
+    if extension == 'parquet':
         return pd.read_parquet(filepath)
-    elif extension == 'pickle' or extension == 'pkl':
+    if extension in ['pickle', 'pkl']:
         return pd.read_pickle(filepath)
-    elif extension == 'xml':
+    if extension == 'xml':
         return pd.read_xml(filepath)
-    
+
     return None
 
 # Pylint disabled due to naming convention.
 def EMR_to_mongodb(filepath): #pylint: disable=C0103
     """
     This function is used to open a csv file and load it's contents into the mongodb database.
-    
+
     Args:
         filepath (str) : The path to the file to load data from.
         For valid file extensions refer to the allowed_data_file function above.
@@ -156,7 +157,7 @@ def upload_data():
     #     return redirect("/")
     if request.method == "GET":
         return render_template("ops/upload_file.html", **db.get_info())
-    
+
     if "data_file1" not in request.files and "data_file2" not in request.files:
         return redirect(url_for('ops.upload_data'))
 
@@ -166,7 +167,7 @@ def upload_data():
 
         if not allowed_data_file(filename):
             return render_template("ops/upload_file.html", **db.get_info())
-        
+
         file_path = Path("app/static") / filename
         file.save(file_path)
         EMR_to_mongodb(file_path)
@@ -180,7 +181,7 @@ def upload_data():
 @admin_required
 def upload_query():
     """
-    This is a flask function for the backend logic 
+    This is a flask function for the backend logic
     to upload a csv file to the database.
     """
 
@@ -206,9 +207,9 @@ def upload_query():
     db.empty_annotations()
 
     #TODO: use flask executor to run this in the background
-    nlp_processor = NLP_processor.NLP_processor()
+    nlp_processor = NLP_processor.NlpProcessor()
     nlp_processor.automatic_nlp_processor()
-    
+
     if "annotation_ids" in session:
         session.pop("annotation_ids")
     if "annotation_number" in session:
@@ -265,7 +266,7 @@ def save_adjudications():
         'next': _move_to_next_annotation,
         'adjudicate': _adjudicate_annotation
     }
-  
+
     action = request.form['submit_button']
     if action in actions:
         actions[action]()
@@ -277,7 +278,7 @@ def save_adjudications():
 @login_required
 def adjudicate_records():
     """
-    Serve the 'adjudicate_records' page. 
+    Serve the 'adjudicate_records' page.
     Handle the logic associated with the main CEDARS page.
     """
     pt_id = None
@@ -296,7 +297,7 @@ def adjudicate_records():
     if len(session['annotation_ids']) == 0:
         _prepare_for_next_patient()
         return redirect(url_for("ops.adjudicate_records"))
-    
+
     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
 
     annotation = db.get_annotation(current_annotation_id)
@@ -349,7 +350,7 @@ def _format_date(date_obj):
 @admin_required
 def download_file ():
     """
-    This is a flask function for the backend logic 
+    This is a flask function for the backend logic
                     for the download_annotations route.
     It will create a csv file of the current annotations and send it to the user.
 
@@ -365,7 +366,7 @@ def download_file ():
 
     data = db.get_all_annotations()
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], "annotations.csv")
-    df = pd.DataFrame(data)
-    df.to_csv(file_path)
+    annotations = pd.DataFrame(data)
+    annotations.to_csv(file_path)
 
     return send_file(file_path, as_attachment=True)

@@ -5,7 +5,7 @@ from dotenv import dotenv_values
 config = dotenv_values(".env")
 
 
-class Base(object):
+class Base:
     SECRET_KEY = config['SECRET_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=15)
     MONGO_URI = f'mongodb://{config["DB_HOST"]}:{config["DB_PORT"]}/{config["DB_NAME"]}'

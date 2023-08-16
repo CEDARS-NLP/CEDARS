@@ -17,6 +17,7 @@ fake = Faker()
 
 
 def create_app(config_filename=None):
+    """Create flask application"""
     app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
         app.config.from_object(config_filename)
@@ -27,7 +28,7 @@ def create_app(config_filename=None):
     db.create_project(project_name=fake.slug(),
                       investigator_name=fake.name(),
                       cedars_version=__version__)
-    
+
     from . import auth
     auth.login_manager.init_app(app)
     app.register_blueprint(auth.bp)

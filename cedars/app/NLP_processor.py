@@ -4,9 +4,10 @@ This module contatins the class to perform NLP operations for the CEDARS project
 import re
 import logging
 import spacy
+
 from . import db
 
-class NLP_processor:
+class NlpProcessor:
     """
     This class stores a sci-spacy model and functions needed to run it on medical notes.
     """
@@ -16,39 +17,31 @@ class NLP_processor:
 
         Args:
             model_name (str) : Name of the sci-spacy model we wish to use.
-
         Returns:
             None
-
-        Raises:
-            Custom model failed to load exception
         """
         if not hasattr(cls, 'instance'):
-            cls.instance = super(NLP_processor, cls).__new__(cls)
+            cls.instance = super(NlpProcessor, cls).__new__(cls)
 
             try:
                 cls.nlp_model = spacy.load(model_name)
-            except:
+            except Exception as exc:
                 logging.critical("Spacy model %s failed to load.", model_name)
-                raise Exception(f"Spacy model {model_name} failed to load.")
+                raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
     def process_note(self, note, regex_query):
         """
-        This function takes a medical note and a regex query as input and annotates 
+        This function takes a medical note and a regex query as input and annotates
         the relevant sections of the text.
 
         Args:
             note (str) : This is a string representing the doctor's note.
             regex_query (str) : This string is a regex pattern for information a doctor may want.
-
         Returns:
-            marked_flags (list) : A list of dictionaries. 
-            Each dictionary contains the annotation and location of where this occurrence 
+            marked_flags (list) : A list of dictionaries.
+            Each dictionary contains the annotation and location of where this occurrence
             can be found.
-
-        Raises:
-            None
         """
         doc = self.nlp_model(note)
         pattern = re.compile(regex_query)
@@ -80,7 +73,7 @@ class NLP_processor:
         """
         This function takes a spacy token and determines if it has been negated in this sentence.
 
-        Ex. 
+        Ex.
         This is not an apple.
         In the above sentence, the token apple is negated.
 
@@ -120,7 +113,7 @@ class NLP_processor:
         This function is used to perform and save NLP annotations
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
-        
+
         Args:
             query (str) : Regex query of all what terms the researcher is looking for.
             patient_id (int) : The ID of a patient we want to perform these annotations for.
@@ -148,14 +141,14 @@ class NLP_processor:
         single patient saved in the database.
         The patient information in the PATIENTS collection is also
         appropriately updated during this process.
-        
+
         Args:
             query (str) : Regex query of all what terms the researcher is looking for.
             patient_id (int) : The ID of a patient we want to perform these annotations for.
         Returns:
             None
         """
-        # TODO: make this parallel
+        # TODO: make this parallel (fixme)
 
         try:
             db.set_patient_lock_status(patient_id, True)
@@ -175,10 +168,10 @@ class NLP_processor:
 
                         db.insert_one_annotation(annotation)
                         has_relevant_notes = True
-    
+
             if has_relevant_notes:
                 db.mark_patient_reviewed(patient_id, False)
-            else: 
+            else:
                 db.mark_patient_reviewed(patient_id, True)
         finally:
             db.set_patient_lock_status(patient_id, False)

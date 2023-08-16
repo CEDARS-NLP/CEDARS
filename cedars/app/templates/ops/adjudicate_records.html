@@ -3,7 +3,7 @@
 {% block title %}CEDARS {% endblock %}
 
 
-{% block search_bar %} 
+{% block search_bar %}
 <div class="mx-10 search_div" id = "search_bar">
   <form class="d-flex" action="/ops/adjudicate_records" method="POST">
       <input type="search" class="form-control"
@@ -43,7 +43,7 @@
           </ul>
         </div>
 
-        
+
 
         <div class="mb-4">
           <h2>Comments</h2>
@@ -52,7 +52,7 @@
             <textarea class="form-control" rows="4" name="comment" id="comment"></textarea>
           </div>
           <br>
-        
+
           <button class="btn btn-primary save-comment-btn" value="comment" type="submit" name="submit_button">Save Comment</button>
 
           <br>
@@ -72,15 +72,15 @@
         <table class="table table-hover">
           <tbody>
             <tr>
-              <td> 
+              <td>
 
-                {{pre_token_sentence}} 
+                {{pre_token_sentence}}
 
                 <mark>
                   <b>
                   {{token_word}}
                 </b>
-                </mark> 
+                </mark>
 
                 {{post_token_sentence}}
 
@@ -97,13 +97,13 @@
                         <button class="btn btn-primary" value="adjudicate" type="submit" name="submit_button">Adjudicate Sentence</button>
                     </div>
                     <div class="btn-group me-2" role="group" aria-label="First group">
-                        <button class="btn btn-outline-secondary" value="prev" type="submit" name="submit_button"><<</button> 
-                        <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>       
+                        <button class="btn btn-outline-secondary" value="prev" type="submit" name="submit_button"><<</button>
+                        <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>
                     </div>
                 </form>
-                
+
               </div>
-         
+
       </div>
 
       <div class="mb-4">
@@ -111,7 +111,7 @@
         <div class="well">{{full_note}}</div>
       </div>
 
-      
+
 
     </div>
   </div>
@@ -134,8 +134,8 @@
     border-color: #0b0b0b !important;
   }
 
-  mark { 
-    
+  mark {
+
     color: red;
   }
 
@@ -222,7 +222,7 @@
           This patient is not currently accessible. The records may be locked or there may be no record in the database.
         </div>
         <div class="modal-footer">
-         
+
         </div>
       </div>
     </div>

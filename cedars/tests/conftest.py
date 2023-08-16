@@ -33,7 +33,7 @@ class AuthActions(object):
             '/auth/resgister',
             data={'username': username, 'password': password}
         )
-    
+
     def login(self, username='test', password='test'):
         return self._client.post(
             '/auth/login',

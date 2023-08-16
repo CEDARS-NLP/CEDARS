@@ -2,7 +2,6 @@
 This page contatins the functions and the flask blueprint for the /stats route.
 """
 from flask import Blueprint, render_template
-from flask import session
 from flask_login import login_required
 from . import db
 
@@ -12,9 +11,9 @@ bp = Blueprint("stats_page", __name__, url_prefix="/stats")
 @login_required
 def stats_route():
     """
-    This is a flask function for the backend logic 
+    This is a flask function for the backend logic
     for the stats route.
-    
+
     It is used by the admin to view statistics of the query in the current project.
     The idea of the stats page is to give the reseacher an idea of the cohort.
     """

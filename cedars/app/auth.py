@@ -5,7 +5,6 @@ from functools import wraps
 from flask import (
     Blueprint,
     render_template,
-    g,
     flash,
     redirect,
     request,
@@ -29,13 +28,13 @@ bp = Blueprint("auth", __name__, url_prefix="/auth")
 login_manager = LoginManager()
 
 
-def admin_required(f):
-    @wraps(f)
+def admin_required(func):
+    @wraps(func)
     def decorated_function(*args, **kwargs):
         if not current_user.is_admin:
             flash('You do not have admin access.')
             return render_template('index.html', **db.get_info())
-        return f(*args, **kwargs)
+        return func(*args, **kwargs)
     return decorated_function
 
 
@@ -80,13 +79,14 @@ def register():
             error = "Username and password are required."
 
         existing_user = db.get_user(username)
-        
+
         if existing_user:
             error = 'Username already exists.'
 
         if error is None:
             hashed_password = generate_password_hash(password)
-            is_admin = False if len(db.get_project_users())>0 else True  # Making the first registered user an admin
+            # Making the first registered user an admin
+            is_admin = not len(db.get_project_users())>0
 
             db.add_user(
                 username=username,
@@ -104,7 +104,7 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        
+
         user = db.get_user(username)
 
         if user and check_password_hash(user['password'], password):
