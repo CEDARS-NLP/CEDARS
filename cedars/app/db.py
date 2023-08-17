@@ -3,23 +3,13 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
 from datetime import datetime
-import json
 import logging
-
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from bson import ObjectId
-
-from app import mongo
+from .database import mongo
 
 load_dotenv()
-
-
-class JSONEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, ObjectId):
-            return str(o)
-        return json.JSONEncoder.default(self, o)
 
 
 def create_project(project_name, investigator_name, cedars_version):

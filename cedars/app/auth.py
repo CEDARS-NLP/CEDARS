@@ -21,7 +21,7 @@ from flask_login import (
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from bson import ObjectId
-from app import db
+from . import db
 # from sentry_sdk import set_user
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -29,6 +29,7 @@ login_manager = LoginManager()
 
 
 def admin_required(func):
+    """Admin required decorator"""
     @wraps(func)
     def decorated_function(*args, **kwargs):
         if not current_user.is_admin:
@@ -38,9 +39,19 @@ def admin_required(func):
     return decorated_function
 
 
-def get_initials(username):
-    words = username.split(" ")
-    return "".join([word[0] for word in words])
+@login_manager.user_loader
+def load_user(user_id):
+    """Load a user"""
+    user_data = db.get_user(user_id)
+    if user_data:
+        return User(user_data)
+    return None
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    """Redirect unauthorized users to login page"""
+    return redirect(url_for("auth.login"))
 
 
 class User(UserMixin):
@@ -57,20 +68,9 @@ class User(UserMixin):
         return str(self.username)
 
 
-@login_manager.user_loader
-def load_user(user_id):
-    user_data = db.get_user(user_id)
-    if user_data:
-        return User(user_data)
-    return None
-
-@login_manager.unauthorized_handler
-def unauthorized():
-    return redirect(url_for("auth.login"))
-
-
 @bp.route("/register", methods=["GET", "POST"])
 def register():
+    """Register a new user"""
     if request.method == 'POST':
         username = request.form.get("username")
         password = request.form.get("password")
@@ -101,6 +101,7 @@ def register():
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
+    """Login a user"""
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -121,6 +122,7 @@ def login():
 
 @bp.route('/logout', methods=["GET", "POST"])
 def logout():
+    """Logout a user"""
     if session.get("patient_id"):
         db.set_patient_lock_status(int(session.get("patient_id")), False)
 
