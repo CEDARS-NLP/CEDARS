@@ -3,6 +3,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import logging
+import re
 from pathlib import Path
 import pandas as pd
 from flask import (
@@ -13,11 +14,8 @@ from flask import (
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app import db
-from app import NLP_processor
+from app import nlpprocessor
 from .auth import admin_required
-
-
-
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -184,6 +182,7 @@ def upload_query():
     This is a flask function for the backend logic
     to upload a csv file to the database.
     """
+    # TODO: make regex translation using chatGPT if API is available
 
     if request.method == "GET":
         return render_template("ops/upload_query.html", **db.get_info())
@@ -196,6 +195,13 @@ def upload_query():
     }
 
     search_query = request.form.get("regex_query")
+
+    try:
+        re.compile(search_query)
+    except re.error:
+        flash("Invalid regex query.")
+        return render_template("ops/upload_query.html", **db.get_info())
+
     use_negation = False # bool(request.form.get("view_negations"))
     hide_duplicates = False # not bool(request.form.get("keep_duplicates"))
     skip_after_event = False # bool(request.form.get("skip_after_event"))
@@ -207,15 +213,19 @@ def upload_query():
     db.empty_annotations()
 
     #TODO: use flask executor to run this in the background
-    nlp_processor = NLP_processor.NlpProcessor()
+    nlp_processor = nlpprocessor.NlpProcessor()
     nlp_processor.automatic_nlp_processor()
 
+    # remove session variables
     if "annotation_ids" in session:
         session.pop("annotation_ids")
+        session.modified = True
     if "annotation_number" in session:
         session.pop("annotation_number")
+        session.modified = True
     if "patient_id" in session:
         session.pop("patient_id")
+        session.modified = True
     return redirect(url_for("ops.adjudicate_records"))
 
 
@@ -256,6 +266,8 @@ def save_adjudications():
     def _adjudicate_annotation():
         db.mark_annotation_reviewed(current_annotation_id)
         session["annotation_ids"].pop(session["annotation_number"])
+        if session["annotation_number"] >= len(session["annotation_ids"]):
+            session["annotation_number"] -= 1
         session.modified = True
 
     actions = {
@@ -324,14 +336,14 @@ def adjudicate_records():
     return render_template("ops/adjudicate_records.html", **context)
 
 def _initialize_session(pt_id=None):
-    if "patient_id" not in session and not pt_id:
-        pt_id = db.get_patient()
-    session.update({
-        "patient_id": pt_id,
-        "annotation_number": 0,
-        "annotation_ids": db.get_patient_annotation_ids(pt_id)
-    })
-    session.modified = True
+    if "patient_id" not in session:
+        pt_id = pt_id if pt_id else db.get_patient()
+        session.update({
+            "patient_id": pt_id,
+            "annotation_number": 0,
+            "annotation_ids": db.get_patient_annotation_ids(pt_id)
+        })
+        session.modified = True
 
 def _prepare_for_next_patient():
     db.mark_patient_reviewed(session['patient_id'])

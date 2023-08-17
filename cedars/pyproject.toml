@@ -40,6 +40,7 @@ source = ["app"]
 [tool.pylint.messages_control]
 disable = [
     "arguments-differ",
+    "assigning-non-slot",
     "attribute-defined-outside-init",
     "blacklisted-name",
     "duplicate-code",
