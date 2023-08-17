@@ -243,12 +243,12 @@ def upload_notes(documents):
         datetime_obj = datetime.strptime(note_info["text_date"], date_format)
         note_info["text_date"] = datetime_obj
 
-        try:
-            notes_collection.insert_one(note_info)
-        except DuplicateKeyError:
+        if notes_collection.find_one({"text_id": note_info["text_id"]}):
             logging.error("Cancelling duplicate note entry")
-
-        patient_ids.add(note_info["patient_id"])
+        else:
+            notes_collection.insert_one(note_info)
+            patient_ids.add(note_info["patient_id"])
+        
 
     patients_collection = mongo.db["PATIENTS"]
     for p_id in patient_ids:
@@ -258,10 +258,8 @@ def upload_notes(documents):
                         "updated": False,
                         "admin_locked": False}
 
-        try:
+        if not patients_collection.find_one({"patient_id": p_id}):
             patients_collection.insert_one(patient_info)
-        except DuplicateKeyError:
-            logging.error("Cancelling duplicate patient entry for patient ID #%s", str(p_id))
 
 
 def get_annotation(annotation_id):
@@ -291,8 +289,7 @@ def get_annotation_note(annotation_id):
                       The values are the values of the attribute in that record.
     """
     logging.debug("Retriving annotation #%s from database.", annotation_id)
-    annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
-    print(annotation)
+    annotation = mongo.db["ANNOTATIONS"].find_one_or_404({ "_id" : ObjectId(annotation_id) })
     note = mongo.db["NOTES"].find_one({ "_id" : annotation["note_id"] })
 
     return note

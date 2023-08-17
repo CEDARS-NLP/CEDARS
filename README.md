@@ -1,21 +1,18 @@
-# Flask App Template
+# CEDARS
 
-Simple Flask application template that uses
-1. Flask-Login for user authentication.
-2. Flask-Caching + Redis LRU as the caching layer.
-3. Jinja templates + Bootstrap for the UI.
-4. Flask application factories to manage multiple configurations (dev, prod, etc.).
-5. Blueprints to encapsulate pieces of functionality in different components.
-6. Docker to simplify the deployment.
 
 ## Pre-requisites
 
-In order to run the app you will need a `.env` file with at least the flask `SECRET_KEY`
-and place it under the `app/app/` directory.
+In order to run the app you will need a `.env` file with at least the flask `SECRET_KEY`, MONGODB details and the host IP.
+Place the `.env` file under the `cedars/cedars` directory.
 
 For example:
 ```
 SECRET_KEY = \xcfR\xd9D\xaa\x06\x84S\x19\xc0\xdcA\t\xf7it
+HOST=0.0.0.0 
+DB_HOST=localhost
+DB_NAME=cedars
+DB_PORT=27017
 ```
 
 ## Run locally
@@ -31,7 +28,7 @@ $ source venv/bin/activate
 
 If you are using Poetry
 ```shell
-$ poetry install
+$ poetry install  # do not cd into cedars/app
 $ cd app
 $ poetry run python -m app.wsgi
 ```
@@ -41,8 +38,15 @@ and navigate to http://localhost:5000
 ## Run on Docker
 
 ```shell
+$ cd cedars
 $ docker-compose build
 $ docker-compose up
 ```
 
-and navigate to http://localhost:8051
+and navigate to http://localhost:5001
+
+## Open Source softwares
+
+1. Docker: (License Details)[https://www.linuxfoundation.org/resources/publications/docker-containers-what-are-the-open-source-licensing-considerations]
+2. MINIO: GNU AFFERO GENERAL PUBLIC LICENSE
+3. MongoDB: Server Side Public License (SSPL) v1
