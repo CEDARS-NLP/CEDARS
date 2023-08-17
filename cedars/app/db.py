@@ -6,7 +6,6 @@ from datetime import datetime
 import json
 import logging
 
-from pymongo.errors import DuplicateKeyError
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from bson import ObjectId
@@ -248,7 +247,6 @@ def upload_notes(documents):
         else:
             notes_collection.insert_one(note_info)
             patient_ids.add(note_info["patient_id"])
-        
 
     patients_collection = mongo.db["PATIENTS"]
     for p_id in patient_ids:

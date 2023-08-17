@@ -7,6 +7,45 @@ import spacy
 
 from . import db
 
+def is_negated(token):
+    """
+    This function takes a spacy token and determines if it has been negated in this sentence.
+
+    Ex.
+    This is not an apple.
+    In the above sentence, the token apple is negated.
+
+    Args:
+        token (spacy token) : This is a token of a single word after spacy
+        runs a model on some text.
+
+    Returns:
+        (bool) : True if the token is negated in the sentence.
+    Raises:
+        None
+    """
+    neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing',
+                        'neither','nowhere','noone',
+                        'no-one','hardly','scarcely','barely']
+
+    parents = list(token.ancestors)
+    children = list(token.children)
+
+    for parent in token.ancestors:
+        children.extend(list(parent.children))
+
+    if ("neg"in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
+        return True
+
+    parents_text = [par.text for par in parents]
+    children_text = [child.text for child in children]
+
+    for word in neg_words:
+        if word in parents_text or word in children_text:
+            return True
+
+    return False
+
 class NlpProcessor:
     """
     This class stores a sci-spacy model and functions needed to run it on medical notes.
@@ -54,7 +93,7 @@ class NlpProcessor:
 
 
             for token in tokens:
-                has_negation = self.is_negated(token)
+                has_negation = is_negated(token)
                 if bool(pattern.match(token.lemma_)):
                     start = token.idx - start_index
                     end = start + len(token.text)
@@ -68,45 +107,6 @@ class NlpProcessor:
 
         return marked_flags
 
-
-    def is_negated(self, token):
-        """
-        This function takes a spacy token and determines if it has been negated in this sentence.
-
-        Ex.
-        This is not an apple.
-        In the above sentence, the token apple is negated.
-
-        Args:
-            token (spacy token) : This is a token of a single word after spacy
-                                                                    runs a model on some text.
-
-        Returns:
-            (bool) : True if the token is negated in the sentence.
-        Raises:
-            None
-        """
-        neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing',
-                            'neither','nowhere','noone',
-                            'no-one','hardly','scarcely','barely']
-
-        parents = list(token.ancestors)
-        children = list(token.children)
-
-        for parent in token.ancestors:
-            children.extend(list(parent.children))
-
-        if ("neg"in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
-            return True
-
-        parents_text = [par.text for par in parents]
-        children_text = [child.text for child in children]
-
-        for word in neg_words:
-            if word in parents_text or word in children_text:
-                return True
-
-        return False
 
     def automatic_nlp_processor(self, patient_id = None):
         """
