@@ -28,7 +28,7 @@ jobs:
           python-version: 3
       
       - name: install deps
-        run: pip install -r requirements.txt
+        run: pip install -r cedars/requirements.txt
 
       - name: Install everything, run the tests, produce the .coverage file
         run: pytest app/*.py # This is the part where you put your own test command
