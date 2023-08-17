@@ -10,7 +10,7 @@ For example:
 ```
 SECRET_KEY = \xcfR\xd9D\xaa\x06\x84S\x19\xc0\xdcA\t\xf7it
 HOST=0.0.0.0 
-DB_HOST=localhost
+DB_HOST=localhost  # change to DB_HOST=db if running docker container
 DB_NAME=cedars
 DB_PORT=27017
 ```

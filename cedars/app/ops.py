@@ -13,9 +13,9 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from app import db
-from app import nlpprocessor
-from .auth import admin_required
+from . import db
+from . import nlpprocessor
+from . import auth
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -54,7 +54,7 @@ def allowed_image_file(filename):
 
 
 @bp.route("/project_details", methods=["GET", "POST"])
-@admin_required
+@auth.admin_required
 def project_details():
     """
     This is a flask function for the backend logic
@@ -89,30 +89,46 @@ def project_details():
 
 def load_pandas_dataframe(filepath):
     """
-    This function is used to load tabular data from a file into a pandas DataFrame.
+    Load tabular data from a file into a pandas DataFrame.
 
     Args:
-        filepath (str) : The path to the file to load data from.
-            For valid file extensions refer to the allowed_data_file function above.
+        filepath (str): The path to the file to load data from.
+            Supported file extensions: csv, xlsx, json, parquet, pickle, pkl, xml.
+
     Returns:
-        (pandas DataFrame) : This is a dataframe with the data from the file.
+        pd.DataFrame: DataFrame with the data from the file.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+        FileNotFoundError: If the file does not exist.
     """
-    extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
+    if not filepath:
+        raise ValueError("Filepath must be provided.")
 
-    if extension == 'csv':
-        return pd.read_csv(filepath)
-    if extension == 'xlsx':
-        return pd.read_excel(filepath)
-    if extension == 'json':
-        return pd.read_json(filepath)
-    if extension == 'parquet':
-        return pd.read_parquet(filepath)
-    if extension in ['pickle', 'pkl']:
-        return pd.read_pickle(filepath)
-    if extension == 'xml':
-        return pd.read_xml(filepath)
+    extension = filepath.rsplit('.', maxsplit=1)[-1].lower()
+    loaders = {
+        'csv': pd.read_csv,
+        'xlsx': pd.read_excel,
+        'json': pd.read_json,
+        'parquet': pd.read_parquet,
+        'pickle': pd.read_pickle,
+        'pkl': pd.read_pickle,
+        'xml': pd.read_xml
+    }
 
-    return None
+    if extension not in loaders:
+        raise ValueError(f"""
+                         Unsupported file extension '{extension}'. 
+                         Supported extensions are 
+                         {', '.join(loaders.keys())}.""")
+
+    try:
+        return loaders[extension](filepath)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"File '{filepath}' not found.") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load the file '{filepath}' due to: {str(exc)}") from exc
+
 
 # Pylint disabled due to naming convention.
 def EMR_to_mongodb(filepath): #pylint: disable=C0103
@@ -145,7 +161,7 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
 
 
 @bp.route("/upload_data", methods=["GET", "POST"])
-@admin_required
+@auth.admin_required
 def upload_data():
     """
     This is a flask function for the backend logic to upload a file to the database.
@@ -176,7 +192,7 @@ def upload_data():
 
 
 @bp.route("/upload_query", methods=["GET", "POST"])
-@admin_required
+@auth.admin_required
 def upload_query():
     """
     This is a flask function for the backend logic
@@ -359,7 +375,7 @@ def _format_date(date_obj):
 
 
 @bp.route('/download_annotations')
-@admin_required
+@auth.admin_required
 def download_file ():
     """
     This is a flask function for the backend logic

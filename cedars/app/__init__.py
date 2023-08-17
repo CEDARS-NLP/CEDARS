@@ -6,13 +6,12 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
-from flask_login import login_required, current_user
-from flask import Flask, redirect, url_for, render_template, session
-
-from flask_pymongo import PyMongo
+from flask_login import login_required
+from flask import Flask, g, url_for, render_template, session
 from faker import Faker
 
-mongo = PyMongo()
+from .database import mongo
+
 fake = Faker()
 
 

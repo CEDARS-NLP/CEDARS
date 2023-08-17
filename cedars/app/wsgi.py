@@ -1,6 +1,8 @@
+"""Create flask application"""
+
 import os
 from dotenv import dotenv_values
-from app import create_app
+from . import create_app
 
 environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")

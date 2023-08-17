@@ -1,0 +1,3 @@
+,_id,sentence,token,lemma,isNegated,start_index,end_index,sentence_number,note_id,patient_id,event_date,comments,reviewed
+0,64de897a2d55eba579984b89,"Mr First is a 60 YO M with a history of metastatic colon CA, diagnosed in 1-2008, initially with stage III disease and s/p hemicolectomy followed by adjuvant chemo, with recurrence in the liver 6 months ago, evaluated today for management of pulmonary embolism.",stage,stage,False,97,102,0,64dd6899136396772901aaef,1111111111,,[],True
+1,64de897b2d55eba579984b8a,"50 YO F with stage III ovarian CA, here in f-u post-op day #7 surgical debulking.",stage,stage,False,13,18,0,64dd6899136396772901ab06,2222222222,,[],True
