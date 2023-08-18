@@ -45,6 +45,15 @@ $ docker-compose up
 
 and navigate to http://localhost:5001
 
+## MINIO 
+
+1. User uploads small amout of data using UI
+    - Store into MINIO
+    - Use stored data to fill mongo
+
+2. User uploads large file on MINIO
+    - Load all available files to mongo
+
 ## Open Source softwares
 
 1. Docker: (License Details)[https://www.linuxfoundation.org/resources/publications/docker-containers-what-are-the-open-source-licensing-considerations]

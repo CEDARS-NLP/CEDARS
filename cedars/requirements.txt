@@ -16,4 +16,5 @@ tokenizers==0.13.3
 urllib3==2.0.3
 flask-caching==2.0.2
 faker
+minio==7.1.16
 en-core-sci-lg @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz

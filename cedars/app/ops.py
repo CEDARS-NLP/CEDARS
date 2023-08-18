@@ -6,6 +6,7 @@ import logging
 import re
 from pathlib import Path
 import pandas as pd
+from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
     redirect, session, request, url_for, flash,
@@ -16,9 +17,12 @@ from werkzeug.utils import secure_filename
 from . import db
 from . import nlpprocessor
 from . import auth
+from .database import client
+
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
+config = dotenv_values(".env")
 
 
 def allowed_data_file(filename):
@@ -105,7 +109,7 @@ def load_pandas_dataframe(filepath):
     if not filepath:
         raise ValueError("Filepath must be provided.")
 
-    extension = filepath.rsplit('.', maxsplit=1)[-1].lower()
+    extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
     loaders = {
         'csv': pd.read_csv,
         'xlsx': pd.read_excel,
@@ -123,7 +127,9 @@ def load_pandas_dataframe(filepath):
                          {', '.join(loaders.keys())}.""")
 
     try:
-        return loaders[extension](filepath)
+        print(filepath)
+        obj = client.get_object("cedars", filepath)
+        return loaders[extension](obj)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
@@ -172,20 +178,28 @@ def upload_data():
     if request.method == "GET":
         return render_template("ops/upload_file.html", **db.get_info())
 
-    if "data_file1" not in request.files and "data_file2" not in request.files:
+    if "data_file1" not in request.files:
         return redirect(url_for('ops.upload_data'))
 
     if "data_file1" in request.files:
-        file = request.files["data_file1"]
-        filename = current_user.username + "_" + secure_filename(file.filename)
+        uploaded_file = request.files["data_file1"]
+        if uploaded_file:
+            size = os.fstat(uploaded_file.fileno()).st_size
+            client.put_object("cedars",
+                               secure_filename(uploaded_file.filename),
+                               uploaded_file,
+                               size)
+            EMR_to_mongodb(uploaded_file.filename)
+        # filename = current_user.username + "_" + secure_filename(file.filename)
 
-        if not allowed_data_file(filename):
-            return render_template("ops/upload_file.html", **db.get_info())
+        # if not allowed_data_file(filename):
+        #     return render_template("ops/upload_file.html", **db.get_info())
 
-        file_path = Path("app/static") / filename
-        file.save(file_path)
-        EMR_to_mongodb(file_path)
-        flash(f"{filename} uploaded successfully.")
+        # file_path = Path("app/static") / filename
+        # file.save(file_path)
+      
+        # EMR_to_mongodb(file_path)
+        flash(f"{secure_filename(uploaded_file.filename)} uploaded successfully.")
         return redirect(url_for('ops.upload_query'))
 
     return render_template("ops/upload_file.html", **db.get_info())
