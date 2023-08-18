@@ -147,8 +147,7 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
     Returns:
         None
     # """
-    # if not allowed_data_file(filepath):
-    #     return
+
 
     data_frame = load_pandas_dataframe(filepath)
     if data_frame is None:
@@ -173,8 +172,6 @@ def upload_data():
     This is a flask function for the backend logic to upload a file to the database.
     """
 
-    # if not (session.get('is_admin') is True):
-    #     return redirect("/")
     if request.method == "GET":
         return render_template("ops/upload_file.html", **db.get_info())
 
@@ -190,15 +187,7 @@ def upload_data():
                                uploaded_file,
                                size)
             EMR_to_mongodb(uploaded_file.filename)
-        # filename = current_user.username + "_" + secure_filename(file.filename)
 
-        # if not allowed_data_file(filename):
-        #     return render_template("ops/upload_file.html", **db.get_info())
-
-        # file_path = Path("app/static") / filename
-        # file.save(file_path)
-      
-        # EMR_to_mongodb(file_path)
         flash(f"{secure_filename(uploaded_file.filename)} uploaded successfully.")
         return redirect(url_for('ops.upload_query'))
 

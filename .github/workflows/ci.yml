@@ -21,17 +21,17 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.9
         id: setup-python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v2
         with:
-          python-version: 3
+          python-version: 3.9
       
       - name: install deps
         run: pip install -r cedars/requirements.txt
 
       - name: Install everything, run the tests, produce the .coverage file
-        run: pytest app/*.py # This is the part where you put your own test command
+        run: pytest cedars/app/*.py # This is the part where you put your own test command
 
       - name: Coverage comment
         id: coverage_comment
