@@ -6,6 +6,7 @@ import logging
 import re
 from pathlib import Path
 import pandas as pd
+from io import BytesIO
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
@@ -214,17 +215,25 @@ def upload_query():
     }
 
     search_query = request.form.get("regex_query")
-
+    search_query_pattern = (
+        r'^\s*('
+        r'(\(\s*[a-zA-Z0-9*?]+(\s*AND\s*[a-zA-Z0-9*?]+)*\s*\))|'
+        r'[a-zA-Z0-9*?]+)'
+        r'('
+        r'\s*OR\s+'
+        r'((\(\s*[a-zA-Z0-9*?]+(\s*AND\s*[a-zA-Z0-9*?]+)*\s*\))|'
+        r'[a-zA-Z0-9*?]+))*'
+        r'\s*$'
+    )
     try:
-        re.compile(search_query)
+        re.match(search_query, search_query_pattern)
     except re.error:
-        flash("Invalid regex query.")
+        flash("Invalid query.")
         return render_template("ops/upload_query.html", **db.get_info())
 
     use_negation = False # bool(request.form.get("view_negations"))
     hide_duplicates = False # not bool(request.form.get("keep_duplicates"))
     skip_after_event = False # bool(request.form.get("skip_after_event"))
-
 
     db.save_query(search_query, use_negation,
                     hide_duplicates, skip_after_event, tag_query)
@@ -284,6 +293,12 @@ def save_adjudications():
 
     def _adjudicate_annotation():
         db.mark_annotation_reviewed(current_annotation_id)
+        # if one annotation has the event date, mark the patient
+        # as reviewed because we don't need to review the rest
+        # this could be based on a parameter though
+        if db.get_annotation_date(current_annotation_id) is not None:
+            db.mark_patient_reviewed(session["patient_id"])
+            session.pop("patient_id")
         session["annotation_ids"].pop(session["annotation_number"])
         if session["annotation_number"] >= len(session["annotation_ids"]):
             session["annotation_number"] -= 1
@@ -345,7 +360,8 @@ def adjudicate_records():
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
         'comments': annotation["comments"],
-        'full_note': note['text'],
+        'full_note': highlighted_text(note),
+        'tags': [note["text_tag_1"], note["text_tag_2"], note["text_tag_3"], note["text_tag_4"]],
         'isLocked': session.get("hasBeenLocked", False),
         **db.get_info()
     }
@@ -353,6 +369,33 @@ def adjudicate_records():
     session["hasBeenLocked"] = False
 
     return render_template("ops/adjudicate_records.html", **context)
+
+
+def highlighted_text(note):
+    """
+    Returns highlighted text for a note.
+    """
+    highlighted_note = ""
+    prev_end_index = 0
+    text = note["text"]
+
+    annotations = db.get_all_annotations_for_note(str(note["_id"]))
+    print(annotations)
+    # sorted_annotations = sorted(annotations, key=lambda x: x["start_index"])
+
+    for annotation in annotations:
+        start_index = annotation['note_start_index']
+        end_index = annotation['note_end_index']
+        # Make sure the annotations don't overlap
+        if start_index < prev_end_index:
+            continue
+        
+        highlighted_note += text[prev_end_index:start_index]
+        highlighted_note += f'<mark>{text[start_index:end_index]}</mark>'
+        prev_end_index = end_index
+
+    highlighted_note += text[prev_end_index:]
+    return highlighted_note
 
 def _initialize_session(pt_id=None):
     if "patient_id" not in session:
@@ -396,8 +439,14 @@ def download_file ():
     """
 
     data = db.get_all_annotations()
+    data_bytes = pd.DataFrame(data).to_csv().encode('utf-8')
+    csv_buffer = BytesIO(data_bytes)
+    client.put_object("cedars",
+                      "annotations.csv",
+                      data=csv_buffer,
+                      length=len(data_bytes),
+                      content_type="application/csv")
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], "annotations.csv")
-    annotations = pd.DataFrame(data)
-    annotations.to_csv(file_path)
-
+    # annotations = pd.DataFrame(data)
+    client.fget_object("cedars", "annotations.csv", file_path)
     return send_file(file_path, as_attachment=True)

@@ -23,6 +23,7 @@ faker = "^19.3.0"
 en-core-sci-lg = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz"}
 coverage = "^7.3.0"
 minio = "^7.1.16"
+fastparquet = "^2023.8.0"
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^2.17.4"

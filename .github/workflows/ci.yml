@@ -31,7 +31,7 @@ jobs:
         run: pip install -r cedars/requirements.txt
 
       - name: Install everything, run the tests, produce the .coverage file
-        run: pytest cedars/app/*.py # This is the part where you put your own test command
+        run: pytest cedars/ # This is the part where you put your own test command
 
       - name: Coverage comment
         id: coverage_comment

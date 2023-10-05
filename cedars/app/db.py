@@ -249,6 +249,13 @@ def upload_notes(documents):
         if not patients_collection.find_one({"patient_id": p_id}):
             patients_collection.insert_one(patient_info)
 
+def  get_all_annotations_for_note(note_oid):
+    """
+    This function is used to get all the annotations for a particular note.
+    """
+    annotations = mongo.db["ANNOTATIONS"].find({"note_id" : ObjectId(note_oid)}).sort([("note_start_index", 1)])
+    return list(annotations)
+
 
 def get_annotation(annotation_id):
     """
@@ -364,6 +371,17 @@ def delete_annotation_date(annotation_id):
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                       { "$set": { "event_date" : None } })
 
+
+def get_annotation_date(annotation_id):
+    """
+    Retrives the event date for an annotation.
+    """
+    logging.debug("Retriving date on annotation #%s.", ObjectId(annotation_id))
+    annotation = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})
+    if "event_date" in annotation.keys():
+        return annotation["event_date"]
+
+    return None
 
 
 def mark_patient_reviewed(patient_id, is_reviewed = True):
