@@ -30,7 +30,7 @@ class AuthActions(object):
 
     def register(self, username='test', password='test'):
         return self._client.post(
-            '/auth/resgister',
+            '/auth/register',
             data={'username': username, 'password': password}
         )
 
