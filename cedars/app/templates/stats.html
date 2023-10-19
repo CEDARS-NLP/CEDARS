@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+
+
+<div class="w-75 mx-auto">
+  <div class="row">
+    <div class="col-4">
+      <form class="form-inline" action="/" method="POST">
+        <div class="mb-4">
+          <h2>{{ proj_name }} Statistics</h2>
+          <ul class="list-group">
+            <li class="list-group-item">Number of Patients in Database: {{ number_of_patients }}</li>
+            <li class="list-group-item">Number of Annotated Patients: {{ number_of_annotated_patients }}</li>
+            <li class="list-group-item">Number of Patients Reviewed: {{ number_of_reviewed }}</li>
+          </ul>
+        </div>
+      </form>
+    </div>
+
+    <div class="col-7">
+      <div class="mb-4">
+        <h6 class="text-muted">Project Progress</h6>
+        <canvas id="number_reviewed_pichart" style="width:100%;max-width:600px"></canvas>
+
+        <br>
+        <br>
+        <br>
+
+        <h6 class="text-muted">Lemma Distribution</h6>
+        <canvas id="Lemma Distribution" style="width:100%;max-width:600px"></canvas>
+
+      </div>
+
+
+
+    </div>
+  </div>
+</div>
+
+
+<script>
+  // Script for the PIE Chart
+  const not_in_anno = {{ number_of_patients }} - {{ number_of_annotated_patients }} ;
+  const num_reviewed = {{ number_of_reviewed }} ;
+  const num_unreviewed = {{ number_of_annotated_patients }} - {{ number_of_reviewed }}
+
+  const data = {
+      labels: ['Number of Patients Not in Annotations', 'Number of Reviewed Patients', 'Number of Unreviewed Patients'],
+      datasets: [{
+        fill: false,
+        lineTension: 0,
+        backgroundColor: ["rgba(0,0,255,1.0)", "rgba(0,255,0,1.0)", "rgba(255,0,0,1.0)"],
+        borderColor: "rgba(0,0,0,0.1)",
+        data: [not_in_anno, num_reviewed, num_unreviewed]
+      }]
+    };
+
+
+  const config = {
+  type: 'pie',
+  data: data,
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Chart.js Pie Chart'
+      }
+    }
+  },
+};
+
+  new Chart("number_reviewed_pichart", config);
+  </script>
+
+  <script>
+    // Script for the BAR Chart
+    var lemma_dist = JSON.parse('{{lemma_dist | tojson}}');
+
+
+  var labels = [];
+  var bar_heights = [];
+  var max_height = 0;
+  for (lemma in lemma_dist) {
+    labels.push(lemma);
+    bar_heights.push(lemma_dist[lemma]);
+
+    if (lemma_dist[lemma] > max_height) {
+      max_height = lemma_dist[lemma];
+    }
+  }
+
+  const bar_data = {
+    labels: labels,
+    datasets: [
+      {
+        label: 'Lemmas',
+        data: bar_heights,
+        borderColor: "rgba(0,0,255,1)",
+        backgroundColor: "rgba(0,0,255,0.5)",
+        fill: false,
+        borderWidth: 0.5,
+        borderRadius: 100,
+      }
+    ]
+  };
+
+    const bar_config = {
+      type: 'bar',
+      data: bar_data,
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+          },
+          title: {
+            display: true,
+            text: 'Chart.js Bar Chart'
+          }
+        },
+        scales : {
+            yAxes: [{
+                    ticks : {
+                        max : max_height * 1.1,
+                        min : 0
+                    }
+                }]
+        }
+      },
+    };
+
+    new Chart("Lemma Distribution", bar_config);
+  </script>
+
+
+{% endblock %}

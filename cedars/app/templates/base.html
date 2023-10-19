@@ -1,0 +1,143 @@
+{% extends "bootstrap.html" %}
+
+{% block container %}
+
+<nav class="navbar navbar-light bg-light mb-5  nav-tabs d-flex">
+    <div class="container-fluid">
+
+        <a class="navbar-brand" href="/">
+            <img src="{{ url_for('static', filename='project_logo.png') }}" alt="" width="24" height="24"
+                 class="d-inline-block align-text-top">
+            CEDARS
+        </a>
+        <div class="proj_name d-inline-block align-text-top" id="proj_name">
+                Project Name : {{ project }}
+
+        </div>
+
+
+        {% block search_bar %} {% endblock %}
+
+        {% if current_user.is_authenticated %}
+            <ul class="nav nav-pills">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
+                    aria-expanded="false">
+
+                    {{ current_user.username }}
+
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="/">Homepage</a></li>
+                        <li><a class="dropdown-item" href="/stats/">Project Statistics</a></li>
+
+                        {% if current_user.is_admin == true %}
+                            <li><a class="dropdown-item" href="/ops/project_details">Project Details</a></li>
+                            <li><a class="dropdown-item" href="/auth/register">Add User</a></li>
+                            <li><a class="dropdown-item" href="/ops/upload_data">Upload Data</a></li>
+                            <li><a class="dropdown-item" href="/ops/upload_query">Search Query</a></li>
+                        {% endif %}
+
+                        <li><a class="dropdown-item" href="/ops/adjudicate_records">Adjudicate Annotations</a></li>
+                        <li><a class="dropdown-item" href="/ops/download_annotations">Download Annotations</a></li>
+                        <li>
+                            <hr class="dropdown-divider">
+                        </li>
+                        <li><a class="dropdown-item" href="/auth/logout">Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+        {% endif %}
+
+
+    </div>
+
+    <div class="container">
+        <!-- Flash messages block -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} mt-2" role="alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Rest of your content -->
+    </div>
+
+
+
+</nav>
+
+    {% block content %} {% endblock %}
+
+    <div class="position-fixed" style="bottom: 0; right: 0">
+        <div class="d-flex flex-column align-items-end m-4">
+            <a href="#feedback" data-bs-toggle="modal" data-bs-target="#exampleModal">
+                <img src="{{ url_for('static', filename='chat-left.svg') }}" alt="" width="32" height="32">
+            </a>
+            <div class="text-muted" style="width: 80px; font-size: 14px; text-align: end">
+                Share your feedback!
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exampleModalLabel">Share your feedback</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form class="needs-validation" novalidate action="/" method="post"
+                      enctype=multipart/form-data>
+                    <div class="modal-body">
+                        <div class="form-floating">
+                        <textarea class="form-control" placeholder="Leave a comment here" id="floatingTextarea2"
+                                  style="height: 100px" name="content" required></textarea>
+                            <label for="floatingTextarea2">Comments</label>
+                            <div class="invalid-feedback">
+                                Please enter some feedback.
+                            </div>
+                        </div>
+                        <div class="col-md-12 mt-3">
+                            <label class="form-label">Add a screenshot</label>
+                            <div class="input-group">
+                                <input type="file" class="form-control" value="Upload" name="screenshot">
+                            </div>
+                            <div class="form-text">
+                                To take a screenshot use (Shift + Command + 4)
+                                <a href="https://support.apple.com/en-us/HT201361a" style="text-decoration: none">
+                                    on a Mac
+                                </a> or (Alt + PrtScn) on Windows 10.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary">Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <style>
+
+        .search_div {
+            width: 55%;
+        }
+
+        .proj_name {
+            font-size: 20px;
+        }
+    </style>
+
+
+    <footer>
+        <div class="p-5"></div>
+    </footer>
+
+{% endblock %}

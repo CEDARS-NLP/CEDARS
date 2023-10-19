@@ -1,0 +1,9 @@
+,_id,sentence,token,lemma,isNegated,start_index,end_index,note_start_index,note_end_index,sentence_number,note_id,patient_id,event_date,comments,reviewed
+0,64e69b86bd7f7616fe6051c5,"Two weeks ago he sustained sudden onset of chest pain and dyspnea, along with palpitations.",dyspnea,,False,11,18,446,18,3,64deb2deaff47f9003d86bd6,1111111111,,[],False
+1,64e69b86bd7f7616fe6051c6,"
+
+Since discharge he has done well, with resolution of chest pain and substantial improvement of dyspnea.",dyspnea,,False,17,24,802,24,8,64deb2deaff47f9003d86bd6,1111111111,,[],False
+2,64e69b86bd7f7616fe6051c7,"
+
+Patient was well until about one month ago, when he started experiencing fevers to 101 degrees, night sweats and fatigue. He also had cough with one episode of hemoptysis, no dyspnea.",dyspnea,,True,35,42,316,42,1,64deb2deaff47f9003d86bf3,3333333333,,[],False
+3,64e69b87bd7f7616fe6051c8,"She was at the office when she experienced rapid onset of R pleuritic chest pain, dyspnea and palpitations.",dyspnea,,False,16,23,366,23,3,64deb2deaff47f9003d86c13,4444444444,,[],False
