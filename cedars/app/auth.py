@@ -59,7 +59,7 @@ class User(UserMixin):
     A user object based on the flask_login specifications.
     """
     def __init__(self, data):
-        self._id = ObjectId(data["_id"])
+        self._id = data["_id"]
         self.username = data["user"]
         self.password = data["password"]
         self.is_admin = data["is_admin"]
@@ -87,7 +87,7 @@ def register():
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
             is_admin = not len(db.get_project_users())>0
-
+            
             db.add_user(
                 username=username,
                 password=hashed_password,
@@ -109,7 +109,9 @@ def login():
         user = db.get_user(username)
 
         if user and check_password_hash(user['password'], password):
-            login_user(User(user))
+            new_user = User(user)
+            
+            login_user(new_user)
             flash('Login successful.')
             return render_template('index.html', **db.get_info())
 

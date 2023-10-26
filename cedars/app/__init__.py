@@ -10,7 +10,9 @@ from flask_login import login_required
 from flask import Flask, g, url_for, render_template, session
 from faker import Faker
 
-from .database import mongo
+from .database import db_conn, db_type
+
+
 
 fake = Faker()
 
@@ -21,7 +23,8 @@ def create_app(config_filename=None):
     if config_filename:
         app.config.from_object(config_filename)
     app.config["UPLOAD_FOLDER"] = os.path.join(app.instance_path)
-    mongo.init_app(app)
+    if db_type == "mongo":
+        db_conn.init_app(app)
 
     from . import db
     db.create_project(project_name=fake.slug(),

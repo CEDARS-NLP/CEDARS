@@ -348,6 +348,7 @@ def adjudicate_records():
 
     annotation = db.get_annotation(current_annotation_id)
     note = db.get_annotation_note(current_annotation_id)
+    comments = db.get_comments(current_annotation_id)
 
     context = {
         'name': current_user.username,
@@ -359,7 +360,7 @@ def adjudicate_records():
         'pos_start': session["annotation_number"] + 1,
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
-        'comments': annotation["comments"],
+        'comments': comments,
         'full_note': highlighted_text(note),
         'tags': [note["text_tag_1"], note["text_tag_2"], note["text_tag_3"], note["text_tag_4"]],
         'isLocked': session.get("hasBeenLocked", False),
@@ -379,8 +380,7 @@ def highlighted_text(note):
     prev_end_index = 0
     text = note["text"]
 
-    annotations = db.get_all_annotations_for_note(str(note["_id"]))
-    print(annotations)
+    annotations = db.get_all_annotations_for_note(str(note["text_id"]))
     # sorted_annotations = sorted(annotations, key=lambda x: x["start_index"])
 
     for annotation in annotations:
@@ -415,7 +415,9 @@ def _prepare_for_next_patient():
 
 
 def _format_date(date_obj):
-    if date_obj:
+    if type(date_obj) == type(""):
+        return date_obj
+    elif date_obj:
         return str(date_obj.date())
     return "None"
 

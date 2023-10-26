@@ -11,7 +11,7 @@
             CEDARS
         </a>
         <div class="proj_name d-inline-block align-text-top" id="proj_name">
-                Project Name : {{ project }}
+                Project Name : {{ project_name }}
 
         </div>
 
@@ -30,6 +30,7 @@
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><a class="dropdown-item" href="/">Homepage</a></li>
                         <li><a class="dropdown-item" href="/stats/">Project Statistics</a></li>
+
 
                         {% if current_user.is_admin == true %}
                             <li><a class="dropdown-item" href="/ops/project_details">Project Details</a></li>

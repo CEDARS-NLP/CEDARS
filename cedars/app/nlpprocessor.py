@@ -135,12 +135,19 @@ class NlpProcessor:
         marked_flags = []
         query = db.get_search_query()
         spacy_patterns = query_to_patterns(query)
+        print("Matcher Tokens: ", flush=True)
         for i, item in enumerate(spacy_patterns):
+            print(f"DVT_{i}", item, flush=True)
             matcher.add(f"DVT_{i}", item)
 
         for sent_no, sentence_annotation in enumerate(doc.sents):
             sentence_text = sentence_annotation.text
+            
+
             matches = matcher(sentence_annotation)
+            if "bleeding" in sentence_text:
+                print("matches", matches, sentence_annotation.lemma_, flush=True)
+                return []
             for match in matches:
                 token_id, start, end = match
                 token = sentence_annotation[start:end]
@@ -153,7 +160,7 @@ class NlpProcessor:
                 token_end = token_start + len(token.text)
                 marked_flags.append({"sentence" : sentence_text,
                                     "token" : token.text,
-                                    "lemma" : "", # token.lemma_
+                                    "lemma" : token.lemma_, # token.lemma_
                                     "isNegated" : has_negation,
                                     "start_index" : start_index,
                                     "end_index" : end_index,
@@ -193,11 +200,13 @@ class NlpProcessor:
         """
         # TODO: make this parallel (fixme)
 
+        print("Annotating", patient_id,flush=True)
+
         try:
             db.set_patient_lock_status(patient_id, True)
             has_relevant_notes = False
             for note in db.get_patient_notes(patient_id):
-                note_id = note["_id"]  # should be text_id
+                note_id = note["text_id"]
                 instances = self.process_note(note["text"])
 
                 if len(instances) > 0:
