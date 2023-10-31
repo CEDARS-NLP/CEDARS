@@ -4,7 +4,7 @@
 
 layout: default
 title: Terms of Use
-summary: Terms of Use for Progressive Inference Nested Episodic Service
+summary: Terms of Use for Clinical Event Detection and Recording System
 ---
 ## Terms of Use CEDARS (Clinical Event Detection and Recording System) 
 
