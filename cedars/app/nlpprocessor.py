@@ -177,6 +177,7 @@ class NlpProcessor:
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
+
         if patient_id is not None:
             patient_ids = [patient_id]
         else:

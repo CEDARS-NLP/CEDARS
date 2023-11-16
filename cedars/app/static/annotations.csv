@@ -1,9 +1,11 @@
-,_id,sentence,token,lemma,isNegated,start_index,end_index,note_start_index,note_end_index,sentence_number,note_id,patient_id,event_date,comments,reviewed
-0,64e69b86bd7f7616fe6051c5,"Two weeks ago he sustained sudden onset of chest pain and dyspnea, along with palpitations.",dyspnea,,False,11,18,446,18,3,64deb2deaff47f9003d86bd6,1111111111,,[],False
-1,64e69b86bd7f7616fe6051c6,"
+,note_id,token,isNegated,end_index,note_end_index,sentence_number,patient_id,reviewed,lemma,anno_id,sentence,start_index,note_start_index,event_date
+0,UNIQUE0000000001,embolism,False,260,260,0,1111111111,True,embolism,1,"Mr First is a 60 YO M with a history of metastatic colon CA, diagnosed in 1-2008, initially with stage III disease and s/p hemicolectomy followed by adjuvant chemo, with recurrence in the liver 6 months ago, evaluated today for management of pulmonary embolism.",252,252,
+1,UNIQUE0000000001,dyspnea,False,65,453,3,1111111111,True,dyspnea,2,"Two weeks ago he sustained sudden onset of chest pain and dyspnea, along with palpitations.",58,446,
+2,UNIQUE0000000001,dyspnea,False,104,809,8,1111111111,True,dyspnea,3,"
 
-Since discharge he has done well, with resolution of chest pain and substantial improvement of dyspnea.",dyspnea,,False,17,24,802,24,8,64deb2deaff47f9003d86bd6,1111111111,,[],False
-2,64e69b86bd7f7616fe6051c7,"
+Since discharge he has done well, with resolution of chest pain and substantial improvement of dyspnea.",97,802,
+3,UNIQUE0000000028,dyspnea,True,184,323,1,3333333333,False,dyspnea,4,"
 
-Patient was well until about one month ago, when he started experiencing fevers to 101 degrees, night sweats and fatigue. He also had cough with one episode of hemoptysis, no dyspnea.",dyspnea,,True,35,42,316,42,1,64deb2deaff47f9003d86bf3,3333333333,,[],False
-3,64e69b87bd7f7616fe6051c8,"She was at the office when she experienced rapid onset of R pleuritic chest pain, dyspnea and palpitations.",dyspnea,,False,16,23,366,23,3,64deb2deaff47f9003d86c13,4444444444,,[],False
+Patient was well until about one month ago, when he started experiencing fevers to 101 degrees, night sweats and fatigue. He also had cough with one episode of hemoptysis, no dyspnea.",177,316,
+4,UNIQUE0000000059,embolism,False,134,134,0,4444444444,True,embolism,5,"32 YO F G0 finance worker in her usual state of health until 1 month ago, when she presented with acute symptomatic pulmonary embolism.",126,126,2023-11-22
+5,UNIQUE0000000059,dyspnea,False,89,373,3,4444444444,False,dyspnea,6,"She was at the office when she experienced rapid onset of R pleuritic chest pain, dyspnea and palpitations.",82,366,
