@@ -1,0 +1,46 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "A simple NLP enabled medical annotation tool for clinical notes"
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "flask",
+    "flask-caching",
+    "flask-login",
+    "python-dotenv",
+    "redis",
+    "scispacy",
+    "fastapi",
+    "flask-pymongo",
+    "jupyterlab",
+    "pandas",
+    "sqlalchemy",
+    "negspacy",
+    "flask-session",
+    "faker"
+]
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.pylint.messages_control]
+disable = [
+    "assigning-non-slot",
+    "fixme",
+    "abstract-method",
+    "import-outside-toplevel",
+]

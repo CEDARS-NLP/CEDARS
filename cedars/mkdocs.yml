@@ -1,0 +1,10 @@
+site_name: CEDARS
+nav:
+  - Home: index.md
+  - Basic Concepts: basic_concepts.md
+  - Getting Started: getting_started.md
+  - Uploading EMR Records: upload_data.md
+  - Querying the Database: query_database.md
+  - Downloading Results: download_annotations.md
+theme: readthedocs
+

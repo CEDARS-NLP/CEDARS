@@ -1,46 +1,31 @@
-[project]
-name = "app"
+[tool.poetry]
+name = "pycedars"
 version = "0.1.0"
-description = "A simple NLP enabled medical annotation tool for clinical notes"
+description = ""
+authors = ["SinghR7 <SinghR7@mskcc.org>"]
+license = "GPL"
+readme = "README.md"
 
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
+[tool.poetry.dependencies]
+python = "^3.9"
+Flask = "^2.3.2"
+Flask-Caching = "^2.0.2"
+Flask-Login = "^0.6.2"
+python-dotenv = "^1.0.0"
+scispacy = "^0.5.2"
+flask-pymongo = "^2.3.0"
+jupyterlab = "^4.0.2"
+pandas = "^2.0.2"
+en-core-sci-md = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_md-0.5.1.tar.gz"}
+negspacy = "^1.0.4"
+flask-session = "^0.5.0"
+faker = "^19.3.0"
+en-core-sci-lg = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz"}
+coverage = "^7.3.0"
+minio = "^7.1.16"
+fastparquet = "^2023.8.0"
 
-dependencies = [
-    "flask",
-    "flask-caching",
-    "flask-login",
-    "python-dotenv",
-    "redis",
-    "scispacy",
-    "fastapi",
-    "flask-pymongo",
-    "jupyterlab",
-    "pandas",
-    "sqlalchemy",
-    "negspacy",
-    "flask-session",
-    "faker"
-]
-
-[build-system]
-requires = ["flit_core<4"]
-build-backend = "flit_core.buildapi"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.coverage.run]
-branch = true
-source = ["app"]
-
-[tool.pylint.messages_control]
-disable = [
-    "assigning-non-slot",
-    "fixme",
-    "abstract-method",
-    "import-outside-toplevel",
-]
+[tool.poetry.group.dev.dependencies]
+pylint = "^2.17.4"
+pytest = "^7.4.0"
+flake8 = "^6.1.0"

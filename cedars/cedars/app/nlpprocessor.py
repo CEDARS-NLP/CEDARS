@@ -145,7 +145,9 @@ class NlpProcessor:
             
 
             matches = matcher(sentence_annotation)
-            
+            if "bleeding" in sentence_text:
+                print("matches", matches, sentence_annotation.lemma_, flush=True)
+                return []
             for match in matches:
                 token_id, start, end = match
                 token = sentence_annotation[start:end]
@@ -175,7 +177,6 @@ class NlpProcessor:
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
-
         if patient_id is not None:
             patient_ids = [patient_id]
         else:

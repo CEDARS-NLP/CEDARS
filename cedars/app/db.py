@@ -378,11 +378,14 @@ def update_annotation_date(annotation_id, new_date):
     # TODO: UTC dates
     logging.debug("Updating date on annotation #%s to %s.", annotation_id, new_date)
 
-    # convert date to datetime object
-    new_date = datetime.strptime(new_date, "%Y-%m-%d")
-
     annotation = db_session.query(ANNOTATIONS).filter(ANNOTATIONS.anno_id == annotation_id)
-    annotation.update({ANNOTATIONS.event_date : new_date})
+
+    # convert date to datetime object
+    if new_date is not None:
+        new_date = datetime.strptime(new_date, "%Y-%m-%d")
+        annotation.update({ANNOTATIONS.event_date : new_date})
+    else:
+        annotation.update({ANNOTATIONS.event_date : None})
 
     db_session.commit()
 
@@ -680,6 +683,7 @@ def get_patient_lock_status(patient_id):
         None
     """
     patient_data = db_session.query(PATIENTS).filter(PATIENTS.patient_id == patient_id)
+    patient_data = patient_data.first()
 
     if patient_data is None:
         return None
