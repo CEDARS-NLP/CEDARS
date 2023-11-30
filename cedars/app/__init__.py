@@ -9,8 +9,10 @@ import os
 from flask_login import login_required
 from flask import Flask, g, url_for, render_template, session
 from faker import Faker
+from loguru import logger
 
 from .database import mongo
+logger.disable("cedars")
 
 fake = Faker()
 
@@ -19,6 +21,7 @@ def create_app(config_filename=None):
     """Create flask application"""
     app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
+        print(f"Loading config from {config_filename}")
         app.config.from_object(config_filename)
     app.config["UPLOAD_FOLDER"] = os.path.join(app.instance_path)
     mongo.init_app(app)

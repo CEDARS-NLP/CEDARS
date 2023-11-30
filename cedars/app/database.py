@@ -3,7 +3,8 @@ from flask_pymongo import PyMongo
 from minio import Minio
 from dotenv import dotenv_values
 
-config = dotenv_values(".env")
+
+config = dotenv_values("cedars/.env")
 mongo = PyMongo()
 
 client = Minio(
