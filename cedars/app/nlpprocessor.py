@@ -2,11 +2,14 @@
 This module contatins the class to perform NLP operations for the CEDARS project
 """
 import re
-import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import spacy
 from spacy.matcher import Matcher
-
+from loguru import logger
+from tqdm import tqdm
 from . import db
+
+logger.enable(__name__)
 
 def query_to_patterns(query: str) -> list:
     """
@@ -26,14 +29,14 @@ def query_to_patterns(query: str) -> list:
     [{"LOWER": "dvt"}] matches case-insenstitive  DVT
     [{"LEMMA": "embolus"}] matches the lemmatized version of embolus as well in text
 
-    TODO: ADD finding negated entities 
-    e.g. leg clot but not femoral
-
     Implementation:
     1. Split the query by OR
-    2. Convert each expression to a spacy pattern
-    3. Combine the patterns
-    4. Return the combined pattern
+    2. Split each expression by AND
+    3. Split each expression by NOT
+    4. Split each expression by wildcard
+    5. Convert each expression to a spacy pattern
+    6. Combine the patterns
+    7. Return the combined pattern
     """
     def get_regex_dict(token):
         return {"TEXT": {"REGEX": token}}
@@ -57,9 +60,9 @@ def query_to_patterns(query: str) -> list:
                 spacy_pattern.append(get_negated_dict(tok.replace("!", "")))
             else:
                 spacy_pattern.append(get_lemma_dict(tok))
-        print(f"{expression} -> {[spacy_pattern]}")
-        res[i] = [spacy_pattern]   
-    return  res
+        # logger.debug(f"{expression} -> {spacy_pattern}")
+        res[i] = spacy_pattern
+    return res
 
 def is_negated(span):
     """
@@ -79,8 +82,8 @@ def is_negated(span):
         None
     """
     neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing',
-                        'neither','nowhere','noone',
-                        'no-one','hardly','scarcely','barely']
+                 'neither','nowhere','noone',
+                 'no-one','hardly','scarcely','barely']
 
     for token in span.subtree:
         parents = list(token.ancestors)
@@ -119,8 +122,11 @@ class NlpProcessor:
 
             try:
                 cls.nlp_model = spacy.load(model_name)
+
+
+                                                               
             except Exception as exc:
-                logging.critical("Spacy model %s failed to load.", model_name)
+                logger.critical("Spacy model %s failed to load.", model_name)
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
@@ -136,15 +142,16 @@ class NlpProcessor:
         query = db.get_search_query()
         spacy_patterns = query_to_patterns(query)
         for i, item in enumerate(spacy_patterns):
-            matcher.add(f"DVT_{i}", item)
+            matcher.add(f"DVT_{i}", [item])
 
+        # TODO: check sentence boundaries 
         for sent_no, sentence_annotation in enumerate(doc.sents):
             sentence_text = sentence_annotation.text
             matches = matcher(sentence_annotation)
             for match in matches:
                 token_id, start, end = match
                 token = sentence_annotation[start:end]
-                print(start, end, token.text)
+                # print(start, end, token.text)
                 # print(sentence_annotation)
                 has_negation = is_negated(token)
                 start_index = sentence_text.find(token.text, start)
@@ -164,25 +171,49 @@ class NlpProcessor:
         return marked_flags
 
 
+    def process_patient(self, p_id):
+        """
+        Processs  a single patient
+        """
+        logger.debug(f"Annotating patient #{p_id}")
+        self.annotate_single(p_id)
+
+
     def automatic_nlp_processor(self, patient_id = None):
         """
         This function is used to perform and save NLP annotations
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
+
         if patient_id is not None:
             patient_ids = [patient_id]
         else:
             patients = db.get_all_patients()
-
             patient_ids = [patient["patient_id"] for patient in patients]
 
-        logging.info("Starting annotation of patients")
-        for p_id in patient_ids:
-            logging.info("Annotating patient #%s.", str(p_id))
-            self.annotate_single(p_id)
+        logger.info("Starting annotation of patients")
 
-        logging.info("Completed annotation of patients for query")
+        num_threads = min(7, len(patient_ids))
+        
+        with ProcessPoolExecutor(max_workers=num_threads) as executor:
+            future_to_patient = {executor.submit(self.process_patient, p_id): p_id for p_id in patient_ids}
+
+        with tqdm(total=len(patient_ids)) as pbar:
+            for future in as_completed(future_to_patient):
+                patient = future_to_patient[future]
+                try:
+                    future.result()
+                    pbar.update(1)
+                except Exception as exc:
+                    logger.error('%r generated an exception: %s' % (patient, exc))
+
+        logger.info("Completed annotation of patients for query")
+        # for p_id in patient_ids:
+        #     logger.info("Annotating patient #%s.", str(p_id))
+        #     self.annotate_single(p_id)
+
+        # logger.info("Completed annotation of patients for query")
 
     def annotate_single(self, patient_id):
         """
@@ -198,12 +229,14 @@ class NlpProcessor:
             has_relevant_notes = False
             for note in db.get_patient_notes(patient_id):
                 note_id = note["_id"]  # should be text_id
+                note_date = note["text_date"]
                 instances = self.process_note(note["text"])
 
                 if len(instances) > 0:
                     for inst in instances:
                         annotation = inst.copy()
                         annotation['note_id'] = note_id
+                        annotation["text_date"] = note_date
                         annotation["patient_id"] = note["patient_id"]
                         annotation["event_date"] = None
                         annotation["comments"] = []

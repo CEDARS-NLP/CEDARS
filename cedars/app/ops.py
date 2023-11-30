@@ -2,7 +2,6 @@
 This page contatins the functions and the flask blueprint for the /proj_details route.
 """
 import os
-import logging
 import re
 from pathlib import Path
 import pandas as pd
@@ -13,6 +12,7 @@ from flask import (
     redirect, session, request, url_for, flash,
     current_app
 )
+from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from . import db
@@ -20,7 +20,7 @@ from . import nlpprocessor
 from . import auth
 from .database import client
 
-
+logger.enable(__name__)
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")
@@ -128,7 +128,7 @@ def load_pandas_dataframe(filepath):
                          {', '.join(loaders.keys())}.""")
 
     try:
-        print(filepath)
+        logger.info(filepath)
         obj = client.get_object("cedars", filepath)
         return loaders[extension](obj)
     except FileNotFoundError as exc:
@@ -154,16 +154,17 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
     if data_frame is None:
         return
 
+    logger.info(f"columns in dataframe:\n {data_frame.columns}")
+    logger.debug(data_frame.head())
     id_list = data_frame["patient_id"].unique()
-    logging.info("Starting document migration to mongodb database.")
+    logger.info("Starting document migration to mongodb database.")
     for i, p_id in enumerate(id_list):
         documents = data_frame[data_frame["patient_id"] == p_id]
-
         db.upload_notes(documents)
 
-        logging.info("Documents uploaded for patient #%s", str(i + 1))
+        logger.info(f"Documents uploaded for patient #{i+1}")
 
-    logging.info("Completed document migration to mongodb database.")
+    logger.info("Completed document migration to mongodb database.")
 
 
 @bp.route("/upload_data", methods=["GET", "POST"])
@@ -187,6 +188,7 @@ def upload_data():
                                secure_filename(uploaded_file.filename),
                                uploaded_file,
                                size)
+            logger.info(f"File - {uploaded_file.filename} uploaded successfully.")
             EMR_to_mongodb(uploaded_file.filename)
 
         flash(f"{secure_filename(uploaded_file.filename)} uploaded successfully.")
@@ -272,7 +274,7 @@ def save_adjudications():
 
     def _update_annotation_date():
         new_date = request.form['date_entry']
-        print(new_date)
+        logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
 
     def _delete_annotation_date():
@@ -296,12 +298,14 @@ def save_adjudications():
         # if one annotation has the event date, mark the patient
         # as reviewed because we don't need to review the rest
         # this could be based on a parameter though
+        # TODO: add logic based on tags if we need to keep reviewing
         if db.get_annotation_date(current_annotation_id) is not None:
             db.mark_patient_reviewed(session["patient_id"])
             session.pop("patient_id")
-        session["annotation_ids"].pop(session["annotation_number"])
-        if session["annotation_number"] >= len(session["annotation_ids"]):
-            session["annotation_number"] -= 1
+        # session["annotation_ids"].pop(session["annotation_number"])
+        session["annotation_number"] += 1
+        # if session["annotation_number"] >= len(session["annotation_ids"]):
+        #     session["annotation_number"] -= 1
         session.modified = True
 
     actions = {
@@ -331,18 +335,17 @@ def adjudicate_records():
     if request.method == "POST":
         if request.form["patient_id"]:
             pt_id = int(request.form["patient_id"])
-            print("Search patient: ", pt_id)
+            logger.info("Search patient: ", pt_id)
 
     _initialize_session(pt_id)
 
-    if len(session['annotation_ids']) == 0:
+    if session['annotation_number'] >= len(session['annotation_ids']):
         _prepare_for_next_patient()
+        if session["patient_id"] and len(session["annotation_ids"]) == 0:
+            _prepare_for_next_patient()
         if not session["patient_id"]:
             return render_template("ops/annotations_complete.html", **db.get_info())
-
-    if len(session['annotation_ids']) == 0:
-        _prepare_for_next_patient()
-        return redirect(url_for("ops.adjudicate_records"))
+        
 
     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
 
@@ -352,7 +355,7 @@ def adjudicate_records():
     context = {
         'name': current_user.username,
         'event_date': _format_date(annotation.get('event_date')),
-        'note_date': _format_date(note['text_date']),
+        'note_date': _format_date(annotation.get('text_date')),
         'pre_token_sentence': annotation['sentence'][:annotation['start_index']],
         'token_word': annotation['sentence'][annotation['start_index']:annotation['end_index']],
         'post_token_sentence': annotation['sentence'][annotation['end_index']:],
@@ -361,7 +364,7 @@ def adjudicate_records():
         'patient_id': session['patient_id'],
         'comments': annotation["comments"],
         'full_note': highlighted_text(note),
-        'tags': [note["text_tag_1"], note["text_tag_2"], note["text_tag_3"], note["text_tag_4"]],
+        'tags': [note.get("text_tag_1",""), note.get("text_tag_2", ""), note.get("text_tag_3", ""), note.get("text_tag_4", "")],
         'isLocked': session.get("hasBeenLocked", False),
         **db.get_info()
     }
@@ -380,8 +383,7 @@ def highlighted_text(note):
     text = note["text"]
 
     annotations = db.get_all_annotations_for_note(str(note["_id"]))
-    print(annotations)
-    # sorted_annotations = sorted(annotations, key=lambda x: x["start_index"])
+    logger.debug(annotations)
 
     for annotation in annotations:
         start_index = annotation['note_start_index']

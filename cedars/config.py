@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from dotenv import dotenv_values
 
-config = dotenv_values(".env")
+config = dotenv_values("cedars/.env")
 
 
 class Base:  # pylint: disable=too-few-public-methods
@@ -15,7 +15,7 @@ class Base:  # pylint: disable=too-few-public-methods
     """
     SECRET_KEY = config['SECRET_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=15)
-    MONGO_URI = f'mongodb://{config["DB_HOST"]}:{config["DB_PORT"]}/{config["DB_NAME"]}'
+    MONGO_URI = f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}@{config["DB_HOST"]}:{config["DB_PORT"]}/{config["DB_NAME"]}?authSource=admin'
 
 
 class Local(Base):  # pylint: disable=too-few-public-methods
@@ -28,7 +28,7 @@ class Test(Base):  # pylint: disable=too-few-public-methods
     """Test Config - for running tests"""
     CACHE_TYPE = 'SimpleCache'
     TESTING = True
-    MONGO_URI = f'mongodb://{config["DB_HOST"]}:{config["DB_PORT"]}/Test'
+    MONGO_URI = f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}@{config["DB_HOST"]}:{config["DB_PORT"]}/test?authSource=admin'
 
 class Dev(Base):  # pylint: disable=too-few-public-methods
     """Dev Config - for deplaying to dev"""

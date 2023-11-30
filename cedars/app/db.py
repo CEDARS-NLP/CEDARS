@@ -3,14 +3,15 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
 from datetime import datetime
-import logging
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from bson import ObjectId
+from loguru import logger
+import re
 from .database import mongo
 
 load_dotenv()
-
+logger.enable(__name__)
 
 def create_project(project_name, investigator_name, cedars_version):
     """
@@ -24,7 +25,7 @@ def create_project(project_name, investigator_name, cedars_version):
         None
     """
     if mongo.db["INFO"].find_one() is not None:
-        logging.info("Database already created.")
+        logger.info("Database already created.")
         return
 
     create_info_col(project_name, investigator_name, cedars_version)
@@ -34,7 +35,7 @@ def create_project(project_name, investigator_name, cedars_version):
     populate_users()
     populate_query()
 
-    logging.info("Database creation successful!")
+    logger.info("Database creation successful!")
 
 def create_info_col(project_name, investigator_name, cedars_version):
     """
@@ -53,7 +54,7 @@ def create_info_col(project_name, investigator_name, cedars_version):
             "investigator" : investigator_name, "CEDARS_version" : cedars_version}
 
     collection.insert_one(info)
-    logging.info("Created INFO collection.")
+    logger.info("Created INFO collection.")
 
 def get_info():
     """
@@ -77,11 +78,11 @@ def populate_annotations():
     annotations.create_index("sentence_number", unique = False)
     annotations.create_index("start_index", unique = False)
 
-    logging.info("Created ANNOTATIONS collection.")
+    logger.info("Created ANNOTATIONS collection.")
 
     # This statement is used to create a collection.
     patients = mongo.db["PATIENTS"]
-    logging.info("Created %s collection.", patients.name)
+    logger.info(f"Created {patients.name} collection.")
 
 def populate_notes():
     """
@@ -94,7 +95,7 @@ def populate_notes():
     notes.create_index("doc_id", unique = False)
     notes.create_index("text_id", unique = True)
 
-    logging.info("Created NOTES collection.")
+    logger.info("Created NOTES collection.")
 
 
 def populate_patients():
@@ -106,7 +107,7 @@ def populate_patients():
 
     notes.create_index("patient_id", unique = True)
 
-    logging.info("Created Patients collection.")
+    logger.info("Created Patients collection.")
 
 
 def populate_users():
@@ -117,7 +118,7 @@ def populate_users():
     users = mongo.db["USERS"]
 
     users.create_index("user", unique = True)
-    logging.info("Created USERS collection.")
+    logger.info("Created USERS collection.")
 
 def populate_query():
     """
@@ -127,7 +128,7 @@ def populate_query():
     # Pylint disabled for pointless statement.
     # This statement is used to create a collection.
     query = mongo.db["QUERY"]
-    logging.info("Created %s collection.", query.name)
+    logger.info("Created %s collection.", query.name)
 
 
 def get_user(username):
@@ -160,7 +161,7 @@ def add_user(username, password, is_admin=False):
         "date_created" : datetime.now()
     }
     mongo.db["USERS"].insert_one(info)
-    logging.info("Added user %s to database.", username)
+    logger.info(f"Added user {username} to database.")
 
 # Pylint disabled due to too many arguments
 def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
@@ -201,7 +202,7 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
     collection.update_one({"current": True}, {"$set": {"current": False}})
     collection.insert_one(info)
 
-    logging.info("Saved query : %s.", query)
+    logger.info(f"Saved query : {query}.")
 
 
 def get_search_query():
@@ -233,10 +234,12 @@ def upload_notes(documents):
         note_info["text_date"] = datetime_obj
 
         if notes_collection.find_one({"text_id": note_info["text_id"]}):
-            logging.error("Cancelling duplicate note entry")
+            logger.error("Cancelling duplicate note entry")
         else:
             notes_collection.insert_one(note_info)
             patient_ids.add(note_info["patient_id"])
+        if i+1 % 10 == 0:
+            logger.info(f"Uploaded {i}/{len(documents)} notes")
 
     patients_collection = mongo.db["PATIENTS"]
     for p_id in patient_ids:
@@ -251,9 +254,14 @@ def upload_notes(documents):
 
 def  get_all_annotations_for_note(note_oid):
     """
-    This function is used to get all the annotations for a particular note.
+    This function is used to get all the annotations for a particular note
+    after removing negated annotations.
+    Order of annotations -
+        text_date (ascending)
+        note_start_index (ascending)
     """
-    annotations = mongo.db["ANNOTATIONS"].find({"note_id" : ObjectId(note_oid)}).sort([("note_start_index", 1)])
+    annotations = mongo.db["ANNOTATIONS"].find({"note_id" : ObjectId(note_oid),
+                                                "isNegated": False}).sort([("text_date", 1),("setence_number", 1)])
     return list(annotations)
 
 
@@ -283,7 +291,7 @@ def get_annotation_note(annotation_id):
                       The keys are the attribute names.
                       The values are the values of the attribute in that record.
     """
-    logging.debug("Retriving annotation #%s from database.", annotation_id)
+    logger.debug(f"Retriving annotation #{annotation_id} from database.")
     annotation = mongo.db["ANNOTATIONS"].find_one_or_404({ "_id" : ObjectId(annotation_id) })
     note = mongo.db["NOTES"].find_one({ "_id" : annotation["note_id"] })
 
@@ -305,10 +313,10 @@ def get_patient():
                                              "locked" : False})
 
     if patient is not None and "patient_id" in patient.keys():
-        logging.debug("Retriving patient #%s from database.", patient['patient_id'])
+        logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
         return patient["patient_id"]
 
-    logging.debug("Failed to retrive any further un-reviewed patients from the database.")
+    logger.debug("Failed to retrive any further un-reviewed patients from the database.")
     return None
 
 def get_patient_annotation_ids(p_id):
@@ -320,10 +328,12 @@ def get_patient_annotation_ids(p_id):
     Returns:
         annotations (list) : A list of all annotation IDs linked to that patient.
     """
-    logging.debug("Retriving annotations for patient #%s from database.", str(p_id))
+    logger.debug(f"Retriving annotations for patient #{p_id} from database.")
     annotation_ids = mongo.db["ANNOTATIONS"].find({"patient_id": p_id,
                                                    "reviewed" : False,
-                                                   "isNegated" : False})
+                                                   "isNegated" : False}).sort([("note_id", 1),
+                                                                               ('text_date', 1),
+                                                                               ("sentence_number", 1)])
 
     return [str(id["_id"]) for id in annotation_ids]
 
@@ -336,7 +346,7 @@ def mark_annotation_reviewed(annotation_id):
     Returns:
         None
     """
-    logging.debug("Marking annotation #%s as reviewed.", annotation_id)
+    logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                        {"$set": { "reviewed": True } })
 
@@ -352,7 +362,7 @@ def update_annotation_date(annotation_id, new_date):
         None
     """
     # TODO: UTC dates
-    logging.debug("Updating date on annotation #%s to %s.", annotation_id, new_date)
+    logger.debug(f"Updating date on annotation #{annotation_id} to {new_date}.")
     date_format = '%Y-%m-%d'
     datetime_obj = datetime.strptime(new_date, date_format)
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
@@ -367,7 +377,7 @@ def delete_annotation_date(annotation_id):
     Returns:
         None
     """
-    logging.debug("Deleting date on annotation #%s.", ObjectId(annotation_id))
+    logger.debug(f"Deleting date on annotation #{ObjectId(annotation_id)}.")
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                       { "$set": { "event_date" : None } })
 
@@ -376,7 +386,7 @@ def get_annotation_date(annotation_id):
     """
     Retrives the event date for an annotation.
     """
-    logging.debug("Retriving date on annotation #%s.", ObjectId(annotation_id))
+    logger.debug(f"Retriving date on annotation #{ObjectId(annotation_id)}.")
     annotation = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})
     if "event_date" in annotation.keys():
         return annotation["event_date"]
@@ -394,7 +404,7 @@ def mark_patient_reviewed(patient_id, is_reviewed = True):
     Returns:
         None
     """
-    logging.debug("Marking patient #%s as reviewed.", patient_id)
+    logger.debug(f"Marking patient #{patient_id} as reviewed.")
     mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
                                                     { "$set": { "reviewed": is_reviewed } })
 
@@ -408,7 +418,7 @@ def add_annotation_comment(annotation_id, comment):
     Returns:
         None
     """
-    logging.debug("Adding comment to annotation #%s.", annotation_id)
+    logger.debug(f"Adding comment to annotation #{annotation_id}")
     annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
     comments = annotation["comments"]
     comments.append(comment)
@@ -420,7 +430,7 @@ def empty_annotations():
     Deletes all annotations from the database.
     """
 
-    logging.info("Deleting all data in annotations collection.")
+    logger.info("Deleting all data in annotations collection.")
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
 
@@ -461,7 +471,7 @@ def update_project_name(new_name):
     Returns:
         None
     """
-    logging.debug("Updating project name to #%s.", new_name)
+    logger.info(f"Updating project name to #{new_name}")
     mongo.db["INFO"].update_one({}, { "$set": { "project": new_name } })
 
 
@@ -562,15 +572,20 @@ def get_curr_stats():
 
     stats["number_of_reviewed"] = num_reviewed_annotations
 
-    lemma_dist = {}
-    for anno in mongo.db["ANNOTATIONS"].find({"isNegated" : False}):
-        if anno['lemma'] in lemma_dist:
-            lemma_dist[anno['lemma']] += 1
-        else:
-            lemma_dist[anno['lemma']] = 1
+    pipeline = [
+            {"$match": {"isNegated": False}},
+            {"$group": {"_id": "$token", "count": {"$sum": 1}}}
+    ]
 
+    # Perform aggregation
+    results = mongo.db.ANNOTATIONS.aggregate(pipeline)
+
+    # Convert aggregation results to a dictionary
+    lemma_dist = {result["_id"]: result["count"] for result in results}
+    lemma_dist = {re.sub(r'[^a-zA-Z0-9-_ ]', '', k): v for k, v in sorted(
+        lemma_dist.items(), key=lambda item: item[1], reverse=True)}
     stats['lemma_dist'] = lemma_dist
-
+    logger.debug(stats)
     return stats
 
 def get_all_patients():
