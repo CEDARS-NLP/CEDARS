@@ -20,9 +20,6 @@ def stats_route():
 
     stats = db.get_curr_stats()
 
-    print(stats, flush=True)
-
-
     number_of_patients = stats["number_of_patients"]
     number_of_annotated_patients = stats["number_of_annotated_patients"]
     number_of_reviewed = stats["number_of_reviewed"]

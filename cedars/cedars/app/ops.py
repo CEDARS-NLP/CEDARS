@@ -128,7 +128,6 @@ def load_pandas_dataframe(filepath):
                          {', '.join(loaders.keys())}.""")
 
     try:
-        print(filepath)
         obj = client.get_object("cedars", filepath)
         return loaders[extension](obj)
     except FileNotFoundError as exc:
@@ -272,7 +271,6 @@ def save_adjudications():
 
     def _update_annotation_date():
         new_date = request.form['date_entry']
-        print(new_date)
         db.update_annotation_date(current_annotation_id, new_date)
 
     def _delete_annotation_date():

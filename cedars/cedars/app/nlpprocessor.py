@@ -57,7 +57,7 @@ def query_to_patterns(query: str) -> list:
                 spacy_pattern.append(get_negated_dict(tok.replace("!", "")))
             else:
                 spacy_pattern.append(get_lemma_dict(tok))
-        print(f"{expression} -> {[spacy_pattern]}")
+        # print(f"{expression} -> {[spacy_pattern]}")
         res[i] = [spacy_pattern]   
     return  res
 
@@ -135,9 +135,7 @@ class NlpProcessor:
         marked_flags = []
         query = db.get_search_query()
         spacy_patterns = query_to_patterns(query)
-        print("Matcher Tokens: ", flush=True)
         for i, item in enumerate(spacy_patterns):
-            print(f"DVT_{i}", item, flush=True)
             matcher.add(f"DVT_{i}", item)
 
         for sent_no, sentence_annotation in enumerate(doc.sents):
@@ -145,14 +143,9 @@ class NlpProcessor:
             
 
             matches = matcher(sentence_annotation)
-            if "bleeding" in sentence_text:
-                print("matches", matches, sentence_annotation.lemma_, flush=True)
-                return []
             for match in matches:
                 token_id, start, end = match
                 token = sentence_annotation[start:end]
-                print(start, end, token.text)
-                # print(sentence_annotation)
                 has_negation = is_negated(token)
                 start_index = sentence_text.find(token.text, start)
                 end_index = start_index + len(token.text)
