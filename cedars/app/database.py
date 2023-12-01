@@ -4,7 +4,7 @@ from minio import Minio
 from dotenv import dotenv_values
 
 
-config = dotenv_values("cedars/.env")
+config = dotenv_values(".env")
 mongo = PyMongo()
 
 client = Minio(

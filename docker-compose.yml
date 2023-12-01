@@ -28,7 +28,10 @@ services:
     image: mongo:latest
     ports:
       - 27018:27017
-
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      
   minio:
     <<: *minio-common
     hostname: minio
@@ -46,8 +49,6 @@ services:
       - "9001:9001"
     depends_on:
       - minio
-
-  
 
 volumes:
   data1-1:

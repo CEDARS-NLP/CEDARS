@@ -9,7 +9,7 @@ from cedars.app import create_app
 load_dotenv()
 
 environment = os.getenv('ENV', 'local')
-config = dotenv_values("cedars/.env")
+config = dotenv_values(".env")
 
 logger.remove()
 logger.add("cedars.log", enqueue=True, rotation="10 MB")

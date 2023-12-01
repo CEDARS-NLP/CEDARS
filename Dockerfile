@@ -8,5 +8,4 @@ RUN pip install -r requirements.txt
 COPY . .
 COPY .docker-env .env
 
-CMD [ "python", "-m", "app.wsgi" ]
-
+CMD [ "python", "-m", "cedars.app.wsgi" ]

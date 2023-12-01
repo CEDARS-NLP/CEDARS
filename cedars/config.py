@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from dotenv import dotenv_values
 
-config = dotenv_values("cedars/.env")
+config = dotenv_values(".env")
 
 
 class Base:  # pylint: disable=too-few-public-methods
