@@ -8,7 +8,8 @@ from cedars.app import nlpprocessor
                                                            {"LEMMA": "vein"},
                                                            {"TEXT": {"REGEX": 'thromb*'}}],
                                                           [{"LEMMA": "clot"}]]]),
-    ("bleed", [1,[[{"LEMMA": "bleed"}]]])
+    ("bleed", [1,[[{"LEMMA": "bleed"}]]]),
+    ("be AND doctor", [1, [[{"LEMMA": "be"}, {"LOWER": "doctor"}]] ])
     ])
 def test_query_to_pattern(query, expected):
     res = nlpprocessor.query_to_patterns(query)
