@@ -13,6 +13,8 @@ from .database import mongo
 load_dotenv()
 logger.enable(__name__)
 
+
+# Create collections and indexes
 def create_project(project_name, investigator_name, cedars_version):
     """
     This function creates all the collections in the mongodb database for CEDARS.
@@ -50,18 +52,13 @@ def create_info_col(project_name, investigator_name, cedars_version):
         None
     """
     collection = mongo.db["INFO"]
-    info = {"creation_time" : datetime.now(), "project" : project_name,
-            "investigator" : investigator_name, "CEDARS_version" : cedars_version}
+    info = {"creation_time" : datetime.now(),
+            "project" : project_name,
+            "investigator" : investigator_name,
+            "CEDARS_version" : cedars_version}
 
     collection.insert_one(info)
     logger.info("Created INFO collection.")
-
-def get_info():
-    """
-    This function returns the info collection in the mongodb database.
-    """
-    return mongo.db.INFO.find_one_or_404()
-
 
 def populate_annotations():
     """
@@ -97,7 +94,6 @@ def populate_notes():
 
     logger.info("Created NOTES collection.")
 
-
 def populate_patients():
     """
     This function creates the notes collection in the mongodb database.
@@ -108,7 +104,6 @@ def populate_patients():
     notes.create_index("patient_id", unique = True)
 
     logger.info("Created Patients collection.")
-
 
 def populate_users():
     """
@@ -130,19 +125,7 @@ def populate_query():
     query = mongo.db["QUERY"]
     logger.info("Created %s collection.", query.name)
 
-
-def get_user(username):
-    """
-    This function is used to get a user from the database.
-
-    Args:
-        username (str) : The name of the user to get.
-    Returns:
-        user (dict) : The user object from the database.
-    """
-    user = mongo.db["USERS"].find_one({"user" : username})
-    return user
-
+# Insert functions
 def add_user(username, password, is_admin=False):
     """
     This function is used to add a new user to the database.
@@ -163,7 +146,22 @@ def add_user(username, password, is_admin=False):
     mongo.db["USERS"].insert_one(info)
     logger.info(f"Added user {username} to database.")
 
-# Pylint disabled due to too many arguments
+def add_project_user(username, password, is_admin = False):
+    """
+    Adds a new user to the project database.
+
+    Args:
+        username (str)  : The name of the new user
+        password (str)  : The user's password
+        is_admin (bool) : True if the new user is the project admin
+                          (used when initializing the project)
+    Returns:
+        None
+    """
+    password_hash = generate_password_hash(password)
+    data = {"user" : username, "password" : password_hash, "admin" : is_admin}
+    mongo.db["USERS"].insert_one(data.copy())
+
 def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
                 skip_after_event, tag_query, date_min = None, date_max = None):
 
@@ -204,16 +202,6 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
 
     logger.info(f"Saved query : {query}.")
 
-
-def get_search_query():
-    """
-    This function is used to get the current search query from the database.
-    All this data is kept in the QUERY collection.
-    """
-    query = mongo.db["QUERY"].find_one({"current" : True})
-    return query["query"]
-
-
 def upload_notes(documents):
     """
     This function is used to take a dataframe of patient records
@@ -252,7 +240,47 @@ def upload_notes(documents):
         if not patients_collection.find_one({"patient_id": p_id}):
             patients_collection.insert_one(patient_info)
 
-def  get_all_annotations_for_note(note_oid):
+def insert_one_annotation(annotation):
+    """
+    Adds an annotation to the database.
+
+    Args:
+        annotation (dict) : The annotation we are inserting
+    Returns:
+        None
+    """
+    annotations_collection = mongo.db["ANNOTATIONS"]
+
+    annotations_collection.insert_one(annotation)
+
+# Get functions
+def get_user(username):
+    """
+    This function is used to get a user from the database.
+
+    Args:
+        username (str) : The name of the user to get.
+    Returns:
+        user (dict) : The user object from the database.
+    """
+    user = mongo.db["USERS"].find_one({"user" : username})
+    return user
+
+def get_search_query():
+    """
+    This function is used to get the current search query from the database.
+    All this data is kept in the QUERY collection.
+    """
+    query = mongo.db["QUERY"].find_one({"current" : True})
+    return query["query"]
+
+def get_info():
+    """
+    This function returns the info collection in the mongodb database.
+    """
+    return mongo.db.INFO.find_one_or_404()
+
+def  get_all_annotations_for_note(note_id):
     """
     This function is used to get all the annotations for a particular note
     after removing negated annotations.
@@ -260,10 +288,9 @@ def  get_all_annotations_for_note(note_oid):
         text_date (ascending)
         note_start_index (ascending)
     """
-    annotations = mongo.db["ANNOTATIONS"].find({"note_id" : ObjectId(note_oid),
+    annotations = mongo.db["ANNOTATIONS"].find({"note_id" : note_id,
                                                 "isNegated": False}).sort([("text_date", 1),("setence_number", 1)])
     return list(annotations)
-
 
 def get_annotation(annotation_id):
     """
@@ -293,10 +320,26 @@ def get_annotation_note(annotation_id):
     """
     logger.debug(f"Retriving annotation #{annotation_id} from database.")
     annotation = mongo.db["ANNOTATIONS"].find_one_or_404({ "_id" : ObjectId(annotation_id) })
-    note = mongo.db["NOTES"].find_one({ "_id" : annotation["note_id"] })
+    note = mongo.db["NOTES"].find_one({"text_id" : annotation["note_id"] })
 
     return note
 
+
+def get_patient_by_id(patient_id):
+    """
+    Retrives a single patient from mongodb.
+
+    Args:
+        patient_id (int) : Unique ID for a patient.
+    Returns:
+        patient (dict) : Dictionary for a patient from mongodb.
+                         The keys are the attribute names.
+                         The values are the values of the attribute in that record.
+    """
+    logger.debug(f"Retriving patient #{patient_id} from database.")
+    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+
+    return patient
 
 def get_patient():
     """
@@ -316,8 +359,30 @@ def get_patient():
         logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
         return patient["patient_id"]
 
-    logger.debug("Failed to retrive any further un-reviewed patients from the database.")
+    logger.info("Failed to retrive any further un-reviewed patients from the database.")
     return None
+
+def get_documents_to_annotate():
+    """
+    Retrives all documents that have not been annotated.
+    """
+    logger.debug("Retriving all annotated documents from database.")
+    documents_to_annotate = mongo.db["NOTES"].aggregate(
+        [{
+            "$lookup": {
+                "from": "ANNOTATIONS",
+                "localField": "text_id",
+                "foreignField": "text_id",
+                "as": "annotations"
+            }
+        },
+        {
+            "$match": {
+                "annotations": {"$eq": []}
+            }
+        }])
+
+    return documents_to_annotate
 
 def get_patient_annotation_ids(p_id):
     """
@@ -336,6 +401,139 @@ def get_patient_annotation_ids(p_id):
                                                                                ("sentence_number", 1)])
 
     return [str(id["_id"]) for id in annotation_ids]
+
+def get_annotation_date(annotation_id):
+    """
+    Retrives the event date for an annotation.
+    """
+    logger.debug(f"Retriving date on annotation #{ObjectId(annotation_id)}.")
+    annotation = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})
+    if "event_date" in annotation.keys():
+        return annotation["event_date"]
+
+    return None
+
+def get_all_annotations():
+    """
+    Returns a list of all annotations from the database.
+
+    Args:
+        None
+    Returns:
+        Annotations (list) : This is a list of all annotations from the database.
+    """
+    annotations = mongo.db["ANNOTATIONS"].find()
+
+    return list(annotations)
+
+def get_proj_name():
+    """
+    Returns the name of the current project.
+
+    Args:
+        None
+    Returns:
+        proj_name (str) : The name of the current CEDARS project.
+    """
+
+    proj_info = mongo.db["INFO"].find_one_or_404()
+    proj_name = proj_info["project"]
+    return proj_name
+
+def get_curr_version():
+    """
+    Returns the name of the current project.
+
+    Args:
+        None
+    Returns:
+        proj_name (str) : The name of the current CEDARS project.
+    """
+
+    proj_info = mongo.db["INFO"].find_one()
+
+    return proj_info["CEDARS_version"]
+
+def get_project_users():
+    """
+    Returns all the usernames for approved users (including the admin) for this project
+
+    Args:
+        None
+    Returns:
+        usernames (list) : List of all usernames for approved users
+                           (including the admin) for this project
+    """
+    users = mongo.db["USERS"].find({})
+
+    return [user["user"] for user in users]
+
+def get_all_patients():
+    """
+    Returns all the patients in this project
+
+    Args:
+        None
+    Returns:
+        patients (list) : List of all patients in this project
+    """
+    patients = mongo.db["PATIENTS"].find()
+
+    return list(patients)
+
+def get_patient_lock_status(patient_id):
+    """
+    Updates the status of the patient to be locked or unlocked.
+
+    Args:
+        patient_id (int) : ID for the patient we are locking / unlocking
+    Returns:
+        status (bool) : True if the patient is locked, False otherwise.
+            If no such patient is found, we return None.
+
+    Raises:
+        None
+    """
+    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+    return patient["locked"]
+
+def get_patient_notes(patient_id):
+    """
+    Returns all notes for that patient.
+
+    Args:
+        patient_id (int) : ID for the patient
+    Returns:
+        notes (list) : A list of all notes for that patient
+    """
+    mongodb_search_query = { "patient_id": patient_id }
+    notes = list(mongo.db["NOTES"].find(mongodb_search_query))
+    return notes
+
+def get_total_counts(collection_name: str) -> int:
+    """
+    Returns the total number of documents in a collection.
+
+    Args:
+        collection_name (str) : The name of the collection to search.
+    Returns:
+        count (int) : The number of documents in the collection.
+    """
+    return mongo.db[collection_name].count_documents({})
+
+
+# update functions
+def update_project_name(new_name):
+    """
+    Updates the project name in the INFO collection of the database.
+
+    Args:
+        new_name (str) : New name of the project.
+    Returns:
+        None
+    """
+    logger.info(f"Updating project name to #{new_name}")
+    mongo.db["INFO"].update_one({}, { "$set": { "project": new_name } })
 
 def mark_annotation_reviewed(annotation_id):
     """
@@ -381,19 +579,6 @@ def delete_annotation_date(annotation_id):
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                       { "$set": { "event_date" : None } })
 
-
-def get_annotation_date(annotation_id):
-    """
-    Retrives the event date for an annotation.
-    """
-    logger.debug(f"Retriving date on annotation #{ObjectId(annotation_id)}.")
-    annotation = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})
-    if "event_date" in annotation.keys():
-        return annotation["event_date"]
-
-    return None
-
-
 def mark_patient_reviewed(patient_id, is_reviewed = True):
     """
     Updates the patient's status to reviewed in the database.
@@ -408,6 +593,13 @@ def mark_patient_reviewed(patient_id, is_reviewed = True):
     mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
                                                     { "$set": { "reviewed": is_reviewed } })
 
+def reset_patient_reviewed():
+    """
+    Update all patients to be un-reviewed.
+    """
+    mongo.db["PATIENTS"].update_many({},
+                                     { "$set": { "reviewed": False } })
+
 def add_annotation_comment(annotation_id, comment):
     """
     Stores a new comment for an annotation.
@@ -418,6 +610,9 @@ def add_annotation_comment(annotation_id, comment):
     Returns:
         None
     """
+    if len(comment) == 0:
+        logger.info("No comment entered.")
+        return
     logger.debug(f"Adding comment to annotation #{annotation_id}")
     annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
     comments = annotation["comments"]
@@ -425,9 +620,37 @@ def add_annotation_comment(annotation_id, comment):
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                        { "$set": { "comments" : comments } })
 
+def set_patient_lock_status(patient_id, status):
+    """
+    Updates the status of the patient to be locked or unlocked.
+
+    Args:
+        patient_id (int) : ID for the patient we are locking / unlocking
+        status (bool) : True if the patient is being locked, False otherwise.
+
+    Returns:
+        None
+    """
+
+
+    patients_collection = mongo.db["PATIENTS"]
+    patients_collection.update_one({"patient_id" : patient_id},
+                                   { "$set": { "locked": status } })
+
+
+def remove_all_locked():
+    """
+    Sets the locked status of all patients to False.
+    This is done when the server is shutting down.
+    """
+    patients_collection = mongo.db["PATIENTS"]
+    patients_collection.update_many({},
+                                    { "$set": { "locked": False } })
+    
+# delete functions
 def empty_annotations():
     """
-    Deletes all annotations from the database.
+    Deletes all annotations from the database
     """
 
     logger.info("Deleting all data in annotations collection.")
@@ -435,76 +658,12 @@ def empty_annotations():
     annotations.delete_many({})
 
 
-def get_all_annotations():
-    """
-    Returns a list of all annotations from the database.
 
-    Args:
-        None
-    Returns:
-        Annotations (list) : This is a list of all annotations from the database.
-    """
-    annotations = mongo.db["ANNOTATIONS"].find()
+def drop_database(name):
+    """Clean Database"""
+    mongo.cx.drop_database(name)
 
-    return list(annotations)
-
-def get_proj_name():
-    """
-    Returns the name of the current project.
-
-    Args:
-        None
-    Returns:
-        proj_name (str) : The name of the current CEDARS project.
-    """
-
-    proj_info = mongo.db["INFO"].find_one_or_404()
-    proj_name = proj_info["project"]
-    return proj_name
-
-def update_project_name(new_name):
-    """
-    Updates the project name in the INFO collection of the database.
-
-    Args:
-        new_name (str) : New name of the project.
-    Returns:
-        None
-    """
-    logger.info(f"Updating project name to #{new_name}")
-    mongo.db["INFO"].update_one({}, { "$set": { "project": new_name } })
-
-
-def get_curr_version():
-    """
-    Returns the name of the current project.
-
-    Args:
-        None
-    Returns:
-        proj_name (str) : The name of the current CEDARS project.
-    """
-
-    proj_info = mongo.db["INFO"].find_one()
-
-    return proj_info["CEDARS_version"]
-
-def add_project_user(username, password, is_admin = False):
-    """
-    Adds a new user to the project database.
-
-    Args:
-        username (str)  : The name of the new user
-        password (str)  : The user's password
-        is_admin (bool) : True if the new user is the project admin
-                          (used when initializing the project)
-    Returns:
-        None
-    """
-    password_hash = generate_password_hash(password)
-    data = {"user" : username, "password" : password_hash, "admin" : is_admin}
-    mongo.db["USERS"].insert_one(data.copy())
-
+# utility functions
 def check_password(username, password):
     """
     Checks if the password matches the password of that user from the database.
@@ -521,22 +680,16 @@ def check_password(username, password):
 
     return "password" in user and check_password_hash(user["password"], password)
 
+def is_admin_user(username):
+    """check if the user is admin"""
+    user = mongo.db["USERS"].find_one({'user' : username})
 
-def get_project_users():
-    """
-    Returns all the usernames for approved users (including the admin) for this project
+    if user is not None and user["is_admin"]:
+        return True
 
-    Args:
-        None
-    Returns:
-        usernames (list) : List of all usernames for approved users
-                           (including the admin) for this project
-    """
-    users = mongo.db["USERS"].find({})
+    return False
 
-    return [user["user"] for user in users]
-
-
+# stats functions
 def get_curr_stats():
     """
     Returns basic statistics for the project
@@ -588,99 +741,3 @@ def get_curr_stats():
     logger.debug(stats)
     return stats
 
-def get_all_patients():
-    """
-    Returns all the patients in this project
-
-    Args:
-        None
-    Returns:
-        patients (list) : List of all patients in this project
-    """
-    patients = mongo.db["PATIENTS"].find()
-
-    return list(patients)
-
-def set_patient_lock_status(patient_id, status):
-    """
-    Updates the status of the patient to be locked or unlocked.
-
-    Args:
-        patient_id (int) : ID for the patient we are locking / unlocking
-        status (bool) : True if the patient is being locked, False otherwise.
-
-    Returns:
-        None
-    """
-
-
-    patients_collection = mongo.db["PATIENTS"]
-    patients_collection.update_one({"patient_id" : patient_id},
-                                   { "$set": { "locked": status } })
-
-def get_patient_lock_status(patient_id):
-    """
-    Updates the status of the patient to be locked or unlocked.
-
-    Args:
-        patient_id (int) : ID for the patient we are locking / unlocking
-    Returns:
-        status (bool) : True if the patient is locked, False otherwise.
-            If no such patient is found, we return None.
-
-    Raises:
-        None
-    """
-    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
-    return patient["locked"]
-
-
-def get_patient_notes(patient_id):
-    """
-    Returns all notes for that patient.
-
-    Args:
-        patient_id (int) : ID for the patient
-    Returns:
-        notes (list) : A list of all notes for that patient
-    """
-    mongodb_search_query = { "patient_id": patient_id }
-    notes = list(mongo.db["NOTES"].find(mongodb_search_query))
-    return notes
-
-def insert_one_annotation(annotation):
-    """
-    Adds an annotation to the database.
-
-    Args:
-        annotation (dict) : The annotation we are inserting
-    Returns:
-        None
-    """
-    annotations_collection = mongo.db["ANNOTATIONS"]
-
-    annotations_collection.insert_one(annotation)
-
-
-def remove_all_locked():
-    """
-    Sets the locked status of all patients to False.
-    This is done when the server is shutting down.
-    """
-    patients_collection = mongo.db["PATIENTS"]
-    patients_collection.update_many({},
-                                    { "$set": { "locked": False } })
-
-def is_admin_user(username):
-    """check if the user is admin"""
-    user = mongo.db["USERS"].find_one({'user' : username})
-
-    if user is not None and user["is_admin"]:
-        return True
-
-    return False
-
-
-def drop_database(name):
-    """Clean Database"""
-    mongo.cx.drop_database(name)

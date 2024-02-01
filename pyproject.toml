@@ -12,20 +12,23 @@ Flask = "^2.3.2"
 Flask-Caching = "^2.0.2"
 Flask-Login = "^0.6.2"
 python-dotenv = "^1.0.0"
-scispacy = "^0.5.2"
+scispacy = "^0.5.3"
 flask-pymongo = "^2.3.0"
 jupyterlab = "^4.0.2"
 pandas = "^2.0.2"
-en-core-sci-md = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_md-0.5.1.tar.gz"}
 negspacy = "^1.0.4"
 flask-session = "^0.5.0"
 faker = "^19.3.0"
-en-core-sci-lg = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz"}
 coverage = "^7.3.0"
 minio = "^7.1.16"
+pydantic = "^1.9.0"
 fastparquet = "^2023.8.0"
 loguru = "^0.7.2"
 tdqm = "^0.0.1"
+mkdocs = "^1.5.3"
+mkdocstrings = {extras = ["python"], version = "^0.24.0"}
+en-core-sci-md = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_core_sci_md-0.5.3.tar.gz"}
+en-core-sci-lg = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_core_sci_lg-0.5.3.tar.gz"}
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^2.17.4"

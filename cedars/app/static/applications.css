@@ -1,0 +1,44 @@
+.cedarsstyle
+{
+    background-color: #0b3d5cff !important;
+}
+
+.btn-primary {
+    background-color: #0b3d5cff; /* Use a primary color for the button */
+    color: #ffffff; /* Text color on the button */
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s ease; /* Add a smooth transition on hover */
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.7; /* Reduce the opacity of the button when disabled */
+    cursor: not-allowed; /* Change cursor to indicate it's not clickable */
+  }
+
+  .btn-primary:hover {
+    background-color: #0b3d5cff; /* Darken the button color on hover */
+  }
+
+  #proj_name {
+    left : 12.35%;
+    position:absolute;
+  }
+
+  #search_bar {
+    left : 37.8%;
+    position:absolute;
+    width: 40%;
+  }
+
+
+  .panel-default {
+    border-color: #0b0b0b !important;
+  }
+
+  mark {
+    color: red;
+  }

@@ -8,3 +8,6 @@ nav:
   - Downloading Results: download_annotations.md
 theme: readthedocs
 
+plugins: 
+  - search
+  - mkdocstrings

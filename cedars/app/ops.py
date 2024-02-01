@@ -78,14 +78,17 @@ def project_details():
 
     if request.method == "POST":
         project_name = request.form.get("project_name")
-        db.update_project_name(project_name)
-        flash(f"Project name updated to {project_name}.")
+        if len(project_name.strip()) > 0:
+            db.update_project_name(project_name)
+            flash(f"Project name updated to {project_name}.")
 
         if "project_logo" in request.files:
             file = request.files["project_logo"]
             if allowed_image_file(secure_filename(file.filename)):
-                file.save(Path("app/static") / "project_logo.png")
+                file.save(Path(current_app.config["UPLOAD_FOLDER"]) / "project_logo.png")
                 flash("Logo updated successfully.")
+            else:
+                flash("Invalid file type. Please upload a .png, .jpg, or .jpeg file.")
 
         return render_template("index.html", **db.get_info())
 
@@ -241,6 +244,7 @@ def upload_query():
                     hide_duplicates, skip_after_event, tag_query)
 
     db.empty_annotations()
+    db.reset_patient_reviewed()
 
     #TODO: use flask executor to run this in the background
     nlp_processor = nlpprocessor.NlpProcessor()
@@ -276,6 +280,7 @@ def save_adjudications():
         new_date = request.form['date_entry']
         logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
+        _adjudicate_annotation()
 
     def _delete_annotation_date():
         db.delete_annotation_date(current_annotation_id)
@@ -302,10 +307,9 @@ def save_adjudications():
         if db.get_annotation_date(current_annotation_id) is not None:
             db.mark_patient_reviewed(session["patient_id"])
             session.pop("patient_id")
-        # session["annotation_ids"].pop(session["annotation_number"])
-        session["annotation_number"] += 1
-        # if session["annotation_number"] >= len(session["annotation_ids"]):
-        #     session["annotation_number"] -= 1
+        session["annotation_ids"].pop(session["annotation_number"])
+        if session["annotation_number"] >= len(session["annotation_ids"]):
+            session["annotation_number"] -= 1
         session.modified = True
 
     actions = {
@@ -334,31 +338,41 @@ def adjudicate_records():
     pt_id = None
     if request.method == "POST":
         if request.form["patient_id"]:
-            pt_id = int(request.form["patient_id"])
-            logger.info("Search patient: ", pt_id)
+            try:
+                pt_id = int(request.form["patient_id"])
+            except ValueError:
+                flash("Patient ID must be an integer.")
+                return redirect(url_for("ops.adjudicate_records"))
+            if db.get_patient_by_id(pt_id) is None:
+                flash(f"Patient {pt_id} does not exist.")
+                return redirect(url_for("ops.adjudicate_records"))
+            if db.get_patient_by_id(pt_id)["reviewed"]:
+                flash(f"Patient {pt_id} has no annotations.")
+                return redirect(url_for("ops.adjudicate_records")) 
+            logger.info(f"Search patient: {pt_id}")
 
     _initialize_session(pt_id)
-
-    if session['annotation_number'] >= len(session['annotation_ids']):
+    if "patient_id" not in session:
+        return render_template("ops/annotations_complete.html", **db.get_info())
+    
+    logger.debug(session)
+    while len(session["annotation_ids"]) == 0:
         _prepare_for_next_patient()
-        if session["patient_id"] and len(session["annotation_ids"]) == 0:
-            _prepare_for_next_patient()
-        if not session["patient_id"]:
-            return render_template("ops/annotations_complete.html", **db.get_info())
         
-
     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-
+    logger.debug(f"Current annotation id: {current_annotation_id}")
     annotation = db.get_annotation(current_annotation_id)
+    logger.debug(f"Current annotation: {annotation}")
     note = db.get_annotation_note(current_annotation_id)
+    logger.debug(f"Current note: {note}")
 
     context = {
         'name': current_user.username,
         'event_date': _format_date(annotation.get('event_date')),
         'note_date': _format_date(annotation.get('text_date')),
-        'pre_token_sentence': annotation['sentence'][:annotation['start_index']],
+        'pre_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
         'token_word': annotation['sentence'][annotation['start_index']:annotation['end_index']],
-        'post_token_sentence': annotation['sentence'][annotation['end_index']:],
+        'post_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
         'pos_start': session["annotation_number"] + 1,
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
@@ -378,12 +392,12 @@ def highlighted_text(note):
     """
     Returns highlighted text for a note.
     """
-    highlighted_note = ""
+    highlighted_note = []
     prev_end_index = 0
     text = note["text"]
 
-    annotations = db.get_all_annotations_for_note(str(note["_id"]))
-    logger.debug(annotations)
+    annotations = db.get_all_annotations_for_note(note["text_id"])
+    logger.info(annotations)
 
     for annotation in annotations:
         start_index = annotation['note_start_index']
@@ -392,27 +406,29 @@ def highlighted_text(note):
         if start_index < prev_end_index:
             continue
         
-        highlighted_note += text[prev_end_index:start_index]
-        highlighted_note += f'<mark>{text[start_index:end_index]}</mark>'
+        highlighted_note.append(text[prev_end_index:start_index])
+        highlighted_note.append(f'<mark>{text[start_index:end_index]}</mark>')
         prev_end_index = end_index
 
-    highlighted_note += text[prev_end_index:]
-    return highlighted_note
+    highlighted_note.append(text[prev_end_index:])
+    logger.info(highlighted_note[1])
+    return " ".join(highlighted_note).replace("\n", "<br>")
 
 def _initialize_session(pt_id=None):
-    if "patient_id" not in session:
+    if pt_id is not None or "patient_id" not in session:
         pt_id = pt_id if pt_id else db.get_patient()
-        session.update({
-            "patient_id": pt_id,
-            "annotation_number": 0,
-            "annotation_ids": db.get_patient_annotation_ids(pt_id)
-        })
+        if pt_id is not None:
+            # found a patient with unreviewed notes
+            session.update({
+                "patient_id": pt_id,
+                "annotation_number": 0,
+                "annotation_ids": db.get_patient_annotation_ids(pt_id)
+            })
         session.modified = True
 
 def _prepare_for_next_patient():
     db.mark_patient_reviewed(session['patient_id'])
     session.pop("patient_id")
-    session.modified = True
     _initialize_session()
 
 

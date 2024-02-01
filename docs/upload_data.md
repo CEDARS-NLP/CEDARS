@@ -11,5 +11,13 @@ To make use of this software, we will first need to upload some medical records 
 
 The file with the data should contain tabular data with at least the following columns:
 1. patient_id (A unique ID for the patient)
-2. text (The medical note written by a doctor)
-3. text_date (The date at which this note was recorded)
+2. text_id (A unique ID for the medical note)
+3. text (The medical note written by a doctor)
+4. text_date (The date at which this note was recorded)
+
+# Reference
+
+The data/notes is uploaded to MongoDB using the following functions:
+
+::: cedars.app.ops.upload_data
+::: cedars.app.ops.EMR_to_mongodb

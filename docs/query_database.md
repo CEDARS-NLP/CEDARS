@@ -5,3 +5,6 @@ To search for medical events using CEDARS you will need to write a [regex](https
 # Important Note 
 Keep in mind that entering a new query will erase all records of the prior query and so you are advised to download a copy of the results of prior queries before entering a new one.
 
+# Reference
+
+::: cedars.app.ops.db
