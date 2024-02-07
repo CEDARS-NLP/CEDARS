@@ -4,8 +4,8 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 from pathlib import Path
-import pandas as pd
 from io import BytesIO
+import pandas as pd
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
@@ -18,7 +18,7 @@ from werkzeug.utils import secure_filename
 from . import db
 from . import nlpprocessor
 from . import auth
-from .database import client
+from .database import client, mongo
 
 logger.enable(__name__)
 
@@ -62,18 +62,8 @@ def allowed_image_file(filename):
 @auth.admin_required
 def project_details():
     """
-    This is a flask function for the backend logic
-                    for the proj_details route.
+    This is a flask function for the backend logic for the proj_details route.
     It is used by the admin to view and alter details of the current project.
-
-    Args:
-        None
-
-    Returns:
-        None
-
-    Raises:
-        None
     """
 
     if request.method == "POST":
@@ -248,7 +238,9 @@ def upload_query():
 
     #TODO: use flask executor to run this in the background
     nlp_processor = nlpprocessor.NlpProcessor()
-    nlp_processor.automatic_nlp_processor()
+
+    for patient_id in db.get_patient_ids():
+        nlp_processor.automatic_nlp_processor(patient_id)
 
     # remove session variables
     if "annotation_ids" in session:
@@ -266,6 +258,16 @@ def upload_query():
 def _get_current_annotation_id():
     return session["annotation_ids"][session["annotation_number"]]
 
+@bp.route("/terminate", methods=["GET"])
+@auth.admin_required
+def terminate():
+    """
+    This is a flask function for the backend logic to terminate the project.
+    """
+    session.clear()
+    db.terminate_project()
+    flash('Database reset successfully.', 'success')
+    return redirect(url_for("auth.register"))
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -305,7 +307,7 @@ def save_adjudications():
         # this could be based on a parameter though
         # TODO: add logic based on tags if we need to keep reviewing
         if db.get_annotation_date(current_annotation_id) is not None:
-            db.mark_patient_reviewed(session["patient_id"])
+            db.mark_patient_reviewed(session["patient_id"], reviewed_by=current_user.username)
             session.pop("patient_id")
         session["annotation_ids"].pop(session["annotation_number"])
         if session["annotation_number"] >= len(session["annotation_ids"]):
@@ -348,7 +350,7 @@ def adjudicate_records():
                 return redirect(url_for("ops.adjudicate_records"))
             if db.get_patient_by_id(pt_id)["reviewed"]:
                 flash(f"Patient {pt_id} has no annotations.")
-                return redirect(url_for("ops.adjudicate_records")) 
+                return redirect(url_for("ops.adjudicate_records"))
             logger.info(f"Search patient: {pt_id}")
 
     _initialize_session(pt_id)
@@ -358,6 +360,8 @@ def adjudicate_records():
     logger.debug(session)
     while len(session["annotation_ids"]) == 0:
         _prepare_for_next_patient()
+        if "patient_id" not in session:
+            return render_template("ops/annotations_complete.html", **db.get_info())
         
     current_annotation_id = session["annotation_ids"][session["annotation_number"]]
     logger.debug(f"Current annotation id: {current_annotation_id}")
@@ -370,6 +374,7 @@ def adjudicate_records():
         'name': current_user.username,
         'event_date': _format_date(annotation.get('event_date')),
         'note_date': _format_date(annotation.get('text_date')),
+        'note_id': note["text_id"],
         'pre_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
         'token_word': annotation['sentence'][annotation['start_index']:annotation['end_index']],
         'post_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
@@ -416,7 +421,7 @@ def highlighted_text(note):
 
 def _initialize_session(pt_id=None):
     if pt_id is not None or "patient_id" not in session:
-        pt_id = pt_id if pt_id else db.get_patient()
+        pt_id = pt_id if pt_id else db.get_patients_to_annotate()
         if pt_id is not None:
             # found a patient with unreviewed notes
             session.update({
@@ -427,7 +432,9 @@ def _initialize_session(pt_id=None):
         session.modified = True
 
 def _prepare_for_next_patient():
-    db.mark_patient_reviewed(session['patient_id'])
+    logger.info(f"Marking patient: {session['patient_id']} as reviewed")
+    db.mark_patient_reviewed(session['patient_id'],
+                             reviewed_by=current_user.username)
     session.pop("patient_id")
     _initialize_session()
 
@@ -440,31 +447,45 @@ def _format_date(date_obj):
 
 @bp.route('/download_annotations')
 @auth.admin_required
-def download_file ():
+def download_file (filename = 'annotations.csv'):
     """
-    This is a flask function for the backend logic
-                    for the download_annotations route.
-    It will create a csv file of the current annotations and send it to the user.
-
-    Args:
-        None
-
-    Returns:
-        None
-
-    Raises:
-        None
+    This generates a CSV file with the following specifications:
+    1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.
+    2. For each patient -
+        a. list the number of total notes in the database
+        b. list the number of reviewed notes
+        c. list the number of total sentences from annotations
+        d. list the number of reviewed sentences
+        e. list all sentences as a list of strings
+        f. add event date from the annotations for each patient
+        g. add the first and last note date for each patient
+    3. Convert all columns to proper datatypes
     """
-
-    data = db.get_all_annotations()
-    data_bytes = pd.DataFrame(data).to_csv().encode('utf-8')
+    patients = db.get_all_patients()
+    data = []
+    for patient in patients:
+        patient_id = patient["patient_id"]
+        notes = db.get_all_notes(patient_id)
+        reviewed_notes = db.get_patient_notes(patient_id, reviewed=True)
+        reviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=True,  key="sentence")
+        unreviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=False,  key="sentence")
+        sentences = reviewed_sentences + unreviewed_sentences
+        total_sentences = len(sentences)
+        event_date = db.get_event_date(patient_id)
+        first_note_date = db.get_first_note_date_for_patient(patient_id)
+        last_note_date = db.get_last_note_date_for_patient(patient_id)
+        data.append([patient_id, len(notes), len(reviewed_notes),
+                     total_sentences, len(reviewed_sentences), reviewed_sentences,
+                     event_date, first_note_date, last_note_date])
+  
+    df = pd.DataFrame(data, columns=["patient_id", "total_notes", "reviewed_notes", "total_sentences", "reviewed_sentences", "sentences", "event_date", "first_note_date", "last_note_date"])
+    data_bytes = df.to_csv().encode('utf-8')
     csv_buffer = BytesIO(data_bytes)
     client.put_object("cedars",
-                      "annotations.csv",
+                      filename,
                       data=csv_buffer,
                       length=len(data_bytes),
                       content_type="application/csv")
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], "annotations.csv")
-    # annotations = pd.DataFrame(data)
-    client.fget_object("cedars", "annotations.csv", file_path)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    client.fget_object("cedars", filename, file_path)
     return send_file(file_path, as_attachment=True)

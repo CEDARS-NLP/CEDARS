@@ -2,6 +2,7 @@
 This module contatins the class to perform NLP operations for the CEDARS project
 """
 import re
+from typing import Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
 import spacy
@@ -137,7 +138,7 @@ class NlpProcessor:
         return cls.instance
 
 
-    def process_notes(self, patient_id = None, processes=4, batch_size=50):
+    def process_notes(self, patient_id = None, processes=1, batch_size=20):
         """
         This function takes a medical note and a regex query as input and annotates
         the relevant sections of the text.
@@ -168,10 +169,12 @@ class NlpProcessor:
         logger.info(f"Starting to process document annotations: {len(document_text)}")
         count = 0
         for document, doc in zip(document_list, annotations):
+            match_count = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
                 matches = matcher(sentence_annotation)
                 for match in matches:
+                    match_count += 1
                     token_id, start, end = match
                     token = sentence_annotation[start:end]
                     # print(sentence_annotation)
@@ -197,11 +200,47 @@ class NlpProcessor:
                     annotation["comments"] = []
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
+            if match_count == 0:
+                db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
             count += 1
             if (count + 1) % 10 == 0:
                 logger.info(f"Processed {count+1} / {len(document_list)} documents")
 
 
+    def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
+        """
+        For each patient who are unreviewed,
+
+        1. Get all notes for which annotations are present
+        2. Get the predictions for each note and save it in the pines collection
+        3. If note prediction is 
+            a. Below threshold
+                i. Mark all annotation as reviewed
+                ii. Update the patient reviewed status based on all notes reviewed status
+            b. Above threshold: Update the pines database
+        """
+
+        notes = db.get_annotated_notes_for_patient(patient_id)
+        logger.info(f"Found {len(notes)} annotated notes for patient {patient_id}")
+        if len(notes) == 0:
+            db.mark_patient_reviewed(patient_id, reviewed_by="CEDARS")
+            logger.debug(f"Marked patient {patient_id} as reviewed")
+            return
+        
+        db.predict_and_save(notes)
+        scores = []
+        for note_id in notes:
+            score = db.get_note_prediction_from_db(note_id)
+            scores.append(score)
+            if score < threshold:
+                updated_annots = db.update_annotation_reviewed(note_id)
+                db.mark_note_reviewed(note_id, reviewed_by="PINES")
+                logger.info(f"Marked {updated_annots} annotations as reviewed for note {note_id} with score {score}")
+        
+        if max(scores) < threshold:
+            db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
+            logger.debug(f"Marked patient {patient_id} as reviewed")
+        
     def automatic_nlp_processor(self, patient_id = None):
         """
         This function is used to perform and save NLP annotations
@@ -209,3 +248,5 @@ class NlpProcessor:
         If patient_id == None we will do this for all patients in the database.
         """
         self.process_notes(patient_id)
+        self.process_patient_pines(patient_id)
+

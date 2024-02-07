@@ -80,8 +80,8 @@ def register():
 
         existing_user = db.get_user(username)
 
-        if existing_user:
-            error = 'Username already exists.'
+        if existing_user or username in ['cedars', 'pines']:
+            error = 'Username already exists or reserved. Please choose a different one.'
 
         if error is None:
             hashed_password = generate_password_hash(password)
