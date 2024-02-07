@@ -1,13 +1,22 @@
 site_name: CEDARS
+
 nav:
-  - Home: index.md
-  - Basic Concepts: basic_concepts.md
-  - Getting Started: getting_started.md
-  - Uploading EMR Records: upload_data.md
-  - Querying the Database: query_database.md
-  - Downloading Results: download_annotations.md
-theme: readthedocs
+  - Overview: README.md # This needs to be linked back with ..\, DO transfer this file to the repo
+  - About: ABOUT.md
+  - Administrator Manual: CEDARS_admin_manual.md
+  - Annotator Manual: CEDARS_annotator_manual.md
+  - Terms of Use: TERMS_OF_USE.md # This needs to be linked back with ..\, do NOT transfer this file to repo
+
+theme: 
+  name: readthedocs
+  include_homepage_in_sidebar: true
+  prev_next_buttons_location: none
+  titles_only: false
+  logo: pics/cedar_G_centered.png
 
 plugins: 
   - search
-  - mkdocstrings
+  # - with-pdf Could not install
+  
+extra_css:
+  - style.css

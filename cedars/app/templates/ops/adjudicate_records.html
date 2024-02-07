@@ -97,7 +97,7 @@
       </div>
 
       <div class="mb-4">
-        <h6 class="text-muted">Full Note</h6>
+        <h6 class="text-muted">Full Note {{ note_id }}</h6>
         <div style="height: 600px; width: 100%; overflow-y: auto;">
           {{full_note|safe}}
         </div>
@@ -105,13 +105,13 @@
 
       <div>
         <table class="table table-hover">
-          <tr>
+          <th>
             <td>Tag 1</td>
             <td>Tag 2</td>
             <td>Tag 3</td>
             <td>Tag 4</td>
             <td>Tag 5</td>
-          </tr>
+          </th>
           <tr>
             <td>{{ tags[0] }}</td>
             <td>{{ tags[1] }}</td>
