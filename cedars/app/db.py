@@ -2,6 +2,7 @@
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
+import os
 from datetime import datetime
 import requests
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -893,7 +894,7 @@ def get_prediction(note: str) -> float:
     """
     Get prediction from endpoint. Text goes in the POST request.
     """
-    url = "http://0.0.0.0:8036/predict"
+    url = f'{os.getenv("PINES_API_URL")}/predict'
     data = {'text': note}
     try:
         response = requests.post(url, json=data, timeout=20)
@@ -940,7 +941,8 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                      pines_collection_name: str = "PINES",
                      force_update: bool = False) -> None:
     """
-    Predict and save the predictions for the given text_ids."""
+    Predict and save the predictions for the given text_ids.
+    """
     notes_collection = mongo.db[note_collection_name]
     pines_collection = mongo.db[pines_collection_name]
     query = {}
@@ -976,4 +978,3 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     create_project(project_name=fake.slug(),
                    investigator_name=fake.name())
-
