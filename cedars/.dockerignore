@@ -1,0 +1,16 @@
+**/__pycache__/*
+**/node_modules/
+**/dist
+**/.git
+**/.github
+npm-debug.log
+.coverage
+.coverage.*
+**/.env
+.aws
+**/Dockerfile
+**/tests
+**/minio
+**/*.ipynb
+**/.DS_Store
+**/.pytest_cache

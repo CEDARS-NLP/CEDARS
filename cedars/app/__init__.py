@@ -12,8 +12,6 @@ from faker import Faker
 from loguru import logger
 
 from .database import mongo
-logger.disable("cedars")
-logger.add(__name__)
 fake = Faker()
 
 

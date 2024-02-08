@@ -16,14 +16,15 @@ x-minio-common: &minio-common
     retries: 3
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: ./cedars/Dockerfile
     ports:
       - 5001:5000
-    volumes:
-      - .:/app
     depends_on:
       - db
       - minio
+      - pines
   db:
     image: mongo:latest
     ports:
@@ -49,6 +50,12 @@ services:
       - "9001:9001"
     depends_on:
       - minio
+
+  pines:
+    build:
+      context: ./pines-api
+    ports:
+      - 8036:8036
 
 volumes:
   data1-1:
