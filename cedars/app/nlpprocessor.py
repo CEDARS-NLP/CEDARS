@@ -47,7 +47,7 @@ def query_to_patterns(query: str) -> list:
         return {"TEXT": {"REGEX": regex_pattern}}
 
     def get_lemma_dict(token):
-        return {"LEMMA": token}
+        return {"LOWER": token}
     
     def get_negated_dict(token):
         return {"LOWER": token, "OP": "!"}
