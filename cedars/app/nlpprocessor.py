@@ -23,23 +23,23 @@ def query_to_patterns(query: str) -> list:
     combined by AND or NOT and the keywords can also contain
     wildcards.
 
-    Spacy Requirements:
-    ! - negation
-    Each dictionary in a list matches one token only
-    A list matches all the dictionaries inside it (and condition)
-    A list of list contains OR conditions
-    [{"TEXT": {"REGEX": "abc*"}}] represents one token with regex match
-    [{"LOWER": "dvt"}] matches case-insenstitive  DVT
-    [{"LEMMA": "embolus"}] matches the lemmatized version of embolus as well in text
+    ##### Spacy Requirements:
+    - ! - negation
+    - Each dictionary in a list matches one token only
+    - A list matches all the dictionaries inside it (and condition)
+    - A list of list contains OR conditions
+      - [{"TEXT": {"REGEX": "abc*"}}] represents one token with regex match
+      - [{"LOWER": "dvt"}] matches case-insenstitive  DVT
+      - [{"LEMMA": "embolus"}] matches the lemmatized version of embolus as well in text
 
-    Implementation:
-    1. Split the query by OR
-    2. Split each expression by AND
-    3. Split each expression by NOT
-    4. Split each expression by wildcard
-    5. Convert each expression to a spacy pattern
-    6. Combine the patterns
-    7. Return the combined pattern
+    ##### Implementation:
+      1. Split the query by OR
+      2. Split each expression by AND
+      3. Split each expression by NOT
+      4. Split each expression by wildcard
+      5. Convert each expression to a spacy pattern
+      6. Combine the patterns
+      7. Return the combined pattern
     """
     def get_regex_dict(token):
         # Replace '*' with '.*' and '?' with '.'
@@ -75,20 +75,21 @@ def query_to_patterns(query: str) -> list:
 
 def is_negated(span):
     """
-    This function takes a spacy token and determines if it has been negated in this sentence.
+    ##### Negation Detection
 
+    This function takes a spacy token and determines if it has been negated in the sentence.
+    ```
     Ex.
     This is not an apple.
     In the above sentence, the token apple is negated.
+    ```
 
     Args:
-        token (spacy token) : This is a token of a single word after spacy
+        spacy token : This is a token of a single word after spacy
         runs a model on some text.
 
     Returns:
         (bool) : True if the token is negated in the sentence.
-    Raises:
-        None
     """
     neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing',
                  'neither','nowhere','noone',
@@ -140,6 +141,8 @@ class NlpProcessor:
 
     def process_notes(self, patient_id = None, processes=1, batch_size=20):
         """
+        ##### Process Query Matching
+        
         This function takes a medical note and a regex query as input and annotates
         the relevant sections of the text.
         """

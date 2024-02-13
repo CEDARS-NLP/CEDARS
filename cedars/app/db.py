@@ -892,6 +892,8 @@ def get_curr_stats():
 # pines functions
 def get_prediction(note: str) -> float:
     """
+    ##### PINES predictions
+    
     Get prediction from endpoint. Text goes in the POST request.
     """
     url = f'{os.getenv("PINES_API_URL")}/predict'
@@ -941,6 +943,8 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                      pines_collection_name: str = "PINES",
                      force_update: bool = False) -> None:
     """
+    ##### Save PINES predictions
+
     Predict and save the predictions for the given text_ids.
     """
     notes_collection = mongo.db[note_collection_name]
@@ -967,6 +971,8 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
 
 def terminate_project():
     """
+    ##### Terminate the Project
+
     Reset the database to the initial state.
     """
     logger.info("Terminating project.")

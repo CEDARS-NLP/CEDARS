@@ -19,5 +19,8 @@ The file with the data should contain tabular data with at least the following c
 
 The data/notes is uploaded to MongoDB using the following functions:
 
+## Upload Data
 ::: cedars.app.ops.upload_data
+---
+## Upload EMR data to MongoDB
 ::: cedars.app.ops.EMR_to_mongodb

@@ -6,5 +6,6 @@ The package authors include:
 
 - [Simon Mantha, MD, MPH](https://www.mskcc.org/cancer-care/doctors/simon-mantha): project lead, clinical hematologist by training
 - [Rohan Singh, MS](https://www.linkedin.com/in/singhrhn): principal data scientist
-- Kayan Irani: collaborator  (I need Kayan's degree and link)
+- [Kayan Irani](https://www.linkedin.com/in/kayan-irani-762938218): collaborator
+
 

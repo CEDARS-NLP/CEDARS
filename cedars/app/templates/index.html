@@ -28,12 +28,12 @@
         <h3>Documentation and Code</h3>
 
         <div class="form-group">
-            To get more information about CEDARS or get help regarding it's workings, you can go to the <a href="">documentation</a>.
+            To get more information about CEDARS or get help regarding it's workings, you can go to the <a href="https://cedars.io">documentation</a>.
 
             <br>
             <br>
 
-            If you are interested in the project's code or wish to contribute some code yourself, you can visit our <a href="">GitHub page</a>.
+            If you are interested in the project's code or wish to contribute some code yourself, you can visit our <a href="https://github.com/CEDARS-NLP/CEDARS">GitHub page</a>.
         </div>
 
 
@@ -44,12 +44,38 @@
         <label>To get started on your project you may click on the button below.</label>
         <br>
         <br>
-
+        
         {% if current_user.is_admin == true %}
-            <a href='/ops/project_details'>
+            <div class="form-group">
+                <label>Project Name</label>
+                <input type="text" class="form-control" name="project_name" value="{{ project_name }}">
+            </div>
+            </br>
+            <!-- <a href='/ops/project_details'>
                 <button class="btn btn-primary cedarsstyle">Start Project</button>
+            </a> -->
+            <a href='/ops/upload_data'>
+                <button class="btn btn-primary cedarsstyle">Upload Data</button>
+            </a>
+            <a href='/ops/upload_query'>
+                <button class="btn btn-primary cedarsstyle">Search Query</button>
+            </a>
+            <a href='/ops/download_annotations'>
+                <button class="btn btn-primary cedarsstyle">Download Data</button>
+            </a>
+            <a href='/stats'>
+                <button class="btn btn-primary cedarsstyle">Project Stats</button>
+            </a>
+            <a href='/auth/register'>
+                <button class="btn btn-primary cedarsstyle">Add Users</button>
+            </a>
+            <a href='/ops/adjudicate_records'>
+                <button class="btn btn-primary cedarsstyle">Adjudicate Records</button>
             </a>
         {% else %}
+            <a href='/stats'>
+                <button class="btn btn-primary cedarsstyle">Project Stats</button>
+            </a>
             <a href='/ops/adjudicate_records'>
                 <button class="btn btn-primary cedarsstyle">Adjudicate Records</button>
             </a>
