@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Annotator Manual - CEDARS</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+        <link href="../assets/_mkdocstrings.css" rel="stylesheet" />
+        <link href="../style.css" rel="stylesheet" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Annotator Manual";
+        var mkdocs_page_input_path = "CEDARS_annotator_manual.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="..">
+          <img src="../pics/cedar_G_centered.png" class="logo" alt="Logo"/>
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Overview</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../ABOUT/">About</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../CEDARS_admin_manual/">Administrator Manual</a>
+                </li>
+              </ul>
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href="./">Annotator Manual</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#introduction">Introduction</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#login">Login</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#find-clinical-events">Find Clinical Events</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#evaluating-a-sentence">Evaluating a Sentence</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#annotating-a-negative-sentence">Annotating a Negative Sentence</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#move-between-sentences-within-a-patients-record">Move Between Sentences Within a Patient's Record</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#entering-information-about-a-patient">Entering Information About a Patient</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#entering-an-event-date">Entering an Event Date</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#deleting-an-event-date">Deleting an Event Date</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#entering-comments-about-a-patient">Entering Comments About a Patient</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#search-for-a-specific-patient">Search for a Specific Patient</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#record-locking">Record Locking</a>
+    </li>
+    </ul>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../TERMS_OF_USE/">Terms of Use</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">CEDARS</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Annotator Manual</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cedars-annotator-manual">CEDARS Annotator Manual</h1>
+<h2 id="introduction">Introduction</h2>
+<p>This short manual is intended for data abstractors who will enter information about clinical events detected by CEDARS.</p>
+<p>CEDARS is a data pipepline set up to optimally present you with sentences drawn from a patient's medical record and potentially indicating the presence of a clinical event. Sentence detection is automatic and based on the words used, but often those sentences do not actually represent a true event. For example, the following sentence does not signal an actual new thrombotic episode:</p>
+<p>"The patient was ruled-out for deep vein thrombosis last night."</p>
+<p>If sentence detection is based only on reporting sentences with the words "deep vein thrombosis", such a negative finding will be reported. In this case, you would not report an event and move on to the next sentence. Event detection approaches used by your CEDARS system administrator will vary, and some queries will be more selective than others, but generally the system will be set up to detect as many events as possible, at the cost of having a certain number of false positive findings. The intent here is for CEDARS to minimize the number of missed events, even if this approach results in you having to review a greater number of sentences.</p>
+<p>Sentences are presented in chronological order. Once you have identified and dated a clinical event, CEDARS might be set up by bypass all following sentences for this patient and move on to the next patient. This approach will be used when your system administrator only aims at capturing the first instance of an event of interest. Also, once you have evaluated all sentences of interest for a given patient, CEDARS will move on to the next patient seamlessly. This sequence of events is illustrated below:</p>
+<p><img alt="CEDARS Workflow" src="../pics/GitHub%20Schema%202%20C.png" /></p>
+<p>If you adjudicate a sentence as reporting no event, CEDARS will present the next sentence for the same patient (#1). On the other end, if you enter an event date, CEDARS will move to the next unreviewed sentence before the event date. If there are no sentences left to review before the event, the GUI moves to the next patient (#2) and the process is repeated with the following record (#3 and #4), until all selected sentences have been reviewed.</p>
+<h2 id="login">Login</h2>
+<p>Go to your <code>CEDARS URL</code> and use the <code>credentials</code> provided by the administrator.</p>
+<h2 id="find-clinical-events">Find Clinical Events</h2>
+<p>As soon as you are logged in, CEDARS will start looking for the next available patient with information to review. It might take a few moments before the first sentence is presented to you. The following is an example from a simulated cohort:</p>
+<p><img alt="Simulated Patient Example - Data Entry Interface" src="../pics/adjudicate_annotations.png" /></p>
+<p>Keywords or concepts are highlighted in red to help you locate them in the text.</p>
+<h3 id="evaluating-a-sentence">Evaluating a Sentence</h3>
+<p>Only one sentence to review will be presented at any given time. It can be found at the beginning of the section titled "Selected sentence:".</p>
+<p>Your first task is to determine whether or not the sentence refers to an actual clinical event of interest, i.e. if the sentence is a true positive. Typically you will be able to make up your mind just by reading the sentence itself. If the sentence is ambiguous and you would like to obtain more context, you can review the note or report from which the sentence was drawn, situated at the bottom of the screen under the section "Selected note:". Also, completely at the bottom of the screen you will find a list of tags with associated data. The information presented here will vary, but would typically include the patient's name, the type of note, the author etc.</p>
+<p>For your reference, the date of entry for the note from which the sentence was drawn is indicated below the sentence, along with sentence position (first, second, third in line for review, etc) and patient ID.</p>
+<h3 id="annotating-a-negative-sentence">Annotating a Negative Sentence</h3>
+<p>In many cases, the sentence you are looking at will be a false positive, i.e. it does not represent the kind of event you were tasked to report. In this case, simply click on the button "ADJUDICATE SENTENCE". This will mark the sentence as such and move to the next one in line.</p>
+<h3 id="move-between-sentences-within-a-patients-record">Move Between Sentences Within a Patient's Record</h3>
+<p>Often the sentence and note presented to you will hint at a possible event but remain ambiguous, or an event will be obvious but the timing unclear. In such cases, you can move from sentence to sentence by using the "&lt;&lt;&lt; PREVIOUS" and "NEXT &gt;&gt;&gt;" buttons. You will go from sentence to sentence, following the timeline of electronic record notes/reports. Note that using previous/next will not annotate sentences or otherwise enter information in the CEDARS database.</p>
+<h2 id="entering-information-about-a-patient">Entering Information About a Patient</h2>
+<h3 id="entering-an-event-date">Entering an Event Date</h3>
+<p>Any known event date will be displayed at the beginning of section titled "Event date:". Most of the time this field will be empty, since generally speaking CEDARS projects aim to determine event dates for a cohort for which no prior information exists. However, CEDARS can also be used to verify known event dates, in which case the interface might display an event date for a patient you have not yet assessed. Your CEDARS system administrator will discuss this aspect with you before starting the project.</p>
+<p>Once you have determined a clinical event did indeed occur, the next step is to assess its timing. As noted above, you might have to travel between sentences or consult complete notes to confirm the date. Once you are ready to enter this information, click on the data entry field under the "ENTER NEW DATE" button. You will be prompted with a calendar. Once the date displayed is correct, press on button "ENTER NEW DATE".</p>
+<p>Given the nature of clinical narratives, not all events will be precisely dated. For example, a clinician might refer to an event only with the month and year, not the day. Such information can still be entered by using simple approximation guidelines. In CEDARS, if only the year of an event is known, enter July 1st of that year (e.g. "2020-07-01"). If only they year and month are known, enter the 15th day of that month/year (e.g. "2020-11-15" if the event was in November of 2020). When approximating a date, it is good practice to document this detail in a comment (see below).</p>
+<h3 id="deleting-an-event-date">Deleting an Event Date</h3>
+<p>It is possible to replace an erroneous date by entering a new one in the date entry field. If there was actually no event, the previously entered date can be deleted by clicking on button "DELETE OLD DATE".</p>
+<h3 id="entering-comments-about-a-patient">Entering Comments About a Patient</h3>
+<p>At any point you can enter comments about a patient in the data entry field under "New comments:", however those will be saved only if you 1) adjudicate the sentence or 2) enter an event date.</p>
+<h2 id="search-for-a-specific-patient">Search for a Specific Patient</h2>
+<p>If you want to go back to a specific patient later on, take note of the patient ID number. After logon, CEDARS will automatically present you with the next available patient to review, so if you have already annotated all sentences for a given patient, the only way to find that record again is to do a search. In this case, simply enter the patient ID number under in the box under "Search for patient" and click button "SEARCH". If you click "SEARCH" on an empty field, CEDARS will bring up the next available patient for you to review.</p>
+<h2 id="record-locking">Record Locking</h2>
+<p>Only one end user at a time can review or enter information about any given patient in the CEDARS database. If someone else is already looking at a specific patient record, you will be locked from accessing it.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../CEDARS_admin_manual/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../TERMS_OF_USE/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

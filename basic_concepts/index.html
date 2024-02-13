@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Basic Concepts - CEDARS</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+        <link href="../assets/_mkdocstrings.css" rel="stylesheet" />
+        <link href="../style.css" rel="stylesheet" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Basic Concepts";
+        var mkdocs_page_input_path = "basic_concepts.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="..">
+          <img src="../pics/cedar_G_centered.png" class="logo" alt="Logo"/>
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Overview</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../ABOUT/">About</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../CEDARS_admin_manual/">Administrator Manual</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../CEDARS_annotator_manual/">Annotator Manual</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../TERMS_OF_USE/">Terms of Use</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">CEDARS</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Basic Concepts</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="basic-concepts">Basic Concepts</h1>
+<p>CEDARS uses a system where keywords are searched for using <a href="https://en.wikipedia.org/wiki/Lemma_(morphology)">lemmas</a> in the search query. This query must be in a <a href="https://en.wikipedia.org/wiki/Regular_expression">regex</a> format. After a query is entered all events that match the search query will be displayed to the user in the Adjudications page. However, unless it is otherwise specified all events that contain negations will not be shown in the Adjudications page.</p>
+<h2 id="lemmas">Lemmas</h2>
+<p>A lemma is defined as the canonical, dictionary or citation form of a word. For example, the words bleeding, bled and bleed all have the lemma bleed. This allows us to search for a reference to an event regardless of tense or grammar. To learn more about lemmas you may read <a href="https://en.wikipedia.org/wiki/Lemma_(morphology)">this article</a>.</p>
+<h2 id="regex-patterns">Regex Patterns</h2>
+<p>A regular expression (regex) pattern is a sequence of characters or words meant to match a pattern in text. For example, the pattern "bleed|cut" will search for both the words bleed and cut within a sentence. If either of them are found we can say that the pattern has been matched. To learn more you can learn more <a href="https://en.wikipedia.org/wiki/Regular_expression">here</a>.</p>
+<h2 id="negations">Negations</h2>
+<p>A negation is the absence or opposite of a positive. For example, in the sentence "He had no bleeding." the lemma for bleed is present, but a researcher looking for instances of bleeding will not be interested in this sentence. This is because the word "bleeding" has been negated and so must be excluded from the events.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

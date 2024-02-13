@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="description" content="None" />
+      <link rel="shortcut icon" href="img/favicon.ico" />
+    <title>CEDARS</title>
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+        <link href="assets/_mkdocstrings.css" rel="stylesheet" />
+        <link href="style.css" rel="stylesheet" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Overview";
+        var mkdocs_page_input_path = "README.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".">
+          <img src="pics/cedar_G_centered.png" class="logo" alt="Logo"/>
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="./search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href=".">Overview</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#background">Background</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#general-requirements">General Requirements</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#basic-concepts">Basic Concepts</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#features">Features</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#operational-schema">Operational Schema</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#future-development">Future Development</a>
+    </li>
+    </ul>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="ABOUT/">About</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="CEDARS_admin_manual/">Administrator Manual</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="CEDARS_annotator_manual/">Annotator Manual</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="TERMS_OF_USE/">Terms of Use</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href=".">CEDARS</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Overview</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="overview">Overview</h1>
+<h2 id="background">Background</h2>
+<p>CEDARS (Clinical Event Detection and Recording System) is a computational paradigm for collection and aggregation of time-to-event data in retrospective clinical studies. Developed out of a practical need for a more efficient way to conduct medical research, it aims to systematize and accelerate the review of electronic health record (EHR) corpora to detect and characterize clinical events. Using CEDARS, human abstractors can work more efficently through the use of dedicated graphical user interface (GUI). the system also incorporates a customized data storage scheme and a natural language processing (NLP) pipeline. In its current iteration, CEDARS is available as an open-source Python package under <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GPL-3 license</a>. The latest package and previous versions can be cloned from <a href="https://github.com/CEDARS-NLP/CEDARS">GitHub</a>. Full documentation is available <a href="https://cedars.io">here</a>. CEDARS can be used with or without its companion NLP package <a href="https://pines.ai">PINES</a>. Please see the <a href="TERMS_OF_USE/">Terms of Use</a> before using CEDARS. <strong>CEDARS is provided as-is with no guarantee whatsoever and users agree to be held responsible for compliance with their local government/institutional regulations.</strong></p>
+<h2 id="general-requirements">General Requirements</h2>
+<ul>
+<li>Python 3.9 or later</li>
+<li>Docker</li>
+</ul>
+<h2 id="basic-concepts">Basic Concepts</h2>
+<p><img alt="CEDARS Workflow" src="pics/GitHub%20Schema%202%20C.png" /></p>
+<p>Sentences with keywords or concepts of interest are presented to the end user one at a time and in chronological order. The user assesses each sentence, determining whether or not a clinical event is being reported. The whole note or report drawn from the EHR is available for review in the GUI. If no event is declared in the sentence, CEDARS presents the next sentence for the same patient (#1). If an event date is entered, CEDARS moves to the next unreviewed sentence before the event date. If there are no sentences left to review before the event, the GUI moves to the next patient (#2) and the process is repeated with the following record (#3 and #4), until all selected sentences have been reviewed.</p>
+<p>In order for CEDARS to be sufficiently sensitive and not miss and unacceptable number of clinical events, the keyword/concept search query must be well thought and exhaustive. The performance of CEDARS will vary by medical area, since the extent of medical lexicon will vary substantially between event types.</p>
+<h2 id="features">Features</h2>
+<ul>
+<li><code>Automatic Detection of Key Events</code></li>
+<li><code>Easy interface to upload and query medical data.</code></li>
+<li><code>Project Statistics</code></li>
+<li><code>Secure Login</code></li>
+</ul>
+<h2 id="operational-schema">Operational Schema</h2>
+<p><img alt="CEDARS Operational Schema" src="pics/GitHub%20Docker%20Schema%20C.png" /></p>
+<p>CEDARS is modular and all information for any given annotation project is stored in one MongoDB database. User credentials, original clinical notes, NLP annotations and patient-specific information are stored in dedicated collections. Once clinical notes have been uploaded, they are passed through the NLP pipeline. Currently only UDPipe is supported and integrated with CEDARS. If desired, the annotation pipeline can include negation and medical concept tagging by NegEx and UMLS respectively.</p>
+<p>Multiple users can load the web GUI and annotate records at the same time. Once accessed, a given patient record is locked for the user.</p>
+<h2 id="future-development">Future Development</h2>
+<p>We are currently documenting the performance of CEDARS with a focus on oncology clinical research. At the present time, we wish to solidify the CEDARS user interface and ensure a smooth experience in multi-user settings. In the longer term, plug-in modules featuring enhanced query generation and adaptive learning will be integrated into the R workflow. Support for other NLP engines and extensive parallel processing are also desirable.</p>
+<p>Please communicate with package author Simon Mantha, MD, MPH (<a href="mailto:smantha@cedars.io">smantha@cedars.io</a>) if you want to discuss new features or using this software for your clinical research application.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+    
+      <span><a href="ABOUT/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = ".";</script>
+    <script src="js/theme_extra.js"></script>
+    <script src="js/theme.js"></script>
+      <script src="search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
+
+<!--
+MkDocs version : 1.5.3
+Build Date UTC : 2024-02-13 23:51:45.974945+00:00
+-->

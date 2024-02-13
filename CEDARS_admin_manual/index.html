@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Administrator Manual - CEDARS</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+        <link href="../assets/_mkdocstrings.css" rel="stylesheet" />
+        <link href="../style.css" rel="stylesheet" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Administrator Manual";
+        var mkdocs_page_input_path = "CEDARS_admin_manual.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="..">
+          <img src="../pics/cedar_G_centered.png" class="logo" alt="Logo"/>
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Overview</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../ABOUT/">About</a>
+                </li>
+              </ul>
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href="./">Administrator Manual</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#software-installation">Software Installation</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#detailed-requirements">Detailed Requirements</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#local-installation-requirement">Local Installation Requirement</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#docker-requirement">Docker Requirement</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#system-architecture">System Architecture</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#installing-cedars">Installing CEDARS</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#standalone-cedars-python-package-installation">Standalone CEDARS Python Package Installation</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#docker-deployment">Docker Deployment</a>
+    </li>
+        </ul>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#project-execution">Project Execution</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#setting-up-a-cedars-project-and-users">Setting Up a CEDARS Project and Users</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#electronic-health-record-corpus-upload">Electronic Health Record Corpus Upload</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#keyword-search-query-design">Keyword Search Query Design</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#search-query-implementation">Search Query Implementation</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.nlpprocessor.query_to_patterns">query_to_patterns</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#natural-language-processing-annotations">Natural Language Processing Annotations</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.nlpprocessor.is_negated">is_negated</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.nlpprocessor.NlpProcessor.process_notes">process_notes</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.get_prediction">get_prediction</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.predict_and_save">predict_and_save</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#event-pre-loading">Event Pre-Loading</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#manual-assessment-for-clinical-events">Manual Assessment for Clinical Events</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#dataset-download">Dataset Download</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.ops.download_file">download_file</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#audit">Audit</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#project-termination">Project Termination</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.terminate_project">terminate_project</a>
+    </li>
+        </ul>
+    </li>
+        </ul>
+    </li>
+    </ul>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../CEDARS_annotator_manual/">Annotator Manual</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../TERMS_OF_USE/">Terms of Use</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">CEDARS</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Administrator Manual</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cedars-administrator-manual">CEDARS Administrator Manual</h1>
+<blockquote>
+<p><strong>CEDARS is provided as-is with no guarantee whatsoever and users agree to be held responsible for compliance with their local government/institutional regulations.</strong> All CEDARS installations should be reviewed with institutional information security authorities.</p>
+</blockquote>
+<h2 id="software-installation">Software Installation</h2>
+<h3 id="detailed-requirements">Detailed Requirements</h3>
+<h4 id="local-installation-requirement">Local Installation Requirement</h4>
+<div class="admonition warning">
+<p class="admonition-title">WARNING</p>
+<p>Local installation is not recommended unless you want to modify the underlying codebase. It is recommended to use the Docker deployment method.</p>
+</div>
+<p>In order to run the app locally, you will need a <code>.env</code> file with at least the flask <code>SECRET_KEY</code>, MONGODB and MINIO details and the host IP.
+Place the <code>.env</code> file under the <code>cedars/cedars</code> directory.</p>
+<p>For example:</p>
+<pre><code>SECRET_KEY = \xcfR\xd9D\xaa\x06\x84S\x19\xc0\xdcA\t\xf7it
+HOST=0.0.0.0 
+DB_HOST=localhost  # change to DB_HOST=db if running docker container
+DB_NAME=cedars
+DB_PORT=27017
+MINIO_HOST=localhost
+MINIO_PORT=9000
+MINIO_ACCESS_KEY=ROOTUSER
+MINIO_SECRET_KEY=CHANGEME123
+ENV=dev
+PINES_API_URL=&lt;&gt;  # if using PINES
+</code></pre>
+<p>CEDARS is a flask web application and depends on the following software:</p>
+<ol>
+<li>
+<p>Python 3.9 or later</p>
+<p>You can install Python from the <a href="https://www.python.org/downloads/">official website</a>.</p>
+<p>If you have multiple python versions installed, you can manage the environments using <a href="https://github.com/pyenv/pyenv?tab=readme-ov-file#installation">pyenv</a></p>
+</li>
+<li>
+<p>Poetry</p>
+<p>To install poetry, run pipx install poetry or follow the <a href="https://python-poetry.org/docs/">instructions</a>.</p>
+</li>
+<li>
+<p>Mongo 7.0 or later</p>
+<p>For using Mongo, you have multiple options:</p>
+<ul>
+<li>You might use your own enterprise Mongo instance</li>
+<li>You can use a cloud-based service like <a href="https://www.mongodb.com/cloud/atlas">MongoDB Atlas</a></li>
+<li>You can run a local instance of Mongo using Docker</li>
+<li>You can run a local instance of Mongo using the <a href="https://docs.mongodb.com/manual/installation/">official installation</a></li>
+</ul>
+</li>
+<li>
+<p>Minio</p>
+<p>Similar to Mongo, you have multiple options to install MINIO</p>
+<ul>
+<li>You might use your own enterprise MINIO instance</li>
+<li>You can use a cloud-based service like <a href="https://min.io/">MINIO</a></li>
+<li>You can run a local instance of MINIO using <a href="https://min.io/docs/minio/container/index.html">Docker</a></li>
+<li>You can run a local instance of MINIO using the <a href="https://docs.min.io/docs/minio-quickstart-guide.html">official installation</a></li>
+</ul>
+</li>
+</ol>
+<h4 id="docker-requirement">Docker Requirement</h4>
+<div class="admonition note">
+<p class="admonition-title">TIP</p>
+<p>This is the easiest way to run CEDARS and encapsulates all dependencies above."</p>
+</div>
+<p>Install <a href="https://docs.docker.com/get-docker/">Docker</a> and <a href="https://docs.docker.com/compose/install/">Docker Compose</a>.</p>
+<h3 id="system-architecture">System Architecture</h3>
+<p><img alt="CEDARS Operational Schema" src="../pics/GitHub%20Docker%20Schema%20C.png" /></p>
+<p>The CEDARS application runs on a web server and generates an online graphical user interface (GUI) using Flask. All data are stored in a MongoDB instance hosted separately. However, most CEDARS instances are dockerized in order to streamline the project setup process and ensure adequate compatibility of dependencies.</p>
+<p>Once the instance is running, electronic health record (EHR) documents are imported and processed through the CEDARS natural language processing (NLP) pipeline. Additional document annotation with a PINES model is optional. A CEDARS annotation project can be set up entirely from the GUI, using the administrator panel. The existing annotations can be downloaded at any point from this interface.</p>
+<p>Annotators can connect to the CEDARS app by accessing a web URL provided by the administrator. CEDARS performs the operations to pull selected documents from the database, process them and present them to the annotators. Data entered by users is processed by CEDARS and saved to the database. Multiple users can work on one CEDARS project at the same time. The application will automatically select individual patient records for each user. Record locking is implemented to prevent collisions and inconsistencies.</p>
+<h3 id="installing-cedars">Installing CEDARS</h3>
+<p>To isntall CEDARS, please start by cloning the repository and installing the required dependencies. You can then run the app locally or using Docker.</p>
+<ul>
+<li>Clone the Repo: <code>git clone git@github.com:CEDARS-NLP/CEDARS.git</code> </li>
+<li>Change directory: <code>cd CEDARS</code></li>
+<li>Download submodules: <code>git pull -v --recurse-submodules</code></li>
+</ul>
+<h4 id="standalone-cedars-python-package-installation">Standalone CEDARS Python Package Installation</h4>
+<p>Make sure all the local requirements <a href="#detailed-requirements">above</a> are met. Then, you can install the package using Poetry:</p>
+<pre><code class="language-shell">$ cd cedars
+$ poetry install  # do not cd into cedars/app
+$ cd app
+$ poetry run python -m app.wsgi
+</code></pre>
+<h4 id="docker-deployment">Docker Deployment</h4>
+<p>The most straightforward way to complete a CEDARS project is via docker containers. This approach allows fast and reliable installation on prems or in the cloud with on-demand access to compute resources, including graphics processing unit (GPU). Inclusion of required dependencies in the containers mitigate the problems associated with version incompatibilities inherent to <em>ad hoc</em> builds. Docker images can be easily installed in air-gapped environment, which is sometimes an institutional requirement. A CEDARS docker deployment will include:</p>
+<ul>
+<li>CEDARS Flask web server</li>
+<li>MongoDB database service</li>
+<li>MINIO object storage service</li>
+<li>PINES NLP annotation service (optional)</li>
+</ul>
+<p>Each component runs as a service encapsulated in a docker container. Those three elements a coordinated within a deployment.The PINES service requires a GPU for model training. This is optional for inference (i.e. annotating documents).</p>
+<p>After cloning as described above, run the following commands:</p>
+<pre><code class="language-shell">$ cd cedars
+$ docker-compose up --build -d
+</code></pre>
+<p>and navigate to http://<hostaddress>:5001</p>
+<h2 id="project-execution">Project Execution</h2>
+<h3 id="overview">Overview</h3>
+<p>Determining clinical event dates with CEDARS is a simple, sequential process:</p>
+<p><img alt="CEDARS Project Execution" src="../pics/GitHub%20Schema%207%20B.png" /></p>
+<p>After generation of a CEDARS instance, EHR documents are uploaded, a keyword search query is generated and automatic NLP annotations are launched, following which manual data entry can begin. If known event dates exist, those can be imported before annotator work starts. Once all patient records have been annotated manually for clinical events, the dataset can be downloaded and used immediately in time-to-event analyses. Alternatively, estimated event dates can be obtained without the human review step if a PINES model of satisfactory accuracy was used to classify documents.</p>
+<p>The package authors suggest that a random sample of patients be selected for manual review via independent means. If performance metrics are unsatisfactory, the search query can be modified and CEDARS annotations updated through the same process.</p>
+<h3 id="setting-up-a-cedars-project-and-users">Setting Up a CEDARS Project and Users</h3>
+<p>The first step after running CEDARS is to set up a new project. This is done by the administrator through the GUI. The following steps are required:</p>
+<p>1. At first login, the administrator will be prompted to register a new user. This user will be the administrator of the project.</p>
+<p>2. The administrator will then fill in Project Details such as Project Name.</p>
+<p>3. The administrator can also create new users who will only work on the Annotation Interface.</p>
+<p>4. Administrator will provide the credentials to the annotators.</p>
+<h3 id="electronic-health-record-corpus-upload"><a href="../upload_data/">Electronic Health Record Corpus Upload</a></h3>
+<h3 id="keyword-search-query-design">Keyword Search Query Design</h3>
+<p>The CEDARS search query incorporates the following wildcards:</p>
+<p>"?": for one character, for example "r?d" would match "red" or "rod" but not "reed"</p>
+<p>"*": for zero to any number of characters, for example "r*" would match "red", "rod", "reed", "rd", etc.</p>
+<p>CEDARS also applies the following Boolean operators:</p>
+<p>"AND": both conditions present
+"OR": either present present
+"!": negation, for example "!red" would only match sentences without the word "red"</p>
+<p>Lastly, the "(" and ")" operators can be used to further develop logic within a query.</p>
+<h4 id="search-query-implementation">Search Query Implementation</h4>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.nlpprocessor.query_to_patterns"></a>
+  <div class="doc doc-contents first">
+  
+      <p>Expected query will be a set of keywords separated
+by OR keyword.</p>
+<p>Each expression separated by OR can have expressions
+combined by AND or NOT and the keywords can also contain
+wildcards.</p>
+<h6 id="cedars.app.nlpprocessor.query_to_patterns--spacy-requirements">Spacy Requirements:</h6>
+<ul>
+<li>! - negation</li>
+<li>Each dictionary in a list matches one token only</li>
+<li>A list matches all the dictionaries inside it (and condition)</li>
+<li>A list of list contains OR conditions</li>
+<li>[{"TEXT": {"REGEX": "abc*"}}] represents one token with regex match</li>
+<li>[{"LOWER": "dvt"}] matches case-insenstitive  DVT</li>
+<li>[{"LEMMA": "embolus"}] matches the lemmatized version of embolus as well in text</li>
+</ul>
+<h6 id="cedars.app.nlpprocessor.query_to_patterns--implementation">Implementation:</h6>
+<ol>
+<li>Split the query by OR</li>
+<li>Split each expression by AND</li>
+<li>Split each expression by NOT</li>
+<li>Split each expression by wildcard</li>
+<li>Convert each expression to a spacy pattern</li>
+<li>Combine the patterns</li>
+<li>Return the combined pattern</li>
+</ol>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span>
+<span class="normal">31</span>
+<span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span>
+<span class="normal">39</span>
+<span class="normal">40</span>
+<span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Expected query will be a set of keywords separated</span>
+<span class="sd">    by OR keyword.</span>
+
+<span class="sd">    Each expression separated by OR can have expressions</span>
+<span class="sd">    combined by AND or NOT and the keywords can also contain</span>
+<span class="sd">    wildcards.</span>
+
+<span class="sd">    ##### Spacy Requirements:</span>
+<span class="sd">    - ! - negation</span>
+<span class="sd">    - Each dictionary in a list matches one token only</span>
+<span class="sd">    - A list matches all the dictionaries inside it (and condition)</span>
+<span class="sd">    - A list of list contains OR conditions</span>
+<span class="sd">      - [{&quot;TEXT&quot;: {&quot;REGEX&quot;: &quot;abc*&quot;}}] represents one token with regex match</span>
+<span class="sd">      - [{&quot;LOWER&quot;: &quot;dvt&quot;}] matches case-insenstitive  DVT</span>
+<span class="sd">      - [{&quot;LEMMA&quot;: &quot;embolus&quot;}] matches the lemmatized version of embolus as well in text</span>
+
+<span class="sd">    ##### Implementation:</span>
+<span class="sd">      1. Split the query by OR</span>
+<span class="sd">      2. Split each expression by AND</span>
+<span class="sd">      3. Split each expression by NOT</span>
+<span class="sd">      4. Split each expression by wildcard</span>
+<span class="sd">      5. Convert each expression to a spacy pattern</span>
+<span class="sd">      6. Combine the patterns</span>
+<span class="sd">      7. Return the combined pattern</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">get_regex_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+        <span class="c1"># Replace &#39;*&#39; with &#39;.*&#39; and &#39;?&#39; with &#39;.&#39;</span>
+        <span class="n">regex_pattern</span> <span class="o">=</span> <span class="s1">&#39;(?i)&#39;</span> <span class="o">+</span> <span class="n">token</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;*&#39;</span><span class="p">,</span> <span class="s1">&#39;.*&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;?&#39;</span><span class="p">,</span> <span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;TEXT&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;REGEX&quot;</span><span class="p">:</span> <span class="n">regex_pattern</span><span class="p">}}</span>
+
+    <span class="k">def</span> <span class="nf">get_lemma_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;LOWER&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">get_negated_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;LOWER&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">,</span> <span class="s2">&quot;OP&quot;</span><span class="p">:</span> <span class="s2">&quot;!&quot;</span><span class="p">}</span>
+
+    <span class="n">or_expressions</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; OR &quot;</span><span class="p">)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[[]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">or_expressions</span><span class="p">))]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">expression</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">or_expressions</span><span class="p">):</span>
+        <span class="n">spacy_pattern</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">expression</span> <span class="o">=</span> <span class="n">expression</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;(&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">and_expressions</span> <span class="o">=</span> <span class="n">expression</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; AND &quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">and_expressions</span><span class="p">:</span>
+            <span class="n">tok</span> <span class="o">=</span> <span class="n">tok</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">tok</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="s2">&quot;*&quot;</span> <span class="ow">in</span> <span class="n">tok</span> <span class="ow">or</span> <span class="s2">&quot;?&quot;</span> <span class="ow">in</span> <span class="n">tok</span><span class="p">:</span>
+                <span class="n">spacy_pattern</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">get_regex_dict</span><span class="p">(</span><span class="n">tok</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="s2">&quot;!&quot;</span> <span class="ow">in</span> <span class="n">tok</span><span class="p">:</span>
+                <span class="n">spacy_pattern</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">get_negated_dict</span><span class="p">(</span><span class="n">tok</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">spacy_pattern</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">get_lemma_dict</span><span class="p">(</span><span class="n">tok</span><span class="p">))</span>
+        <span class="c1"># logger.debug(f&quot;{expression} -&gt; {spacy_pattern}&quot;)</span>
+        <span class="n">res</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">spacy_pattern</span>
+    <span class="k">return</span> <span class="n">res</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+<h3 id="natural-language-processing-annotations">Natural Language Processing Annotations</h3>
+<p>The process of automatically parsing clinical documents before presentation to an annotator is performed in three steps:</p>
+<p>1. <strong>NLP annotation via the SpaCy traditional NLP pipeline</strong>: In this step, sentence boundaries, lemmas and negation status are characterized.</p>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.nlpprocessor.is_negated"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.nlpprocessor.is_negated--negation-detection">Negation Detection</h6>
+<p>This function takes a spacy token and determines if it has been negated in the sentence.</p>
+<pre><code>Ex.
+This is not an apple.
+In the above sentence, the token apple is negated.
+</code></pre>
+
+
+
+<table class="field-list">
+  <colgroup>
+    <col class="field-name" />
+    <col class="field-body" />
+  </colgroup>
+  <tbody valign="top">
+    <tr class="field">
+      <th class="field-name">Parameters:</th>
+      <td class="field-body">
+        <ul class="first simple">
+            <li>
+              <b><code>spacy</code></b>
+                  (<code>token</code>)
+              –
+              <div class="doc-md-description">
+                <p>This is a token of a single word after spacy</p>
+              </div>
+            </li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+
+<table class="field-list">
+  <colgroup>
+    <col class="field-name" />
+    <col class="field-body" />
+  </colgroup>
+  <tbody valign="top">
+    <tr class="field">
+    <th class="field-name">Returns:</th>
+    <td class="field-body">
+      <ul class="first simple">
+          <li>
+            –
+            <div class="doc-md-description">
+              <p>(bool) : True if the token is negated in the sentence.</p>
+            </div>
+          </li>
+      </ul>
+    </td>
+    </tr>
+  </tbody>
+</table>
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_negated</span><span class="p">(</span><span class="n">span</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### Negation Detection</span>
+
+<span class="sd">    This function takes a spacy token and determines if it has been negated in the sentence.</span>
+<span class="sd">    ```</span>
+<span class="sd">    Ex.</span>
+<span class="sd">    This is not an apple.</span>
+<span class="sd">    In the above sentence, the token apple is negated.</span>
+<span class="sd">    ```</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        spacy token : This is a token of a single word after spacy</span>
+<span class="sd">        runs a model on some text.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (bool) : True if the token is negated in the sentence.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">neg_words</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;no&#39;</span><span class="p">,</span><span class="s1">&#39;not&#39;</span><span class="p">,</span><span class="s2">&quot;n&#39;t&quot;</span><span class="p">,</span><span class="s2">&quot;wouldn&#39;t&quot;</span><span class="p">,</span><span class="s1">&#39;never&#39;</span><span class="p">,</span><span class="s1">&#39;nobody&#39;</span><span class="p">,</span><span class="s1">&#39;nothing&#39;</span><span class="p">,</span>
+                 <span class="s1">&#39;neither&#39;</span><span class="p">,</span><span class="s1">&#39;nowhere&#39;</span><span class="p">,</span><span class="s1">&#39;noone&#39;</span><span class="p">,</span>
+                 <span class="s1">&#39;no-one&#39;</span><span class="p">,</span><span class="s1">&#39;hardly&#39;</span><span class="p">,</span><span class="s1">&#39;scarcely&#39;</span><span class="p">,</span><span class="s1">&#39;barely&#39;</span><span class="p">]</span>
+
+    <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">span</span><span class="o">.</span><span class="n">subtree</span><span class="p">:</span>
+        <span class="n">parents</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">ancestors</span><span class="p">)</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">children</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">token</span><span class="o">.</span><span class="n">ancestors</span><span class="p">:</span>
+            <span class="n">children</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">parent</span><span class="o">.</span><span class="n">children</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span><span class="ow">in</span> <span class="p">[</span><span class="n">child</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">children</span><span class="p">])</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">par</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]):</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+        <span class="n">parents_text</span> <span class="o">=</span> <span class="p">[</span><span class="n">par</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]</span>
+        <span class="n">children_text</span> <span class="o">=</span> <span class="p">[</span><span class="n">child</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">children</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">neg_words</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">parents_text</span> <span class="ow">or</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">children_text</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">return</span> <span class="kc">False</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+<p>2. <strong>Keyword query matching</strong>: only documents with at least one sentence matching the search query are retained. Sentences from documents without a matched will be marked as reviewed. Patients with no remaining sentences/documents will be considered not to have sustained the event of interest and will not be reviewed manually.</p>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.nlpprocessor.NlpProcessor.process_notes"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.nlpprocessor.NlpProcessor.process_notes--process-query-matching">Process Query Matching</h6>
+<p>This function takes a medical note and a regex query as input and annotates
+the relevant sections of the text.</p>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">process_notes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient_id</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">processes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### Process Query Matching</span>
+
+<span class="sd">    This function takes a medical note and a regex query as input and annotates</span>
+<span class="sd">    the relevant sections of the text.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># nlp_model = spacy.load(model_name)</span>
+    <span class="n">matcher</span> <span class="o">=</span> <span class="n">Matcher</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nlp_model</span><span class="o">.</span><span class="n">vocab</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">matcher</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_search_query</span><span class="p">()</span>
+
+    <span class="c1"># load previosly processed documents</span>
+    <span class="c1"># document_processed = load_progress()</span>
+    <span class="n">spacy_patterns</span> <span class="o">=</span> <span class="n">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">spacy_patterns</span><span class="p">):</span>
+        <span class="n">matcher</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DVT_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">item</span><span class="p">])</span>
+
+    <span class="c1"># check all documents already processed</span>
+    <span class="k">if</span> <span class="n">patient_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">documents_to_process</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">documents_to_process</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_documents_to_annotate</span><span class="p">()</span>
+    <span class="n">document_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">document</span> <span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">documents_to_process</span><span class="p">]</span>
+    <span class="n">document_text</span> <span class="o">=</span> <span class="p">[</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">document_list</span><span class="p">]</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">db</span><span class="o">.</span><span class="n">get_total_counts</span><span class="p">(</span><span class="s1">&#39;NOTES&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> to process&quot;</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sample document: </span><span class="si">{</span><span class="n">document_text</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">100</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">annotations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nlp_model</span><span class="o">.</span><span class="n">pipe</span><span class="p">(</span><span class="n">document_text</span><span class="p">,</span>
+                                      <span class="n">n_process</span><span class="o">=</span><span class="n">processes</span><span class="p">,</span>
+                                      <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting to process document annotations: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_text</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">document</span><span class="p">,</span> <span class="n">doc</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">document_list</span><span class="p">,</span> <span class="n">annotations</span><span class="p">):</span>
+        <span class="n">match_count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">sent_no</span><span class="p">,</span> <span class="n">sentence_annotation</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">sents</span><span class="p">):</span>
+            <span class="n">sentence_text</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="o">.</span><span class="n">text</span>
+            <span class="n">matches</span> <span class="o">=</span> <span class="n">matcher</span><span class="p">(</span><span class="n">sentence_annotation</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">matches</span><span class="p">:</span>
+                <span class="n">match_count</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">token_id</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">match</span>
+                <span class="n">token</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">]</span>
+                <span class="c1"># print(sentence_annotation)</span>
+                <span class="n">has_negation</span> <span class="o">=</span> <span class="n">is_negated</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+                <span class="n">start_index</span> <span class="o">=</span> <span class="n">sentence_text</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">,</span> <span class="n">start</span><span class="p">)</span>
+                <span class="n">end_index</span> <span class="o">=</span> <span class="n">start_index</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+                <span class="n">token_start</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">start_char</span>
+                <span class="n">token_end</span> <span class="o">=</span> <span class="n">token_start</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+                <span class="n">annotation</span> <span class="o">=</span> <span class="p">{</span>
+                                <span class="s2">&quot;sentence&quot;</span> <span class="p">:</span> <span class="n">sentence_text</span><span class="p">,</span>
+                                <span class="s2">&quot;token&quot;</span> <span class="p">:</span> <span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">,</span>
+                                <span class="s2">&quot;isNegated&quot;</span> <span class="p">:</span> <span class="n">has_negation</span><span class="p">,</span>
+                                <span class="s2">&quot;start_index&quot;</span> <span class="p">:</span> <span class="n">start_index</span><span class="p">,</span>
+                                <span class="s2">&quot;end_index&quot;</span> <span class="p">:</span> <span class="n">end_index</span><span class="p">,</span>
+                                <span class="s2">&quot;note_start_index&quot;</span> <span class="p">:</span> <span class="n">token_start</span><span class="p">,</span>
+                                <span class="s2">&quot;note_end_index&quot;</span> <span class="p">:</span> <span class="n">token_end</span><span class="p">,</span>
+                                <span class="s2">&quot;sentence_number&quot;</span> <span class="p">:</span> <span class="n">sent_no</span>
+                                <span class="p">}</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s1">&#39;note_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_id&quot;</span><span class="p">]</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;text_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_date&quot;</span><span class="p">]</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;event_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;comments&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;reviewed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="n">db</span><span class="o">.</span><span class="n">insert_one_annotation</span><span class="p">(</span><span class="n">annotation</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">match_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">db</span><span class="o">.</span><span class="n">mark_note_reviewed</span><span class="p">(</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_id&quot;</span><span class="p">],</span> <span class="n">reviewed_by</span><span class="o">=</span><span class="s2">&quot;CEDARS&quot;</span><span class="p">)</span>
+        <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">count</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed </span><span class="si">{</span><span class="n">count</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2"> documents&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+<p>3. <strong>Transformer model labelling</strong> (optional): individual documents are labelled for their probability (<em>p</em>) of occurring at or after a clinical event. This last step is facultative and offers the possibility of further narrowing the scope of material to be reviewed manually, further improving efficiency. Documents with a <em>p</em> inferior to the predetermined threshold and their associated sentences are marked as reviewed. Patients with no remaining sentences/documents will be considered not to have sustained the event of interest and will not be reviewed manually.</p>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.db.get_prediction"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.db.get_prediction--pines-predictions">PINES predictions</h6>
+<p>Get prediction from endpoint. Text goes in the POST request.</p>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/db.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">893</span>
+<span class="normal">894</span>
+<span class="normal">895</span>
+<span class="normal">896</span>
+<span class="normal">897</span>
+<span class="normal">898</span>
+<span class="normal">899</span>
+<span class="normal">900</span>
+<span class="normal">901</span>
+<span class="normal">902</span>
+<span class="normal">903</span>
+<span class="normal">904</span>
+<span class="normal">905</span>
+<span class="normal">906</span>
+<span class="normal">907</span>
+<span class="normal">908</span>
+<span class="normal">909</span>
+<span class="normal">910</span>
+<span class="normal">911</span>
+<span class="normal">912</span>
+<span class="normal">913</span>
+<span class="normal">914</span>
+<span class="normal">915</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### PINES predictions</span>
+
+<span class="sd">    Get prediction from endpoint. Text goes in the POST request.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;PINES_API_URL&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1">/predict&#39;</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">note</span><span class="p">}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+        <span class="n">response</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">&quot;prediction&quot;</span><span class="p">]</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;score&quot;</span><span class="p">)</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;label&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">score</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">score</span> <span class="k">if</span> <span class="s2">&quot;0&quot;</span> <span class="ow">in</span> <span class="n">label</span> <span class="k">else</span> <span class="n">score</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">score</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">score</span> <span class="k">if</span> <span class="n">label</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">score</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Got prediction for note: </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2"> with score: </span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2"> and label: </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">score</span>
+    <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">RequestException</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to get prediction for note: </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">e</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.db.predict_and_save"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.db.predict_and_save--save-pines-predictions">Save PINES predictions</h6>
+<p>Predict and save the predictions for the given text_ids.</p>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/db.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">941</span>
+<span class="normal">942</span>
+<span class="normal">943</span>
+<span class="normal">944</span>
+<span class="normal">945</span>
+<span class="normal">946</span>
+<span class="normal">947</span>
+<span class="normal">948</span>
+<span class="normal">949</span>
+<span class="normal">950</span>
+<span class="normal">951</span>
+<span class="normal">952</span>
+<span class="normal">953</span>
+<span class="normal">954</span>
+<span class="normal">955</span>
+<span class="normal">956</span>
+<span class="normal">957</span>
+<span class="normal">958</span>
+<span class="normal">959</span>
+<span class="normal">960</span>
+<span class="normal">961</span>
+<span class="normal">962</span>
+<span class="normal">963</span>
+<span class="normal">964</span>
+<span class="normal">965</span>
+<span class="normal">966</span>
+<span class="normal">967</span>
+<span class="normal">968</span>
+<span class="normal">969</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">predict_and_save</span><span class="p">(</span><span class="n">text_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                     <span class="n">note_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;NOTES&quot;</span><span class="p">,</span>
+                     <span class="n">pines_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;PINES&quot;</span><span class="p">,</span>
+                     <span class="n">force_update</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### Save PINES predictions</span>
+
+<span class="sd">    Predict and save the predictions for the given text_ids.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">notes_collection</span> <span class="o">=</span> <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="p">[</span><span class="n">note_collection_name</span><span class="p">]</span>
+    <span class="n">pines_collection</span> <span class="o">=</span> <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="p">[</span><span class="n">pines_collection_name</span><span class="p">]</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">text_ids</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;text_id&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;$in&quot;</span><span class="p">:</span> <span class="n">text_ids</span><span class="p">}}</span>
+
+    <span class="n">cedars_notes</span> <span class="o">=</span> <span class="n">notes_collection</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">note</span> <span class="ow">in</span> <span class="n">cedars_notes</span><span class="p">:</span>
+        <span class="n">note_id</span> <span class="o">=</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_id&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">force_update</span> <span class="ow">or</span> <span class="n">get_note_prediction_from_db</span><span class="p">(</span><span class="n">note_id</span><span class="p">,</span> <span class="n">pines_collection_name</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Predicting for note: </span><span class="si">{</span><span class="n">note_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">prediction</span> <span class="o">=</span> <span class="n">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">))</span>
+            <span class="n">pines_collection</span><span class="o">.</span><span class="n">insert_one</span><span class="p">({</span>
+                <span class="s2">&quot;text_id&quot;</span><span class="p">:</span> <span class="n">note_id</span><span class="p">,</span>
+                <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;predicted_score&quot;</span><span class="p">:</span> <span class="n">prediction</span><span class="p">,</span>
+                <span class="s2">&quot;report_type&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_tag_3&quot;</span><span class="p">),</span>
+                <span class="s2">&quot;document_type&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_tag_1&quot;</span><span class="p">)</span>
+                <span class="p">})</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+<h3 id="event-pre-loading">Event Pre-Loading</h3>
+<p>Sometimes a cohort of patients will already have been assessed with other methods and CEDARS is used as a redundant method to pick up any previously missed events. In this use case, a list of known clinical events with their dates will exist. This information can be loaded on CEDARS as a "starting point", so as to avoid re-discovering already documented events.</p>
+<h3 id="manual-assessment-for-clinical-events">Manual Assessment for Clinical Events</h3>
+<p>The process by which human abstractors annotate patient records for events is described in the <a href="../CEDARS_annotator_manual/">End User Manual</a>. This step can be skipped altogether if a PINES model was used to classify documents. An estimated event date will be generated by PINES. Transformer models often exhibit sufficient performance to be used without individual record review, but an audit step as detailed below is strongly advised to confirm satisfactory sensitivity, specifcity and event time estimation.</p>
+<h3 id="dataset-download">Dataset Download</h3>
+<p>Once there are no patient records left to review, event data can be downloaded from the database via the GUI Detailed information is provided including clinical event dates, individual annotator contribution and review times. If a PINES model was used but no manual annotations were applied, estimated event dates can be used in a time-to-event analysis instead of manual entry.</p>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.ops.download_file"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.ops.download_file--download-completed-annotations">Download Completed Annotations</h6>
+<p>This generates a CSV file with the following specifications:
+1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.
+2. For each patient -
+    a. list the number of total notes in the database
+    b. list the number of reviewed notes
+    c. list the number of total sentences from annotations
+    d. list the number of reviewed sentences
+    e. list all sentences as a list of strings
+    f. add event date from the annotations for each patient
+    g. add the first and last note date for each patient
+3. Convert all columns to proper datatypes</p>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/ops.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span>
+<span class="normal">462</span>
+<span class="normal">463</span>
+<span class="normal">464</span>
+<span class="normal">465</span>
+<span class="normal">466</span>
+<span class="normal">467</span>
+<span class="normal">468</span>
+<span class="normal">469</span>
+<span class="normal">470</span>
+<span class="normal">471</span>
+<span class="normal">472</span>
+<span class="normal">473</span>
+<span class="normal">474</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span>
+<span class="normal">478</span>
+<span class="normal">479</span>
+<span class="normal">480</span>
+<span class="normal">481</span>
+<span class="normal">482</span>
+<span class="normal">483</span>
+<span class="normal">484</span>
+<span class="normal">485</span>
+<span class="normal">486</span>
+<span class="normal">487</span>
+<span class="normal">488</span>
+<span class="normal">489</span>
+<span class="normal">490</span>
+<span class="normal">491</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/download_annotations&#39;</span><span class="p">)</span>
+<span class="nd">@auth</span><span class="o">.</span><span class="n">admin_required</span>
+<span class="k">def</span> <span class="nf">download_file</span> <span class="p">(</span><span class="n">filename</span> <span class="o">=</span> <span class="s1">&#39;annotations.csv&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### Download Completed Annotations</span>
+
+<span class="sd">    This generates a CSV file with the following specifications:</span>
+<span class="sd">    1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.</span>
+<span class="sd">    2. For each patient -</span>
+<span class="sd">        a. list the number of total notes in the database</span>
+<span class="sd">        b. list the number of reviewed notes</span>
+<span class="sd">        c. list the number of total sentences from annotations</span>
+<span class="sd">        d. list the number of reviewed sentences</span>
+<span class="sd">        e. list all sentences as a list of strings</span>
+<span class="sd">        f. add event date from the annotations for each patient</span>
+<span class="sd">        g. add the first and last note date for each patient</span>
+<span class="sd">    3. Convert all columns to proper datatypes</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Downloading annotations&quot;</span><span class="p">)</span>
+    <span class="n">patients</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_all_patients</span><span class="p">()</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">patient</span> <span class="ow">in</span> <span class="n">patients</span><span class="p">:</span>
+        <span class="n">patient_id</span> <span class="o">=</span> <span class="n">patient</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span>
+        <span class="n">notes</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_all_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="n">reviewed_notes</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">reviewed_sentences</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_annotation_ids</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="n">key</span><span class="o">=</span><span class="s2">&quot;sentence&quot;</span><span class="p">)</span>
+        <span class="n">unreviewed_sentences</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_annotation_ids</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="n">key</span><span class="o">=</span><span class="s2">&quot;sentence&quot;</span><span class="p">)</span>
+        <span class="n">sentences</span> <span class="o">=</span> <span class="n">reviewed_sentences</span> <span class="o">+</span> <span class="n">unreviewed_sentences</span>
+        <span class="n">total_sentences</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">sentences</span><span class="p">)</span>
+        <span class="n">event_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_event_date</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="n">first_note_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_first_note_date_for_patient</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="n">last_note_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_last_note_date_for_patient</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">patient_id</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">notes</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">reviewed_notes</span><span class="p">),</span>
+                     <span class="n">total_sentences</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">reviewed_sentences</span><span class="p">),</span> <span class="n">reviewed_sentences</span><span class="p">,</span>
+                     <span class="n">event_date</span><span class="p">,</span> <span class="n">first_note_date</span><span class="p">,</span> <span class="n">last_note_date</span><span class="p">])</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;total_notes&quot;</span><span class="p">,</span> <span class="s2">&quot;reviewed_notes&quot;</span><span class="p">,</span> <span class="s2">&quot;total_sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;reviewed_sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;event_date&quot;</span><span class="p">,</span> <span class="s2">&quot;first_note_date&quot;</span><span class="p">,</span> <span class="s2">&quot;last_note_date&quot;</span><span class="p">])</span>
+    <span class="n">data_bytes</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">()</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+    <span class="n">csv_buffer</span> <span class="o">=</span> <span class="n">BytesIO</span><span class="p">(</span><span class="n">data_bytes</span><span class="p">)</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">put_object</span><span class="p">(</span><span class="s2">&quot;cedars&quot;</span><span class="p">,</span>
+                      <span class="n">filename</span><span class="p">,</span>
+                      <span class="n">data</span><span class="o">=</span><span class="n">csv_buffer</span><span class="p">,</span>
+                      <span class="n">length</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">data_bytes</span><span class="p">),</span>
+                      <span class="n">content_type</span><span class="o">=</span><span class="s2">&quot;application/csv&quot;</span><span class="p">)</span>
+    <span class="n">file_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">current_app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;UPLOAD_FOLDER&#39;</span><span class="p">],</span> <span class="n">filename</span><span class="p">)</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">fget_object</span><span class="p">(</span><span class="s2">&quot;cedars&quot;</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File saved to </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">send_file</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">as_attachment</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+<h3 id="audit">Audit</h3>
+<p>CEDARS is by definition semi-automated, and depending on the specific use case and search query some events might be missed. This problem should be quantified by means of a systematic, old-fashion review of randomly selected patients. Typically, at least 200 patients would be selected and their corpora reviewed manually for events. Alternatively, a different method (e.g. billing codes) could be used. This audit dataset should be overlapped with the CEDARS event table to estimate sensitivity of the search query in the cohort at large. If this parameter falls below the previously established minimum acceptable value, the search query scope should be broadened, followed by a database reset, uploading of previously identified events and a new human annotation pass, followed by a repeat audit.</p>
+<h3 id="project-termination">Project Termination</h3>
+<p>Once all events have been tallied and the audit results are satisfactory, if desired the CEDARS project database can be deleted from the MongoDB database. This is an irreversible operation.</p>
+<p>In future, there will be way to archive CEDARS projects, but this feature is not yet available.</p>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.db.terminate_project"></a>
+  <div class="doc doc-contents first">
+  
+      <h6 id="cedars.app.db.terminate_project--terminate-the-project">Terminate the Project</h6>
+<p>Reset the database to the initial state.</p>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/db.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">972</span>
+<span class="normal">973</span>
+<span class="normal">974</span>
+<span class="normal">975</span>
+<span class="normal">976</span>
+<span class="normal">977</span>
+<span class="normal">978</span>
+<span class="normal">979</span>
+<span class="normal">980</span>
+<span class="normal">981</span>
+<span class="normal">982</span>
+<span class="normal">983</span>
+<span class="normal">984</span>
+<span class="normal">985</span>
+<span class="normal">986</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">terminate_project</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    ##### Terminate the Project</span>
+
+<span class="sd">    Reset the database to the initial state.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Terminating project.&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;ANNOTATIONS&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;NOTES&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;PATIENTS&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;USERS&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;QUERY&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;PINES&quot;</span><span class="p">)</span>
+    <span class="n">create_project</span><span class="p">(</span><span class="n">project_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">slug</span><span class="p">(),</span>
+                   <span class="n">investigator_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">name</span><span class="p">())</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../ABOUT/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../CEDARS_annotator_manual/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
