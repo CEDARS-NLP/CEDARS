@@ -12,9 +12,17 @@ environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")
 
 logger.remove()
-logger.add("cedars_{time}.log",
-           rotation="1 day", enqueue=True, level="INFO", format="{time} - {level} - {message}")
-logger.add(sys.stderr, format="{time} {level} {message}", filter="cedars", level="INFO", colorize=True)
+logger.add("cedars.log",
+           rotation="1 day",
+           enqueue=True,
+           level="DEBUG",
+           format="{time} - {level} - {message}")
+
+logger.add(sys.stdout,
+           format="{time} {level} {message}",
+           filter="cedars",
+           level="DEBUG",
+           colorize=True)
 
 app = create_app(f"config.{environment.title()}")
 

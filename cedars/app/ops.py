@@ -449,6 +449,8 @@ def _format_date(date_obj):
 @auth.admin_required
 def download_file (filename = 'annotations.csv'):
     """
+    ##### Download Completed Annotations
+
     This generates a CSV file with the following specifications:
     1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.
     2. For each patient -
@@ -461,6 +463,7 @@ def download_file (filename = 'annotations.csv'):
         g. add the first and last note date for each patient
     3. Convert all columns to proper datatypes
     """
+    logger.info("Downloading annotations")
     patients = db.get_all_patients()
     data = []
     for patient in patients:
@@ -488,4 +491,5 @@ def download_file (filename = 'annotations.csv'):
                       content_type="application/csv")
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
     client.fget_object("cedars", filename, file_path)
+    logger.info(f"File saved to {file_path}")
     return send_file(file_path, as_attachment=True)

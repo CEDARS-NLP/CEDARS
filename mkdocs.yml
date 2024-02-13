@@ -16,7 +16,11 @@ theme:
 
 plugins: 
   - search
+  - mkdocstrings
   # - with-pdf Could not install
   
+markdown_extensions: 
+  - admonition
+
 extra_css:
   - style.css

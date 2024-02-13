@@ -18,13 +18,13 @@ If you adjudicate a sentence as reporting no event, CEDARS will present the next
 
 ## Login
 
-
+Go to your `CEDARS URL` and use the `credentials` provided by the administrator.
 
 ## Find Clinical Events
 
 As soon as you are logged in, CEDARS will start looking for the next available patient with information to review. It might take a few moments before the first sentence is presented to you. The following is an example from a simulated cohort:
 
-![Simulated Patient Example - Data Entry Interface](pics/interface%20A.png)
+![Simulated Patient Example - Data Entry Interface](pics/adjudicate_annotations.png)
 
 Keywords or concepts are highlighted in red to help you locate them in the text.
 

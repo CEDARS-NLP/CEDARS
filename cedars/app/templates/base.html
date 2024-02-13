@@ -5,13 +5,13 @@
 <nav class="navbar navbar-light bg-light mb-5  nav-tabs d-flex">
     <div class="container-fluid">
 
-        <a class="navbar-brand" href="/">
+        <a class="navbar-brand" href="/" style="display: flex; align-items: center; justify-content: center;">
             <img src="{{ url_for('static', filename='project_logo.png') }}" alt="" width="24" height="24"
                  class="d-inline-block align-text-top">
             CEDARS
         </a>
         <div class="proj_name d-inline-block align-text-top" id="proj_name">
-                Project Name : {{ project }}
+                Project: {{ project }}
 
         </div>
 
@@ -24,7 +24,7 @@
                     <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" role="button"
                     aria-expanded="false">
 
-                    {{ current_user.username }}
+                    {{ current_user.username.title() }}
 
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end">
@@ -36,11 +36,10 @@
                             <li><a class="dropdown-item" href="/auth/register">Add User</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_data">Upload Data</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_query">Search Query</a></li>
+                            <li><a class="dropdown-item" href="/ops/download_annotations">Download Annotations</a></li>
                             <li><a class="dropdown-item" href="/ops/terminate">Terminate Project</a></li>
                         {% endif %}
-
                         <li><a class="dropdown-item" href="/ops/adjudicate_records">Adjudicate Annotations</a></li>
-                        <li><a class="dropdown-item" href="/ops/download_annotations">Download Annotations</a></li>
                         <li>
                             <hr class="dropdown-divider">
                         </li>
@@ -81,46 +80,6 @@
             </a>
             <div class="text-muted" style="width: 80px; font-size: 14px; text-align: end">
                 Share your feedback!
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal -->
-    <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Share your feedback</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <form class="needs-validation" novalidate action="/" method="post"
-                      enctype=multipart/form-data>
-                    <div class="modal-body">
-                        <div class="form-floating">
-                        <textarea class="form-control" placeholder="Leave a comment here" id="floatingTextarea2"
-                                  style="height: 100px" name="content" required></textarea>
-                            <label for="floatingTextarea2">Comments</label>
-                            <div class="invalid-feedback">
-                                Please enter some feedback.
-                            </div>
-                        </div>
-                        <div class="col-md-12 mt-3">
-                            <label class="form-label">Add a screenshot</label>
-                            <div class="input-group">
-                                <input type="file" class="form-control" value="Upload" name="screenshot">
-                            </div>
-                            <div class="form-text">
-                                To take a screenshot use (Shift + Command + 4)
-                                <a href="https://support.apple.com/en-us/HT201361a" style="text-decoration: none">
-                                    on a Mac
-                                </a> or (Alt + PrtScn) on Windows 10.
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="submit" class="btn btn-primary">Send</button>
-                    </div>
-                </form>
             </div>
         </div>
     </div>
