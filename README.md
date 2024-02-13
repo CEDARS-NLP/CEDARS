@@ -6,7 +6,8 @@ CEDARS \(Clinical Event Detection and Recording System\) is a computational para
 
 ## General Requirements
 
-Rohan to populate
+- Python 3.9 or later
+- Docker
 
 ## Basic Concepts
 
