@@ -1,3 +1,3 @@
-[submodule "pines-api"]
-	path = pines-api
-	url = git@github.com:CEDARS-NLP/pines-api.git
+[submodule "PINES"]
+	path = PINES
+	url = git@github.com:CEDARS-NLP/PINES.git
