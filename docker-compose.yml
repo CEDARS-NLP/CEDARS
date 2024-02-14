@@ -55,7 +55,7 @@ services:
 
   pines:
     build:
-      context: ./pines-api
+      context: ./PINES
     ports:
       - 8036:8036
 
