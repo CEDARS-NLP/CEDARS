@@ -81,11 +81,12 @@ Annotators can connect to the CEDARS app by accessing a web URL provided by the 
 
 ### Installing CEDARS
 
-To isntall CEDARS, please start by cloning the repository and installing the required dependencies. You can then run the app locally or using Docker.
+To install CEDARS, please start by cloning the repository and installing the required dependencies. You can then run the app locally or using Docker.
 
 - Clone the Repo: `git clone git@github.com:CEDARS-NLP/CEDARS.git` 
 - Change directory: `cd CEDARS`
-- Download submodules: `git pull -v --recurse-submodules`
+- Initialize submodules: `git submodule init`
+- Download submodules: `git submodule update`
 
 #### Standalone CEDARS Python Package Installation
 
