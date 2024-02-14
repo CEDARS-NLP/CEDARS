@@ -227,11 +227,12 @@ PINES_API_URL=&lt;&gt;  # if using PINES
 <p>Once the instance is running, electronic health record (EHR) documents are imported and processed through the CEDARS natural language processing (NLP) pipeline. Additional document annotation with a PINES model is optional. A CEDARS annotation project can be set up entirely from the GUI, using the administrator panel. The existing annotations can be downloaded at any point from this interface.</p>
 <p>Annotators can connect to the CEDARS app by accessing a web URL provided by the administrator. CEDARS performs the operations to pull selected documents from the database, process them and present them to the annotators. Data entered by users is processed by CEDARS and saved to the database. Multiple users can work on one CEDARS project at the same time. The application will automatically select individual patient records for each user. Record locking is implemented to prevent collisions and inconsistencies.</p>
 <h3 id="installing-cedars">Installing CEDARS</h3>
-<p>To isntall CEDARS, please start by cloning the repository and installing the required dependencies. You can then run the app locally or using Docker.</p>
+<p>To install CEDARS, please start by cloning the repository and installing the required dependencies. You can then run the app locally or using Docker.</p>
 <ul>
 <li>Clone the Repo: <code>git clone git@github.com:CEDARS-NLP/CEDARS.git</code> </li>
 <li>Change directory: <code>cd CEDARS</code></li>
-<li>Download submodules: <code>git pull -v --recurse-submodules</code></li>
+<li>Initialize submodules: <code>git submodule init</code></li>
+<li>Download submodules: <code>git submodule update</code></li>
 </ul>
 <h4 id="standalone-cedars-python-package-installation">Standalone CEDARS Python Package Installation</h4>
 <p>Make sure all the local requirements <a href="#detailed-requirements">above</a> are met. Then, you can install the package using Poetry:</p>
