@@ -3,34 +3,31 @@
 {% block title %}CEDARS {% endblock %}
 
 {% block content %}
-<div class="w-75 mx-auto">
+
+<div class="container-md col-4">
   <form class="form-inline" method="POST">
 
-    <div class="mb-4">
+    <div class="p-5">
       <h2>Registration</h2>
 
-      <div class="form-group">
+      <div class="mb-3">
         <label for="exampleInputEmail1">Enter Your username</label>
         <input type="text" class="form-control" name="username">
       </div>
-
-      <br>
-
-      <div class="form-group">
+      <div class="mb-3">
         <label>Enter Your password</label>
         <input type="password" class="form-control" name="password">
       </div>
-
-      <br>
-
-      <br>
-
+      <div class="mb-3">
+        <label>Confirm Your password</label>
+        <input type="password" class="form-control" name="confirm_password">
+      </div>
+      <div class="mb-3" form-check>
+        <input type="checkbox" class="form-check-input" id="isadmin" name="isadmin">
+        <label class="form-check-label" for="isadmin"> Is Admin </label>
+      </div>
       <input type="submit" class="btn btn-primary"></button>
-
   </form>
-
-
-
 </div>
 
 {% endblock %}

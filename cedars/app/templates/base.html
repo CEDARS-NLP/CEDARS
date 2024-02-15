@@ -8,11 +8,10 @@
         <a class="navbar-brand" href="/" style="display: flex; align-items: center; justify-content: center;">
             <img src="{{ url_for('static', filename='project_logo.png') }}" alt="" width="24" height="24"
                  class="d-inline-block align-text-top">
-            CEDARS
+            <h4 style="margin: 5px;">CEDARS</h4>
         </a>
-        <div class="proj_name d-inline-block align-text-top" id="proj_name">
+        <div class="fw-bolder" id="proj_name">
                 Project: {{ project }}
-
         </div>
 
 
@@ -88,10 +87,6 @@
 
         .search_div {
             width: 55%;
-        }
-
-        .proj_name {
-            font-size: 20px;
         }
     </style>
 

@@ -3,34 +3,21 @@
 {% block title %}CEDARS {% endblock %}
 
 {% block content %}
-<div class="w-75 mx-auto">
+<div class="container-md col-4">
   <form action="login" class="form-inline" method="POST">
 
-    <div class="mb-4">
+    <div class="p-5">
       <h2>User Login</h2>
-
-      <div class="form-group">
+      <div class="mb-3">
         <label for="exampleInputEmail1">Enter Your username</label>
         <input type="text" class="form-control" name="username">
       </div>
-
-      <br>
-
-      <div class="form-group">
+      <div class="mb-3">
         <label>Enter Your password</label>
         <input type="password" class="form-control" name="password">
       </div>
-
-      <br>
-
-      <br>
-
       <button type="submit" class="btn btn-primary">Submit</button>
-
   </form>
-
-
-
 </div>
 
 
