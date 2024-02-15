@@ -74,19 +74,28 @@ def register():
     if request.method == 'POST':
         username = request.form.get("username")
         password = request.form.get("password")
+        confirm_password = request.form.get("confirm_password")
+        is_admin = request.form.get("isadmin") == "on"
+        print(f"Registering user {username} as admin: {is_admin}")
+
         error = None
-        if not username or not password  or len(username.strip())==0 or len(password.strip())==0:
+        existing_user = db.get_user(username)
+        if password != confirm_password:
+            error = 'Passwords do not match.'
+        elif not username or not password or len(username.strip())==0 or len(password.strip())==0:
             error = "Username and password are required."
 
-        existing_user = db.get_user(username)
-
-        if existing_user or username in ['cedars', 'pines']:
+        elif existing_user or username.lower() in ['cedars', 'pines']:
             error = 'Username already exists or reserved. Please choose a different one.'
 
         if error is None:
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
-            is_admin = not len(db.get_project_users())>0
+            no_admin = not len(db.get_project_users())>0
+
+            if no_admin and not is_admin:
+                is_admin = True
+                flash('First user registered is an admin.')
 
             db.add_user(
                 username=username,
@@ -94,7 +103,10 @@ def register():
                 is_admin=is_admin)
 
             flash('Registration successful.')
-            return redirect(url_for('auth.login'))
+            if no_admin:
+                login_user(User(db.get_user(username)))
+
+            return render_template('index.html', **db.get_info())
         flash(error)
     return render_template('auth/register.html', **db.get_info())
 

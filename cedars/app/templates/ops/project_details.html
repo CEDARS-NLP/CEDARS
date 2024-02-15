@@ -3,81 +3,19 @@
 {% block title %} CEDARS {% endblock %}
 
 {% block content %}
-<div class="w-75 mx-auto">
+<div class="container-md col-4 b-1">
   <form class="form-inline" method="POST" enctype="multipart/form-data">
 
-    <div class="mb-4">
+    <div class="mb-3">
       <h2>Project Details</h2>
-
-      <div class="form-group">
-        <label>CEDARS Version</label>
-        <input type="text" class="form-control" value="{{ __version__ }}" disabled>
-      </div>
-
-      <br>
-
-      <div class="form-group">
+      <div class="mb-4" >
         <label>Project Name</label>
-        <input type="text" class="form-control" name="project_name" value="{{ project_name }}">
+        <input type="text" class="form-control mb-3" name="project_name" value="{{ project_name }}">
+        <button type="submit" class="btn btn-primary p-2">Save Changes</button>
       </div>
-
-      <br>
-
-      <div class="form-group">
-        <label>Upload New Project Logo</label>
-
-        <div class="mb-3">
-          <input class="form-control" type="file" id="formFile" name = "project_logo">
-        </div>
-
-
-    <br>
-
-      <button type="submit" class="btn btn-primary">Save Changes</button>
-
+    </div>
   </form>
-
-
-
 </div>
-
-<style>
-  .panel-default {
-    border-color: #0b0b0b !important;
-  }
-
-  #File-selected{
-      position: absolute;
-      left: 38%;
-      top: 54%;
-    }
-    .holder_default {
-        position: absolute;
-
-        width:26%;
-        height:15.5%;
-        border: 3px dashed #ccc;
-    }
-
-
-    #holder.hover {
-        position: absolute;
-        width:26%;
-        height:15.5%;
-        border: 3px dashed #0c0 !important;
-    }
-
-
-
-    .hidden {
-        visibility: hidden;
-    }
-
-    .visible {
-        visibility: visible;
-    }
-
-</style>
 
 
 {% endblock %}
