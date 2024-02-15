@@ -1,11 +1,5 @@
 {% extends "base.html" %}
-
-
-{% block title %}CEDARS {% endblock %}
-
 {% block content %}
-
-
 <div class="w-75 mx-auto">
 
       <div class="mb-4">
@@ -46,32 +40,9 @@
         <br>
         
         {% if current_user.is_admin == true %}
-            <div class="form-group">
-                <label>Project Name</label>
-                <input type="text" class="form-control" name="project_name" value="{{ project_name }}">
-            </div>
-            </br>
             <a href='/ops/project_details'>
                 <button class="btn btn-primary cedarsstyle">Start Project</button>
             </a>
-            <!-- <a href='/ops/upload_data'>
-                <button class="btn btn-primary cedarsstyle">Upload Data</button>
-            </a>
-            <a href='/ops/upload_query'>
-                <button class="btn btn-primary cedarsstyle">Search Query</button>
-            </a>
-            <a href='/ops/download_annotations'>
-                <button class="btn btn-primary cedarsstyle">Download Data</button>
-            </a>
-            <a href='/stats'>
-                <button class="btn btn-primary cedarsstyle">Project Stats</button>
-            </a>
-            <a href='/auth/register'>
-                <button class="btn btn-primary cedarsstyle">Add Users</button>
-            </a>
-            <a href='/ops/adjudicate_records'>
-                <button class="btn btn-primary cedarsstyle">Adjudicate Records</button>
-            </a> -->
         {% else %}
             <a href='/stats'>
                 <button class="btn btn-primary cedarsstyle">Project Stats</button>

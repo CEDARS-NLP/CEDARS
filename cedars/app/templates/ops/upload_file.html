@@ -3,28 +3,34 @@
 {% block title %}CEDARS {% endblock %}
 
 {% block content %}
-<div class="w-75 mx-auto">
+<div class="container-md col-8" >
   <form action="upload_data" class="form-inline" method="POST" enctype="multipart/form-data">
 
-    <div class="mb-4">
+    <div class="mb-4" col-4>
       <h2>Data Upload</h2>
 
       <div class="mb-3">
         <label for="formFile" class="form-label">Upload a file with patient data.</label>
-        <input class="form-control" type="file" id="formFile" name = "data_file1">
+        <input class="form-control" type="file" id="formFile" name = "data_file">
       </div>
 
+      <div class="form-floating">
+        <select class="form-select" id="miniofile" name="miniofile" aria-label="Floating label select example">
+          <option selected>None</option>
+          {% for file in files %}
+            <option value="{{ file[0] }}">{{ file[0] }} ({{ file[1]//1000 }} KB)</option>
+          {% endfor %}
+        </select>
+        <label for="floatingSelect">Available Files</label>
+      </div>
     <br>
       <div class="btn-group me-2" role="group" aria-label="Second group">
         <button class="btn btn-primary cedars-btn" type="submit" name="submit_button">Upload file</button>
     </div>
 
   </form>
-
-  <br>
-  <br>
-  <br>
-
+</br>
+</br>
   <b>
     <label>Note that to upload data, your file must be in one of the following formats :</label>
   </b>

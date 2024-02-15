@@ -136,12 +136,11 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
     This function is used to open a csv file and load it's contents into the mongodb database.
 
     Args:
-        filepath (str) : The path to the file to load data from.
+        filename (str) : The path to the file to load data from.
         For valid file extensions refer to the allowed_data_file function above.
     Returns:
         None
-    # """
-
+    """
 
     data_frame = load_pandas_dataframe(filepath)
     if data_frame is None:
@@ -167,28 +166,56 @@ def upload_data():
     This is a flask function for the backend logic to upload a file to the database.
     """
 
-    if request.method == "GET":
-        return render_template("ops/upload_file.html", **db.get_info())
+    filename = None
+    if request.method == "POST":
+        filename = None
+        minio_file = request.form.get("miniofile")
+        if minio_file != "None":
+            logger.info(f"Using minio file: {minio_file}")
+            filename = minio_file
+        else:
+            if 'data_file' not in request.files:
+                flash('No file part')
+                return redirect(request.url)
 
-    if "data_file1" not in request.files:
-        return redirect(url_for('ops.upload_data'))
+            file = request.files['data_file']
+            if file.filename == '':
+                flash('No selected file')
+                return redirect(request.url)
+            if file and not allowed_data_file(file.filename):
+                flash("Invalid file type. Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.")
+                return redirect(request.url)
+            
+            filename = f"uploaded_files/{secure_filename(file.filename)}"
+            size = os.fstat(file.fileno()).st_size
+            try:
+                client.put_object("cedars",
+                                filename,
+                                file,
+                                size)
+                logger.info(f"File - {file.filename} uploaded successfully.")
+                flash(f"{filename} uploaded successfully.")
 
-    if "data_file1" in request.files:
-        uploaded_file = request.files["data_file1"]
-        if uploaded_file:
-            size = os.fstat(uploaded_file.fileno()).st_size
-            client.put_object("cedars",
-                               secure_filename(uploaded_file.filename),
-                               uploaded_file,
-                               size)
-            logger.info(f"File - {uploaded_file.filename} uploaded successfully.")
-            EMR_to_mongodb(uploaded_file.filename)
-
-        flash(f"{secure_filename(uploaded_file.filename)} uploaded successfully.")
-        return redirect(url_for('ops.upload_query'))
-
-    return render_template("ops/upload_file.html", **db.get_info())
-
+            except Exception as e:
+                filename = None
+                flash(f"Failed to upload file: {str(e)}")
+                return redirect(request.url)
+        if filename:
+            try:
+                EMR_to_mongodb(filename)
+                flash(f"Data from {filename} uploaded to the database.")
+                return redirect(url_for('ops.upload_query'))
+            except Exception as e:
+                flash(f"Failed to upload data: {str(e)}")
+                return redirect(request.url)
+    try:
+        files = [(obj.object_name, obj.size) for obj in client.list_objects("cedars", prefix="uploaded_files/")]
+    except Exception as e:
+        flash(f"Error listing files: {e}")
+        files = []
+    
+    return render_template("ops/upload_file.html", files=files, **db.get_info())
+    
 
 @bp.route("/upload_query", methods=["GET", "POST"])
 @auth.admin_required
@@ -485,7 +512,7 @@ def download_file (filename = 'annotations.csv'):
     data_bytes = df.to_csv().encode('utf-8')
     csv_buffer = BytesIO(data_bytes)
     client.put_object("cedars",
-                      filename,
+                      f"annotated_files/{filename}",
                       data=csv_buffer,
                       length=len(data_bytes),
                       content_type="application/csv")
