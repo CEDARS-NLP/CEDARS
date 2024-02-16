@@ -11,19 +11,11 @@
 
       <div class="form-group">
         <label for="exampleInputEmail1">Search Query</label>
-        <input type="text" class="form-control" name="regex_query">
+        <input type="text" class="form-control" name="regex_query" value="{{ current_query }}">
         <small class="form-text text-muted">Logical Query: DVT OR (deep AND vein AND thromb*) OR pe OR (pulmonary AND embolism)</small>
       </div>
-
-
       <br>
-
       <button type="submit" class="btn btn-primary">Submit</button>
-
   </form>
-
 </div>
-
-
-
 {% endblock %}
