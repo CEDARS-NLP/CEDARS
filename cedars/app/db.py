@@ -226,11 +226,9 @@ def upload_notes(documents):
         note_info["text_date"] = datetime_obj
         note_info["reviewed"] = False
 
-        if notes_collection.find_one({"text_id": note_info["text_id"]}):
-            logger.error("Cancelling duplicate note entry")
-        else:
-            notes_collection.insert_one(note_info)
-            patient_ids.add(note_info["patient_id"])
+        # text_id should be unique
+        notes_collection.insert_one(note_info)
+        patient_ids.add(note_info["patient_id"])
         if i+1 % 10 == 0:
             logger.info(f"Uploaded {i}/{len(documents)} notes")
 
@@ -277,7 +275,11 @@ def get_search_query():
     All this data is kept in the QUERY collection.
     """
     query = mongo.db["QUERY"].find_one({"current" : True})
-    return query["query"]
+
+    if query:
+        return query["query"]
+    
+    return ""
 
 def get_info():
     """
@@ -378,7 +380,8 @@ def get_patients_to_annotate():
         patient_to_annotate: A single patient that needs to manually reviewed 
     """
     logger.debug("Retriving all un-reviewed patients from database.")
-    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False})
+    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False,
+                                                      "locked": False})
 
     # check is this patient has any unreviewed annotations
     for patient in patients_to_annotate:
@@ -729,13 +732,15 @@ def reset_patient_reviewed():
     Update all patients, notes to be un-reviewed.
     """
     mongo.db["PATIENTS"].update_many({},
-                                     { "$set": { "reviewed": False } })
+                                     { "$set": { "reviewed": False,
+                                                "reviewed_by": "",
+                                                 "comments": [] } })
     mongo.db["NOTES"].update_many({}, { "$set": { "reviewed": False } })
 
 
-def add_annotation_comment(annotation_id, comment):
+def add_comment(annotation_id, comment):
     """
-    Stores a new comment for an annotation.
+    Stores a new comment for a patient.
 
     Args:
         annotation_id (str) : Unique ID for the annotation.
@@ -747,10 +752,11 @@ def add_annotation_comment(annotation_id, comment):
         logger.info("No comment entered.")
         return
     logger.debug(f"Adding comment to annotation #{annotation_id}")
-    annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
-    comments = annotation["comments"]
+    patient_id = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})["patient_id"]
+    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+    comments = patient["comments"]
     comments.append(comment)
-    mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
+    mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
                                        { "$set": { "comments" : comments } })
 
 def set_patient_lock_status(patient_id, status):
@@ -842,53 +848,49 @@ def get_curr_stats():
     """
     Returns basic statistics for the project
 
-    Args:
-        None
-    Returns:
-        stats (list) : List of basic statistics for the project. These include :
-            1. number_of_patients (number of unique patients in the database)
-            2. number_of_annotated_patients (number of patiens who had notes
-                in which key words were found)
-            3. number_of_reviewed
-                        (number of patients who have been reviewed for the current query)
     """
-    # TODO: use aggregation pipeline
     stats = {}
-    patients = get_all_patients()
+    # Aggregation pipeline to count unique patients
+    pipeline_unique_patients = [
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    unique_patients = list(mongo.db.PATIENTS.aggregate(pipeline_unique_patients))
+    stats["number_of_patients"] = len(unique_patients)
 
-    stats["number_of_patients"] = len(list(patients))
+    pipeline_annotated_patients = [
+        {"$match": {"isNegated": False}},
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    annotated_patients = list(mongo.db.ANNOTATIONS.aggregate(pipeline_annotated_patients))
+    stats["number_of_annotated_patients"] = len(annotated_patients)
 
-    annotations = mongo.db["ANNOTATIONS"].find({"isNegated" : False})
-    unique_patients = {annotation["patient_id"] for annotation in annotations}
+    # Aggregation pipeline to count reviewed annotations
+    pipeline_reviewed = [
+        {"$match": {"isNegated": False, "reviewed": True}},
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    reviewed_annotations = list(mongo.db.ANNOTATIONS.aggregate(pipeline_reviewed))
+    stats["number_of_reviewed"] = len(reviewed_annotations)
 
-    stats["number_of_annotated_patients"] = len(unique_patients)
-
-    num_reviewed_annotations = 0
-
-    for p_id in unique_patients:
-        p_anno = mongo.db["PATIENTS"].find_one({"patient_id" : p_id})
-
-        if p_anno["reviewed"] is True:
-            num_reviewed_annotations += 1
-
-    stats["number_of_reviewed"] = num_reviewed_annotations
-
-    pipeline = [
-            {"$match": {"isNegated": False}},
-            {"$group": {"_id": "$token", "count": {"$sum": 1}}}
+    # pipeline for notes and reviewed by user for notes with reviewed_by field
+    pipeline_notes = [
+        {"$match": {"reviewed": True}},
+        {"$group": {"_id": "$reviewed_by", "count": {"$sum": 1}}}
     ]
 
-    # Perform aggregation
-    results = mongo.db.ANNOTATIONS.aggregate(pipeline)
+    reviewed_notes = list(mongo.db.NOTES.aggregate(pipeline_notes))
+    stats["user_review_stats"] = {doc["_id"]: doc["count"] for doc in reviewed_notes}
+    # Aggregation pipeline for lemma distribution
+    pipeline_lemma_dist = [
+        {"$match": {"isNegated": False}},
+        {"$group": {"_id": "$token", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$project": {"token": "$_id", "_id": 0, "count": 1}}
+    ]
+    lemma_dist_results = mongo.db.ANNOTATIONS.aggregate(pipeline_lemma_dist)
+    stats['lemma_dist'] = {doc['token']: doc['count'] for doc in lemma_dist_results}
 
-    # Convert aggregation results to a dictionary
-    lemma_dist = {result["_id"]: result["count"] for result in results}
-    lemma_dist = {re.sub(r'[^a-zA-Z0-9-_ ]', '', k): v for k, v in sorted(
-        lemma_dist.items(), key=lambda item: item[1], reverse=True)}
-    stats['lemma_dist'] = lemma_dist
-    logger.debug(stats)
     return stats
-
 # pines functions
 def get_prediction(note: str) -> float:
     """

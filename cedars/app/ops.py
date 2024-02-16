@@ -227,7 +227,10 @@ def upload_query():
     # TODO: make regex translation using chatGPT if API is available
 
     if request.method == "GET":
-        return render_template("ops/upload_query.html", **db.get_info())
+        current_query = db.get_search_query()
+        return render_template("ops/upload_query.html",
+                               current_query = current_query,
+                               **db.get_info())
 
     tag_query = {
         "exact": [False],
@@ -315,7 +318,7 @@ def save_adjudications():
         db.delete_annotation_date(current_annotation_id)
 
     def _add_annotation_comment():
-        db.add_annotation_comment(current_annotation_id, request.form['comment'])
+        db.add_comment(current_annotation_id, request.form['comment'])
 
     def _move_to_previous_annotation():
         if session["annotation_number"] > 0:
@@ -334,7 +337,11 @@ def save_adjudications():
         # this could be based on a parameter though
         # TODO: add logic based on tags if we need to keep reviewing
         if db.get_annotation_date(current_annotation_id) is not None:
-            db.mark_patient_reviewed(session["patient_id"], reviewed_by=current_user.username)
+            db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                  reviewed_by=current_user.username)
+            db.mark_patient_reviewed(session["patient_id"],
+                                     reviewed_by=current_user.username)
+            db.set_patient_lock_status(session["patient_id"], False)
             session.pop("patient_id")
         session["annotation_ids"].pop(session["annotation_number"])
         if session["annotation_number"] >= len(session["annotation_ids"]):
@@ -396,7 +403,7 @@ def adjudicate_records():
     logger.debug(f"Current annotation: {annotation}")
     note = db.get_annotation_note(current_annotation_id)
     logger.debug(f"Current note: {note}")
-
+    patient = db.get_patient_by_id(session["patient_id"])
     context = {
         'name': current_user.username,
         'event_date': _format_date(annotation.get('event_date')),
@@ -408,7 +415,8 @@ def adjudicate_records():
         'pos_start': session["annotation_number"] + 1,
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
-        'comments': annotation["comments"],
+        'comments': patient["comments"],
+        'search_query': db.get_search_query(),
         'full_note': highlighted_text(note),
         'tags': [note.get("text_tag_1",""), note.get("text_tag_2", ""), note.get("text_tag_3", ""), note.get("text_tag_4", "")],
         'isLocked': session.get("hasBeenLocked", False),
@@ -456,12 +464,14 @@ def _initialize_session(pt_id=None):
                 "annotation_number": 0,
                 "annotation_ids": db.get_patient_annotation_ids(pt_id)
             })
+            db.set_patient_lock_status(pt_id, True)
         session.modified = True
 
 def _prepare_for_next_patient():
     logger.info(f"Marking patient: {session['patient_id']} as reviewed")
     db.mark_patient_reviewed(session['patient_id'],
                              reviewed_by=current_user.username)
+    db.set_patient_lock_status(session['patient_id'], False)
     session.pop("patient_id")
     _initialize_session()
 

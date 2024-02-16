@@ -31,10 +31,9 @@
 
         <div class="mb-4">
           <ul class="list-group">
-            <li class="list-group-item">Event Date: {{event_date}}</li>
             <li class="list-group-item">
-              <label for="date_entry">Select New Date:</label>
-              <input type="date" name="date_entry" id="date_entry" value="{{event_date}}">
+              <label for="date_entry">Event Date:</label>
+              <input type="date" name="date_entry" id="date_entry" value="{{note_date}}">
             </li>
             <li class="list-group-item">
               <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>
@@ -68,7 +67,8 @@
 
     <div class="col-7">
       <div class="mb-4">
-        <h6 class="text-muted">Found Sentence</h6>
+        <p class="text-muted" ><strong>Search Query </strong>[{{ search_query }}]</p>
+        <h6 class="text-muted">Selected Sentence</h6>
         <div style="height: 150px; width: 100%; overflow-y: auto;">
           {{pre_token_sentence|safe}}
             <mark>
@@ -91,11 +91,8 @@
                         <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>
                     </div>
                 </form>
-
               </div>
-
       </div>
-
       <div class="mb-4">
         <h6 class="text-muted">Full Note {{ note_id }}</h6>
         <div style="height: 600px; width: 100%; overflow-y: auto;">
@@ -104,7 +101,7 @@
       </div>
 
       <div>
-        <table class="table table-hover">
+        <table class="table table-sm">
           <th>
             <td>Tag 1</td>
             <td>Tag 2</td>
@@ -121,9 +118,6 @@
           </tr>
         </table>
       </div>
-
-
-
     </div>
   </div>
 </div>
