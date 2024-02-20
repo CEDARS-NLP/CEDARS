@@ -91,7 +91,7 @@ def register():
         if error is None:
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
-            no_admin = not len(db.get_project_users())>0
+            no_admin = not (db.get_total_counts("USERS")>0)
 
             if no_admin and not is_admin:
                 is_admin = True
@@ -127,7 +127,7 @@ def login():
 
         flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
-    if len(db.get_project_users()) == 0:
+    if db.get_total_counts("USERS") == 0:
         return redirect(url_for('auth.register'))
     return render_template('auth/login.html',  **db.get_info())
 

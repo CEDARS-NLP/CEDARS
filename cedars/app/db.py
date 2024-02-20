@@ -4,14 +4,14 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 
 import os
 from datetime import datetime
+from typing import Optional
+import re
 import requests
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from faker import Faker
 from bson import ObjectId
 from loguru import logger
-from typing import Optional
-import re
 from .database import mongo
 
 load_dotenv()
@@ -138,33 +138,21 @@ def add_user(username, password, is_admin=False):
     Args:
         username (str) : The name of this user.
         password (str) : The password this user will need to login to the system.
-    Returns:
-        None
-    """
-    info = {
-        "user" : username,
-        "password" : password,
-        "is_admin": is_admin,
-        "date_created" : datetime.now()
-    }
-    mongo.db["USERS"].insert_one(info)
-    logger.info(f"Added user {username} to database.")
-
-def add_project_user(username, password, is_admin = False):
-    """
-    Adds a new user to the project database.
-
-    Args:
-        username (str)  : The name of the new user
-        password (str)  : The user's password
         is_admin (bool) : True if the new user is the project admin
                           (used when initializing the project)
     Returns:
         None
     """
     password_hash = generate_password_hash(password)
-    data = {"user" : username, "password" : password_hash, "admin" : is_admin}
-    mongo.db["USERS"].insert_one(data.copy())
+
+    info = {
+        "user" : username,
+        "password" : password_hash,
+        "is_admin": is_admin,
+        "date_created" : datetime.now()
+    }
+    mongo.db["USERS"].insert_one(info.copy())
+    logger.info(f"Added user {username} to database.")
 
 def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
                 skip_after_event, tag_query, date_min = None, date_max = None):
@@ -259,6 +247,30 @@ def insert_one_annotation(annotation):
     annotations_collection.insert_one(annotation)
 
 # Get functions
+def get_total_counts(collection_name: str) -> int:
+    """
+    Returns the total number of documents in a collection.
+
+    Args:
+        collection_name (str) : The name of the collection to search.
+    Returns:
+        count (int) : The number of documents in the collection.
+    """
+    return mongo.db[collection_name].count_documents({})
+
+
+def get_info():
+    """
+    This function returns the info collection in the mongodb database.
+
+    Args:
+        None
+    Returns:
+        info (dict) : A dictionary containing the metadata of the project.
+                      If this data is not found, a 404 exception is thrown.
+    """
+    return mongo.db.INFO.find_one_or_404()
+
 def get_user(username):
     """
     This function is used to get a user from the database.
@@ -271,19 +283,56 @@ def get_user(username):
     user = mongo.db["USERS"].find_one({"user" : username})
     return user
 
+def is_admin_user(username):
+    """
+    Check if the user is admin.
+
+    Args:
+        username (str) : The name of the user to get.
+    Returns:
+        user (dict) : The user object from the database.
+    """
+    user = mongo.db["USERS"].find_one({'user' : username})
+
+    if user is not None and user["is_admin"]:
+        return True
+
+    return False
+
+
 def get_search_query():
     """
     This function is used to get the current search query from the database.
     All this data is kept in the QUERY collection.
+
+    Args:
+        None
+    Returns:
+        info (dict) : A dictionary containing information of the current search query.
     """
     query = mongo.db["QUERY"].find_one({"current" : True})
     return query["query"]
 
-def get_info():
+
+def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
     """
-    This function returns the info collection in the mongodb database.
+    For a given patient, list all note_ids which have matching keyword
+    annotations
+
+    Args:
+        patient_id (int) : The patient_id for which we want to retrieve the
+            annotated notes
+
+    Returns:
+        notes (list[str]) : List of note_ids for the patient which have
+            matching keyword annotations
     """
-    return mongo.db.INFO.find_one_or_404()
+    annotations = mongo.db["ANNOTATIONS"].find({"patient_id": patient_id})
+    notes = set()
+    for annotation in annotations:
+        notes.add(annotation["note_id"])
+
+    return list(notes)
 
 def  get_all_annotations_for_note(note_id):
     """
@@ -292,9 +341,16 @@ def  get_all_annotations_for_note(note_id):
     Order of annotations -
         text_date (ascending)
         note_start_index (ascending)
+    
+    Args:
+        note_id (str) : Unique ID for the note.
+    Returns:
+        annotations (list) : A list of dictionaries where each element is the information
+                             of an annotation associated with that note.
     """
     annotations = mongo.db["ANNOTATIONS"].find({"note_id" : note_id,
-                                                "isNegated": False}).sort([("text_date", 1),("setence_number", 1)])
+                                                "isNegated": False}).sort([("text_date", 1),
+                                                                           ("setence_number", 1)])
     return list(annotations)
 
 def get_annotation(annotation_id):
@@ -329,71 +385,34 @@ def get_annotation_note(annotation_id):
 
     return note
 
-
-def get_patient_by_id(patient_id):
+def get_patient_annotation_ids(p_id, reviewed = False, key = "_id"):
     """
-    Retrives a single patient from mongodb.
+    Retrives all annotation IDs for annotations linked to a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        p_id (int) : Unique ID for a patient.
+        reviewed (bool) : True if we want to get reviewed annotations.
     Returns:
-        patient (dict) : Dictionary for a patient from mongodb.
-                         The keys are the attribute names.
-                         The values are the values of the attribute in that record.
+        annotations (list) : A list of all annotation IDs linked to that patient.
     """
-    logger.debug(f"Retriving patient #{patient_id} from database.")
-    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+    logger.debug(f"Retriving annotations for patient #{p_id} from database.")
+    annotation_ids = mongo.db["ANNOTATIONS"].find({"patient_id": p_id,
+                                                   "reviewed" : reviewed,
+                                                   "isNegated" : False}).sort([("note_id", 1),
+                                                                               ('text_date', 1),
+                                                                            ("sentence_number", 1)])
 
-    return patient
+    return [str(id[key]) for id in annotation_ids]
 
-def get_patient():
-    """
-    Retrives a single patient ID who has not yet been reviewed and is not currently locked.
-    The chosen patient is simply the first one in the database that has not yet been reviewed.
-
-    Args:
-        None
-    Returns:
-        patient_id (int) : Unique ID for a patient.
-    """
-
-    patient = mongo.db["PATIENTS"].find_one({"reviewed" : False,
-                                             "locked" : False})
-
-    if patient is not None and "patient_id" in patient.keys():
-        logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
-        return patient["patient_id"]
-
-    logger.info("Failed to retrive any further un-reviewed patients from the database.")
-    return None
-
-
-def get_patients_to_annotate():
-    """
-    Retrieves a patient that have not been reviewed
-
-    Args:
-        None
-    Returns:
-        patient_to_annotate: A single patient that needs to manually reviewed 
-    """
-    logger.debug("Retriving all un-reviewed patients from database.")
-    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False})
-
-    # check is this patient has any unreviewed annotations
-    for patient in patients_to_annotate:
-        patient_id = patient["patient_id"]
-        annotations = get_patient_annotation_ids(patient_id)
-        if len(annotations) > 0:
-            return patient_id
-        else:
-            continue
-
-    return None
 
 def get_documents_to_annotate():
     """
     Retrives all documents that have not been annotated.
+
+    Args:
+        None
+    Returns:
+        documents_to_annotate (mongodb cursor) : A generator for all the annotations in the db.
     """
     logger.debug("Retriving all annotated documents from database.")
     documents_to_annotate = mongo.db["NOTES"].aggregate(
@@ -413,28 +432,15 @@ def get_documents_to_annotate():
 
     return documents_to_annotate
 
-def get_patient_annotation_ids(p_id, reviewed = False, key = "_id"):
-    """
-    Retrives all annotation IDs for annotations linked to a patient.
-
-    Args:
-        p_id (int) : Unique ID for a patient.
-        reviewed (bool) : True if we want to get reviewed annotations.
-    Returns:
-        annotations (list) : A list of all annotation IDs linked to that patient.
-    """
-    logger.debug(f"Retriving annotations for patient #{p_id} from database.")
-    annotation_ids = mongo.db["ANNOTATIONS"].find({"patient_id": p_id,
-                                                   "reviewed" : reviewed,
-                                                   "isNegated" : False}).sort([("note_id", 1),
-                                                                               ('text_date', 1),
-                                                                               ("sentence_number", 1)])
-
-    return [str(id[key]) for id in annotation_ids]
 
 def get_annotation_date(annotation_id):
     """
     Retrives the event date for an annotation.
+
+    Args:
+        annotation_id (str) : Unique ID for the annotation.
+    Returns:
+        event_date (Date) : The event date for that annotation (None if no date is saved).
     """
     logger.debug(f"Retriving date on annotation #{ObjectId(annotation_id)}.")
     annotation = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})
@@ -446,15 +452,131 @@ def get_annotation_date(annotation_id):
 def get_event_date(patient_id):
     """
     Find the event date from the annotations for a patient.
+
+    Args:
+        annotation_id (int) : Unique ID for a patient.
+    Returns:
+        event_date (Date) : The most relevant event date for that patient.
     """
     logger.debug(f"Retriving event date for patient #{patient_id}.")
     annotations = mongo.db["ANNOTATIONS"].find({"patient_id" : patient_id,
-                                               "event_date" : {"$ne" : None}}).sort([("event_date", 1)])
+                                               "event_date" : 
+                                               {"$ne" : None}}).sort([("event_date",1)])
+
     annotations = list(annotations)
     if len(annotations) > 0:
         return annotations[0]["event_date"]
 
     return None
+
+
+def get_patient(patient_id = None):
+    """
+    If a patient_id is specified,
+        then retrives the data for that patient.
+
+    If no id is specified,
+        then retrives a single patient ID who has not yet been reviewed and is not currently locked.
+        In this case the chosen patient is simply the
+        first one in the database that has not yet been reviewed.
+
+    Args:
+        patient_id (int) : Unique ID for a patient.
+    Returns:
+        patient (dict) : Dictionary for a patient from mongodb.
+                         The keys are the attribute names.
+                         The values are the values of the attribute in that record.
+    """
+
+    if patient_id is not None:
+        logger.debug(f"Retriving patient #{patient_id} from database.")
+        patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+
+        return patient
+
+    patient = mongo.db["PATIENTS"].find_one({"reviewed" : False,
+                                             "locked" : False})
+
+    if patient is not None and "patient_id" in patient.keys():
+        logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
+        return patient
+
+    logger.info("Failed to retrive any further un-reviewed patients from the database.")
+    return None
+
+
+def get_patient_to_annotate():
+    """
+    Retrieves a patient that have not been reviewed
+
+    Args:
+        None
+    Returns:
+        patient_to_annotate: A single patient that needs to manually reviewed 
+    """
+    logger.debug("Retriving all un-reviewed patients from database.")
+    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False})
+
+    # check is this patient has any unreviewed annotations
+    for patient in patients_to_annotate:
+        patient_id = patient["patient_id"]
+        annotations = get_patient_annotation_ids(patient_id)
+        if len(annotations) > 0:
+            return patient_id
+
+    return None
+
+def get_all_patients():
+    """
+    Returns all the patients in this project
+
+    Args:
+        None
+    Returns:
+        patients (list) : List of all patients in this project
+    """
+    patients = mongo.db["PATIENTS"].find()
+
+    return list(patients)
+
+def get_patient_lock_status(patient_id):
+    """
+    Updates the status of the patient to be locked or unlocked.
+
+    Args:
+        patient_id (int) : ID for the patient we are locking / unlocking
+    Returns:
+        status (bool) : True if the patient is locked, False otherwise.
+            If no such patient is found, we return None.
+
+    Raises:
+        None
+    """
+    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+    return patient["locked"]
+
+def get_patient_notes(patient_id, reviewed = False, check_reviewed = True):
+    """
+    Returns all notes for that patient.
+
+    Args:
+        patient_id (int) : ID for the patient
+
+        reviewed (boolean) : True if the patient's notes have already been annotated.
+                             Unused if check_reviewed is False.
+
+        check_reviewed (boolean) : True if we want to only return notes
+                                        that have a particular reviewed status.
+    Returns:
+        notes (list) : A list of all notes for that patient
+    """
+    if not check_reviewed:
+        mongodb_search_query = { "patient_id": patient_id}
+    else:
+        mongodb_search_query = { "patient_id": patient_id, "reviewed": reviewed }
+
+    notes = mongo.db["NOTES"].find(mongodb_search_query)
+    return list(notes)
 
 
 def get_first_note_date_for_patient(patient_id):
@@ -491,156 +613,6 @@ def get_last_note_date_for_patient(patient_id):
     if not note:
         return None
     return note["text_date"]
-
-def get_all_annotations():
-    """
-    Returns a list of all annotations from the database.
-
-    Args:
-        None
-    Returns:
-        Annotations (list) : This is a list of all annotations from the database.
-    """
-    annotations = mongo.db["ANNOTATIONS"].find()
-
-    return list(annotations)
-
-def get_proj_name():
-    """
-    Returns the name of the current project.
-
-    Args:
-        None
-    Returns:
-        proj_name (str) : The name of the current CEDARS project.
-    """
-
-    proj_info = mongo.db["INFO"].find_one_or_404()
-    proj_name = proj_info["project"]
-    return proj_name
-
-def get_curr_version():
-    """
-    Returns the name of the current project.
-
-    Args:
-        None
-    Returns:
-        proj_name (str) : The name of the current CEDARS project.
-    """
-
-    proj_info = mongo.db["INFO"].find_one()
-
-    return proj_info["CEDARS_version"]
-
-def get_project_users():
-    """
-    Returns all the usernames for approved users (including the admin) for this project
-
-    Args:
-        None
-    Returns:
-        usernames (list) : List of all usernames for approved users
-                           (including the admin) for this project
-    """
-    users = mongo.db["USERS"].find({})
-
-    return [user["user"] for user in users]
-
-def get_all_patients():
-    """
-    Returns all the patients in this project
-
-    Args:
-        None
-    Returns:
-        patients (list) : List of all patients in this project
-    """
-    patients = mongo.db["PATIENTS"].find()
-
-    return list(patients)
-
-def get_patient_ids():
-    """
-    Returns all the patient IDs in this project
-
-    Args:
-        None
-    Returns:
-        patient_ids (list) : List of all patient IDs in this project
-    """
-    patients = mongo.db["PATIENTS"].find()
-
-    return [patient["patient_id"] for patient in patients]
-
-def get_patient_lock_status(patient_id):
-    """
-    Updates the status of the patient to be locked or unlocked.
-
-    Args:
-        patient_id (int) : ID for the patient we are locking / unlocking
-    Returns:
-        status (bool) : True if the patient is locked, False otherwise.
-            If no such patient is found, we return None.
-
-    Raises:
-        None
-    """
-    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
-    return patient["locked"]
-
-
-def get_all_notes(patient_id):
-    """
-    Returns all notes for that patient.
-    """
-    notes = mongo.db["NOTES"].find({"patient_id": patient_id})
-    return list(notes)
-
-def get_patient_notes(patient_id, reviewed = False):
-    """
-    Returns all notes for that patient.
-
-    Args:
-        patient_id (int) : ID for the patient
-    Returns:
-        notes (list) : A list of all notes for that patient
-    """
-    mongodb_search_query = { "patient_id": patient_id, "reviewed": reviewed }
-    notes = list(mongo.db["NOTES"].find(mongodb_search_query))
-    return notes
-
-def get_total_counts(collection_name: str) -> int:
-    """
-    Returns the total number of documents in a collection.
-
-    Args:
-        collection_name (str) : The name of the collection to search.
-    Returns:
-        count (int) : The number of documents in the collection.
-    """
-    return mongo.db[collection_name].count_documents({})
-
-def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
-    """
-    For a given patient, list all note_ids which have matching keyword
-    annotations
-
-    Args:
-        patient_id (int) : The patient_id for which we want to retrieve the
-            annotated notes
-
-    Returns:
-        notes (list[str]) : List of note_ids for the patient which have
-            matching keyword annotations
-    """
-    annotations = mongo.db["ANNOTATIONS"].find({"patient_id": patient_id})
-    notes = set()
-    for annotation in annotations:
-        notes.add(annotation["note_id"])
-
-    return list(notes)
-    
 
 # update functions
 def update_project_name(new_name):
@@ -699,39 +671,19 @@ def delete_annotation_date(annotation_id):
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                       { "$set": { "event_date" : None } })
 
-def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed = True):
+def update_annotation_reviewed(note_id: str) -> int:
     """
-    Updates the patient's status to reviewed in the database.
+    Mark all annotations for a note as reviewed.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
-        reviewed_by (str) : The name of the user who reviewed the patient.
-        is_reviewed (bool) : True if patient's annotations have been reviewed.
+        note_id (str) : The note_id for which we want to mark all annotations as reviewed.
     Returns:
-        None
+        count (int) : The number of annotations that were marked as reviewed.
     """
-    logger.debug(f"Marking patient #{patient_id} as reviewed.")
-    mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
-                                                    { "$set": { "reviewed": is_reviewed,
-                                                               "reviewed_by": reviewed_by } })
-
-
-def mark_note_reviewed(note_id, reviewed_by: str):
-    """
-    Updates the note's status to reviewed in the database.
-    """
-    logger.debug(f"Marking note #{note_id} as reviewed.")
-    mongo.db["NOTES"].update_one({"text_id" : note_id},
-                                 { "$set": { "reviewed": True,
-                                             "reviewed_by": reviewed_by} })
-def reset_patient_reviewed():
-    """
-    Update all patients, notes to be un-reviewed.
-    """
-    mongo.db["PATIENTS"].update_many({},
-                                     { "$set": { "reviewed": False } })
-    mongo.db["NOTES"].update_many({}, { "$set": { "reviewed": False } })
-
+    annotations_collection = mongo.db["ANNOTATIONS"]
+    result = annotations_collection.update_many({"note_id": note_id},
+                                               {"$set": {"reviewed": True}})
+    return result.modified_count
 
 def add_annotation_comment(annotation_id, comment):
     """
@@ -752,6 +704,36 @@ def add_annotation_comment(annotation_id, comment):
     comments.append(comment)
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                        { "$set": { "comments" : comments } })
+
+def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed = True):
+    """
+    Updates the patient's status to reviewed in the database.
+
+    Args:
+        patient_id (int) : Unique ID for a patient.
+        reviewed_by (str) : The name of the user who reviewed the patient.
+        is_reviewed (bool) : True if patient's annotations have been reviewed.
+    Returns:
+        None
+    """
+    logger.debug(f"Marking patient #{patient_id} as reviewed.")
+    mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
+                                                    { "$set": { "reviewed": is_reviewed,
+                                                               "reviewed_by": reviewed_by } })
+
+def reset_patient_reviewed():
+    """
+    Update all patients, notes to be un-reviewed.
+
+    Args:
+        None
+    Returns:
+        None
+    """
+    mongo.db["PATIENTS"].update_many({},
+                                     { "$set": { "reviewed": False } })
+    mongo.db["NOTES"].update_many({}, { "$set": { "reviewed": False } })
+
 
 def set_patient_lock_status(patient_id, status):
     """
@@ -775,30 +757,41 @@ def remove_all_locked():
     """
     Sets the locked status of all patients to False.
     This is done when the server is shutting down.
+
+    Args:
+        None
+    Returns:
+        None
     """
     patients_collection = mongo.db["PATIENTS"]
     patients_collection.update_many({},
                                     { "$set": { "locked": False } })
 
 
-def update_annotation_reviewed(note_id: str) -> int:
+def mark_note_reviewed(note_id, reviewed_by: str):
     """
-    Mark all annotations for a note as reviewed.
+    Updates the note's status to reviewed in the database.
 
     Args:
-        note_id (str) : The note_id for which we want to mark all annotations as reviewed.
+        note_id (str) : A unique identifier for a note.
+        reviewed_by (str) : The user who reviewed that note.
     Returns:
-        count (int) : The number of annotations that were marked as reviewed.
+        None
     """
-    annotations_collection = mongo.db["ANNOTATIONS"]
-    result = annotations_collection.update_many({"note_id": note_id},
-                                               {"$set": {"reviewed": True}})
-    return result.modified_count
+    logger.debug(f"Marking note #{note_id} as reviewed.")
+    mongo.db["NOTES"].update_one({"text_id" : note_id},
+                                 { "$set": { "reviewed": True,
+                                             "reviewed_by": reviewed_by} })
 
 # delete functions
 def empty_annotations():
     """
-    Deletes all annotations from the database
+    Deletes all annotations from the database.
+
+    Args:
+        None
+    Returns:
+        None
     """
 
     logger.info("Deleting all data in annotations collection.")
@@ -808,7 +801,14 @@ def empty_annotations():
 
 
 def drop_database(name):
-    """Clean Database"""
+    """
+    Drops a specific database.
+    
+    Args:
+        name (str) : Name of the database to be deleted.
+    Returns:
+        None
+    """
     mongo.cx.drop_database(name)
 
 # utility functions
@@ -827,15 +827,6 @@ def check_password(username, password):
     user = mongo.db["USERS"].find_one({"user" : username})
 
     return "password" in user and check_password_hash(user["password"], password)
-
-def is_admin_user(username):
-    """check if the user is admin"""
-    user = mongo.db["USERS"].find_one({'user' : username})
-
-    if user is not None and user["is_admin"]:
-        return True
-
-    return False
 
 # stats functions
 def get_curr_stats():
@@ -910,10 +901,9 @@ def get_prediction(note: str) -> float:
             score = 1 - score if label == 0 else score
         logger.debug(f"Got prediction for note: {note} with score: {score} and label: {label}")
         return score
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException as exp:
         logger.error(f"Failed to get prediction for note: {note}")
-        raise e
-    
+        raise exp
 
 def get_note_prediction_from_db(note_id: str,
                                 pines_collection_name: str = "PINES") -> Optional[float]:
@@ -952,7 +942,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
     query = {}
     if text_ids is not None:
         query = {"text_id": {"$in": text_ids}}
-    
+
     cedars_notes = notes_collection.find(query)
     for note in cedars_notes:
         note_id = note.get("text_id")
@@ -967,7 +957,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                 "report_type": note.get("text_tag_3"),
                 "document_type": note.get("text_tag_1")
                 })
-            
+
 
 def terminate_project():
     """

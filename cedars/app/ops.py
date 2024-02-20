@@ -266,8 +266,8 @@ def upload_query():
     #TODO: use flask executor to run this in the background
     nlp_processor = nlpprocessor.NlpProcessor()
 
-    for patient_id in db.get_patient_ids():
-        nlp_processor.automatic_nlp_processor(patient_id)
+    for patient in db.get_all_patients():
+        nlp_processor.automatic_nlp_processor(patient["patient_id"])
 
     # remove session variables
     if "annotation_ids" in session:
@@ -372,10 +372,12 @@ def adjudicate_records():
             except ValueError:
                 flash("Patient ID must be an integer.")
                 return redirect(url_for("ops.adjudicate_records"))
-            if db.get_patient_by_id(pt_id) is None:
+            
+            patient_info = db.get_patient(pt_id)
+            if patient_info is None:
                 flash(f"Patient {pt_id} does not exist.")
                 return redirect(url_for("ops.adjudicate_records"))
-            if db.get_patient_by_id(pt_id)["reviewed"]:
+            elif patient_info["reviewed"]:
                 flash(f"Patient {pt_id} has no annotations.")
                 return redirect(url_for("ops.adjudicate_records"))
             logger.info(f"Search patient: {pt_id}")
@@ -448,7 +450,7 @@ def highlighted_text(note):
 
 def _initialize_session(pt_id=None):
     if pt_id is not None or "patient_id" not in session:
-        pt_id = pt_id if pt_id else db.get_patients_to_annotate()
+        pt_id = pt_id if pt_id else db.get_patient_to_annotate()
         if pt_id is not None:
             # found a patient with unreviewed notes
             session.update({
@@ -495,7 +497,7 @@ def download_file (filename = 'annotations.csv'):
     data = []
     for patient in patients:
         patient_id = patient["patient_id"]
-        notes = db.get_all_notes(patient_id)
+        notes = db.get_patient_notes(patient_id, check_reviewed = False)
         reviewed_notes = db.get_patient_notes(patient_id, reviewed=True)
         reviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=True,  key="sentence")
         unreviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=False,  key="sentence")
