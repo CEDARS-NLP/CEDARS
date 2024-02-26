@@ -14,8 +14,12 @@ class Base:  # pylint: disable=too-few-public-methods
     configurations go here
     """
     SECRET_KEY = config['SECRET_KEY']
-    PERMANENT_SESSION_LIFETIME = timedelta(minutes=15)
+    PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
     MONGO_URI = f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}@{config["DB_HOST"]}:{config["DB_PORT"]}/{config["DB_NAME"]}?authSource=admin'
+    RQ = {
+        "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
+        "queue_name": "cedars"
+    }
 
 
 class Local(Base):  # pylint: disable=too-few-public-methods
@@ -30,8 +34,13 @@ class Test(Base):  # pylint: disable=too-few-public-methods
     TESTING = True
     MONGO_URI = f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}@{config["DB_HOST"]}:{config["DB_PORT"]}/test?authSource=admin'
 
+
+
 class Dev(Base):  # pylint: disable=too-few-public-methods
     """Dev Config - for deplaying to dev"""
     CACHE_TYPE = 'RedisCache'
-    CACHE_REDIS_URL = 'redis://redis:6379/0'
-    CACHE_KEY_PREFIX = 'app_'
+
+
+class Prod(Base):  # pylint: disable=too-few-public-methods
+    """Dev Config - for deplaying to dev"""
+    CACHE_TYPE = 'RedisCache'

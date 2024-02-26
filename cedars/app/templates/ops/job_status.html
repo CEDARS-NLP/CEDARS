@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<div class="container-md col-8" >
+    <div class="mb-4" col-12>
+      <h2>Job Status</h2>
+      <div class="container-fluid mb-4">
+        <div class="row g-5 p-2">
+          <div class="col-12">
+            <table class="table table-sm">
+              <tr>
+                <th>Job ID</th>
+                <th>Name</th>
+                <th>User</th>
+                <th>Completed</th>
+                <th>Progress</th>
+              </tr>
+              {% for task in tasks %}
+              <tr>
+                <td>{{ task.job_id }}</td>
+                <td>{{ task.name }}</td>
+                <td>{{ task.user }}</td>
+                <td>{{ task.complete }}</td>
+                <td>{{ task.progress }}</td>
+              </tr>
+              {% endfor %}
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+
+
+
+{% endblock %}

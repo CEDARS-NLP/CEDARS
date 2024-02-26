@@ -3,14 +3,13 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
-from pathlib import Path
-from io import BytesIO
 import pandas as pd
+import requests
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
     redirect, session, request, url_for, flash,
-    current_app
+    current_app, Response
 )
 from loguru import logger
 from flask_login import current_user, login_required
@@ -18,7 +17,7 @@ from werkzeug.utils import secure_filename
 from . import db
 from . import nlpprocessor
 from . import auth
-from .database import client, mongo
+from .database import client
 
 logger.enable(__name__)
 
@@ -67,20 +66,24 @@ def project_details():
     """
 
     if request.method == "POST":
-        project_name = request.form.get("project_name")
-        if len(project_name.strip()) > 0:
-            db.update_project_name(project_name)
-            flash(f"Project name updated to {project_name}.")
+        if "update_project_name" in request.form:
+            project_name = request.form.get("project_name")
+            if len(project_name.strip()) > 0:
+                db.update_project_name(project_name)
+                flash(f"Project name updated to {project_name}.")
 
-        if "project_logo" in request.files:
-            file = request.files["project_logo"]
-            if allowed_image_file(secure_filename(file.filename)):
-                file.save(Path(current_app.config["UPLOAD_FOLDER"]) / "project_logo.png")
-                flash("Logo updated successfully.")
+            return render_template("index.html", **db.get_info())
+        
+        if "terminate" in request.form:
+            terminate_clause = request.form.get("terminate_conf")
+            if len(terminate_clause.strip()) > 0:
+                if terminate_clause == 'DELETE EVERYTHING':
+                    session.clear()
+                    db.terminate_project()
+                    flash(f"Project Terminated.")
+                    return render_template("index.html")
             else:
-                flash("Invalid file type. Please upload a .png, .jpg, or .jpeg file.")
-
-        return render_template("index.html", **db.get_info())
+                flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
     return render_template("ops/project_details.html", **db.get_info())
 
@@ -153,10 +156,11 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
     for i, p_id in enumerate(id_list):
         documents = data_frame[data_frame["patient_id"] == p_id]
         db.upload_notes(documents)
-
-        logger.info(f"Documents uploaded for patient #{i+1}")
+        if i+1 % 100 == 0:
+            logger.info(f"Documents uploaded for patient #{i+1}")
 
     logger.info("Completed document migration to mongodb database.")
+
 
 
 @bp.route("/upload_data", methods=["GET", "POST"])
@@ -168,7 +172,9 @@ def upload_data():
 
     filename = None
     if request.method == "POST":
-        filename = None
+        if db.get_task(f"upload_and_process:{current_user.username}"):
+            flash("A file is already being processed.")
+            return redirect(request.url)
         minio_file = request.form.get("miniofile")
         if minio_file != "None":
             logger.info(f"Using minio file: {minio_file}")
@@ -177,7 +183,7 @@ def upload_data():
             if 'data_file' not in request.files:
                 flash('No file part')
                 return redirect(request.url)
-
+            
             file = request.files['data_file']
             if file.filename == '':
                 flash('No selected file')
@@ -185,14 +191,14 @@ def upload_data():
             if file and not allowed_data_file(file.filename):
                 flash("Invalid file type. Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.")
                 return redirect(request.url)
-            
+
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
             try:
                 client.put_object("cedars",
-                                filename,
-                                file,
-                                size)
+                                    filename,
+                                    file,
+                                    size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
 
@@ -200,6 +206,7 @@ def upload_data():
                 filename = None
                 flash(f"Failed to upload file: {str(e)}")
                 return redirect(request.url)
+        
         if filename:
             try:
                 EMR_to_mongodb(filename)
@@ -209,13 +216,16 @@ def upload_data():
                 flash(f"Failed to upload data: {str(e)}")
                 return redirect(request.url)
     try:
-        files = [(obj.object_name, obj.size) for obj in client.list_objects("cedars", prefix="uploaded_files/")]
+        files = [(obj.object_name, obj.size) 
+                 for obj in client.list_objects("cedars",
+                                                prefix="uploaded_files/")]
     except Exception as e:
         flash(f"Error listing files: {e}")
         files = []
     
     return render_template("ops/upload_file.html", files=files, **db.get_info())
     
+        
 
 @bp.route("/upload_query", methods=["GET", "POST"])
 @auth.admin_required
@@ -266,12 +276,6 @@ def upload_query():
     db.empty_annotations()
     db.reset_patient_reviewed()
 
-    #TODO: use flask executor to run this in the background
-    nlp_processor = nlpprocessor.NlpProcessor()
-
-    for patient_id in db.get_patient_ids():
-        nlp_processor.automatic_nlp_processor(patient_id)
-
     # remove session variables
     if "annotation_ids" in session:
         session.pop("annotation_ids")
@@ -282,22 +286,30 @@ def upload_query():
     if "patient_id" in session:
         session.pop("patient_id")
         session.modified = True
-    return redirect(url_for("ops.adjudicate_records"))
+
+    
+    do_nlp_processing()
+    return redirect(url_for("ops.get_job_status"))
+
+
+@bp.route("/start_process")
+def do_nlp_processing():
+    """
+    Run NLP workers
+    """
+    nlp_processor = nlpprocessor.NlpProcessor()
+    nlp_processor.automatic_nlp_processor()
+    return redirect(url_for("ops.get_job_status"))
+
+
+@bp.route("/job_status", methods=["GET"])
+def get_job_status():
+    return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 def _get_current_annotation_id():
     return session["annotation_ids"][session["annotation_number"]]
 
-@bp.route("/terminate", methods=["GET"])
-@auth.admin_required
-def terminate():
-    """
-    This is a flask function for the backend logic to terminate the project.
-    """
-    session.clear()
-    db.terminate_project()
-    flash('Database reset successfully.', 'success')
-    return redirect(url_for("auth.register"))
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -501,32 +513,5 @@ def download_file (filename = 'annotations.csv'):
     3. Convert all columns to proper datatypes
     """
     logger.info("Downloading annotations")
-    patients = db.get_all_patients()
-    data = []
-    for patient in patients:
-        patient_id = patient["patient_id"]
-        notes = db.get_all_notes(patient_id)
-        reviewed_notes = db.get_patient_notes(patient_id, reviewed=True)
-        reviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=True,  key="sentence")
-        unreviewed_sentences = db.get_patient_annotation_ids(patient_id, reviewed=False,  key="sentence")
-        sentences = reviewed_sentences + unreviewed_sentences
-        total_sentences = len(sentences)
-        event_date = db.get_event_date(patient_id)
-        first_note_date = db.get_first_note_date_for_patient(patient_id)
-        last_note_date = db.get_last_note_date_for_patient(patient_id)
-        data.append([patient_id, len(notes), len(reviewed_notes),
-                     total_sentences, len(reviewed_sentences), reviewed_sentences,
-                     event_date, first_note_date, last_note_date])
-  
-    df = pd.DataFrame(data, columns=["patient_id", "total_notes", "reviewed_notes", "total_sentences", "reviewed_sentences", "sentences", "event_date", "first_note_date", "last_note_date"])
-    data_bytes = df.to_csv().encode('utf-8')
-    csv_buffer = BytesIO(data_bytes)
-    client.put_object("cedars",
-                      f"annotated_files/{filename}",
-                      data=csv_buffer,
-                      length=len(data_bytes),
-                      content_type="application/csv")
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    client.fget_object("cedars", filename, file_path)
-    logger.info(f"File saved to {file_path}")
-    return send_file(file_path, as_attachment=True)
+    return db.download_annotations()
+    
