@@ -20,12 +20,8 @@ services:
       context: .
       dockerfile: ./cedars/Dockerfile
     image: cedars
-    # ports:
-    #   - 5001:5000
-    depends_on:
-      - db
-      - minio
-      - pines
+    ports:
+      - 5001:5000
   db:
     image: mongo:latest
     ports:
@@ -52,7 +48,10 @@ services:
       - "9000:9000"
       - "9001:9001"
       - "81:81"
-      
+    depends_on:
+      - web
+      - minio
+
   pines:
     build:
       context: ./PINES
