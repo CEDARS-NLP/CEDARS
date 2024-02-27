@@ -96,3 +96,4 @@ watchdog==4.0.0 ; python_version >= "3.9" and python_version < "3.12"
 werkzeug==3.0.1 ; python_version >= "3.9" and python_version < "3.12"
 win32-setctime==1.1.0 ; python_version >= "3.9" and python_version < "3.12" and sys_platform == "win32"
 zipp==3.17.0 ; python_version >= "3.9" and python_version < "3.10"
+>>>>>>> c68aaee0f9fb12caa85be979ecba30263632840d
