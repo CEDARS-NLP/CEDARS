@@ -3,15 +3,24 @@
 {% block title %} CEDARS {% endblock %}
 
 {% block content %}
-<div class="container-md col-4 b-1">
-  <form class="form-inline" method="POST" enctype="multipart/form-data">
-
+<div class="container-md col-6 b-1">
+  <form class="form-inline" method="POST">
     <div class="mb-3">
       <h2>Project Details</h2>
       <div class="mb-4" >
         <label>Project Name</label>
         <input type="text" class="form-control mb-3" name="project_name" value="{{ project_name }}">
-        <button type="submit" class="btn btn-primary p-2">Save Changes</button>
+        <button type="submit" name="update_project_name" class="btn btn-primary p-2">Save Changes</button>
+      </div>
+    </div>
+  </form>
+  <form class="form-inline" method="POST">
+    <div class="mb-3">
+      <h2>Terminate Project</h2>
+      <div class="mb-4" >
+        <label>Confirm Terminate</label>
+        <input type="text" class="form-control mb-3" name="terminate_conf" placeholder="Type: DELETE EVERYTHING" >
+        <button type="submit" name="terminate" class="btn btn-primary p-2">Terminate</button>
       </div>
     </div>
   </form>
