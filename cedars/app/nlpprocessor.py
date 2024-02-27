@@ -252,29 +252,27 @@ class NlpProcessor:
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
-        total_patients = db.get_total_counts("PATIENTS")
-        processed = 0
         for patient_id in db.get_patient_ids():
             try:
-                process_note_job_id = db.add_task(self.process_notes,
-                                                  job_id = f"spacy:{patient_id}",
-                                                  patient_id=patient_id,
-                                                  user=current_user.username,
-                                                  description="cedars service",
-                                                  on_success=db.report_success,
-                                                  on_failure=db.report_failure
-                                                  )
+                db.add_task(self.process_notes,
+                            job_id = f"spacy:{patient_id}",
+                            patient_id=patient_id,
+                            user=current_user.username,
+                            description="cedars service",
+                            on_success=db.report_success,
+                            on_failure=db.report_failure
+                            )
                 
-                pines_job_id = db.add_task(self.process_patient_pines,
-                                           job_id = f"pines:{patient_id}",
-                                           patient_id=patient_id,
-                                           user=current_user.username,
-                                           description="pines service", 
-                                           depends_on=process_note_job_id,
-                                           on_success=db.report_success,
-                                           on_failure=db.report_failure
-                                           )
+                db.add_task(self.process_patient_pines,
+                            job_id = f"pines:{patient_id}",
+                            patient_id=patient_id,
+                            user=current_user.username,
+                            description="pines service", 
+                            depends_on=f"spacy:{patient_id}",
+                            on_success=db.report_success,
+                            on_failure=db.report_failure
+                            )
             except:
-                print(sys.exc_info())
+                logger.debug(f"error while processing patient: {sys.exc_info()}")
             finally:
-                print(sys.exc_info())
+                logger.debug(f"error while processing patient: {sys.exc_info()}")
