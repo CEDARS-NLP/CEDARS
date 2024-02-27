@@ -19,8 +19,6 @@ services:
     build:
       context: .
       dockerfile: ./cedars/Dockerfile
-    ports:
-      - 5001:5000
     depends_on:
       - db
       - minio
@@ -46,12 +44,11 @@ services:
     image: nginx:1.19.2-alpine
     hostname: nginx
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "9000:9000"
       - "9001:9001"
-    depends_on:
-      - minio
+      - "81:81"
 
   pines:
     build:
