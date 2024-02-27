@@ -25,7 +25,11 @@
           <ul class="list-group">
             <li class="list-group-item">Position: {{pos_start}} of {{total_pos}}</li>
             <li class="list-group-item">Patient ID: {{patient_id}}</li>
-            <li class="list-group-item">Note Date: {{note_date.strftime("%m/%d/%Y") }}</li>
+            {% if note_date  %}
+              <li class="list-group-item">Note Date: {{note_date.strftime("%m/%d/%Y") }}</li>
+            {% else %}
+              <li class="list-group-item">Note Date: None</li>
+            {% endif %}
           </ul>
         </div>
 
@@ -36,8 +40,14 @@
               <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
             </li>
             <li class="list-group-item">
-              <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>
-              <button class="btn btn-outline-secondary " value="del_date" type="submit" name="submit_button">Delete the Old Date</button>
+              <div class="btn-toolbar" role="toolbar" aria-label="button groups">
+                <div class="btn-group me-2" role="group" aria-label="First group">
+                  <button  value="new_date" type="submit" name="submit_button" class="btn btn-primary">Enter Date</button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Second group">
+                  <button type="button" class="btn btn-outline-secondary" value="del_date" type="submit" name="submit_button">Delete Date</button>
+                </div>
+              </div>
             </li>
           </ul>
         </div>

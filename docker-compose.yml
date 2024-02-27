@@ -73,7 +73,7 @@ services:
   worker:
     image: cedars
     command: rq worker cedars --url redis://redis:6379/0
-    scale: 4
+    scale: 8
     depends_on:
       - web
 
