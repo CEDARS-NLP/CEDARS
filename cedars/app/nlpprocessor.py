@@ -46,7 +46,7 @@ def query_to_patterns(query: str) -> list:
     """
     def get_regex_dict(token):
         # Replace '*' with '.*' and '?' with '.'
-        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\w')
+        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\w?')
         return {"TEXT": {"REGEX": regex_pattern}}
 
     def get_lemma_dict(token):
