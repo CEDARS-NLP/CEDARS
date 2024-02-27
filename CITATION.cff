@@ -1,0 +1,46 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: CEDARS
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Rohan
+    family-names: Singh
+    email: singhrohan@outlook.com
+    affiliation: Memorial Sloan Kettering Cancer Center
+    orcid: 'https://orcid.org/0009-0003-1326-7249'
+  - given-names: Simon
+    family-names: Mantha
+    affiliation: Memorial Sloan Kettering
+repository-code: 'https://github.com/CEDARS-NLP/CEDARS'
+url: 'https://cedars.io'
+abstract: >-
+  CEDARS (Clinical Event Detection and Recording System) is
+  a computational paradigm for collection and aggregation of
+  time-to-event data in retrospective clinical studies.
+  Developed out of a practical need for a more efficient way
+  to conduct medical research, it aims to systematize and
+  accelerate the review of electronic health record (EHR)
+  corpora to detect and characterize clinical events. Using
+  CEDARS, human abstractors can work more efficently through
+  the use of dedicated graphical user interface (GUI). the
+  system also incorporates a customized data storage scheme
+  and a natural language processing (NLP) pipeline. In its
+  current iteration, CEDARS is available as an open-source
+  Python package under GPL-3 license. The latest package and
+  previous versions can be cloned from GitHub. Full
+  documentation is available here. CEDARS can be used with
+  or without its companion NLP package PINES. Please see the
+  Terms of Use before using CEDARS. CEDARS is provided as-is
+  with no guarantee whatsoever and users agree to be held
+  responsible for compliance with their local
+  government/institutional regulations.
+keywords:
+  - nlp
+  - clinical
+  - EHR
+  - annotation
