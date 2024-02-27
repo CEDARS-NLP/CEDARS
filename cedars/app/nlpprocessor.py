@@ -46,11 +46,11 @@ def query_to_patterns(query: str) -> list:
     """
     def get_regex_dict(token):
         # Replace '*' with '.*' and '?' with '.'
-        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '.')
+        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\w')
         return {"TEXT": {"REGEX": regex_pattern}}
 
     def get_lemma_dict(token):
-        return {"LOWER": token}
+        return {"LEMMA": token}
     
     def get_negated_dict(token):
         return {"LOWER": token, "OP": "!"}
@@ -169,7 +169,7 @@ class NlpProcessor:
         document_text = [document["text"] for document in document_list]
         logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} to process")
         logger.info(f"sample document: {document_text[0][:100]}")
-        annotations = self.nlp_model.pipe(document_text,
+        annotations = self.nlp_model.pipe([document["text"].lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
         logger.info(f"Starting to process document annotations: {len(document_text)}")
@@ -210,7 +210,6 @@ class NlpProcessor:
             count += 1
             if (count + 1) % 10 == 0:
                 logger.info(f"Processed {count+1} / {len(document_list)} documents")
-            db.set_task_progress(f"process_notes:{patient_id}", int(100 * (count / len(document_list))))
 
 
     def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
@@ -258,22 +257,24 @@ class NlpProcessor:
         for patient_id in db.get_patient_ids():
             try:
                 process_note_job_id = db.add_task(self.process_notes,
-                                                  name = patient_id,
-                                                  patient_id=patient_id, user=current_user.username,
-                                                  description="cedars service"
+                                                  job_id = f"spacy:{patient_id}",
+                                                  patient_id=patient_id,
+                                                  user=current_user.username,
+                                                  description="cedars service",
+                                                  on_success=db.report_success,
+                                                  on_failure=db.report_failure
                                                   )
+                
                 pines_job_id = db.add_task(self.process_patient_pines,
-                                           name = patient_id,
+                                           job_id = f"pines:{patient_id}",
                                            patient_id=patient_id,
                                            user=current_user.username,
                                            description="pines service", 
-                                           depends_on=process_note_job_id
+                                           depends_on=process_note_job_id,
+                                           on_success=db.report_success,
+                                           on_failure=db.report_failure
                                            )
             except:
-                db.set_task_progress(f"process_notes:{patient_id}",100)
-                db.set_task_progress(f"process_patient_pines:{patient_id}",100)
                 print(sys.exc_info())
             finally:
-                db.set_task_progress(f"process_notes:{patient_id}",100)
-                db.set_task_progress(f"process_patient_pines:{patient_id}",100)
-
+                print(sys.exc_info())

@@ -1029,11 +1029,10 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                 "document_type": note.get("text_tag_1")
                 })
         count += 1
-        set_task_progress(f"process_patient_pines:{note['patient_id']}", int(100 * count / total_notes))
             
 
 # queue and background workers
-def add_task(func, name, description, user, *args, **kwargs):
+def add_task(func, description, user, *args, **kwargs):
     """
     Launch a task and add it to Mongo
     """
@@ -1043,7 +1042,7 @@ def add_task(func, name, description, user, *args, **kwargs):
     )
     task = {
         "job_id": rq_job.get_id(),
-        "name" : f"{func.__name__}:{name}",
+        "name" : func.__name__,
         "description": description,
         "user": user,
         "complete": False,
@@ -1088,12 +1087,16 @@ def update_db_task_progress(task_id, progress):
     task_db.update_one({"job_id": task["job_id"]}, {"$set": {"progress": progress,
                                                     "complete": completed}})
 
-def set_task_progress(name, progress):
-    job = get_rq_job(name)
-    if job:
-        job.meta['progress'] = progress
-        job.save_meta()
-        update_db_task_progress(job.get_id(), progress)
+def report_success(job, connection, result, *args, **kwargs):
+    job.meta['progress'] = 100
+    job.save_meta()
+    update_db_task_progress(job.get_id(), 100)
+
+
+def report_failure(job, connection, type, value, *args, **kwargs):
+    job.meta['progress'] = 0
+    job.save_meta()
+    update_db_task_progress(job.get_id(), 0)
 
 
 def download_annotations(filename: str = "annotations.csv"):
