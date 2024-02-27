@@ -26,6 +26,7 @@ from . import db
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 login_manager = LoginManager()
+login_manager.needs_refresh_message = (u"Session timed out, please re-login")
 
 
 def admin_required(func):

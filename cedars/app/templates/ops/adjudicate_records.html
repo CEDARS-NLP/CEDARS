@@ -25,7 +25,7 @@
           <ul class="list-group">
             <li class="list-group-item">Position: {{pos_start}} of {{total_pos}}</li>
             <li class="list-group-item">Patient ID: {{patient_id}}</li>
-            <li class="list-group-item">Note Date: {{note_date}}</li>
+            <li class="list-group-item">Note Date: {{note_date.strftime("%m/%d/%Y") }}</li>
           </ul>
         </div>
 
@@ -33,7 +33,7 @@
           <ul class="list-group">
             <li class="list-group-item">
               <label for="date_entry">Event Date:</label>
-              <input type="date" name="date_entry" id="date_entry" value="{{note_date}}">
+              <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
             </li>
             <li class="list-group-item">
               <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>

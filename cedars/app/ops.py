@@ -4,7 +4,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 import pandas as pd
-import requests
+import datetime
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
@@ -489,9 +489,10 @@ def _prepare_for_next_patient():
 
 
 def _format_date(date_obj):
+    res = None
     if date_obj:
-        return str(date_obj.date())
-    return "None"
+        res = date_obj.date()
+    return res
 
 
 @bp.route('/download_annotations')
