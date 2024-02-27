@@ -2,7 +2,10 @@
 This module contatins the class to perform NLP operations for the CEDARS project
 """
 import re
+import sys
 from typing import Optional
+from flask import current_app
+from flask_login import current_user
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
 import spacy
@@ -180,7 +183,6 @@ class NlpProcessor:
                     match_count += 1
                     token_id, start, end = match
                     token = sentence_annotation[start:end]
-                    # print(sentence_annotation)
                     has_negation = is_negated(token)
                     start_index = sentence_text.find(token.text, start)
                     end_index = start_index + len(token.text)
@@ -208,6 +210,7 @@ class NlpProcessor:
             count += 1
             if (count + 1) % 10 == 0:
                 logger.info(f"Processed {count+1} / {len(document_list)} documents")
+            db.set_task_progress(f"process_notes:{patient_id}", int(100 * (count / len(document_list))))
 
 
     def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
@@ -250,6 +253,27 @@ class NlpProcessor:
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
-        self.process_notes(patient_id)
-        self.process_patient_pines(patient_id)
+        total_patients = db.get_total_counts("PATIENTS")
+        processed = 0
+        for patient_id in db.get_patient_ids():
+            try:
+                process_note_job_id = db.add_task(self.process_notes,
+                                                  name = patient_id,
+                                                  patient_id=patient_id, user=current_user.username,
+                                                  description="cedars service"
+                                                  )
+                pines_job_id = db.add_task(self.process_patient_pines,
+                                           name = patient_id,
+                                           patient_id=patient_id,
+                                           user=current_user.username,
+                                           description="pines service", 
+                                           depends_on=process_note_job_id
+                                           )
+            except:
+                db.set_task_progress(f"process_notes:{patient_id}",100)
+                db.set_task_progress(f"process_patient_pines:{patient_id}",100)
+                print(sys.exc_info())
+            finally:
+                db.set_task_progress(f"process_notes:{patient_id}",100)
+                db.set_task_progress(f"process_patient_pines:{patient_id}",100)
 

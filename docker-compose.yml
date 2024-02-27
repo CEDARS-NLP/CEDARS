@@ -19,6 +19,9 @@ services:
     build:
       context: .
       dockerfile: ./cedars/Dockerfile
+    image: cedars
+    ports:
+      - 5001:5000
     depends_on:
       - db
       - minio
@@ -56,9 +59,30 @@ services:
     ports:
       - 8036:8036
 
+  redis:
+    image: redis:latest
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_data:/data1
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    
+  worker:
+    image: cedars
+    command: rq worker cedars --url redis://redis:6379/0
+    scale: 4
+    depends_on:
+      - web
+
+
 volumes:
   data1-1:
   data1-2:
   data2-1:
   data2-2:
   cedars_db:
+  redis_data:
