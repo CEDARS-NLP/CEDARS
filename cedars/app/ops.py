@@ -270,11 +270,12 @@ def upload_query():
     hide_duplicates = False # not bool(request.form.get("keep_duplicates"))
     skip_after_event = False # bool(request.form.get("skip_after_event"))
 
-    db.save_query(search_query, use_negation,
-                    hide_duplicates, skip_after_event, tag_query)
+    new_query_added = db.save_query(search_query, use_negation,
+                                    hide_duplicates, skip_after_event, tag_query)
 
-    db.empty_annotations()
-    db.reset_patient_reviewed()
+    if new_query_added:
+        db.empty_annotations()
+        db.reset_patient_reviewed()
 
     # remove session variables
     if "annotation_ids" in session:
@@ -428,7 +429,6 @@ def adjudicate_records():
         'total_pos': len(session["annotation_ids"]),
         'patient_id': session['patient_id'],
         'comments': patient["comments"],
-        'search_query': db.get_search_query(),
         'full_note': highlighted_text(note),
         'tags': [note.get("text_tag_1",""), note.get("text_tag_2", ""), note.get("text_tag_3", ""), note.get("text_tag_4", "")],
         'isLocked': session.get("hasBeenLocked", False),

@@ -24,6 +24,7 @@ def rq_init_app(app):
     app.extensions['rq'] = app
     return app
 
+
 def create_app(config_filename=None):
     """Create flask application"""
     app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
