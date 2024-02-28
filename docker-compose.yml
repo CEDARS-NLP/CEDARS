@@ -72,7 +72,7 @@ services:
     
   worker:
     image: cedars
-    command: rq worker cedars --url redis://redis:6379/0
+    command: python -m app.make_rq
     scale: 8
     depends_on:
       - web

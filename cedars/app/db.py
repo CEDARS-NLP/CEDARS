@@ -5,12 +5,10 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 import os
 from io import BytesIO
 import flask
-from functools import wraps
 from datetime import datetime
 import requests
 import pandas as pd
 from werkzeug.security import check_password_hash, generate_password_hash
-from dotenv import load_dotenv
 from faker import Faker
 from bson import ObjectId
 from loguru import logger
@@ -19,14 +17,6 @@ from .database import mongo, client
 from .make_rq import create_rq_app
 
 fake = Faker()
-
-def rq_decorator(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        app = create_rq_app()
-        with app.app_context():
-            return func(*args, **kwargs)
-    return wrapper
 
 
 # Create collections and indexes
@@ -200,7 +190,8 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
         date_min (str) : Smallest date for valid query.
         date_max (str) : Greatest date for valid query.
     Returns:
-        None
+        Status (bool) : True if the query was saved,
+                        False if query same quqery already exists.
     """
     info = {
         "query" : query,
@@ -217,10 +208,16 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
     # TODO: make a query history and enable multiple queries.
     info["current"] = True
 
+    if query == get_search_query():
+        logger.info(f"Query already saved : {query}.")
+        return False
+
     collection.update_one({"current": True}, {"$set": {"current": False}})
     collection.insert_one(info)
 
     logger.info(f"Saved query : {query}.")
+    return True
+
 
 def upload_notes(documents):
     """
@@ -260,7 +257,6 @@ def upload_notes(documents):
             patients_collection.insert_one(patient_info)
 
 
-@rq_decorator
 def insert_one_annotation(annotation):
     """
     Adds an annotation to the database.
@@ -288,7 +284,6 @@ def get_user(username):
     return user
 
 
-@rq_decorator
 def get_search_query():
     """
     This function is used to get the current search query from the database.
@@ -308,7 +303,6 @@ def get_info():
     return mongo.db.INFO.find_one_or_404()
 
 
-@rq_decorator
 def  get_all_annotations_for_note(note_id):
     """
     This function is used to get all the annotations for a particular note
@@ -322,7 +316,6 @@ def  get_all_annotations_for_note(note_id):
     return list(annotations)
 
 
-@rq_decorator
 def get_annotation(annotation_id):
     """
     Retrives annotation from mongodb.
@@ -339,7 +332,6 @@ def get_annotation(annotation_id):
     return annotation
 
 
-@rq_decorator
 def get_annotation_note(annotation_id):
     """
     Retrives note linked to a paticular annotation.
@@ -358,7 +350,6 @@ def get_annotation_note(annotation_id):
     return note
 
 
-@rq_decorator
 def get_patient_by_id(patient_id):
     """
     Retrives a single patient from mongodb.
@@ -376,7 +367,6 @@ def get_patient_by_id(patient_id):
     return patient
 
 
-@rq_decorator
 def get_patient():
     """
     Retrives a single patient ID who has not yet been reviewed and is not currently locked.
@@ -399,7 +389,6 @@ def get_patient():
     return None
 
 
-@rq_decorator
 def get_patients_to_annotate():
     """
     Retrieves a patient that have not been reviewed
@@ -425,7 +414,6 @@ def get_patients_to_annotate():
     return None
 
 
-@rq_decorator
 def get_documents_to_annotate():
     """
     Retrives all documents that have not been annotated.
@@ -449,7 +437,6 @@ def get_documents_to_annotate():
     return documents_to_annotate
 
 
-@rq_decorator
 def get_patient_annotation_ids(p_id, reviewed = False, key = "_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
@@ -585,7 +572,6 @@ def get_project_users():
     return [user["user"] for user in users]
 
 
-@rq_decorator
 def get_all_patients():
     """
     Returns all the patients in this project
@@ -613,7 +599,6 @@ def get_patient_ids():
     return [patient["patient_id"] for patient in patients]
 
 
-@rq_decorator
 def get_patient_lock_status(patient_id):
     """
     Updates the status of the patient to be locked or unlocked.
@@ -631,7 +616,6 @@ def get_patient_lock_status(patient_id):
     return patient["locked"]
 
 
-@rq_decorator
 def get_all_notes(patient_id):
     """
     Returns all notes for that patient.
@@ -640,7 +624,6 @@ def get_all_notes(patient_id):
     return list(notes)
 
 
-@rq_decorator
 def get_patient_notes(patient_id, reviewed = False):
     """
     Returns all notes for that patient.
@@ -655,7 +638,6 @@ def get_patient_notes(patient_id, reviewed = False):
     return notes
 
 
-@rq_decorator
 def get_total_counts(collection_name: str) -> int:
     """
     Returns the total number of documents in a collection.
@@ -668,7 +650,6 @@ def get_total_counts(collection_name: str) -> int:
     return mongo.db[collection_name].count_documents({})
 
 
-@rq_decorator
 def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
     """
     For a given patient, list all note_ids which have matching keyword
@@ -704,7 +685,6 @@ def update_project_name(new_name):
     mongo.db["INFO"].update_one({}, { "$set": { "project": new_name } })
 
 
-@rq_decorator
 def mark_annotation_reviewed(annotation_id):
     """
     Updates the annotation in the database to mark it as reviewed.
@@ -750,7 +730,6 @@ def delete_annotation_date(annotation_id):
                                       { "$set": { "event_date" : None } })
 
 
-@rq_decorator
 def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed = True):
     """
     Updates the patient's status to reviewed in the database.
@@ -778,7 +757,6 @@ def mark_note_reviewed(note_id, reviewed_by: str):
                                              "reviewed_by": reviewed_by} })
     
 
-@rq_decorator
 def reset_patient_reviewed():
     """
     Update all patients, notes to be un-reviewed.
@@ -811,7 +789,6 @@ def add_comment(annotation_id, comment):
     mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
                                        { "$set": { "comments" : comments } })
 
-@rq_decorator
 def set_patient_lock_status(patient_id, status):
     """
     Updates the status of the patient to be locked or unlocked.
@@ -840,7 +817,6 @@ def remove_all_locked():
                                     { "$set": { "locked": False } })
 
 
-@rq_decorator
 def update_annotation_reviewed(note_id: str) -> int:
     """
     Mark all annotations for a note as reviewed.
@@ -972,7 +948,6 @@ def get_prediction(note: str) -> float:
         raise e
     
 
-@rq_decorator
 def get_note_prediction_from_db(note_id: str,
                                 pines_collection_name: str = "PINES") -> Optional[float]:
     """
@@ -996,7 +971,6 @@ def get_note_prediction_from_db(note_id: str,
     return None
 
 
-@rq_decorator
 def predict_and_save(text_ids: Optional[list[str]] = None,
                      note_collection_name: str = "NOTES",
                      pines_collection_name: str = "PINES",
@@ -1066,7 +1040,7 @@ def get_task(task_name):
     task_db = mongo.db["TASK"]
     return task_db.find_one({"name": task_name})
 
-@rq_decorator
+
 def get_rq_job(task_name):
         task = get_task(task_name)
         import rq
@@ -1077,7 +1051,7 @@ def get_rq_job(task_name):
             return None
         return rq_job
 
-@rq_decorator
+
 def update_db_task_progress(task_id, progress):
     task_db = mongo.db["TASK"]
     task = task_db.find_one({"job_id": task_id})
