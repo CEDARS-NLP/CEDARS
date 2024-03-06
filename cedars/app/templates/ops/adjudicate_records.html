@@ -37,7 +37,11 @@
           <ul class="list-group">
             <li class="list-group-item">
               <label for="date_entry">Event Date:</label>
-              <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
+              {% if event_date is none %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
+              {% else %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{event_date}}">
+              {% endif %}
             </li>
             <li class="list-group-item">
               <div class="btn-toolbar" role="toolbar" aria-label="button groups">
@@ -51,9 +55,6 @@
             </li>
           </ul>
         </div>
-
-
-
         <div class="mb-4">
           <h2>Comments</h2>
           <div class="form-group">
@@ -100,7 +101,7 @@
                         <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>
                     </div>
                 </form>
-              </div>
+            </div>
       </div>
       <div class="mb-4">
         <h6 class="text-muted">Full Note {{ note_id }}</h6>

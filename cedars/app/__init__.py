@@ -20,7 +20,9 @@ fake = Faker()
 def rq_init_app(app):
     """Initialize the rq app"""
     app.redis = Redis.from_url(app.config["RQ"]['redis_url'])
-    app.task_queue = rq.Queue(app.config["RQ"]['queue_name'], connection=app.redis)
+    app.task_queue = rq.Queue(app.config["RQ"]['queue_name'],
+                              connection=app.redis,
+                              default_timeout=app.config["RQ"]['job_timeout'])
     app.extensions['rq'] = app
     return app
 

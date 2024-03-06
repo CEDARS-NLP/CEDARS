@@ -273,17 +273,11 @@ def upload_query():
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
 
+    # TODO: add a javascript confirm box to make sure the user wants to update the query
     if new_query_added:
         db.empty_annotations()
         db.reset_patient_reviewed()
 
-    # remove session variables
-    if "annotation_ids" in session:
-        session.pop("annotation_ids")
-        session.modified = True
-    if "annotation_number" in session:
-        session.pop("annotation_number")
-        session.modified = True
     if "patient_id" in session:
         session.pop("patient_id")
         session.modified = True
@@ -308,10 +302,6 @@ def get_job_status():
     return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
-def _get_current_annotation_id():
-    return session["annotation_ids"][session["annotation_number"]]
-
-
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 def save_adjudications():
@@ -319,8 +309,9 @@ def save_adjudications():
     Handle logic for the save_adjudications route.
     Used to edit and review annotations.
     """
-    current_annotation_id = _get_current_annotation_id()
 
+    current_annotation_id = session["annotations"][session["index"]]
+    
     def _update_annotation_date():
         new_date = request.form['date_entry']
         logger.info(f"Updating {current_annotation_id}: {new_date}")
@@ -334,31 +325,41 @@ def save_adjudications():
         db.add_comment(current_annotation_id, request.form['comment'])
 
     def _move_to_previous_annotation():
-        if session["annotation_number"] > 0:
-            session["annotation_number"] -= 1
+        if session["index"] > 0:
+            session["index"] -= 1
             session.modified = True
 
     def _move_to_next_annotation():
-        if session["annotation_number"] < (len(session["annotation_ids"]) - 1):
-            session["annotation_number"] += 1
+        if session["index"] < session["total_count"] - 1:
+            session["index"] += 1
             session.modified = True
 
     def _adjudicate_annotation():
-        db.mark_annotation_reviewed(current_annotation_id)
-        # if one annotation has the event date, mark the patient
-        # as reviewed because we don't need to review the rest
-        # this could be based on a parameter though
-        # TODO: add logic based on tags if we need to keep reviewing
-        if db.get_annotation_date(current_annotation_id) is not None:
-            db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
-                                  reviewed_by=current_user.username)
-            db.mark_patient_reviewed(session["patient_id"],
-                                     reviewed_by=current_user.username)
-            db.set_patient_lock_status(session["patient_id"], False)
-            session.pop("patient_id")
-        session["annotation_ids"].pop(session["annotation_number"])
-        if session["annotation_number"] >= len(session["annotation_ids"]):
-            session["annotation_number"] -= 1
+        if session["unreviewed_annotations_index"][session["index"]] == 1:
+            db.mark_annotation_reviewed(current_annotation_id)
+            session["unreviewed_annotations_index"][session["index"]] = 0
+            session.modified = True
+            # if one annotation has the event date, mark the patient
+            # as reviewed because we don't need to review the rest
+            # this could be based on a parameter though
+            # TODO: add logic based on tags if we need to keep reviewing
+            if db.get_annotation_date(current_annotation_id) is not None or len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
+                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                    reviewed_by=current_user.username)
+                db.mark_patient_reviewed(session["patient_id"],
+                                        reviewed_by=current_user.username)
+                db.set_patient_lock_status(session["patient_id"], False)
+                session.pop("patient_id")
+            else:
+                session["index"] = session["unreviewed_annotations_index"].index(1)
+        elif 1 in session["unreviewed_annotations_index"]:
+            # any unreviewed annotations left?
+            session["index"] = session["unreviewed_annotations_index"].index(1)
+        else:
+            flash("Annotation already reviewed.")
+            if session["index"] < session["total_count"] - 1:
+                session["index"] += 1
+
         session.modified = True
 
     actions = {
@@ -374,70 +375,126 @@ def save_adjudications():
     if action in actions:
         actions[action]()
 
-    return redirect(url_for("ops.adjudicate_records"))
+    # the session has been cleared so get the next patient
+    if session.get("patient_id") is None:
+        return redirect(url_for("ops.adjudicate_records"))
+    
+    return redirect(url_for("ops.show_annotation"))
+
+
+@bp.route("/show_annotation", methods=["GET"])
+def show_annotation():
+    index = session.get("index", 0)
+    annotation = db.get_annotation(session["annotations"][index])
+    note = db.get_annotation_note(str(annotation["_id"]))
+    annotation_data = {
+        "pos_start": index + 1,
+        "total_pos": session["total_count"],
+        "patient_id": session["patient_id"],
+        "name": current_user.username,
+        "note_date": _format_date(annotation.get('text_date')),
+        "event_date": _format_date(annotation.get('event_date')),
+        "comments": db.get_patient_by_id(session["patient_id"])["comments"],
+        "pre_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
+        "token_word": annotation['sentence'][annotation['start_index']:annotation['end_index']],
+        "post_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
+        "note_id": annotation["note_id"],
+        "full_note": highlighted_text(note),
+        "tags": [note.get("text_tag_1",""),
+                 note.get("text_tag_2", ""),
+                 note.get("text_tag_3", ""),
+                 note.get("text_tag_4", ""),
+                 note.get("text_tag_5", "")]
+    }
+    return render_template("ops/adjudicate_records.html",
+                            **annotation_data,
+                            **db.get_info())
 
 
 @bp.route("/adjudicate_records", methods=["GET", "POST"])
 @login_required
 def adjudicate_records():
     """
-    Serve the 'adjudicate_records' page.
-    Handle the logic associated with the main CEDARS page.
-    """
-    pt_id = None
-    if request.method == "POST":
-        if request.form["patient_id"]:
-            try:
-                pt_id = int(request.form["patient_id"])
-            except ValueError:
-                flash("Patient ID must be an integer.")
-                return redirect(url_for("ops.adjudicate_records"))
-            if db.get_patient_by_id(pt_id) is None:
-                flash(f"Patient {pt_id} does not exist.")
-                return redirect(url_for("ops.adjudicate_records"))
-            if db.get_patient_by_id(pt_id)["reviewed"]:
-                flash(f"Patient {pt_id} has no annotations.")
-                return redirect(url_for("ops.adjudicate_records"))
-            logger.info(f"Search patient: {pt_id}")
+    Adjudication Workflow:
 
-    _initialize_session(pt_id)
-    if "patient_id" not in session:
+    ### Get the next available patient
+
+    1. The first time this page is hit, get a patient who is not reviewed from the database
+    2. Since the patient is not reviewed in the db, they should have annotations, if not, skip to the next patientd
+
+    ### Search for a patient
+
+    1. If the user searches for a patient, get the patient from the database
+    2. If the patient has no annotations, skip to the next patient
+
+    ### show the annotation
+    
+    3. Get the first annotation and show it to the user
+    4. User can adjudicate the annotation or browse back and forth
+    5. If the annotation has an event date, mark the note as reviewed
+        5.a. If the note has been reviewed, mark the note as reviewed
+        5.b. If the all notes have been reviewed, mark the patient as reviewed
+    6. If the annotation has no event date, show the next annotation
+    7. If there are no more annotations to be reviewed, mark the patient as reviewed
+    8. All annotations are a mongodb document.
+
+    """
+
+    patient_id = None
+
+    if request.method == "GET":
+        if session.get("patient_id") is not None:
+            logger.info(f"Getting patient: {session.get('patient_id')} from session")
+            return redirect(url_for("ops.show_annotation"))
+        patient_id = db.get_patient()
+    else:
+        session.pop("patient_id", None)
+        search_patient = request.form.get("patient_id")
+        if search_patient and len(search_patient.strip()) > 0:
+            search_patient = int(search_patient)
+            patient_id = db.get_patient_by_id(search_patient)["patient_id"]
+
+        if patient_id is None:
+            # if the search return no patient, get the next patient
+            flash(f"Patient {search_patient} does not exist. Showing next patient")
+            patient_id = db.get_patient()
+
+    if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
     
-    logger.debug(session)
-    while len(session["annotation_ids"]) == 0:
-        _prepare_for_next_patient()
-        if "patient_id" not in session:
-            return render_template("ops/annotations_complete.html", **db.get_info())
-        
-    current_annotation_id = session["annotation_ids"][session["annotation_number"]]
-    logger.debug(f"Current annotation id: {current_annotation_id}")
-    annotation = db.get_annotation(current_annotation_id)
-    logger.debug(f"Current annotation: {annotation}")
-    note = db.get_annotation_note(current_annotation_id)
-    logger.debug(f"Current note: {note}")
-    patient = db.get_patient_by_id(session["patient_id"])
-    context = {
-        'name': current_user.username,
-        'event_date': _format_date(annotation.get('event_date')),
-        'note_date': _format_date(annotation.get('text_date')),
-        'note_id': note["text_id"],
-        'pre_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
-        'token_word': annotation['sentence'][annotation['start_index']:annotation['end_index']],
-        'post_token_sentence': re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
-        'pos_start': session["annotation_number"] + 1,
-        'total_pos': len(session["annotation_ids"]),
-        'patient_id': session['patient_id'],
-        'comments': patient["comments"],
-        'full_note': highlighted_text(note),
-        'tags': [note.get("text_tag_1",""), note.get("text_tag_2", ""), note.get("text_tag_3", ""), note.get("text_tag_4", "")],
-        'isLocked': session.get("hasBeenLocked", False),
-        **db.get_info()
-    }
+    res = db.get_all_annotations_for_patient(patient_id)
 
-    session["hasBeenLocked"] = False
+    annotations = res["annotations"]
+    total_count = res["total"]
+    all_annotation_index = res["all_annotation_index"]
+    unreviewed_annotations_index = res["unreviewed_annotations_index"]
 
-    return render_template("ops/adjudicate_records.html", **context)
+    if total_count == 0:
+        logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
+        flash(f"Patient {patient_id} has no annotations. Showing next patient")
+        return redirect(url_for("ops.adjudicate_records"))
+    elif len(unreviewed_annotations_index) == 0:
+        logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
+        session["patient_id"] = patient_id
+        session["total_count"] = total_count
+        session["annotations"] = annotations
+        session["all_annotation_index"] = all_annotation_index
+        session["unreviewed_annotations_index"] = unreviewed_annotations_index
+        # in case of reviewed patient show everything..
+        session["index"] = 0
+        return redirect(url_for("ops.adjudicate_records"))
+    else:
+        logger.info(f"Total annotations for patient {patient_id}: {total_count}")
+        session["patient_id"] = patient_id
+        session["total_count"] = total_count
+        session["annotations"] = annotations
+        session["all_annotation_index"] = all_annotation_index
+        session["unreviewed_annotations_index"] = unreviewed_annotations_index
+        session["index"] = all_annotation_index[unreviewed_annotations_index.index(1)]
+        session.modified = True
+
+    # db.set_patient_lock_status(patient_id, True)
+    return redirect(url_for("ops.show_annotation"))
 
 
 def highlighted_text(note):
@@ -463,29 +520,29 @@ def highlighted_text(note):
         prev_end_index = end_index
 
     highlighted_note.append(text[prev_end_index:])
-    logger.info(highlighted_note[1])
+    logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>")
 
-def _initialize_session(pt_id=None):
-    if pt_id is not None or "patient_id" not in session:
-        pt_id = pt_id if pt_id else db.get_patients_to_annotate()
-        if pt_id is not None:
-            # found a patient with unreviewed notes
-            session.update({
-                "patient_id": pt_id,
-                "annotation_number": 0,
-                "annotation_ids": db.get_patient_annotation_ids(pt_id)
-            })
-            db.set_patient_lock_status(pt_id, True)
-        session.modified = True
+# def _initialize_session(pt_id=None):
+#     if pt_id is not None or "patient_id" not in session:
+#         pt_id = pt_id if pt_id else db.get_patients_to_annotate()
+#         if pt_id is not None:
+#             # found a patient with unreviewed notes
+#             session.update({
+#                 "patient_id": pt_id,
+#                 "annotation_number": 0,
+#                 "annotation_ids": db.get_patient_annotation_ids(pt_id)
+#             })
+#             db.set_patient_lock_status(pt_id, True)
+#         session.modified = True
 
-def _prepare_for_next_patient():
-    logger.info(f"Marking patient: {session['patient_id']} as reviewed")
-    db.mark_patient_reviewed(session['patient_id'],
-                             reviewed_by=current_user.username)
-    db.set_patient_lock_status(session['patient_id'], False)
-    session.pop("patient_id")
-    _initialize_session()
+# def _prepare_for_next_patient():
+#     logger.info(f"Marking patient: {session['patient_id']} as reviewed")
+#     db.mark_patient_reviewed(session['patient_id'],
+#                              reviewed_by=current_user.username)
+#     db.set_patient_lock_status(session['patient_id'], False)
+#     session.pop("patient_id")
+#     _initialize_session()
 
 
 def _format_date(date_obj):
