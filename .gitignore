@@ -24,3 +24,5 @@ curl.zip
 data-to-label
 site
 **/annotations.csv
+**/scratch.py
+.vscode

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import logging
 from dotenv import dotenv_values, load_dotenv
 from loguru import logger
 from app import create_app
@@ -11,13 +12,9 @@ load_dotenv()
 environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")
 
+log = logging.getLogger('werkzeug')
+log.disabled = True
 logger.remove()
-logger.add("cedars.log",
-           rotation="1 day",
-           enqueue=True,
-           level="DEBUG",
-           format="{time} - {level} - {message}")
-
 logger.add(sys.stdout,
            format="{time} {level} {message}",
            filter="cedars",

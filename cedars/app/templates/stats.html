@@ -95,6 +95,12 @@
     options: {
       indexAxis: 'y', // Horizontal bar chart
       scales: {
+        x: { // Define x axis
+          title: {
+            display: true,
+            text: '% of all matched tokens'
+          }
+        },
         y: {
           beginAtZero: true
         }
@@ -111,7 +117,7 @@
     data: {
       labels: users,
       datasets: [{
-        label: 'Notes Reviewed by Users',
+        label: 'Patients Reviewed by Users',
         data: userReviewedCount,
         backgroundColor: 'rgba(11,61,92, 0.6)',
         borderColor: 'rgba(11,61,92, 1)',

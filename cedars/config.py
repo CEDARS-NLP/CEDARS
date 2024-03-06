@@ -18,7 +18,8 @@ class Base:  # pylint: disable=too-few-public-methods
     MONGO_URI = f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}@{config["DB_HOST"]}:{config["DB_PORT"]}/{config["DB_NAME"]}?authSource=admin'
     RQ = {
         "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
-        "queue_name": "cedars"
+        "queue_name": "cedars",
+        "job_timeout": 3600
     }
 
 
