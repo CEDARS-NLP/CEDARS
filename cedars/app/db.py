@@ -1002,6 +1002,7 @@ def get_prediction(note: str) -> float:
     """
     url = f'{os.getenv("PINES_API_URL")}/predict'
     data = {'text': note}
+    log_notes = None
     try:
         response = requests.post(url, json=data, timeout=3600)
         response.raise_for_status()
