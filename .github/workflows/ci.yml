@@ -29,6 +29,7 @@ jobs:
       
       - name: install deps
         run: pip install -r cedars/requirements.txt
+        run: pip insall pytest pytest-cov
 
       - name: Install everything, run the tests, produce the .coverage file
         run: pytest cedars/ # This is the part where you put your own test command
