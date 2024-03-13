@@ -36,7 +36,6 @@
                             <li><a class="dropdown-item" href="/ops/upload_data">Upload Data</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_query">Search Query</a></li>
                             <li><a class="dropdown-item" href="/ops/download_annotations">Download Annotations</a></li>
-                            <li><a class="dropdown-item" href="/ops/terminate">Terminate Project</a></li>
                         {% endif %}
                         <li><a class="dropdown-item" href="/ops/adjudicate_records">Adjudicate Annotations</a></li>
                         <li>
@@ -65,34 +64,18 @@
 
         <!-- Rest of your content -->
     </div>
-
-
-
 </nav>
-
     {% block content %} {% endblock %}
+<style>
 
-    <div class="position-fixed" style="bottom: 0; right: 0">
-        <div class="d-flex flex-column align-items-end m-4">
-            <a href="#feedback" data-bs-toggle="modal" data-bs-target="#exampleModal">
-                <img src="{{ url_for('static', filename='chat-left.svg') }}" alt="" width="32" height="32">
-            </a>
-            <div class="text-muted" style="width: 80px; font-size: 14px; text-align: end">
-                Share your feedback!
-            </div>
-        </div>
-    </div>
-
-    <style>
-
-        .search_div {
-            width: 55%;
-        }
-    </style>
+    .search_div {
+        width: 55%;
+    }
+</style>
 
 
-    <footer>
-        <div class="p-5"></div>
-    </footer>
+<footer>
+    <div class="p-5"></div>
+</footer>
 
 {% endblock %}

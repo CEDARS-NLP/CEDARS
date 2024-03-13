@@ -1,14 +1,13 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
-import re
-from typing import Optional
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import sys
+import multiprocessing as mp
+from flask_login import current_user
 import pandas as pd
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
-from tqdm import tqdm
 from . import db
 
 logger.enable(__name__)
@@ -43,11 +42,11 @@ def query_to_patterns(query: str) -> list:
     """
     def get_regex_dict(token):
         # Replace '*' with '.*' and '?' with '.'
-        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '.')
+        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\w?')
         return {"TEXT": {"REGEX": regex_pattern}}
 
     def get_lemma_dict(token):
-        return {"LOWER": token}
+        return {"LEMMA": token}
     
     def get_negated_dict(token):
         return {"LOWER": token, "OP": "!"}
@@ -139,7 +138,7 @@ class NlpProcessor:
         return cls.instance
 
 
-    def process_notes(self, patient_id = None, processes=1, batch_size=20):
+    def process_notes(self, patient_id, processes=1, batch_size=20):
         """
         ##### Process Query Matching
         
@@ -158,29 +157,44 @@ class NlpProcessor:
             matcher.add(f"DVT_{i}", [item])
 
         # check all documents already processed
+        documents_to_process = []
         if patient_id is not None:
+            # get all note for patient which are not reviewed
             documents_to_process = db.get_patient_notes(patient_id)
         else:
+            # get all notes which are not in annotation collection.
             documents_to_process = db.get_documents_to_annotate()
+
         document_list = [document for document in documents_to_process]
+        if len(document_list) == 0:
+            # no notes found to annotate
+            logger.info(f"No documents to process for patient {patient_id}")
+            self.process_patient_pines(patient_id)
+            return
+        
         document_text = [document["text"] for document in document_list]
-        logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} to process")
-        logger.info(f"sample document: {document_text[0][:100]}")
-        annotations = self.nlp_model.pipe(document_text,
+        if patient_id is not None:
+            logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
+        else:
+            logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
+
+        # logger.info(f"sample document: {document_text[0][:100]}")
+        annotations = self.nlp_model.pipe([document["text"].lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
         logger.info(f"Starting to process document annotations: {len(document_text)}")
         count = 0
+        docs_with_annotations = 0
         for document, doc in zip(document_list, annotations):
+            docs_with_annotations += 1
             match_count = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
                 matches = matcher(sentence_annotation)
                 for match in matches:
                     match_count += 1
-                    token_id, start, end = match
+                    _, start, end = match
                     token = sentence_annotation[start:end]
-                    # print(sentence_annotation)
                     has_negation = is_negated(token)
                     start_index = sentence_text.find(token.text, start)
                     end_index = start_index + len(token.text)
@@ -200,7 +214,6 @@ class NlpProcessor:
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
                     annotation["event_date"] = None
-                    annotation["comments"] = []
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
             if match_count == 0:
@@ -208,7 +221,11 @@ class NlpProcessor:
             count += 1
             if (count + 1) % 10 == 0:
                 logger.info(f"Processed {count+1} / {len(document_list)} documents")
-
+        
+        if docs_with_annotations > 0:
+            logger.info(f"Processing {docs_with_annotations} documents with PINES")
+            self.process_patient_pines(patient_id)
+                
 
     def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
         """
@@ -250,6 +267,19 @@ class NlpProcessor:
         on one or all patients saved in the database.
         If patient_id == None we will do this for all patients in the database.
         """
-        self.process_notes(patient_id)
-        self.process_patient_pines(patient_id)
 
+        # Retrieve all patient ids where patient was not reviewed
+        for patient_id in db.get_patient_ids():
+            try:
+                db.add_task(self.process_notes,
+                            job_id = f"spacy:{patient_id}",
+                            patient_id=patient_id,
+                            user=current_user.username,
+                            description="cedars service",
+                            on_success=db.report_success,
+                            on_failure=db.report_failure
+                            )
+            except:
+                logger.debug(f"error while processing patient: {sys.exc_info()}")
+            finally:
+                logger.debug(f"error while processing patient: {sys.exc_info()}")

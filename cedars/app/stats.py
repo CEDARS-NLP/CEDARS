@@ -25,9 +25,12 @@ def stats_route():
     number_of_annotated_patients = stats["number_of_annotated_patients"]
     number_of_reviewed = stats["number_of_reviewed"]
     lemma_dist = stats['lemma_dist']
+    user_review_stats = stats['user_review_stats']
 
     return render_template("stats.html",
                             number_of_patients = number_of_patients,
                             number_of_annotated_patients = number_of_annotated_patients,
                             number_of_reviewed = number_of_reviewed,
-                            lemma_dist = lemma_dist, **db.get_info())
+                            lemma_dist = lemma_dist,
+                            user_review_stats = user_review_stats,
+                            **db.get_info())

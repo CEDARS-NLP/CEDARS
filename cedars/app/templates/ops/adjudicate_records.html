@@ -25,26 +25,36 @@
           <ul class="list-group">
             <li class="list-group-item">Position: {{pos_start}} of {{total_pos}}</li>
             <li class="list-group-item">Patient ID: {{patient_id}}</li>
-            <li class="list-group-item">Note Date: {{note_date}}</li>
+            {% if note_date  %}
+              <li class="list-group-item">Note Date: {{note_date.strftime("%m/%d/%Y") }}</li>
+            {% else %}
+              <li class="list-group-item">Note Date: None</li>
+            {% endif %}
           </ul>
         </div>
 
         <div class="mb-4">
           <ul class="list-group">
-            <li class="list-group-item">Event Date: {{event_date}}</li>
             <li class="list-group-item">
-              <label for="date_entry">Select New Date:</label>
-              <input type="date" name="date_entry" id="date_entry" value="{{event_date}}">
+              <label for="date_entry">Event Date:</label>
+              {% if event_date is none %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
+              {% else %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{event_date}}">
+              {% endif %}
             </li>
             <li class="list-group-item">
-              <button class="btn btn-primary" value="new_date" type="submit" name="submit_button">Enter a New Date</button>
-              <button class="btn btn-outline-secondary " value="del_date" type="submit" name="submit_button">Delete the Old Date</button>
+              <div class="btn-toolbar" role="toolbar" aria-label="button groups">
+                <div class="btn-group me-2" role="group" aria-label="First group">
+                  <button  value="new_date" type="submit" name="submit_button" class="btn btn-primary">Enter Date</button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Second group">
+                  <button type="button" class="btn btn-outline-secondary" value="del_date" type="submit" name="submit_button">Delete Date</button>
+                </div>
+              </div>
             </li>
           </ul>
         </div>
-
-
-
         <div class="mb-4">
           <h2>Comments</h2>
           <div class="form-group">
@@ -68,7 +78,7 @@
 
     <div class="col-7">
       <div class="mb-4">
-        <h6 class="text-muted">Found Sentence</h6>
+        <h6 class="text-muted">Selected Sentence</h6>
         <div style="height: 150px; width: 100%; overflow-y: auto;">
           {{pre_token_sentence|safe}}
             <mark>
@@ -91,11 +101,8 @@
                         <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>
                     </div>
                 </form>
-
-              </div>
-
+            </div>
       </div>
-
       <div class="mb-4">
         <h6 class="text-muted">Full Note {{ note_id }}</h6>
         <div style="height: 600px; width: 100%; overflow-y: auto;">
@@ -104,7 +111,7 @@
       </div>
 
       <div>
-        <table class="table table-hover">
+        <table class="table table-sm">
           <th>
             <td>Tag 1</td>
             <td>Tag 2</td>
@@ -121,9 +128,6 @@
           </tr>
         </table>
       </div>
-
-
-
     </div>
   </div>
 </div>
