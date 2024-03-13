@@ -3,20 +3,24 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
 import os
+from io import BytesIO
+import re
+import flask
 from datetime import datetime
 import requests
+import pandas as pd
 from werkzeug.security import check_password_hash, generate_password_hash
-from dotenv import load_dotenv
 from faker import Faker
 from bson import ObjectId
+import rq
+import redis
+from rq import Retry
 from loguru import logger
 from typing import Optional
-import re
-from .database import mongo
+from .database import mongo, client
 
-load_dotenv()
-logger.enable(__name__)
 fake = Faker()
+
 
 # Create collections and indexes
 def create_project(project_name, investigator_name, cedars_version = "0.1.0"):
@@ -109,6 +113,7 @@ def populate_patients():
 
     logger.info("Created Patients collection.")
 
+
 def populate_users():
     """
     This function creates the users collection in the mongodb database.
@@ -119,6 +124,7 @@ def populate_users():
     users.create_index("user", unique = True)
     logger.info("Created USERS collection.")
 
+
 def populate_query():
     """
     This function creates the query collection in the mongodb database.
@@ -128,6 +134,7 @@ def populate_query():
     # This statement is used to create a collection.
     query = mongo.db["QUERY"]
     logger.info("Created %s collection.", query.name)
+
 
 # Insert functions
 def add_user(username, password, is_admin=False):
@@ -150,21 +157,6 @@ def add_user(username, password, is_admin=False):
     mongo.db["USERS"].insert_one(info)
     logger.info(f"Added user {username} to database.")
 
-def add_project_user(username, password, is_admin = False):
-    """
-    Adds a new user to the project database.
-
-    Args:
-        username (str)  : The name of the new user
-        password (str)  : The user's password
-        is_admin (bool) : True if the new user is the project admin
-                          (used when initializing the project)
-    Returns:
-        None
-    """
-    password_hash = generate_password_hash(password)
-    data = {"user" : username, "password" : password_hash, "admin" : is_admin}
-    mongo.db["USERS"].insert_one(data.copy())
 
 def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
                 skip_after_event, tag_query, date_min = None, date_max = None):
@@ -184,7 +176,8 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
         date_min (str) : Smallest date for valid query.
         date_max (str) : Greatest date for valid query.
     Returns:
-        None
+        Status (bool) : True if the query was saved,
+                        False if query same quqery already exists.
     """
     info = {
         "query" : query,
@@ -201,10 +194,16 @@ def save_query(query, exclude_negated, hide_duplicates, #pylint: disable=R0913
     # TODO: make a query history and enable multiple queries.
     info["current"] = True
 
+    if query == get_search_query():
+        logger.info(f"Query already saved : {query}.")
+        return False
+
     collection.update_one({"current": True}, {"$set": {"current": False}})
     collection.insert_one(info)
 
     logger.info(f"Saved query : {query}.")
+    return True
+
 
 def upload_notes(documents):
     """
@@ -226,12 +225,10 @@ def upload_notes(documents):
         note_info["text_date"] = datetime_obj
         note_info["reviewed"] = False
 
-        if notes_collection.find_one({"text_id": note_info["text_id"]}):
-            logger.error("Cancelling duplicate note entry")
-        else:
-            notes_collection.insert_one(note_info)
-            patient_ids.add(note_info["patient_id"])
-        if i+1 % 10 == 0:
+        # text_id should be unique
+        notes_collection.insert_one(note_info)
+        patient_ids.add(note_info["patient_id"])
+        if i+1 % 100 == 0:
             logger.info(f"Uploaded {i}/{len(documents)} notes")
 
     patients_collection = mongo.db["PATIENTS"]
@@ -240,10 +237,12 @@ def upload_notes(documents):
                         "reviewed": False,
                         "locked": False,
                         "updated": False,
+                        "comments": [],
                         "admin_locked": False}
 
         if not patients_collection.find_one({"patient_id": p_id}):
             patients_collection.insert_one(patient_info)
+
 
 def insert_one_annotation(annotation):
     """
@@ -271,19 +270,25 @@ def get_user(username):
     user = mongo.db["USERS"].find_one({"user" : username})
     return user
 
+
 def get_search_query():
     """
     This function is used to get the current search query from the database.
     All this data is kept in the QUERY collection.
     """
     query = mongo.db["QUERY"].find_one({"current" : True})
-    return query["query"]
+
+    if query:
+        return query["query"]
+    
+    return ""
 
 def get_info():
     """
     This function returns the info collection in the mongodb database.
     """
     return mongo.db.INFO.find_one_or_404()
+
 
 def  get_all_annotations_for_note(note_id):
     """
@@ -296,6 +301,7 @@ def  get_all_annotations_for_note(note_id):
     annotations = mongo.db["ANNOTATIONS"].find({"note_id" : note_id,
                                                 "isNegated": False}).sort([("text_date", 1),("setence_number", 1)])
     return list(annotations)
+
 
 def get_annotation(annotation_id):
     """
@@ -312,7 +318,8 @@ def get_annotation(annotation_id):
 
     return annotation
 
-def get_annotation_note(annotation_id):
+
+def get_annotation_note(annotation_id: str):
     """
     Retrives note linked to a paticular annotation.
 
@@ -346,6 +353,7 @@ def get_patient_by_id(patient_id):
 
     return patient
 
+
 def get_patient():
     """
     Retrives a single patient ID who has not yet been reviewed and is not currently locked.
@@ -378,7 +386,8 @@ def get_patients_to_annotate():
         patient_to_annotate: A single patient that needs to manually reviewed 
     """
     logger.debug("Retriving all un-reviewed patients from database.")
-    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False})
+    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed" : False,
+                                                      "locked": False})
 
     # check is this patient has any unreviewed annotations
     for patient in patients_to_annotate:
@@ -391,9 +400,12 @@ def get_patients_to_annotate():
 
     return None
 
+
 def get_documents_to_annotate():
     """
     Retrives all documents that have not been annotated.
+
+    Returns: All matching notes from the database.
     """
     logger.debug("Retriving all annotated documents from database.")
     documents_to_annotate = mongo.db["NOTES"].aggregate(
@@ -401,7 +413,7 @@ def get_documents_to_annotate():
             "$lookup": {
                 "from": "ANNOTATIONS",
                 "localField": "text_id",
-                "foreignField": "text_id",
+                "foreignField": "note_id",
                 "as": "annotations"
             }
         },
@@ -412,6 +424,85 @@ def get_documents_to_annotate():
         }])
 
     return documents_to_annotate
+
+
+def get_all_annotations_for_patient(patient_id):
+    """
+    Retrives all annotations for a patient.
+
+    Args:
+        patient_id (int) : Unique ID for a patient.
+    Returns:
+        annotations (list) : A list of all annotations for that patient.
+    """
+    annotations = list(mongo.db["ANNOTATIONS"]
+                   .find({"patient_id": patient_id, "isNegated": False})
+                   .sort([("text_date", 1), ("note_id", 1), ("note_start_index", 1)])
+                   )
+
+    result = {
+        "annotations": [],
+        "all_annotation_index": [],
+        "unreviewed_annotations_index": [],
+        "total": 0
+    }
+
+    if len(annotations) > 0:
+            result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
+            result["all_annotation_index"] = list(range(len(annotations)))
+            # set array to 1 if annotation is unreviewed
+            result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]  # Close the square bracket here
+            result["total"] = len(annotations)
+    
+    return result
+
+
+def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):
+    """
+    Retrives all annotations for a patient.
+
+    Args:
+        patient_id (int) : Unique ID for a patient.
+    Returns:
+        annotations (list) : A list of all annotations for that patient.
+    """
+    annotations = mongo.db["ANNOTATIONS"].aggregate([
+        {
+            "$match": { "patient_id": patient_id }
+        },
+        {
+            "$facet": {
+                "metadata": [{ "$count": 'total' }],
+                "data": [
+                    { "$match": { "patient_id": patient_id }},
+                    { "$sort": { "text_date": 1, "note_id": 1, "note_start_index": 1}},
+                    { "$skip": (page - 1) * page_size },
+                    { "$limit": page_size }]
+                }
+        },
+        {
+            "$project": {
+                "total": {"$arrayElemAt": ["$metadata.total", 0]},
+                "annotations": "$data"
+            }
+        }
+    ])
+
+    result = list(annotations)
+
+    if result:
+        # Extract the document
+        data = result[0]
+        total = data.get("total", 0)  # Total number of annotations
+        annotations = data.get("annotations", [])  # Annotations for the current page
+    else:
+        # If no results, set default values
+        total = 0
+        annotations = []
+
+    # Return the total count and the current page of annotations
+    return {"total": total, "annotations": annotations}
+
 
 def get_patient_annotation_ids(p_id, reviewed = False, key = "_id"):
     """
@@ -547,6 +638,7 @@ def get_project_users():
 
     return [user["user"] for user in users]
 
+
 def get_all_patients():
     """
     Returns all the patients in this project
@@ -569,9 +661,10 @@ def get_patient_ids():
     Returns:
         patient_ids (list) : List of all patient IDs in this project
     """
-    patients = mongo.db["PATIENTS"].find()
+    patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False})
 
     return [patient["patient_id"] for patient in patients]
+
 
 def get_patient_lock_status(patient_id):
     """
@@ -597,6 +690,7 @@ def get_all_notes(patient_id):
     notes = mongo.db["NOTES"].find({"patient_id": patient_id})
     return list(notes)
 
+
 def get_patient_notes(patient_id, reviewed = False):
     """
     Returns all notes for that patient.
@@ -604,22 +698,25 @@ def get_patient_notes(patient_id, reviewed = False):
     Args:
         patient_id (int) : ID for the patient
     Returns:
-        notes (list) : A list of all notes for that patient
+        notes: A list of all notes for that patient
     """
     mongodb_search_query = { "patient_id": patient_id, "reviewed": reviewed }
-    notes = list(mongo.db["NOTES"].find(mongodb_search_query))
+    notes = mongo.db["NOTES"].find(mongodb_search_query)
     return notes
 
-def get_total_counts(collection_name: str) -> int:
+
+def get_total_counts(collection_name: str, **kwargs) -> int:
     """
     Returns the total number of documents in a collection.
 
     Args:
         collection_name (str) : The name of the collection to search.
+        **kwargs : Additional arguments to pass to the find
     Returns:
         count (int) : The number of documents in the collection.
     """
-    return mongo.db[collection_name].count_documents({})
+    return mongo.db[collection_name].count_documents({**kwargs})
+
 
 def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
     """
@@ -654,6 +751,7 @@ def update_project_name(new_name):
     """
     logger.info(f"Updating project name to #{new_name}")
     mongo.db["INFO"].update_one({}, { "$set": { "project": new_name } })
+
 
 def mark_annotation_reviewed(annotation_id):
     """
@@ -699,6 +797,7 @@ def delete_annotation_date(annotation_id):
     mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
                                       { "$set": { "event_date" : None } })
 
+
 def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed = True):
     """
     Updates the patient's status to reviewed in the database.
@@ -724,18 +823,22 @@ def mark_note_reviewed(note_id, reviewed_by: str):
     mongo.db["NOTES"].update_one({"text_id" : note_id},
                                  { "$set": { "reviewed": True,
                                              "reviewed_by": reviewed_by} })
+    
+
 def reset_patient_reviewed():
     """
     Update all patients, notes to be un-reviewed.
     """
     mongo.db["PATIENTS"].update_many({},
-                                     { "$set": { "reviewed": False } })
+                                     { "$set": { "reviewed": False,
+                                                "reviewed_by": "",
+                                                 "comments": [] } })
     mongo.db["NOTES"].update_many({}, { "$set": { "reviewed": False } })
 
 
-def add_annotation_comment(annotation_id, comment):
+def add_comment(annotation_id, comment):
     """
-    Stores a new comment for an annotation.
+    Stores a new comment for a patient.
 
     Args:
         annotation_id (str) : Unique ID for the annotation.
@@ -747,11 +850,14 @@ def add_annotation_comment(annotation_id, comment):
         logger.info("No comment entered.")
         return
     logger.debug(f"Adding comment to annotation #{annotation_id}")
-    annotation = mongo.db["ANNOTATIONS"].find_one({ "_id" : ObjectId(annotation_id) })
-    comments = annotation["comments"]
+    patient_id = mongo.db["ANNOTATIONS"].find_one({"_id" : ObjectId(annotation_id)})["patient_id"]
+    patient = mongo.db["PATIENTS"].find_one({"patient_id" : patient_id})
+    comments = patient["comments"]
     comments.append(comment)
-    mongo.db["ANNOTATIONS"].update_one({"_id" : ObjectId(annotation_id)},
-                                       { "$set": { "comments" : comments } })
+    mongo.db["PATIENTS"].update_one({"patient_id" : patient_id},
+                                    { "$set": 
+                                     { "comments" : comments } 
+                                     })
 
 def set_patient_lock_status(patient_id, status):
     """
@@ -804,7 +910,6 @@ def empty_annotations():
     logger.info("Deleting all data in annotations collection.")
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
-    mongo.db["PINES"].delete_many({})
 
 
 def drop_database(name):
@@ -842,52 +947,51 @@ def get_curr_stats():
     """
     Returns basic statistics for the project
 
-    Args:
-        None
-    Returns:
-        stats (list) : List of basic statistics for the project. These include :
-            1. number_of_patients (number of unique patients in the database)
-            2. number_of_annotated_patients (number of patiens who had notes
-                in which key words were found)
-            3. number_of_reviewed
-                        (number of patients who have been reviewed for the current query)
     """
-    # TODO: use aggregation pipeline
     stats = {}
-    patients = get_all_patients()
+    # Aggregation pipeline to count unique patients
+    pipeline_unique_patients = [
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    unique_patients = list(mongo.db.PATIENTS.aggregate(pipeline_unique_patients))
+    stats["number_of_patients"] = len(unique_patients)
 
-    stats["number_of_patients"] = len(list(patients))
+    pipeline_annotated_patients = [
+        {"$match": {"isNegated": False}},
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    annotated_patients = list(mongo.db.ANNOTATIONS.aggregate(pipeline_annotated_patients))
+    stats["number_of_annotated_patients"] = len(annotated_patients)
 
-    annotations = mongo.db["ANNOTATIONS"].find({"isNegated" : False})
-    unique_patients = {annotation["patient_id"] for annotation in annotations}
+    # Aggregation pipeline to count reviewed annotations
+    pipeline_reviewed = [
+        {"$match": {"isNegated": False, "reviewed": True}},
+        {"$group": {"_id": "$patient_id"}}
+    ]
+    reviewed_annotations = list(mongo.db.ANNOTATIONS.aggregate(pipeline_reviewed))
+    stats["number_of_reviewed"] = len(reviewed_annotations)
 
-    stats["number_of_annotated_patients"] = len(unique_patients)
-
-    num_reviewed_annotations = 0
-
-    for p_id in unique_patients:
-        p_anno = mongo.db["PATIENTS"].find_one({"patient_id" : p_id})
-
-        if p_anno["reviewed"] is True:
-            num_reviewed_annotations += 1
-
-    stats["number_of_reviewed"] = num_reviewed_annotations
-
-    pipeline = [
-            {"$match": {"isNegated": False}},
-            {"$group": {"_id": "$token", "count": {"$sum": 1}}}
+    # pipeline for notes and reviewed by user for notes with reviewed_by field
+    pipeline_patients = [
+        {"$match": {"reviewed": True}},
+        {"$group": {"_id": "$reviewed_by", "count": {"$sum": 1}}}
     ]
 
-    # Perform aggregation
-    results = mongo.db.ANNOTATIONS.aggregate(pipeline)
+    reviewed_notes = list(mongo.db.PATIENTS.aggregate(pipeline_patients))
+    stats["user_review_stats"] = {doc["_id"]: doc["count"] for doc in reviewed_notes}
+    # Aggregation pipeline for lemma distribution
+    pipeline_lemma_dist = [
+        {"$match": {"isNegated": False}},
+        {"$group": {"_id": "$token", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$project": {"token": "$_id", "_id": 0, "count": 1}}
+    ]
+    lemma_dist_results = mongo.db.ANNOTATIONS.aggregate(pipeline_lemma_dist)
+    total_tokens = mongo.db.ANNOTATIONS.count_documents({"isNegated": False})
+    stats['lemma_dist'] = {doc['token']: 100 * doc['count']/total_tokens for doc in lemma_dist_results}
 
-    # Convert aggregation results to a dictionary
-    lemma_dist = {result["_id"]: result["count"] for result in results}
-    lemma_dist = {re.sub(r'[^a-zA-Z0-9-_ ]', '', k): v for k, v in sorted(
-        lemma_dist.items(), key=lambda item: item[1], reverse=True)}
-    stats['lemma_dist'] = lemma_dist
-    logger.debug(stats)
     return stats
+
 
 # pines functions
 def get_prediction(note: str) -> float:
@@ -898,8 +1002,9 @@ def get_prediction(note: str) -> float:
     """
     url = f'{os.getenv("PINES_API_URL")}/predict'
     data = {'text': note}
+    log_notes = None
     try:
-        response = requests.post(url, json=data, timeout=20)
+        response = requests.post(url, json=data, timeout=3600)
         response.raise_for_status()
         res = response.json()["prediction"]
         score = res.get("score")
@@ -908,10 +1013,11 @@ def get_prediction(note: str) -> float:
             score = 1 - score if "0" in label else score
         else:
             score = 1 - score if label == 0 else score
-        logger.debug(f"Got prediction for note: {note} with score: {score} and label: {label}")
+        log_notes  = re.sub(r'\d', '*', note[:20])
+        logger.debug(f"Got prediction for note: {log_notes} with score: {score} and label: {label}")
         return score
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to get prediction for note: {note}")
+        logger.error(f"Failed to get prediction for note: {log_notes}")
         raise e
     
 
@@ -954,6 +1060,8 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
         query = {"text_id": {"$in": text_ids}}
     
     cedars_notes = notes_collection.find(query)
+    total_notes = notes_collection.count_documents(query)
+    count = 0
     for note in cedars_notes:
         note_id = note.get("text_id")
         if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
@@ -967,7 +1075,138 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                 "report_type": note.get("text_tag_3"),
                 "document_type": note.get("text_tag_1")
                 })
+        count += 1
             
+
+def add_task(func, description, user, *args, **kwargs):
+    """
+    Launch a task and add it to Mongo if it doesn't already exist.
+    """
+    task_db = mongo.db["TASK"]
+    job_id = kwargs.get("job_id")
+    patient_id = kwargs.get("patient_id")
+    logger.info(f"Adding task to queue: {job_id}")
+    exists = get_task(job_id)
+
+    logger.debug(f"Task exists: {exists}")
+    rq_job = None
+    if exists:
+        try:
+            rq_job = rq.job.Job.fetch(job_id, connection=flask.current_app.redis)
+        except (redis.exceptions.RedisError, rq.exceptions.NoSuchJobError):
+            logger.warning(f"Task {job_id} exists in MongoDB but not in RQ queue. Re-enqueuing.")
+            exists = None  # If the job cannot be fetched, treat it as non-existent
+
+    if not exists:
+        rq_job = flask.current_app.task_queue.enqueue(
+            func, retry=Retry(max=3), *args, **kwargs
+        )
+        task = {
+            "job_id": rq_job.get_id(),
+            "name": func.__name__,
+            "description": description,
+            "user": user,
+            "complete": False,
+            "progress": 0
+        }
+        task_db.insert_one(task)
+        # when the patient is being processed, lock it
+        set_patient_lock_status(patient_id, True)
+
+    return rq_job.get_id()
+
+
+def get_tasks_in_progress():
+    task_db = mongo.db["TASK"]
+    return task_db.find({"complete": False})
+
+
+def get_task_in_progress(task_id):
+    task_db = mongo.db["TASK"]
+    return task_db.find_one({"job_id": task_id,
+                             "complete": False})
+
+
+def get_task(task_id):
+    task_db = mongo.db["TASK"]
+    return task_db.find_one({"job_id": task_id})
+
+
+def update_db_task_progress(task_id, progress):
+    task_db = mongo.db["TASK"]
+    task = task_db.find_one({"job_id": task_id})
+    completed = False
+    if progress >= 100:
+        completed = True
+    task_db.update_one({"job_id": task["job_id"]},
+                       {"$set": {"progress": progress,
+                                 "complete": completed}})
+    patient_id = int(task_id.split(":")[1])
+    # TODO: handle failed patients?
+    set_patient_lock_status(patient_id, False)
+
+
+def report_success(job, connection, result, *args, **kwargs):
+    job.meta['progress'] = 100
+    job.save_meta()
+    update_db_task_progress(job.get_id(), 100)
+
+
+def report_failure(job, connection, type, value, *args, **kwargs):
+    job.meta['progress'] = 0
+    job.save_meta()
+    update_db_task_progress(job.get_id(), 0)
+
+
+def download_annotations(filename: str = "annotations.csv"):
+    """
+    download annotations from the database
+    """
+    patients = get_all_patients()
+    data = []
+    count = 0
+    for patient in patients:
+        patient_id = patient["patient_id"]
+        notes = get_all_notes(patient_id)
+        reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+        reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True,  key="sentence")
+        unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False,  key="sentence")
+        sentences = reviewed_sentences + unreviewed_sentences
+        total_sentences = len(sentences)
+        event_date = get_event_date(patient_id)
+        first_note_date = get_first_note_date_for_patient(patient_id)
+        last_note_date = get_last_note_date_for_patient(patient_id)
+        data.append([patient_id, len(notes), len(reviewed_notes),
+                     total_sentences, len(reviewed_sentences), reviewed_sentences,
+                     event_date, first_note_date, last_note_date])
+        count += 1
+
+    df = pd.DataFrame(data, columns=["patient_id",
+                                     "total_notes",
+                                     "reviewed_notes",
+                                     "total_sentences",
+                                     "reviewed_sentences",
+                                     "sentences",
+                                     "event_date",
+                                     "first_note_date",
+                                     "last_note_date"]
+                                     )
+    data_bytes = df.to_csv().encode('utf-8')
+    csv_buffer = BytesIO(data_bytes)
+    client.put_object("cedars",
+                      f"annotated_files/{filename}",
+                      data=csv_buffer,
+                      length=len(data_bytes),
+                      content_type="application/csv")
+    logger.info(f"Uploaded annotations to s3: {filename}")
+    file = client.get_object("cedars", f"annotated_files/{filename}")
+    logger.info(f"Downloaded annotations from s3: {filename}")
+    return flask.Response(
+        file.stream(32*1024),
+        mimetype='text/csv',
+        headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
+    )
+
 
 def terminate_project():
     """
@@ -976,11 +1215,17 @@ def terminate_project():
     Reset the database to the initial state.
     """
     logger.info("Terminating project.")
+    # Delete all mongo DB collections
     mongo.db.drop_collection("ANNOTATIONS")
     mongo.db.drop_collection("NOTES")
     mongo.db.drop_collection("PATIENTS")
     mongo.db.drop_collection("USERS")
     mongo.db.drop_collection("QUERY")
     mongo.db.drop_collection("PINES")
+    mongo.db.drop_collection("TASK")
+
+    # reset all rq queues
+    flask.current_app.task_queue.empty()
+
     create_project(project_name=fake.slug(),
                    investigator_name=fake.name())

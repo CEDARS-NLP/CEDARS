@@ -32,7 +32,7 @@ PINES_API_URL=<>  # if using PINES
 
 CEDARS is a flask web application and depends on the following software:
 
-1. Python 3.9 or later
+1. Python 3.9 - 3.11
 
     You can install Python from the [official website](https://www.python.org/downloads/).
     
@@ -59,6 +59,17 @@ CEDARS is a flask web application and depends on the following software:
     - You can use a cloud-based service like [MINIO](https://min.io/)
     - You can run a local instance of MINIO using [Docker](https://min.io/docs/minio/container/index.html)
     - You can run a local instance of MINIO using the [official installation](https://docs.min.io/docs/minio-quickstart-guide.html)
+
+ 5. Redis
+
+!!! note "Mac Fork Issue"
+    On MacOS, if you see a issue with fork processes you will need to `export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`
+    for running the `rq` workers
+
+    To manage long running processes such as upload, download, spacy labelling, PINES jobs etc.
+
+    - You can install [redis](https://redis.io/docs/install/install-redis/) locally on your computer 
+    - Run redis docker [image](https://hub.docker.com/_/redis)
 
 #### Docker Requirement
 
@@ -207,6 +218,10 @@ CEDARS is by definition semi-automated, and depending on the specific use case a
 Once all events have been tallied and the audit results are satisfactory, if desired the CEDARS project database can be deleted from the MongoDB database. This is an irreversible operation.
 
 In future, there will be way to archive CEDARS projects, but this feature is not yet available.
+
+### Issues
+
+- Unable to install `thinc` - downgrade python version < 3.12
 
 #### ::: cedars.app.db.terminate_project
 ---

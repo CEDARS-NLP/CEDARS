@@ -8,4 +8,4 @@ RUN pip install -r requirements.txt
 COPY ./cedars .
 COPY ./cedars/.docker-env .env
 
-CMD [ "python", "-m", "app.wsgi" ]
+CMD [ "gunicorn", "app.wsgi:app", "--log-level", "warning" ]
