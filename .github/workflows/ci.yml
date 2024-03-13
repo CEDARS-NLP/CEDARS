@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r cedars/requirements.txt
-          pip insall pytest pytest-cov coverage flake8 mkdocs
+          pip install pytest pytest-cov coverage flake8 mkdocs
 
       - name: Install everything, run the tests, produce the .coverage file
         run: pytest cedars/ # This is the part where you put your own test command
