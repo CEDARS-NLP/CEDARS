@@ -99,6 +99,13 @@ To install CEDARS, please start by cloning the repository and installing the req
 - Initialize submodules: `git submodule init`
 - Download submodules: `git submodule update`
 
+!!! note "git submodule update time out"
+    If you are accessing git over http - take following steps
+    - update `.gitmodules` in the root dir with
+      `url = https://github.com/CEDARS-NLP/PINES.git`
+    - Run: `git submodule sync`
+    - Run: `git submodule update`
+
 #### Standalone CEDARS Python Package Installation
 
 Make sure all the local requirements [above](#detailed-requirements) are met. Then, you can install the package using Poetry:

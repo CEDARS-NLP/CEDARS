@@ -4,7 +4,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 import pandas as pd
-import datetime
+import flask
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template, send_file,
@@ -446,7 +446,7 @@ def adjudicate_records():
         if session.get("patient_id") is not None:
             logger.info(f"Getting patient: {session.get('patient_id')} from session")
             return redirect(url_for("ops.show_annotation"))
-        patient_id = db.get_patient()
+        patient_id = db.get_patients_to_annotate()
     else:
         session.pop("patient_id", None)
         search_patient = request.form.get("patient_id")
@@ -457,7 +457,7 @@ def adjudicate_records():
         if patient_id is None:
             # if the search return no patient, get the next patient
             flash(f"Patient {search_patient} does not exist. Showing next patient")
-            patient_id = db.get_patient()
+            patient_id = db.get_patients_to_annotate()
 
     if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
@@ -523,27 +523,6 @@ def highlighted_text(note):
     logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>")
 
-# def _initialize_session(pt_id=None):
-#     if pt_id is not None or "patient_id" not in session:
-#         pt_id = pt_id if pt_id else db.get_patients_to_annotate()
-#         if pt_id is not None:
-#             # found a patient with unreviewed notes
-#             session.update({
-#                 "patient_id": pt_id,
-#                 "annotation_number": 0,
-#                 "annotation_ids": db.get_patient_annotation_ids(pt_id)
-#             })
-#             db.set_patient_lock_status(pt_id, True)
-#         session.modified = True
-
-# def _prepare_for_next_patient():
-#     logger.info(f"Marking patient: {session['patient_id']} as reviewed")
-#     db.mark_patient_reviewed(session['patient_id'],
-#                              reviewed_by=current_user.username)
-#     db.set_patient_lock_status(session['patient_id'], False)
-#     session.pop("patient_id")
-#     _initialize_session()
-
 
 def _format_date(date_obj):
     res = None
@@ -571,5 +550,14 @@ def download_file (filename = 'annotations.csv'):
     3. Convert all columns to proper datatypes
     """
     logger.info("Downloading annotations")
-    return db.download_annotations()
+    if db.download_annotations(filename):
+        file = client.get_object("cedars", f"annotated_files/{filename}")
+        logger.info(f"Downloaded annotations from s3: {filename}")
+        return flask.Response(
+            file.stream(32*1024),
+          mimetype='text/csv',
+            headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
+        )
+    else:
+        flask.jsonify({"error": f"Annotations with filename '{filename}' not found."}), 404
     
