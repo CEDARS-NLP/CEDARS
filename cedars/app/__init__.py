@@ -7,7 +7,8 @@ __author__ = "Rohan Singh"
 
 import os
 from flask_login import login_required
-from flask import Flask, g, url_for, render_template, session
+from flask import Flask, render_template
+from flask_session import Session
 from faker import Faker
 from loguru import logger
 import rq
@@ -15,7 +16,7 @@ from redis import Redis
 
 from .database import mongo
 fake = Faker()
-
+sess = Session()
 
 def rq_init_app(app):
     """Initialize the rq app"""
@@ -34,6 +35,10 @@ def create_app(config_filename=None):
         logger.info(f"Loading config from {config_filename}")
         app.config.from_object(config_filename)
     app.config["UPLOAD_FOLDER"] = os.path.join(app.instance_path)
+    app.config["SESSION_TYPE"] = "redis"
+    app.config["SESSION_REDIS"] = Redis.from_url(app.config["RQ"]['redis_url'])
+
+    sess.init_app(app)
     mongo.init_app(app)
     rq_init_app(app)
 

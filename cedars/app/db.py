@@ -365,6 +365,8 @@ def get_patient():
         patient_id (int) : Unique ID for a patient.
     """
 
+    # todo: make sure it only get patients who have annotations atleast
+    # while adjuticating
     patient = mongo.db["PATIENTS"].find_one({"reviewed" : False,
                                              "locked" : False})
 
@@ -965,10 +967,10 @@ def get_curr_stats():
 
     # Aggregation pipeline to count reviewed annotations
     pipeline_reviewed = [
-        {"$match": {"isNegated": False, "reviewed": True}},
+        {"$match": {"reviewed": True}},
         {"$group": {"_id": "$patient_id"}}
     ]
-    reviewed_annotations = list(mongo.db.ANNOTATIONS.aggregate(pipeline_reviewed))
+    reviewed_annotations = list(mongo.db.PATIENTS.aggregate(pipeline_reviewed))
     stats["number_of_reviewed"] = len(reviewed_annotations)
 
     # pipeline for notes and reviewed by user for notes with reviewed_by field
@@ -984,6 +986,7 @@ def get_curr_stats():
         {"$match": {"isNegated": False}},
         {"$group": {"_id": "$token", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
+        {"$limit": 10},
         {"$project": {"token": "$_id", "_id": 0, "count": 1}}
     ]
     lemma_dist_results = mongo.db.ANNOTATIONS.aggregate(pipeline_lemma_dist)
@@ -1193,19 +1196,17 @@ def download_annotations(filename: str = "annotations.csv"):
                                      )
     data_bytes = df.to_csv().encode('utf-8')
     csv_buffer = BytesIO(data_bytes)
-    client.put_object("cedars",
-                      f"annotated_files/{filename}",
-                      data=csv_buffer,
-                      length=len(data_bytes),
-                      content_type="application/csv")
-    logger.info(f"Uploaded annotations to s3: {filename}")
-    file = client.get_object("cedars", f"annotated_files/{filename}")
-    logger.info(f"Downloaded annotations from s3: {filename}")
-    return flask.Response(
-        file.stream(32*1024),
-        mimetype='text/csv',
-        headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
-    )
+    try:
+        client.put_object("cedars",
+                        f"annotated_files/{filename}",
+                        data=csv_buffer,
+                        length=len(data_bytes),
+                        content_type="application/csv")
+        logger.info(f"Uploaded annotations to s3: {filename}")
+        return True
+    except Exception:
+        logger.error(f"Failed to upload annotations to s3: {filename}")
+        return False
 
 
 def terminate_project():
