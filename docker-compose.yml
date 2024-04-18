@@ -21,8 +21,6 @@ services:
       dockerfile: ./cedars/Dockerfile
     image: cedars
     restart: always
-    ports:
-      - 5001:5000
     # flask requires SIGINT to stop gracefully
     # (default stop signal from Compose is SIGTERM)
     stop_signal: SIGINT
