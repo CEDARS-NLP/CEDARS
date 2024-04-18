@@ -1172,8 +1172,8 @@ def download_annotations(filename: str = "annotations.csv"):
         patient_id = patient["patient_id"]
         notes = get_all_notes(patient_id)
         reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
-        reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True,  key="sentence")
-        unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False,  key="sentence")
+        reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
+        unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
         sentences = reviewed_sentences + unreviewed_sentences
         total_sentences = len(sentences)
         event_date = get_event_date(patient_id)
