@@ -51,14 +51,19 @@
   new Chart(ctx, {
     type: 'pie',
     data: {
-      labels: ['Patients Not in Annotations', 'Reviewed Patients', 'Unreviewed Patients'],
+      labels: [
+        // 'Patients Not in Annotations',
+        'Reviewed Patients',
+        'Unreviewed Patients'],
       datasets: [{
         label: 'Progress',
-        data: [{{ number_of_patients }} - {{ number_of_annotated_patients }},
-        {{ number_of_reviewed }},
-        {{ number_of_annotated_patients }} - {{ number_of_reviewed }}],
+        data: [
+          // {{ number_of_patients }} - {{ number_of_annotated_patients }},
+          {{ number_of_reviewed }},
+          {{ number_of_patients }} - {{ number_of_reviewed }}
+        ],
         backgroundColor: [
-          'rgba(11,61,92, 1.0)',
+          // 'rgba(11,61,92, 1.0)',
           'rgba(217,180,15, 1.0)',
           'rgba(255,0,0,1.0)'
         ],
