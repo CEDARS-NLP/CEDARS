@@ -14,6 +14,7 @@ config = dotenv_values(".env")
 
 log = logging.getLogger('werkzeug')
 log.disabled = True
+
 logger.remove()
 logger.add(sys.stdout,
            format="{time} {level} {message}",

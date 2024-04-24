@@ -79,7 +79,7 @@ def populate_annotations():
 
     annotations.create_index("patient_id", unique = False)
     annotations.create_index("note_id", unique = False)
-    annotations.create_index("text_id", unique = False)
+    # annotations.create_index("text_id", unique = False)
     annotations.create_index("sentence_number", unique = False)
     annotations.create_index("start_index", unique = False)
 
@@ -97,7 +97,7 @@ def populate_notes():
     notes = mongo.db["NOTES"]
 
     notes.create_index("patient_id", unique = False)
-    notes.create_index("doc_id", unique = False)
+    # notes.create_index("doc_id", unique = False)
     notes.create_index("text_id", unique = True)
 
     logger.info("Created NOTES collection.")
@@ -271,7 +271,7 @@ def get_user(username):
     return user
 
 
-def get_search_query():
+def get_search_query(query_key = "query"):
     """
     This function is used to get the current search query from the database.
     All this data is kept in the QUERY collection.
@@ -279,7 +279,7 @@ def get_search_query():
     query = mongo.db["QUERY"].find_one({"current" : True})
 
     if query:
-        return query["query"]
+        return query[query_key]
     
     return ""
 
@@ -403,13 +403,20 @@ def get_patients_to_annotate():
     return None
 
 
-def get_documents_to_annotate():
+def get_documents_to_annotate(patient_id = None):
     """
     Retrives all documents that have not been annotated.
 
     Returns: All matching notes from the database.
     """
     logger.debug("Retriving all annotated documents from database.")
+    match_stage = {
+        "annotations": {"$eq": []},
+        "reviewed": {"$ne": True}
+    }
+    if patient_id:
+        match_stage["patient_id"] = patient_id
+
     documents_to_annotate = mongo.db["NOTES"].aggregate(
         [{
             "$lookup": {
@@ -420,9 +427,7 @@ def get_documents_to_annotate():
             }
         },
         {
-            "$match": {
-                "annotations": {"$eq": []}
-            }
+            "$match": match_stage
         }])
 
     return documents_to_annotate
@@ -517,11 +522,13 @@ def get_patient_annotation_ids(p_id, reviewed = False, key = "_id"):
         annotations (list) : A list of all annotation IDs linked to that patient.
     """
     logger.debug(f"Retriving annotations for patient #{p_id} from database.")
-    annotation_ids = mongo.db["ANNOTATIONS"].find({"patient_id": p_id,
-                                                   "reviewed" : reviewed,
-                                                   "isNegated" : False}).sort([("note_id", 1),
-                                                                               ('text_date', 1),
-                                                                               ("sentence_number", 1)])
+    query_filter = {"patient_id": p_id, "isNegated": False, "reviewed": reviewed}
+
+    annotation_ids = mongo.db["ANNOTATIONS"].find(
+        query_filter).sort([
+            ("note_id", 1),
+            ('text_date', 1),
+            ("sentence_number", 1)])
 
     return [str(id[key]) for id in annotation_ids]
 

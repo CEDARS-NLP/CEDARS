@@ -1,5 +1,5 @@
 import pytest
-from cedars.app import nlpprocessor
+from app import nlpprocessor
 
 
 @pytest.mark.parametrize("query, expected", [
