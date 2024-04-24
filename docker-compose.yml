@@ -26,9 +26,7 @@ services:
     stop_signal: SIGINT
     depends_on:
       - db
-      - minio
       - redis
-      - worker
 
   db:
     image: mongo:latest
@@ -86,6 +84,8 @@ services:
     image: cedars
     command: python -m app.make_rq
     scale: 2
+    depends_on:
+      - web
 
 
 volumes:
