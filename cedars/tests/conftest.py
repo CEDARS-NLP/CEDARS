@@ -2,8 +2,8 @@ import os
 import pandas as pd
 import pytest
 from pathlib import Path
-from cedars.app import create_app
-from cedars.app import db
+from app import create_app
+from app import db
 
 test_data = pd.read_csv(Path(__file__).parent / "simulated_patients.csv")
 
@@ -11,14 +11,9 @@ test_data = pd.read_csv(Path(__file__).parent / "simulated_patients.csv")
 @pytest.fixture(scope='session', autouse=True)
 def app():
     environment = 'test'
-    cedars_app = create_app(f"cedars.config.{environment.title()}")
+    cedars_app = create_app(f"config.{environment.title()}")
 
     with cedars_app.app_context():
-        db.create_project(
-            project_name="testing",
-            investigator_name="tester",
-            cedars_version="test")
-
         db.upload_notes(test_data)
 
     yield cedars_app

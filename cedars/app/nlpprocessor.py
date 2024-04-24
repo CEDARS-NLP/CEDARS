@@ -160,7 +160,7 @@ class NlpProcessor:
         documents_to_process = []
         if patient_id is not None:
             # get all note for patient which are not reviewed
-            documents_to_process = db.get_patient_notes(patient_id)
+            documents_to_process = db.get_documents_to_annotate(patient_id)
         else:
             # get all notes which are not in annotation collection.
             documents_to_process = db.get_documents_to_annotate()
@@ -219,10 +219,11 @@ class NlpProcessor:
             if match_count == 0:
                 db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
             count += 1
-            if (count + 1) % 10 == 0:
-                logger.info(f"Processed {count+1} / {len(document_list)} documents")
+            if (count) % 10 == 0:
+                logger.info(f"Processed {count} / {len(document_list)} documents")
         
-        if docs_with_annotations > 0:
+        # check if nlp processing is enabled
+        if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] == True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
                 

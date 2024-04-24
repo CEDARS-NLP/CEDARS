@@ -244,7 +244,7 @@ def upload_query():
 
     tag_query = {
         "exact": [False],
-        "nlp_apply": [False],
+        "nlp_apply": bool(request.form.get("nlp_apply")),
         "include": [None],
         "exclude": [None]
     }
@@ -267,8 +267,8 @@ def upload_query():
         return render_template("ops/upload_query.html", **db.get_info())
 
     use_negation = False # bool(request.form.get("view_negations"))
-    hide_duplicates = False # not bool(request.form.get("keep_duplicates"))
-    skip_after_event = False # bool(request.form.get("skip_after_event"))
+    hide_duplicates = not bool(request.form.get("keep_duplicates"))
+    skip_after_event = bool(request.form.get("skip_after_event"))
 
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
@@ -343,13 +343,19 @@ def save_adjudications():
             # as reviewed because we don't need to review the rest
             # this could be based on a parameter though
             # TODO: add logic based on tags if we need to keep reviewing
-            if db.get_annotation_date(current_annotation_id) is not None or len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
-                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
-                                    reviewed_by=current_user.username)
+            if len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
                 db.mark_patient_reviewed(session["patient_id"],
                                         reviewed_by=current_user.username)
                 db.set_patient_lock_status(session["patient_id"], False)
                 session.pop("patient_id")
+            elif db.get_annotation_date(current_annotation_id) is not None:
+                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                    reviewed_by=current_user.username)
+                db.mark_patient_reviewed(session["patient_id"],
+                                        reviewed_by=current_user.username)
+                if db.get_search_query(query_key="skip_after_event"):
+                    db.set_patient_lock_status(session["patient_id"], False)
+                    session.pop("patient_id")
             else:
                 session["index"] = session["unreviewed_annotations_index"].index(1)
         elif 1 in session["unreviewed_annotations_index"]:
