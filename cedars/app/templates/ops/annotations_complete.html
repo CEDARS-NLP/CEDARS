@@ -3,11 +3,23 @@
 
 {% block title %}CEDARS {% endblock %}
 
+{% block search_bar %}
+<div class="mx-10 search_div" id = "search_bar">
+  <form class="d-flex" action="/ops/adjudicate_records" method="POST">
+      <input type="search" class="form-control"
+             placeholder="Enter Patient ID"
+             aria-label="Search" name="patient_id" id="patient_id" value="">
+      <button class="btn btn-outline-secondary" type="submit" value = "search patient" id="button-addon2">Search</button>
+  </form>
+</div>
+
+{% endblock %}
+
 {% block content %}
 
 
     <h>
-        All Annotations in this Database have been reviewed!
+        ✅ All Annotations in this Database have been reviewed!
     </h>
 
 
