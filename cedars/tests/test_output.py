@@ -1,2 +1,3 @@
+"""Add tests for the output module."""
 def test_download():
-    return True
+    assert True

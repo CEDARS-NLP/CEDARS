@@ -39,7 +39,7 @@ jobs:
           flake8 cedars/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Install everything, run the tests, produce the .coverage file
-        run: pytest cedars/ # This is the part where you put your own test command
+        run: cd cedars & python -m pytest --cov=app
 
       - name: Coverage comment
         id: coverage_comment

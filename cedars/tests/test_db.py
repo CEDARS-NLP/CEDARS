@@ -1,4 +1,5 @@
-# UNIQUE0000000001
+# Test for db.py
+# Curr
 
 import pytest
 from app import db
@@ -23,7 +24,7 @@ def test_add_user():
     is_admin = False
 
     # Act (call the function)
-    db.add_user(username, password, is_admin)
+    db.add_user(username, password, is_admin)ß
 
     # Assert (verify the result)
     assert db.get_user(username) is not None
