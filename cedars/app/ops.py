@@ -57,6 +57,14 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
+def convert_to_int(s):
+    """Convert to integer if possible, otherwise return the string."""
+    try:
+        return int(s)
+    except ValueError:
+        return s
+
+
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
 def project_details():
@@ -85,7 +93,7 @@ def project_details():
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
-    return render_template("ops/project_details.html", **db.get_info())
+    return render_template("ops/project_details.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 def load_pandas_dataframe(filepath):
@@ -243,10 +251,8 @@ def upload_query():
                                **db.get_info())
 
     tag_query = {
-        "exact": [False],
-        "nlp_apply": bool(request.form.get("nlp_apply")),
-        "include": [None],
-        "exclude": [None]
+        "exact": False,
+        "nlp_apply": bool(request.form.get("nlp_apply"))
     }
 
     search_query = request.form.get("regex_query")
@@ -457,8 +463,10 @@ def adjudicate_records():
         session.pop("patient_id", None)
         search_patient = request.form.get("patient_id")
         if search_patient and len(search_patient.strip()) > 0:
-            search_patient = int(search_patient)
-            patient_id = db.get_patient_by_id(search_patient)["patient_id"]
+            search_patient = convert_to_int(search_patient)
+            patient = db.get_patient_by_id(search_patient)
+            if patient:
+                patient_id = patient["patient_id"]
 
         if patient_id is None:
             # if the search return no patient, get the next patient
@@ -479,8 +487,8 @@ def adjudicate_records():
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         return redirect(url_for("ops.adjudicate_records"))
-    elif len(unreviewed_annotations_index) == 0:
-        logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
+    elif unreviewed_annotations_index.count(1) == 0:
+        flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
         session["patient_id"] = patient_id
         session["total_count"] = total_count
         session["annotations"] = annotations
@@ -488,7 +496,6 @@ def adjudicate_records():
         session["unreviewed_annotations_index"] = unreviewed_annotations_index
         # in case of reviewed patient show everything..
         session["index"] = 0
-        return redirect(url_for("ops.adjudicate_records"))
     else:
         logger.info(f"Total annotations for patient {patient_id}: {total_count}")
         session["patient_id"] = patient_id
@@ -497,9 +504,9 @@ def adjudicate_records():
         session["all_annotation_index"] = all_annotation_index
         session["unreviewed_annotations_index"] = unreviewed_annotations_index
         session["index"] = all_annotation_index[unreviewed_annotations_index.index(1)]
-        session.modified = True
 
     # db.set_patient_lock_status(patient_id, True)
+    session.modified = True
     return redirect(url_for("ops.show_annotation"))
 
 

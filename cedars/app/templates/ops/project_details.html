@@ -4,27 +4,55 @@
 
 {% block content %}
 <div class="container-md col-6 b-1">
-  <form class="form-inline" method="POST">
-    <div class="mb-3">
-      <h2>Project Details</h2>
-      <div class="mb-4" >
-        <label>Project Name</label>
-        <input type="text" class="form-control mb-3" name="project_name" value="{{ project_name }}">
-        <button type="submit" name="update_project_name" class="btn btn-primary p-2">Save Changes</button>
+  <div class="row">
+    <div class="col-md-6">
+      <div class="tile">
+        <h2>Project Details</h2>
+        <form class="form-inline" method="POST">
+          <div class="mb-3">
+            <label>Project Name</label>
+            <input type="text" class="form-control mb-3" name="project_name" value="{{ project_name }}">
+            <button type="submit" name="update_project_name" class="btn btn-primary p-2">Save Changes</button>
+          </div>
+        </form>
       </div>
     </div>
-  </form>
-  <form class="form-inline" method="POST">
-    <div class="mb-3">
-      <h2>Terminate Project</h2>
-      <div class="mb-4" >
-        <label>Confirm Terminate</label>
-        <input type="text" class="form-control mb-3" name="terminate_conf" placeholder="Type: DELETE EVERYTHING" >
-        <button type="submit" name="terminate" class="btn btn-primary p-2">Terminate</button>
+    <div class="col-md-6">
+      <div class="tile">
+        <h2>Terminate Project</h2>
+        <form class="form-inline" method="POST">
+          <div class="mb-3">
+            <label>Confirm Terminate</label>
+            <input type="text" class="form-control mb-3" name="terminate_conf" placeholder="Type: DELETE EVERYTHING" >
+            <button type="submit" name="terminate" class="btn btn-primary p-2">Terminate</button>
+          </div>
+        </form>
       </div>
     </div>
-  </form>
+    <div class="col-md-12">
+      <div class="tile full-width">
+        <h2>Job Status</h2>
+          <table class="table table-sm">
+            <tr>
+              <th>Job ID</th>
+              <th>Name</th>
+              <th>User</th>
+              <th>Completed</th>
+              <th>Progress</th>
+            </tr>
+            {% for task in tasks %}
+            <tr>
+              <td>{{ task.job_id }}</td>
+              <td>{{ task.name }}</td>
+              <td>{{ task.user }}</td>
+              <td>{{ task.complete }}</td>
+              <td>{{ task.progress }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+      </div>
+    </div>
+  </div>
 </div>
-
 
 {% endblock %}

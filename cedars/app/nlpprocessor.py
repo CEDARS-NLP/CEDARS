@@ -169,7 +169,8 @@ class NlpProcessor:
         if len(document_list) == 0:
             # no notes found to annotate
             logger.info(f"No documents to process for patient {patient_id}")
-            self.process_patient_pines(patient_id)
+            if db.get_search_query("tag_query")["nlp_apply"] == True:
+                self.process_patient_pines(patient_id)
             return
         
         document_text = [document["text"] for document in document_list]
