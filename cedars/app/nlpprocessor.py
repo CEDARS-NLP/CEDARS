@@ -2,9 +2,7 @@
 This module contatins the class to perform NLP operations for the CEDARS project
 """
 import sys
-import multiprocessing as mp
 from flask_login import current_user
-import pandas as pd
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
@@ -12,7 +10,21 @@ from . import db
 
 logger.enable(__name__)
 
-# Filter keywords
+
+def get_regex_dict(token):
+    # Replace '*' with '.*' and '?' with '\w?'
+    regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\\w?')
+    return {"TEXT": {"REGEX": regex_pattern}}
+
+
+def get_lemma_dict(token):
+    return {"LEMMA": token}
+
+
+def get_negated_dict(token):
+    return {"LOWER": token, "OP": "!"}
+
+
 def query_to_patterns(query: str) -> list:
     """
     Expected query will be a set of keywords separated
@@ -40,16 +52,6 @@ def query_to_patterns(query: str) -> list:
       6. Combine the patterns
       7. Return the combined pattern
     """
-    def get_regex_dict(token):
-        # Replace '*' with '.*' and '?' with '.'
-        regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\w?')
-        return {"TEXT": {"REGEX": regex_pattern}}
-
-    def get_lemma_dict(token):
-        return {"LEMMA": token}
-    
-    def get_negated_dict(token):
-        return {"LOWER": token, "OP": "!"}
 
     or_expressions = query.split(" OR ")
     res = [[] for _ in range(len(or_expressions))]
@@ -90,9 +92,8 @@ def is_negated(span):
     Returns:
         (bool) : True if the token is negated in the sentence.
     """
-    neg_words = ['no','not',"n't","wouldn't",'never','nobody','nothing',
-                 'neither','nowhere','noone',
-                 'no-one','hardly','scarcely','barely']
+    neg_words = ['no', 'not', "n't", "wouldn't", 'never', 'nobody', 'nothing',
+                 'neither', 'nowhere', 'noone', 'no-one', 'hardly', 'scarcely', 'barely']
 
     for token in span.subtree:
         parents = list(token.ancestors)
@@ -101,7 +102,7 @@ def is_negated(span):
         for parent in token.ancestors:
             children.extend(list(parent.children))
 
-        if ("neg"in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
+        if ("neg" in [child.dep_ for child in children]) or ("neg" in [par.dep_ for par in parents]):
             return True
 
         parents_text = [par.text for par in parents]
@@ -113,11 +114,12 @@ def is_negated(span):
 
     return False
 
+
 class NlpProcessor:
     """
     This class stores a sci-spacy model and functions needed to run it on medical notes.
     """
-    def __new__(cls, model_name = "en_core_sci_lg"):
+    def __new__(cls, model_name="en_core_sci_lg"):
         """
         Loads the model
 
@@ -131,17 +133,15 @@ class NlpProcessor:
 
             try:
                 cls.nlp_model = spacy.load(model_name)
-                                        
             except Exception as exc:
                 logger.critical("Spacy model %s failed to load.", model_name)
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
-
     def process_notes(self, patient_id, processes=1, batch_size=20):
         """
         ##### Process Query Matching
-        
+
         This function takes a medical note and a regex query as input and annotates
         the relevant sections of the text.
         """
@@ -169,10 +169,10 @@ class NlpProcessor:
         if len(document_list) == 0:
             # no notes found to annotate
             logger.info(f"No documents to process for patient {patient_id}")
-            if db.get_search_query("tag_query")["nlp_apply"] == True:
+            if db.get_search_query("tag_query")["nlp_apply"] is True:
                 self.process_patient_pines(patient_id)
             return
-        
+
         document_text = [document["text"] for document in document_list]
         if patient_id is not None:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
@@ -202,14 +202,14 @@ class NlpProcessor:
                     token_start = token.start_char
                     token_end = token_start + len(token.text)
                     annotation = {
-                                    "sentence" : sentence_text,
-                                    "token" : token.text,
-                                    "isNegated" : has_negation,
-                                    "start_index" : start_index,
-                                    "end_index" : end_index,
-                                    "note_start_index" : token_start,
-                                    "note_end_index" : token_end,
-                                    "sentence_number" : sent_no
+                                    "sentence": sentence_text,
+                                    "token": token.text,
+                                    "isNegated": has_negation,
+                                    "start_index": start_index,
+                                    "end_index": end_index,
+                                    "note_start_index": token_start,
+                                    "note_end_index": token_end,
+                                    "sentence_number": sent_no
                                     }
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
@@ -222,12 +222,11 @@ class NlpProcessor:
             count += 1
             if (count) % 10 == 0:
                 logger.info(f"Processed {count} / {len(document_list)} documents")
-        
+
         # check if nlp processing is enabled
-        if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] == True:
+        if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
-                
 
     def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
         """
@@ -235,7 +234,7 @@ class NlpProcessor:
 
         1. Get all notes for which annotations are present
         2. Get the predictions for each note and save it in the pines collection
-        3. If note prediction is 
+        3. If note prediction is
             a. Below threshold
                 i. Mark all annotation as reviewed
                 ii. Update the patient reviewed status based on all notes reviewed status
@@ -248,7 +247,7 @@ class NlpProcessor:
             db.mark_patient_reviewed(patient_id, reviewed_by="CEDARS")
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
-        
+
         db.predict_and_save(notes)
         scores = []
         for note_id in notes:
@@ -258,12 +257,12 @@ class NlpProcessor:
                 updated_annots = db.update_annotation_reviewed(note_id)
                 db.mark_note_reviewed(note_id, reviewed_by="PINES")
                 logger.info(f"Marked {updated_annots} annotations as reviewed for note {note_id} with score {score}")
-        
+
         if max(scores) < threshold:
             db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
             logger.debug(f"Marked patient {patient_id} as reviewed")
-        
-    def automatic_nlp_processor(self, patient_id = None):
+
+    def automatic_nlp_processor(self, patient_id=None):
         """
         This function is used to perform and save NLP annotations
         on one or all patients saved in the database.
@@ -274,14 +273,14 @@ class NlpProcessor:
         for patient_id in db.get_patient_ids():
             try:
                 db.add_task(self.process_notes,
-                            job_id = f"spacy:{patient_id}",
+                            job_id=f"spacy:{patient_id}",
                             patient_id=patient_id,
                             user=current_user.username,
                             description="cedars service",
                             on_success=db.report_success,
                             on_failure=db.report_failure
                             )
-            except:
+            except Exception:
                 logger.debug(f"error while processing patient: {sys.exc_info()}")
             finally:
                 logger.debug(f"error while processing patient: {sys.exc_info()}")

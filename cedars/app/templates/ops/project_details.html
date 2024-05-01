@@ -10,8 +10,21 @@
         <h2>Project Details</h2>
         <form class="form-inline" method="POST">
           <div class="mb-3">
+            <label>Project ID</label>
+            <label class="text-muted" name="project_id">{{ project_id }}</label>
+            <br/>
+            <label>Investigator</label>
+            <label class="text-muted" name="investigator">{{ investigator }}</label>
+            <br/>
+            <label>Created</label>
+            {% if creation_time %}
+              <label class="text-muted" name="creation_time">{{ creation_time.strftime('%Y-%m-%d') }}</label>
+            {% else %}
+              <label class="text-muted text-danger" name="creation_time">None</label>
+            {% endif %}
+            <br/>
             <label>Project Name</label>
-            <input type="text" class="form-control mb-3" name="project_name" value="{{ project_name }}">
+            <input type="text" class="form-control mb-3" name="project_name" value="{{ project }}">
             <button type="submit" name="update_project_name" class="btn btn-primary p-2">Save Changes</button>
           </div>
         </form>

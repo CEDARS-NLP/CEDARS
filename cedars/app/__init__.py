@@ -6,60 +6,52 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
-from flask_login import login_required
 from flask import Flask, render_template
 from flask_session import Session
-from faker import Faker
 from loguru import logger
 import rq
 from redis import Redis
 
-from .database import mongo
-fake = Faker()
+
 sess = Session()
 
-def rq_init_app(app):
+
+def rq_init_app(cedars_rq):
     """Initialize the rq app"""
-    app.redis = Redis.from_url(app.config["RQ"]['redis_url'])
-    app.task_queue = rq.Queue(app.config["RQ"]['queue_name'],
-                              connection=app.redis,
-                              default_timeout=app.config["RQ"]['job_timeout'])
-    app.extensions['rq'] = app
-    return app
+    cedars_rq.redis = Redis.from_url(cedars_rq.config["RQ"]['redis_url'])
+    cedars_rq.task_queue = rq.Queue(cedars_rq.config["RQ"]['queue_name'],
+                                    connection=cedars_rq.redis,
+                                    default_timeout=cedars_rq.config["RQ"]['job_timeout'])
+    cedars_rq.extensions['rq'] = cedars_rq
+    return cedars_rq
 
 
 def create_app(config_filename=None):
     """Create flask application"""
-    app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
+    cedars_app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
         logger.info(f"Loading config from {config_filename}")
-        app.config.from_object(config_filename)
-    app.config["UPLOAD_FOLDER"] = os.path.join(app.instance_path)
-    app.config["SESSION_TYPE"] = "redis"
-    app.config["SESSION_REDIS"] = Redis.from_url(app.config["RQ"]['redis_url'])
+        cedars_app.config.from_object(config_filename)
 
-    sess.init_app(app)
-    mongo.init_app(app)
-    rq_init_app(app)
+    cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
+    cedars_app.config["SESSION_TYPE"] = "redis"
+    cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
 
-    from . import db
-    db.create_project(project_name=fake.slug(),
-                      investigator_name=fake.name(),
-                      cedars_version=__version__)
+    sess.init_app(cedars_app)
+    rq_init_app(cedars_app)
 
     from . import auth
-    auth.login_manager.init_app(app)
-    app.register_blueprint(auth.bp)
+    auth.login_manager.init_app(cedars_app)
+    cedars_app.register_blueprint(auth.bp)
 
     from . import ops
-    app.register_blueprint(ops.bp)
+    cedars_app.register_blueprint(ops.bp)
 
     from . import stats
-    app.register_blueprint(stats.bp)
+    cedars_app.register_blueprint(stats.bp)
 
-    @app.route('/', methods=["GET"])
-    @login_required
+    @cedars_app.route('/', methods=["GET"])
     def homepage():
-        return render_template('index.html', **db.get_info())
+        return render_template('index.html')
 
-    return app
+    return cedars_app
