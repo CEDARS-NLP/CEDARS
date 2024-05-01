@@ -36,6 +36,7 @@ def db(cedars_app):
 
 @pytest.fixture(scope="session")
 def client(cedars_app):
+    cedars_app.config["SECRET_KEY"] = "test_secret_key"
     yield cedars_app.test_client()
 
 
