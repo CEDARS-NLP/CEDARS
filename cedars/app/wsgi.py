@@ -5,7 +5,7 @@ import sys
 import logging
 from dotenv import dotenv_values, load_dotenv
 from loguru import logger
-from app import create_app
+from . import create_app
 
 load_dotenv()
 
@@ -27,4 +27,4 @@ app = create_app(f"config.{environment.title()}")
 if __name__ == '__main__':
     # host should be 0.0.0.0 for docker to work
     logger.info(f"Starting app in {environment} mode")
-    app.run(host=config['HOST'], debug=True)
+    app.run(host=config['HOST'], port=config['PORT'], debug=True)

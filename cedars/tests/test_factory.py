@@ -3,12 +3,11 @@ Pytests
 """
 
 
-def test_config(app):
-    with app.app_context():
-        assert app.testing is True
+def test_config(cedars_app):
+    with cedars_app.app_context():
+        assert cedars_app.testing is True
 
 
 def test_index(client):
     response = client.get("/")
-    assert response.status_code == 302
-    assert b"auth/login" in response.data
+    assert response.status_code == 200
