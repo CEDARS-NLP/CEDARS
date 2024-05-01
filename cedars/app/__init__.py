@@ -28,7 +28,7 @@ def rq_init_app(cedars_rq):
 
 def create_app(config_filename=None):
     """Create flask application"""
-    cedars_app = Flask(__name__, instance_path=os.path.join(os.path.dirname(__file__), "static"))
+    cedars_app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
         logger.info(f"Loading config from {config_filename}")
         cedars_app.config.from_object(config_filename)
