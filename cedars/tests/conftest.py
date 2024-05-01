@@ -3,10 +3,12 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 from flask import g
+from dotenv import load_dotenv
 from mongomock import MongoClient
 from redis import Redis
 import fakeredis
 
+load_dotenv()
 test_data = pd.read_csv(Path(__file__).parent / "simulated_patients.csv")
 
 
