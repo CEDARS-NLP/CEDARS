@@ -353,6 +353,9 @@ def get_annotation_note(annotation_id: str):
     """
     logger.debug(f"Retriving annotation #{annotation_id} from database.")
     annotation = mongo.db["ANNOTATIONS"].find_one({"_id": ObjectId(annotation_id)})
+    if not annotation:
+        return None
+
     note = mongo.db["NOTES"].find_one({"text_id": annotation["note_id"]})
 
     return note
@@ -643,6 +646,8 @@ def get_proj_name():
     """
 
     proj_info = mongo.db["INFO"].find_one()
+    if proj_info is None:
+        return None
     proj_name = proj_info["project"]
     return proj_name
 
