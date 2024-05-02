@@ -6,6 +6,7 @@ from flask_login import current_user
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
+from rq import Callback
 from . import db
 
 logger.enable(__name__)
@@ -277,8 +278,8 @@ class NlpProcessor:
                             patient_id=patient_id,
                             user=current_user.username,
                             description="cedars service",
-                            on_success=db.report_success,
-                            on_failure=db.report_failure
+                            on_success=Callback(db.report_success),
+                            on_failure=Callback(db.report_failure)
                             )
             except Exception:
                 logger.debug(f"error while processing patient: {sys.exc_info()}")

@@ -2,11 +2,13 @@ import pandas as pd
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from flask import g
+from flask import g, request
 from dotenv import load_dotenv
 from mongomock import MongoClient
 from redis import Redis
 import fakeredis
+from flask_login import FlaskLoginClient
+from app.auth import User
 
 load_dotenv()
 test_data = pd.read_csv(Path(__file__).parent / "simulated_patients.csv")
@@ -18,7 +20,7 @@ def cedars_app():
     with patch.object(Redis, 'from_url', fakeredis.FakeStrictRedis.from_url):
         from app import create_app
         cedars_app = create_app(f"config.{environment.title()}")
-        with cedars_app.app_context():
+        with cedars_app.test_request_context():
             g.mongo = MongoClient()
             yield cedars_app
 
@@ -36,8 +38,21 @@ def db(cedars_app):
 
 @pytest.fixture(scope="session")
 def client(cedars_app):
-    cedars_app.config["SECRET_KEY"] = "test_secret_key"
-    yield cedars_app.test_client()
+    user = User({"_id": "000102030405060708090a0b",
+                 "user": "test_user",
+                 "password": "test_password",
+                 "is_admin": True})
+    with cedars_app.test_request_context():
+        cedars_app.test_client_class = FlaskLoginClient
+        with patch.object(request, 'form') as mock_form:
+            mock_form.return_value.username = "test_user"
+            mock_form.return_value.password = "test_password"
+            mock_form.return_value.confirm_password = "test_password"
+            mock_form.return_value.is_admin = True
+            client = cedars_app.test_client(user=user)
+            client.post("/auth/register")
+            client.post("/auth/login")
+            yield client
 
 
 @pytest.fixture

@@ -18,9 +18,6 @@ def get_mongo():
     return mongo
 
 
-mongo = LocalProxy(get_mongo)
-
-
 def get_minio():
     minio = getattr(g, "minio", None)
     from . import db
@@ -33,9 +30,13 @@ def get_minio():
             secret_key=config["MINIO_SECRET_KEY"],
             secure=False  # should be true for prod or AWS
         )
-        if not minio.bucket_exists("cedars"):
+        if not minio.bucket_exists(g.bucket_name):
             minio.make_bucket(g.bucket_name)
         else:
             print(f"Bucket '{g.bucket_name}' already exists")
 
     return minio
+
+
+mongo = LocalProxy(get_mongo)
+minio = LocalProxy(get_minio)
