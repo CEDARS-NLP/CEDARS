@@ -18,7 +18,7 @@ import redis
 from rq import Retry
 from loguru import logger
 from typing import Optional
-from .database import mongo
+from .database import mongo, minio
 from uuid import uuid4
 
 fake = Faker()
@@ -352,7 +352,7 @@ def get_annotation_note(annotation_id: str):
                       The values are the values of the attribute in that record.
     """
     logger.debug(f"Retriving annotation #{annotation_id} from database.")
-    annotation = mongo.db["ANNOTATIONS"].find_one_or_404({"_id": ObjectId(annotation_id)})
+    annotation = mongo.db["ANNOTATIONS"].find_one({"_id": ObjectId(annotation_id)})
     note = mongo.db["NOTES"].find_one({"text_id": annotation["note_id"]})
 
     return note
@@ -637,7 +637,7 @@ def get_proj_name():
         proj_name (str) : The name of the current CEDARS project.
     """
 
-    proj_info = mongo.db["INFO"].find_one_or_404()
+    proj_info = mongo.db["INFO"].find_one()
     proj_name = proj_info["project"]
     return proj_name
 
@@ -765,12 +765,14 @@ def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
         notes (list[str]) : List of note_ids for the patient which have
             matching keyword annotations
     """
-    annotations = mongo.db["ANNOTATIONS"].find({"patient_id": patient_id})
-    notes = set()
+    annotations = (mongo.db["ANNOTATIONS"]
+                   .find({"patient_id": patient_id})
+                   .sort([("text_date", 1), ("note_id", 1), ("note_start_index", 1)]))
+    notes = []
     for annotation in annotations:
-        notes.add(annotation["note_id"])
+        notes.append(annotation["note_id"])
 
-    return list(notes)
+    return list(dict.fromkeys(notes))
 
 
 # update functions
@@ -1202,11 +1204,9 @@ def download_annotations(filename: str = "annotations.csv"):
     """
     download annotations from the database
     """
-    from .database import get_minio
     patients = get_all_patients()
     data = []
     count = 0
-    client = get_minio()
     for patient in patients:
         patient_id = patient["patient_id"]
         notes = get_all_notes(patient_id)
@@ -1235,11 +1235,11 @@ def download_annotations(filename: str = "annotations.csv"):
     data_bytes = df.to_csv().encode('utf-8')
     csv_buffer = BytesIO(data_bytes)
     try:
-        client.put_object(g.bucket_name,
-                          f"annotated_files/{filename}",
-                          data=csv_buffer,
-                          length=len(data_bytes),
-                          content_type="application/csv")
+        minio.put_object(g.bucket_name,
+                         f"annotated_files/{filename}",
+                         data=csv_buffer,
+                         length=len(data_bytes),
+                         content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
     except Exception:

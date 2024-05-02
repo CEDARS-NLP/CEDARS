@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 from . import db
 from . import nlpprocessor
 from . import auth
-from .database import get_minio
+from .database import minio
 
 logger.enable(__name__)
 
@@ -120,7 +120,6 @@ def load_pandas_dataframe(filepath):
         raise ValueError("Filepath must be provided.")
 
     extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
-    client = get_minio()
     loaders = {
         'csv': pd.read_csv,
         'xlsx': pd.read_excel,
@@ -139,7 +138,7 @@ def load_pandas_dataframe(filepath):
 
     try:
         logger.info(filepath)
-        obj = client.get_object("cedars", filepath)
+        obj = minio.get_object(g.bucket_name, filepath)
         return loaders[extension](obj)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
@@ -182,14 +181,13 @@ def upload_data():
     """
     This is a flask function for the backend logic to upload a file to the database.
     """
-    client = get_minio()
     filename = None
     if request.method == "POST":
         if db.get_task(f"upload_and_process:{current_user.username}"):
             flash("A file is already being processed.")
             return redirect(request.url)
         minio_file = request.form.get("miniofile")
-        if minio_file != "None":
+        if minio_file != "None" and minio_file is not None:
             logger.info(f"Using minio file: {minio_file}")
             filename = minio_file
         else:
@@ -207,10 +205,10 @@ def upload_data():
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
             try:
-                client.put_object(g.bucket_name,
-                                  filename,
-                                  file,
-                                  size)
+                minio.put_object(g.bucket_name,
+                                 filename,
+                                 file,
+                                 size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
 
@@ -229,8 +227,8 @@ def upload_data():
                 return redirect(request.url)
     try:
         files = [(obj.object_name, obj.size)
-                 for obj in client.list_objects(g.bucket_name,
-                                                prefix="uploaded_files/")]
+                 for obj in minio.list_objects(g.bucket_name,
+                                               prefix="uploaded_files/")]
     except Exception as e:
         flash(f"Error listing files: {e}")
         files = []
@@ -563,10 +561,9 @@ def download_file(filename='annotations.csv'):
         g. add the first and last note date for each patient
     3. Convert all columns to proper datatypes
     """
-    client = get_minio()
     logger.info("Downloading annotations")
     if db.download_annotations(filename):
-        file = client.get_object(g.bucket_name, f"annotated_files/{filename}")
+        file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
         logger.info(f"Downloaded annotations from s3: {filename}")
         return flask.Response(
             file.stream(32*1024),

@@ -1492,6 +1492,12 @@ pysbd==0.3.4 ; python_version >= "3.9" and python_version < "3.12" \
 pytest-cov==5.0.0 ; python_version >= "3.9" and python_version < "3.12" \
     --hash=sha256:4f0764a1219df53214206bf1feea4633c3b558a2925c8b59f144f682861ce652 \
     --hash=sha256:5837b58e9f6ebd335b0f8060eecce69b662415b16dc503883a02f45dfeb14857
+pytest-minio-mock==0.4.13 ; python_version >= "3.9" and python_version < "3.12" \
+    --hash=sha256:852634355c6ef59c5e00951bc6c09c73af98ac86ffabe3d7e311b55ebc5690d9 \
+    --hash=sha256:fa8777a376310efee4403a8cb34bb58936276693f9dc221c4fc1173b6f55344d
+pytest-mock==3.14.0 ; python_version >= "3.9" and python_version < "3.12" \
+    --hash=sha256:0b72c38033392a5f4621342fe11e9219ac11ec9d375f8e2a0c164539e0d70f6f \
+    --hash=sha256:2719255a1efeceadbc056d6bf3df3d1c5015530fb40cf347c0f9afac88410bd0
 pytest==7.4.4 ; python_version >= "3.9" and python_version < "3.12" \
     --hash=sha256:2cf0005922c6ace4a3e2ec8b4080eb0d9753fdc93107415332f50ce9e7994280 \
     --hash=sha256:b090cdf5ed60bf4c45261be03239c2c1c22df034fbffe691abe93cd80cea01d8
@@ -2134,6 +2140,9 @@ uri-template==1.3.0 ; python_version >= "3.9" and python_version < "3.12" \
 urllib3==2.2.1 ; python_version >= "3.9" and python_version < "3.12" \
     --hash=sha256:450b20ec296a467077128bff42b73080516e71b56ff59a60a02bef2232c4fa9d \
     --hash=sha256:d0570876c61ab9e520d776c38acbbb5b05a776d3f9ff98a5c8fd5162a444cf19
+validators==0.28.1 ; python_version >= "3.9" and python_version < "3.12" \
+    --hash=sha256:5ac88e7916c3405f0ce38ac2ac82a477fcf4d90dbbeddd04c8193171fc17f7dc \
+    --hash=sha256:890c98789ad884037f059af6ea915ec2d667129d509180c2c590b8009a4c4219
 virtualenv==20.26.1 ; python_version >= "3.9" and python_version < "3.12" \
     --hash=sha256:604bfdceaeece392802e6ae48e69cec49168b9c5f4a44e483963f9242eb0e78b \
     --hash=sha256:7aa9982a728ae5892558bff6a2839c00b9ed145523ece2274fad6f414690ae75
