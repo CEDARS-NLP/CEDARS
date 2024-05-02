@@ -1,4 +1,3 @@
-version: '3.8'
 # Settings and configurations that are common for all containers
 x-minio-common: &minio-common
   image: docker.io/minio/minio
@@ -28,9 +27,7 @@ services:
     stop_signal: SIGINT
     depends_on:
       - db
-      - minio
       - redis
-      - worker
 
   db:
     image: mongo:latest
@@ -61,6 +58,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "81:81"
+      - "9000:9000"
+      - "9001:9001"
     depends_on:
       - web
 
@@ -93,7 +92,9 @@ services:
   worker:
     image: cedars
     command: python -m app.make_rq
-    scale: 2
+    scale: 8
+    depends_on:
+      - web
 
 
 volumes:

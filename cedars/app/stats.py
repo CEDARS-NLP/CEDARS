@@ -7,6 +7,7 @@ from . import db
 
 bp = Blueprint("stats_page", __name__, url_prefix="/stats")
 
+
 @bp.route('/')
 @login_required
 def stats_route():
@@ -20,7 +21,6 @@ def stats_route():
 
     stats = db.get_curr_stats()
 
-
     number_of_patients = stats["number_of_patients"]
     number_of_annotated_patients = stats["number_of_annotated_patients"]
     number_of_reviewed = stats["number_of_reviewed"]
@@ -28,9 +28,9 @@ def stats_route():
     user_review_stats = stats['user_review_stats']
 
     return render_template("stats.html",
-                            number_of_patients = number_of_patients,
-                            number_of_annotated_patients = number_of_annotated_patients,
-                            number_of_reviewed = number_of_reviewed,
-                            lemma_dist = lemma_dist,
-                            user_review_stats = user_review_stats,
-                            **db.get_info())
+                           number_of_patients=number_of_patients,
+                           number_of_annotated_patients=number_of_annotated_patients,
+                           number_of_reviewed=number_of_reviewed,
+                           lemma_dist=lemma_dist,
+                           user_review_stats=user_review_stats,
+                           **db.get_info())

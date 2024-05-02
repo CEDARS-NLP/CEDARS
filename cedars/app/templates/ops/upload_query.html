@@ -7,12 +7,19 @@
   <form class="form-inline" method="POST">
 
     <div class="mb-4">
-      <h2>Query Upload</h2>
-
       <div class="form-group">
-        <label for="exampleInputEmail1">Search Query</label>
+        <label class="h3">Search Query</label>
         <input type="text" class="form-control" name="regex_query" value="{{ current_query }}">
         <small class="form-text text-muted">Logical Query (all lower keywords)<br/>dvt OR (deep AND vein AND thromb*) OR pe OR (pulmonary AND embolism)</small>
+        <br>
+        <br>
+        <label class="h4">Additional Parameters</label>
+        <br>
+        <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply"> Enable PINES</input>
+        <br>
+        <input type="checkbox" class="form-check-input" id="skip_after_event" name="skip_after_event" checked={{ True }}> Skip After Event</input>
+        <br>
+        <!-- <input type="checkbox" class="form-check-input" id="keep_duplicates" name="keep_duplicates"> Keep Duplicates</input> -->
       </div>
       <br>
       <button type="submit" class="btn btn-primary">Submit</button>

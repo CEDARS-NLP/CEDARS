@@ -7,9 +7,9 @@ import pandas as pd
 import flask
 from dotenv import dotenv_values
 from flask import (
-    Blueprint, render_template, send_file,
-    redirect, session, request, url_for, flash,
-    current_app, Response
+    Blueprint, render_template,
+    redirect, session, request,
+    url_for, flash, g
 )
 from loguru import logger
 from flask_login import current_user, login_required
@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 from . import db
 from . import nlpprocessor
 from . import auth
-from .database import client
+from .database import minio
 
 logger.enable(__name__)
 
@@ -57,6 +57,14 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
+def convert_to_int(s):
+    """Convert to integer if possible, otherwise return the string."""
+    try:
+        return int(s)
+    except ValueError:
+        return s
+
+
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
 def project_details():
@@ -68,24 +76,29 @@ def project_details():
     if request.method == "POST":
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name")
-            if len(project_name.strip()) > 0:
-                db.update_project_name(project_name)
-                flash(f"Project name updated to {project_name}.")
-
+            id = request.form.get("project_id")
+            if id is None:
+                if len(project_name.strip()) > 0:
+                    db.create_project(project_name, current_user.username)
+                    flash(f"Project **{project_name}** created.")
+            else:
+                if len(project_name.strip()) > 0:
+                    db.update_project_name(project_name)
+                    flash(f"Project name updated to {project_name}.")
             return render_template("index.html", **db.get_info())
-        
+
         if "terminate" in request.form:
             terminate_clause = request.form.get("terminate_conf")
             if len(terminate_clause.strip()) > 0:
                 if terminate_clause == 'DELETE EVERYTHING':
                     session.clear()
                     db.terminate_project()
-                    flash(f"Project Terminated.")
-                    return render_template("index.html")
+                    flash("Project Terminated.")
+                    return render_template("index.html", **db.get_info())
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
-    return render_template("ops/project_details.html", **db.get_info())
+    return render_template("ops/project_details.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 def load_pandas_dataframe(filepath):
@@ -119,13 +132,13 @@ def load_pandas_dataframe(filepath):
 
     if extension not in loaders:
         raise ValueError(f"""
-                         Unsupported file extension '{extension}'. 
-                         Supported extensions are 
+                         Unsupported file extension '{extension}'.
+                         Supported extensions are
                          {', '.join(loaders.keys())}.""")
 
     try:
         logger.info(filepath)
-        obj = client.get_object("cedars", filepath)
+        obj = minio.get_object(g.bucket_name, filepath)
         return loaders[extension](obj)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
@@ -134,7 +147,7 @@ def load_pandas_dataframe(filepath):
 
 
 # Pylint disabled due to naming convention.
-def EMR_to_mongodb(filepath): #pylint: disable=C0103
+def EMR_to_mongodb(filepath):  # pylint: disable=C0103
     """
     This function is used to open a csv file and load it's contents into the mongodb database.
 
@@ -162,28 +175,25 @@ def EMR_to_mongodb(filepath): #pylint: disable=C0103
     logger.info("Completed document migration to mongodb database.")
 
 
-
 @bp.route("/upload_data", methods=["GET", "POST"])
 @auth.admin_required
 def upload_data():
     """
     This is a flask function for the backend logic to upload a file to the database.
     """
-
     filename = None
     if request.method == "POST":
         if db.get_task(f"upload_and_process:{current_user.username}"):
             flash("A file is already being processed.")
             return redirect(request.url)
         minio_file = request.form.get("miniofile")
-        if minio_file != "None":
+        if minio_file != "None" and minio_file is not None:
             logger.info(f"Using minio file: {minio_file}")
             filename = minio_file
         else:
             if 'data_file' not in request.files:
                 flash('No file part')
                 return redirect(request.url)
-            
             file = request.files['data_file']
             if file.filename == '':
                 flash('No selected file')
@@ -195,10 +205,10 @@ def upload_data():
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
             try:
-                client.put_object("cedars",
-                                    filename,
-                                    file,
-                                    size)
+                minio.put_object(g.bucket_name,
+                                 filename,
+                                 file,
+                                 size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
 
@@ -206,7 +216,7 @@ def upload_data():
                 filename = None
                 flash(f"Failed to upload file: {str(e)}")
                 return redirect(request.url)
-        
+
         if filename:
             try:
                 EMR_to_mongodb(filename)
@@ -216,16 +226,15 @@ def upload_data():
                 flash(f"Failed to upload data: {str(e)}")
                 return redirect(request.url)
     try:
-        files = [(obj.object_name, obj.size) 
-                 for obj in client.list_objects("cedars",
-                                                prefix="uploaded_files/")]
+        files = [(obj.object_name, obj.size)
+                 for obj in minio.list_objects(g.bucket_name,
+                                               prefix="uploaded_files/")]
     except Exception as e:
         flash(f"Error listing files: {e}")
         files = []
-    
+
     return render_template("ops/upload_file.html", files=files, **db.get_info())
-    
-        
+
 
 @bp.route("/upload_query", methods=["GET", "POST"])
 @auth.admin_required
@@ -239,14 +248,12 @@ def upload_query():
     if request.method == "GET":
         current_query = db.get_search_query()
         return render_template("ops/upload_query.html",
-                               current_query = current_query,
+                               current_query=current_query,
                                **db.get_info())
 
     tag_query = {
-        "exact": [False],
-        "nlp_apply": [False],
-        "include": [None],
-        "exclude": [None]
+        "exact": False,
+        "nlp_apply": bool(request.form.get("nlp_apply"))
     }
 
     search_query = request.form.get("regex_query")
@@ -266,9 +273,9 @@ def upload_query():
         flash("Invalid query.")
         return render_template("ops/upload_query.html", **db.get_info())
 
-    use_negation = False # bool(request.form.get("view_negations"))
-    hide_duplicates = False # not bool(request.form.get("keep_duplicates"))
-    skip_after_event = False # bool(request.form.get("skip_after_event"))
+    use_negation = False  # bool(request.form.get("view_negations"))
+    hide_duplicates = not bool(request.form.get("keep_duplicates"))
+    skip_after_event = bool(request.form.get("skip_after_event"))
 
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
@@ -282,7 +289,6 @@ def upload_query():
         session.pop("patient_id")
         session.modified = True
 
-    
     do_nlp_processing()
     return redirect(url_for("ops.get_job_status"))
 
@@ -311,7 +317,7 @@ def save_adjudications():
     """
 
     current_annotation_id = session["annotations"][session["index"]]
-    
+
     def _update_annotation_date():
         new_date = request.form['date_entry']
         logger.info(f"Updating {current_annotation_id}: {new_date}")
@@ -343,13 +349,19 @@ def save_adjudications():
             # as reviewed because we don't need to review the rest
             # this could be based on a parameter though
             # TODO: add logic based on tags if we need to keep reviewing
-            if db.get_annotation_date(current_annotation_id) is not None or len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
-                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
-                                    reviewed_by=current_user.username)
+            if len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
                 db.mark_patient_reviewed(session["patient_id"],
-                                        reviewed_by=current_user.username)
+                                         reviewed_by=current_user.username)
                 db.set_patient_lock_status(session["patient_id"], False)
                 session.pop("patient_id")
+            elif db.get_annotation_date(current_annotation_id) is not None:
+                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                      reviewed_by=current_user.username)
+                db.mark_patient_reviewed(session["patient_id"],
+                                         reviewed_by=current_user.username)
+                if db.get_search_query(query_key="skip_after_event"):
+                    db.set_patient_lock_status(session["patient_id"], False)
+                    session.pop("patient_id")
             else:
                 session["index"] = session["unreviewed_annotations_index"].index(1)
         elif 1 in session["unreviewed_annotations_index"]:
@@ -378,7 +390,7 @@ def save_adjudications():
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
         return redirect(url_for("ops.adjudicate_records"))
-    
+
     return redirect(url_for("ops.show_annotation"))
 
 
@@ -387,6 +399,9 @@ def show_annotation():
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
     note = db.get_annotation_note(str(annotation["_id"]))
+    if not note:
+        flash("Annotation note not found.")
+        return redirect(url_for("ops.adjudicate_records"))
     annotation_data = {
         "pos_start": index + 1,
         "total_pos": session["total_count"],
@@ -400,15 +415,15 @@ def show_annotation():
         "post_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
         "note_id": annotation["note_id"],
         "full_note": highlighted_text(note),
-        "tags": [note.get("text_tag_1",""),
+        "tags": [note.get("text_tag_1", ""),
                  note.get("text_tag_2", ""),
                  note.get("text_tag_3", ""),
                  note.get("text_tag_4", ""),
                  note.get("text_tag_5", "")]
     }
     return render_template("ops/adjudicate_records.html",
-                            **annotation_data,
-                            **db.get_info())
+                           **annotation_data,
+                           **db.get_info())
 
 
 @bp.route("/adjudicate_records", methods=["GET", "POST"])
@@ -428,7 +443,6 @@ def adjudicate_records():
     2. If the patient has no annotations, skip to the next patient
 
     ### show the annotation
-    
     3. Get the first annotation and show it to the user
     4. User can adjudicate the annotation or browse back and forth
     5. If the annotation has an event date, mark the note as reviewed
@@ -451,8 +465,10 @@ def adjudicate_records():
         session.pop("patient_id", None)
         search_patient = request.form.get("patient_id")
         if search_patient and len(search_patient.strip()) > 0:
-            search_patient = int(search_patient)
-            patient_id = db.get_patient_by_id(search_patient)["patient_id"]
+            search_patient = convert_to_int(search_patient)
+            patient = db.get_patient_by_id(search_patient)
+            if patient:
+                patient_id = patient["patient_id"]
 
         if patient_id is None:
             # if the search return no patient, get the next patient
@@ -461,7 +477,7 @@ def adjudicate_records():
 
     if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
-    
+
     res = db.get_all_annotations_for_patient(patient_id)
 
     annotations = res["annotations"]
@@ -473,8 +489,8 @@ def adjudicate_records():
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         return redirect(url_for("ops.adjudicate_records"))
-    elif len(unreviewed_annotations_index) == 0:
-        logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
+    elif unreviewed_annotations_index.count(1) == 0:
+        flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
         session["patient_id"] = patient_id
         session["total_count"] = total_count
         session["annotations"] = annotations
@@ -482,7 +498,6 @@ def adjudicate_records():
         session["unreviewed_annotations_index"] = unreviewed_annotations_index
         # in case of reviewed patient show everything..
         session["index"] = 0
-        return redirect(url_for("ops.adjudicate_records"))
     else:
         logger.info(f"Total annotations for patient {patient_id}: {total_count}")
         session["patient_id"] = patient_id
@@ -491,9 +506,9 @@ def adjudicate_records():
         session["all_annotation_index"] = all_annotation_index
         session["unreviewed_annotations_index"] = unreviewed_annotations_index
         session["index"] = all_annotation_index[unreviewed_annotations_index.index(1)]
-        session.modified = True
 
     # db.set_patient_lock_status(patient_id, True)
+    session.modified = True
     return redirect(url_for("ops.show_annotation"))
 
 
@@ -514,7 +529,7 @@ def highlighted_text(note):
         # Make sure the annotations don't overlap
         if start_index < prev_end_index:
             continue
-        
+
         highlighted_note.append(text[prev_end_index:start_index])
         highlighted_note.append(f'<mark>{text[start_index:end_index]}</mark>')
         prev_end_index = end_index
@@ -533,7 +548,7 @@ def _format_date(date_obj):
 
 @bp.route('/download_annotations')
 @auth.admin_required
-def download_file (filename = 'annotations.csv'):
+def download_file(filename='annotations.csv'):
     """
     ##### Download Completed Annotations
 
@@ -551,13 +566,12 @@ def download_file (filename = 'annotations.csv'):
     """
     logger.info("Downloading annotations")
     if db.download_annotations(filename):
-        file = client.get_object("cedars", f"annotated_files/{filename}")
+        file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
         logger.info(f"Downloaded annotations from s3: {filename}")
         return flask.Response(
             file.stream(32*1024),
-          mimetype='text/csv',
+            mimetype='text/csv',
             headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
         )
     else:
         flask.jsonify({"error": f"Annotations with filename '{filename}' not found."}), 404
-    
