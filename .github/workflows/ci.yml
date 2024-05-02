@@ -53,7 +53,7 @@ jobs:
           echo "DB_PWD=password" >> .env
           echo "MINIO_HOST=localhost" >> .env
           echo "MINIO_PORT=9000" >> .env
-          echo "MINIO_ACCESS_KEY=ROOT_USER" >> .env
+          echo "MINIO_ACCESS_KEY=ROOTUSER" >> .env
           echo "MINIO_SECRET_KEY=CHANGEME123" >> .env
           echo "ENV=dev" >> .env
           echo "PINES_API_URL=http://localhost:8036" >> .env
@@ -77,11 +77,11 @@ jobs:
       #     # If you use a different name, update COMMENT_FILENAME accordingly
       #     path: python-coverage-comment-action.txt
       
-      - name: Build documentation
-        run: mkdocs build
+      # - name: Build documentation
+      #   run: mkdocs build
             
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+      # - name: Deploy to GitHub Pages
+      #   uses: peaceiris/actions-gh-pages@v3
+      #   with:
+      #     github_token: ${{ secrets.GITHUB_TOKEN }}
+      #     publish_dir: ./docs
