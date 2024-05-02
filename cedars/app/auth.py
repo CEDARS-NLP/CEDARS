@@ -83,7 +83,7 @@ def register():
         existing_user = db.get_user(username)
         if password != confirm_password:
             error = 'Passwords do not match.'
-        elif not username or not password or len(username.strip())==0 or len(password.strip())==0:
+        elif not username or not password or len(username.strip()) == 0 or len(password.strip()) == 0:
             error = "Username and password are required."
 
         elif existing_user or username.lower() in ['cedars', 'pines']:
@@ -92,7 +92,7 @@ def register():
         if error is None:
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
-            no_admin = not len(db.get_project_users())>0
+            no_admin = not len(db.get_project_users()) > 0
 
             if no_admin and not is_admin:
                 is_admin = True
