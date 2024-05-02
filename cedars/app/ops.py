@@ -399,6 +399,9 @@ def show_annotation():
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
     note = db.get_annotation_note(str(annotation["_id"]))
+    if not note:
+        flash("Annotation note not found.")
+        return redirect(url_for("ops.adjudicate_records"))
     annotation_data = {
         "pos_start": index + 1,
         "total_pos": session["total_count"],
