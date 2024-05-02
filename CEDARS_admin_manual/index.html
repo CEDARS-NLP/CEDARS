@@ -51,7 +51,7 @@
                 </li>
               </ul>
               <ul class="current">
-                <li class="toctree-l1 current"><a class="reference internal current" href="./">Administrator Manual</a>
+                <li class="toctree-l1 current"><a class="reference internal current" href="#">Administrator Manual</a>
     <ul class="current">
     <li class="toctree-l2"><a class="reference internal" href="#software-installation">Software Installation</a>
         <ul>
@@ -116,6 +116,8 @@
     <li class="toctree-l3"><a class="reference internal" href="#audit">Audit</a>
     </li>
     <li class="toctree-l3"><a class="reference internal" href="#project-termination">Project Termination</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#issues">Issues</a>
         <ul>
     <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.terminate_project">terminate_project</a>
     </li>
@@ -186,7 +188,7 @@ PINES_API_URL=&lt;&gt;  # if using PINES
 <p>CEDARS is a flask web application and depends on the following software:</p>
 <ol>
 <li>
-<p>Python 3.9 or later</p>
+<p>Python 3.9 - 3.11</p>
 <p>You can install Python from the <a href="https://www.python.org/downloads/">official website</a>.</p>
 <p>If you have multiple python versions installed, you can manage the environments using <a href="https://github.com/pyenv/pyenv?tab=readme-ov-file#installation">pyenv</a></p>
 </li>
@@ -214,7 +216,20 @@ PINES_API_URL=&lt;&gt;  # if using PINES
 <li>You can run a local instance of MINIO using the <a href="https://docs.min.io/docs/minio-quickstart-guide.html">official installation</a></li>
 </ul>
 </li>
+<li>
+<p>Redis</p>
+</li>
 </ol>
+<div class="admonition note">
+<p class="admonition-title">Mac Fork Issue</p>
+<p>On MacOS, if you see a issue with fork processes you will need to <code>export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES</code>
+for running the <code>rq</code> workers</p>
+<p>To manage long running processes such as upload, download, spacy labelling, PINES jobs etc.</p>
+<ul>
+<li>You can install <a href="https://redis.io/docs/install/install-redis/">redis</a> locally on your computer </li>
+<li>Run redis docker <a href="https://hub.docker.com/_/redis">image</a></li>
+</ul>
+</div>
 <h4 id="docker-requirement">Docker Requirement</h4>
 <div class="admonition note">
 <p class="admonition-title">TIP</p>
@@ -234,6 +249,14 @@ PINES_API_URL=&lt;&gt;  # if using PINES
 <li>Initialize submodules: <code>git submodule init</code></li>
 <li>Download submodules: <code>git submodule update</code></li>
 </ul>
+<div class="admonition note">
+<p class="admonition-title">git submodule update time out</p>
+<p>If you are accessing git over http - take following steps
+- update <code>.gitmodules</code> in the root dir with
+  <code>url = https://github.com/CEDARS-NLP/PINES.git</code>
+- Run: <code>git submodule sync</code>
+- Run: <code>git submodule update</code></p>
+</div>
 <h4 id="standalone-cedars-python-package-installation">Standalone CEDARS Python Package Installation</h4>
 <p>Make sure all the local requirements <a href="#detailed-requirements">above</a> are met. Then, you can install the package using Poetry:</p>
 <pre><code class="language-shell">$ cd cedars
@@ -317,19 +340,7 @@ wildcards.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">17</span>
-<span class="normal">18</span>
-<span class="normal">19</span>
-<span class="normal">20</span>
-<span class="normal">21</span>
-<span class="normal">22</span>
-<span class="normal">23</span>
-<span class="normal">24</span>
-<span class="normal">25</span>
-<span class="normal">26</span>
-<span class="normal">27</span>
-<span class="normal">28</span>
-<span class="normal">29</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">29</span>
 <span class="normal">30</span>
 <span class="normal">31</span>
 <span class="normal">32</span>
@@ -373,7 +384,9 @@ wildcards.</p>
 <span class="normal">70</span>
 <span class="normal">71</span>
 <span class="normal">72</span>
-<span class="normal">73</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Expected query will be a set of keywords separated</span>
 <span class="sd">    by OR keyword.</span>
@@ -400,16 +413,6 @@ wildcards.</p>
 <span class="sd">      6. Combine the patterns</span>
 <span class="sd">      7. Return the combined pattern</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">def</span> <span class="nf">get_regex_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
-        <span class="c1"># Replace &#39;*&#39; with &#39;.*&#39; and &#39;?&#39; with &#39;.&#39;</span>
-        <span class="n">regex_pattern</span> <span class="o">=</span> <span class="s1">&#39;(?i)&#39;</span> <span class="o">+</span> <span class="n">token</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;*&#39;</span><span class="p">,</span> <span class="s1">&#39;.*&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;?&#39;</span><span class="p">,</span> <span class="s1">&#39;.&#39;</span><span class="p">)</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;TEXT&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;REGEX&quot;</span><span class="p">:</span> <span class="n">regex_pattern</span><span class="p">}}</span>
-
-    <span class="k">def</span> <span class="nf">get_lemma_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;LOWER&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">}</span>
-
-    <span class="k">def</span> <span class="nf">get_negated_dict</span><span class="p">(</span><span class="n">token</span><span class="p">):</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;LOWER&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">,</span> <span class="s2">&quot;OP&quot;</span><span class="p">:</span> <span class="s2">&quot;!&quot;</span><span class="p">}</span>
 
     <span class="n">or_expressions</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; OR &quot;</span><span class="p">)</span>
     <span class="n">res</span> <span class="o">=</span> <span class="p">[[]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">or_expressions</span><span class="p">))]</span>
@@ -506,9 +509,7 @@ In the above sentence, the token apple is negated.
 </table>
           <details class="quote">
             <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 76</span>
-<span class="normal"> 77</span>
-<span class="normal"> 78</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 78</span>
 <span class="normal"> 79</span>
 <span class="normal"> 80</span>
 <span class="normal"> 81</span>
@@ -545,7 +546,8 @@ In the above sentence, the token apple is negated.
 <span class="normal">112</span>
 <span class="normal">113</span>
 <span class="normal">114</span>
-<span class="normal">115</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_negated</span><span class="p">(</span><span class="n">span</span><span class="p">):</span>
+<span class="normal">115</span>
+<span class="normal">116</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_negated</span><span class="p">(</span><span class="n">span</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Negation Detection</span>
 
@@ -563,9 +565,8 @@ In the above sentence, the token apple is negated.
 <span class="sd">    Returns:</span>
 <span class="sd">        (bool) : True if the token is negated in the sentence.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">neg_words</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;no&#39;</span><span class="p">,</span><span class="s1">&#39;not&#39;</span><span class="p">,</span><span class="s2">&quot;n&#39;t&quot;</span><span class="p">,</span><span class="s2">&quot;wouldn&#39;t&quot;</span><span class="p">,</span><span class="s1">&#39;never&#39;</span><span class="p">,</span><span class="s1">&#39;nobody&#39;</span><span class="p">,</span><span class="s1">&#39;nothing&#39;</span><span class="p">,</span>
-                 <span class="s1">&#39;neither&#39;</span><span class="p">,</span><span class="s1">&#39;nowhere&#39;</span><span class="p">,</span><span class="s1">&#39;noone&#39;</span><span class="p">,</span>
-                 <span class="s1">&#39;no-one&#39;</span><span class="p">,</span><span class="s1">&#39;hardly&#39;</span><span class="p">,</span><span class="s1">&#39;scarcely&#39;</span><span class="p">,</span><span class="s1">&#39;barely&#39;</span><span class="p">]</span>
+    <span class="n">neg_words</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;no&#39;</span><span class="p">,</span> <span class="s1">&#39;not&#39;</span><span class="p">,</span> <span class="s2">&quot;n&#39;t&quot;</span><span class="p">,</span> <span class="s2">&quot;wouldn&#39;t&quot;</span><span class="p">,</span> <span class="s1">&#39;never&#39;</span><span class="p">,</span> <span class="s1">&#39;nobody&#39;</span><span class="p">,</span> <span class="s1">&#39;nothing&#39;</span><span class="p">,</span>
+                 <span class="s1">&#39;neither&#39;</span><span class="p">,</span> <span class="s1">&#39;nowhere&#39;</span><span class="p">,</span> <span class="s1">&#39;noone&#39;</span><span class="p">,</span> <span class="s1">&#39;no-one&#39;</span><span class="p">,</span> <span class="s1">&#39;hardly&#39;</span><span class="p">,</span> <span class="s1">&#39;scarcely&#39;</span><span class="p">,</span> <span class="s1">&#39;barely&#39;</span><span class="p">]</span>
 
     <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">span</span><span class="o">.</span><span class="n">subtree</span><span class="p">:</span>
         <span class="n">parents</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">ancestors</span><span class="p">)</span>
@@ -574,7 +575,7 @@ In the above sentence, the token apple is negated.
         <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">token</span><span class="o">.</span><span class="n">ancestors</span><span class="p">:</span>
             <span class="n">children</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">parent</span><span class="o">.</span><span class="n">children</span><span class="p">))</span>
 
-        <span class="k">if</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span><span class="ow">in</span> <span class="p">[</span><span class="n">child</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">children</span><span class="p">])</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">par</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">child</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">children</span><span class="p">])</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">&quot;neg&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">par</span><span class="o">.</span><span class="n">dep_</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]):</span>
             <span class="k">return</span> <span class="kc">True</span>
 
         <span class="n">parents_text</span> <span class="o">=</span> <span class="p">[</span><span class="n">par</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">par</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]</span>
@@ -676,7 +677,27 @@ the relevant sections of the text.</p>
 <span class="normal">207</span>
 <span class="normal">208</span>
 <span class="normal">209</span>
-<span class="normal">210</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">process_notes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient_id</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">processes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">process_notes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient_id</span><span class="p">,</span> <span class="n">processes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Process Query Matching</span>
 
@@ -695,56 +716,76 @@ the relevant sections of the text.</p>
         <span class="n">matcher</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DVT_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">item</span><span class="p">])</span>
 
     <span class="c1"># check all documents already processed</span>
+    <span class="n">documents_to_process</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">if</span> <span class="n">patient_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">documents_to_process</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="c1"># get all note for patient which are not reviewed</span>
+        <span class="n">documents_to_process</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_documents_to_annotate</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># get all notes which are not in annotation collection.</span>
         <span class="n">documents_to_process</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_documents_to_annotate</span><span class="p">()</span>
+
     <span class="n">document_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">document</span> <span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">documents_to_process</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># no notes found to annotate</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No documents to process for patient </span><span class="si">{</span><span class="n">patient_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">db</span><span class="o">.</span><span class="n">get_search_query</span><span class="p">(</span><span class="s2">&quot;tag_query&quot;</span><span class="p">)[</span><span class="s2">&quot;nlp_apply&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process_patient_pines</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="k">return</span>
+
     <span class="n">document_text</span> <span class="o">=</span> <span class="p">[</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">document_list</span><span class="p">]</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">db</span><span class="o">.</span><span class="n">get_total_counts</span><span class="p">(</span><span class="s1">&#39;NOTES&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> to process&quot;</span><span class="p">)</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sample document: </span><span class="si">{</span><span class="n">document_text</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">100</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-    <span class="n">annotations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nlp_model</span><span class="o">.</span><span class="n">pipe</span><span class="p">(</span><span class="n">document_text</span><span class="p">,</span>
+    <span class="k">if</span> <span class="n">patient_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">db</span><span class="o">.</span><span class="n">get_total_counts</span><span class="p">(</span><span class="s1">&#39;NOTES&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">patient_id</span><span class="o">=</span><span class="n">patient_id</span><span class="p">)</span><span class="si">}</span><span class="s2"> to process&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">db</span><span class="o">.</span><span class="n">get_total_counts</span><span class="p">(</span><span class="s1">&#39;NOTES&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> documents to process&quot;</span><span class="p">)</span>
+
+    <span class="c1"># logger.info(f&quot;sample document: {document_text[0][:100]}&quot;)</span>
+    <span class="n">annotations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nlp_model</span><span class="o">.</span><span class="n">pipe</span><span class="p">([</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">document_list</span><span class="p">],</span>
                                       <span class="n">n_process</span><span class="o">=</span><span class="n">processes</span><span class="p">,</span>
                                       <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">)</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting to process document annotations: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_text</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
     <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">docs_with_annotations</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="k">for</span> <span class="n">document</span><span class="p">,</span> <span class="n">doc</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">document_list</span><span class="p">,</span> <span class="n">annotations</span><span class="p">):</span>
+        <span class="n">docs_with_annotations</span> <span class="o">+=</span> <span class="mi">1</span>
         <span class="n">match_count</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="k">for</span> <span class="n">sent_no</span><span class="p">,</span> <span class="n">sentence_annotation</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">sents</span><span class="p">):</span>
             <span class="n">sentence_text</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="o">.</span><span class="n">text</span>
             <span class="n">matches</span> <span class="o">=</span> <span class="n">matcher</span><span class="p">(</span><span class="n">sentence_annotation</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">matches</span><span class="p">:</span>
                 <span class="n">match_count</span> <span class="o">+=</span> <span class="mi">1</span>
-                <span class="n">token_id</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">match</span>
+                <span class="n">_</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">match</span>
                 <span class="n">token</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">]</span>
-                <span class="c1"># print(sentence_annotation)</span>
                 <span class="n">has_negation</span> <span class="o">=</span> <span class="n">is_negated</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
                 <span class="n">start_index</span> <span class="o">=</span> <span class="n">sentence_text</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">,</span> <span class="n">start</span><span class="p">)</span>
                 <span class="n">end_index</span> <span class="o">=</span> <span class="n">start_index</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
                 <span class="n">token_start</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">start_char</span>
                 <span class="n">token_end</span> <span class="o">=</span> <span class="n">token_start</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
                 <span class="n">annotation</span> <span class="o">=</span> <span class="p">{</span>
-                                <span class="s2">&quot;sentence&quot;</span> <span class="p">:</span> <span class="n">sentence_text</span><span class="p">,</span>
-                                <span class="s2">&quot;token&quot;</span> <span class="p">:</span> <span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">,</span>
-                                <span class="s2">&quot;isNegated&quot;</span> <span class="p">:</span> <span class="n">has_negation</span><span class="p">,</span>
-                                <span class="s2">&quot;start_index&quot;</span> <span class="p">:</span> <span class="n">start_index</span><span class="p">,</span>
-                                <span class="s2">&quot;end_index&quot;</span> <span class="p">:</span> <span class="n">end_index</span><span class="p">,</span>
-                                <span class="s2">&quot;note_start_index&quot;</span> <span class="p">:</span> <span class="n">token_start</span><span class="p">,</span>
-                                <span class="s2">&quot;note_end_index&quot;</span> <span class="p">:</span> <span class="n">token_end</span><span class="p">,</span>
-                                <span class="s2">&quot;sentence_number&quot;</span> <span class="p">:</span> <span class="n">sent_no</span>
+                                <span class="s2">&quot;sentence&quot;</span><span class="p">:</span> <span class="n">sentence_text</span><span class="p">,</span>
+                                <span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="n">token</span><span class="o">.</span><span class="n">text</span><span class="p">,</span>
+                                <span class="s2">&quot;isNegated&quot;</span><span class="p">:</span> <span class="n">has_negation</span><span class="p">,</span>
+                                <span class="s2">&quot;start_index&quot;</span><span class="p">:</span> <span class="n">start_index</span><span class="p">,</span>
+                                <span class="s2">&quot;end_index&quot;</span><span class="p">:</span> <span class="n">end_index</span><span class="p">,</span>
+                                <span class="s2">&quot;note_start_index&quot;</span><span class="p">:</span> <span class="n">token_start</span><span class="p">,</span>
+                                <span class="s2">&quot;note_end_index&quot;</span><span class="p">:</span> <span class="n">token_end</span><span class="p">,</span>
+                                <span class="s2">&quot;sentence_number&quot;</span><span class="p">:</span> <span class="n">sent_no</span>
                                 <span class="p">}</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s1">&#39;note_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_id&quot;</span><span class="p">]</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;text_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_date&quot;</span><span class="p">]</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">document</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;event_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-                <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;comments&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;reviewed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
                 <span class="n">db</span><span class="o">.</span><span class="n">insert_one_annotation</span><span class="p">(</span><span class="n">annotation</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">match_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
             <span class="n">db</span><span class="o">.</span><span class="n">mark_note_reviewed</span><span class="p">(</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_id&quot;</span><span class="p">],</span> <span class="n">reviewed_by</span><span class="o">=</span><span class="s2">&quot;CEDARS&quot;</span><span class="p">)</span>
         <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
-        <span class="k">if</span> <span class="p">(</span><span class="n">count</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed </span><span class="si">{</span><span class="n">count</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2"> documents&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">count</span><span class="p">)</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">document_list</span><span class="p">)</span><span class="si">}</span><span class="s2"> documents&quot;</span><span class="p">)</span>
+
+    <span class="c1"># check if nlp processing is enabled</span>
+    <span class="k">if</span> <span class="n">docs_with_annotations</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">db</span><span class="o">.</span><span class="n">get_search_query</span><span class="p">(</span><span class="s2">&quot;tag_query&quot;</span><span class="p">)[</span><span class="s2">&quot;nlp_apply&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">docs_with_annotations</span><span class="si">}</span><span class="s2"> documents with PINES&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">process_patient_pines</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
           </details>
   </div>
@@ -767,29 +808,31 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">895</span>
-<span class="normal">896</span>
-<span class="normal">897</span>
-<span class="normal">898</span>
-<span class="normal">899</span>
-<span class="normal">900</span>
-<span class="normal">901</span>
-<span class="normal">902</span>
-<span class="normal">903</span>
-<span class="normal">904</span>
-<span class="normal">905</span>
-<span class="normal">906</span>
-<span class="normal">907</span>
-<span class="normal">908</span>
-<span class="normal">909</span>
-<span class="normal">910</span>
-<span class="normal">911</span>
-<span class="normal">912</span>
-<span class="normal">913</span>
-<span class="normal">914</span>
-<span class="normal">915</span>
-<span class="normal">916</span>
-<span class="normal">917</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1050</span>
+<span class="normal">1051</span>
+<span class="normal">1052</span>
+<span class="normal">1053</span>
+<span class="normal">1054</span>
+<span class="normal">1055</span>
+<span class="normal">1056</span>
+<span class="normal">1057</span>
+<span class="normal">1058</span>
+<span class="normal">1059</span>
+<span class="normal">1060</span>
+<span class="normal">1061</span>
+<span class="normal">1062</span>
+<span class="normal">1063</span>
+<span class="normal">1064</span>
+<span class="normal">1065</span>
+<span class="normal">1066</span>
+<span class="normal">1067</span>
+<span class="normal">1068</span>
+<span class="normal">1069</span>
+<span class="normal">1070</span>
+<span class="normal">1071</span>
+<span class="normal">1072</span>
+<span class="normal">1073</span>
+<span class="normal">1074</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### PINES predictions</span>
 
@@ -797,8 +840,9 @@ the relevant sections of the text.</p>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;PINES_API_URL&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1">/predict&#39;</span>
     <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">note</span><span class="p">}</span>
+    <span class="n">log_notes</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="k">try</span><span class="p">:</span>
-        <span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="n">data</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">3600</span><span class="p">)</span>
         <span class="n">response</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
         <span class="n">res</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">&quot;prediction&quot;</span><span class="p">]</span>
         <span class="n">score</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;score&quot;</span><span class="p">)</span>
@@ -807,10 +851,11 @@ the relevant sections of the text.</p>
             <span class="n">score</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">score</span> <span class="k">if</span> <span class="s2">&quot;0&quot;</span> <span class="ow">in</span> <span class="n">label</span> <span class="k">else</span> <span class="n">score</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">score</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">score</span> <span class="k">if</span> <span class="n">label</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">score</span>
-        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Got prediction for note: </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2"> with score: </span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2"> and label: </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">log_notes</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\d&#39;</span><span class="p">,</span> <span class="s1">&#39;*&#39;</span><span class="p">,</span> <span class="n">note</span><span class="p">[:</span><span class="mi">20</span><span class="p">])</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Got prediction for note: </span><span class="si">{</span><span class="n">log_notes</span><span class="si">}</span><span class="s2"> with score: </span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2"> and label: </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">score</span>
     <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">RequestException</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to get prediction for note: </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to get prediction for note: </span><span class="si">{</span><span class="n">log_notes</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="k">raise</span> <span class="n">e</span>
 </code></pre></div></td></tr></table></div>
           </details>
@@ -833,35 +878,37 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">943</span>
-<span class="normal">944</span>
-<span class="normal">945</span>
-<span class="normal">946</span>
-<span class="normal">947</span>
-<span class="normal">948</span>
-<span class="normal">949</span>
-<span class="normal">950</span>
-<span class="normal">951</span>
-<span class="normal">952</span>
-<span class="normal">953</span>
-<span class="normal">954</span>
-<span class="normal">955</span>
-<span class="normal">956</span>
-<span class="normal">957</span>
-<span class="normal">958</span>
-<span class="normal">959</span>
-<span class="normal">960</span>
-<span class="normal">961</span>
-<span class="normal">962</span>
-<span class="normal">963</span>
-<span class="normal">964</span>
-<span class="normal">965</span>
-<span class="normal">966</span>
-<span class="normal">967</span>
-<span class="normal">968</span>
-<span class="normal">969</span>
-<span class="normal">970</span>
-<span class="normal">971</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">predict_and_save</span><span class="p">(</span><span class="n">text_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1100</span>
+<span class="normal">1101</span>
+<span class="normal">1102</span>
+<span class="normal">1103</span>
+<span class="normal">1104</span>
+<span class="normal">1105</span>
+<span class="normal">1106</span>
+<span class="normal">1107</span>
+<span class="normal">1108</span>
+<span class="normal">1109</span>
+<span class="normal">1110</span>
+<span class="normal">1111</span>
+<span class="normal">1112</span>
+<span class="normal">1113</span>
+<span class="normal">1114</span>
+<span class="normal">1115</span>
+<span class="normal">1116</span>
+<span class="normal">1117</span>
+<span class="normal">1118</span>
+<span class="normal">1119</span>
+<span class="normal">1120</span>
+<span class="normal">1121</span>
+<span class="normal">1122</span>
+<span class="normal">1123</span>
+<span class="normal">1124</span>
+<span class="normal">1125</span>
+<span class="normal">1126</span>
+<span class="normal">1127</span>
+<span class="normal">1128</span>
+<span class="normal">1129</span>
+<span class="normal">1130</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">predict_and_save</span><span class="p">(</span><span class="n">text_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                      <span class="n">note_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;NOTES&quot;</span><span class="p">,</span>
                      <span class="n">pines_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;PINES&quot;</span><span class="p">,</span>
                      <span class="n">force_update</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -877,6 +924,7 @@ the relevant sections of the text.</p>
         <span class="n">query</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;text_id&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;$in&quot;</span><span class="p">:</span> <span class="n">text_ids</span><span class="p">}}</span>
 
     <span class="n">cedars_notes</span> <span class="o">=</span> <span class="n">notes_collection</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="k">for</span> <span class="n">note</span> <span class="ow">in</span> <span class="n">cedars_notes</span><span class="p">:</span>
         <span class="n">note_id</span> <span class="o">=</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_id&quot;</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">force_update</span> <span class="ow">or</span> <span class="n">get_note_prediction_from_db</span><span class="p">(</span><span class="n">note_id</span><span class="p">,</span> <span class="n">pines_collection_name</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -890,6 +938,7 @@ the relevant sections of the text.</p>
                 <span class="s2">&quot;report_type&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_tag_3&quot;</span><span class="p">),</span>
                 <span class="s2">&quot;document_type&quot;</span><span class="p">:</span> <span class="n">note</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_tag_1&quot;</span><span class="p">)</span>
                 <span class="p">})</span>
+        <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
 </code></pre></div></td></tr></table></div>
           </details>
   </div>
@@ -927,56 +976,37 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/ops.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">485</span>
-<span class="normal">486</span>
-<span class="normal">487</span>
-<span class="normal">488</span>
-<span class="normal">489</span>
-<span class="normal">490</span>
-<span class="normal">491</span>
-<span class="normal">492</span>
-<span class="normal">493</span>
-<span class="normal">494</span>
-<span class="normal">495</span>
-<span class="normal">496</span>
-<span class="normal">497</span>
-<span class="normal">498</span>
-<span class="normal">499</span>
-<span class="normal">500</span>
-<span class="normal">501</span>
-<span class="normal">502</span>
-<span class="normal">503</span>
-<span class="normal">504</span>
-<span class="normal">505</span>
-<span class="normal">506</span>
-<span class="normal">507</span>
-<span class="normal">508</span>
-<span class="normal">509</span>
-<span class="normal">510</span>
-<span class="normal">511</span>
-<span class="normal">512</span>
-<span class="normal">513</span>
-<span class="normal">514</span>
-<span class="normal">515</span>
-<span class="normal">516</span>
-<span class="normal">517</span>
-<span class="normal">518</span>
-<span class="normal">519</span>
-<span class="normal">520</span>
-<span class="normal">521</span>
-<span class="normal">522</span>
-<span class="normal">523</span>
-<span class="normal">524</span>
-<span class="normal">525</span>
-<span class="normal">526</span>
-<span class="normal">527</span>
-<span class="normal">528</span>
-<span class="normal">529</span>
-<span class="normal">530</span>
-<span class="normal">531</span>
-<span class="normal">532</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/download_annotations&#39;</span><span class="p">)</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">549</span>
+<span class="normal">550</span>
+<span class="normal">551</span>
+<span class="normal">552</span>
+<span class="normal">553</span>
+<span class="normal">554</span>
+<span class="normal">555</span>
+<span class="normal">556</span>
+<span class="normal">557</span>
+<span class="normal">558</span>
+<span class="normal">559</span>
+<span class="normal">560</span>
+<span class="normal">561</span>
+<span class="normal">562</span>
+<span class="normal">563</span>
+<span class="normal">564</span>
+<span class="normal">565</span>
+<span class="normal">566</span>
+<span class="normal">567</span>
+<span class="normal">568</span>
+<span class="normal">569</span>
+<span class="normal">570</span>
+<span class="normal">571</span>
+<span class="normal">572</span>
+<span class="normal">573</span>
+<span class="normal">574</span>
+<span class="normal">575</span>
+<span class="normal">576</span>
+<span class="normal">577</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/download_annotations&#39;</span><span class="p">)</span>
 <span class="nd">@auth</span><span class="o">.</span><span class="n">admin_required</span>
-<span class="k">def</span> <span class="nf">download_file</span> <span class="p">(</span><span class="n">filename</span> <span class="o">=</span> <span class="s1">&#39;annotations.csv&#39;</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">download_file</span><span class="p">(</span><span class="n">filename</span><span class="o">=</span><span class="s1">&#39;annotations.csv&#39;</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Download Completed Annotations</span>
 
@@ -993,35 +1023,16 @@ the relevant sections of the text.</p>
 <span class="sd">    3. Convert all columns to proper datatypes</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Downloading annotations&quot;</span><span class="p">)</span>
-    <span class="n">patients</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_all_patients</span><span class="p">()</span>
-    <span class="n">data</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">patient</span> <span class="ow">in</span> <span class="n">patients</span><span class="p">:</span>
-        <span class="n">patient_id</span> <span class="o">=</span> <span class="n">patient</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span>
-        <span class="n">notes</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_all_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
-        <span class="n">reviewed_notes</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_notes</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-        <span class="n">reviewed_sentences</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_annotation_ids</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="n">key</span><span class="o">=</span><span class="s2">&quot;sentence&quot;</span><span class="p">)</span>
-        <span class="n">unreviewed_sentences</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_patient_annotation_ids</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">reviewed</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="n">key</span><span class="o">=</span><span class="s2">&quot;sentence&quot;</span><span class="p">)</span>
-        <span class="n">sentences</span> <span class="o">=</span> <span class="n">reviewed_sentences</span> <span class="o">+</span> <span class="n">unreviewed_sentences</span>
-        <span class="n">total_sentences</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">sentences</span><span class="p">)</span>
-        <span class="n">event_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_event_date</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
-        <span class="n">first_note_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_first_note_date_for_patient</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
-        <span class="n">last_note_date</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_last_note_date_for_patient</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
-        <span class="n">data</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">patient_id</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">notes</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">reviewed_notes</span><span class="p">),</span>
-                     <span class="n">total_sentences</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">reviewed_sentences</span><span class="p">),</span> <span class="n">reviewed_sentences</span><span class="p">,</span>
-                     <span class="n">event_date</span><span class="p">,</span> <span class="n">first_note_date</span><span class="p">,</span> <span class="n">last_note_date</span><span class="p">])</span>
-
-    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;total_notes&quot;</span><span class="p">,</span> <span class="s2">&quot;reviewed_notes&quot;</span><span class="p">,</span> <span class="s2">&quot;total_sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;reviewed_sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;sentences&quot;</span><span class="p">,</span> <span class="s2">&quot;event_date&quot;</span><span class="p">,</span> <span class="s2">&quot;first_note_date&quot;</span><span class="p">,</span> <span class="s2">&quot;last_note_date&quot;</span><span class="p">])</span>
-    <span class="n">data_bytes</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">()</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
-    <span class="n">csv_buffer</span> <span class="o">=</span> <span class="n">BytesIO</span><span class="p">(</span><span class="n">data_bytes</span><span class="p">)</span>
-    <span class="n">client</span><span class="o">.</span><span class="n">put_object</span><span class="p">(</span><span class="s2">&quot;cedars&quot;</span><span class="p">,</span>
-                      <span class="sa">f</span><span class="s2">&quot;annotated_files/</span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-                      <span class="n">data</span><span class="o">=</span><span class="n">csv_buffer</span><span class="p">,</span>
-                      <span class="n">length</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">data_bytes</span><span class="p">),</span>
-                      <span class="n">content_type</span><span class="o">=</span><span class="s2">&quot;application/csv&quot;</span><span class="p">)</span>
-    <span class="n">file_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">current_app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;UPLOAD_FOLDER&#39;</span><span class="p">],</span> <span class="n">filename</span><span class="p">)</span>
-    <span class="n">client</span><span class="o">.</span><span class="n">fget_object</span><span class="p">(</span><span class="s2">&quot;cedars&quot;</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File saved to </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">send_file</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">as_attachment</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">db</span><span class="o">.</span><span class="n">download_annotations</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+        <span class="n">file</span> <span class="o">=</span> <span class="n">minio</span><span class="o">.</span><span class="n">get_object</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">bucket_name</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;annotated_files/</span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Downloaded annotations from s3: </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">flask</span><span class="o">.</span><span class="n">Response</span><span class="p">(</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">stream</span><span class="p">(</span><span class="mi">32</span><span class="o">*</span><span class="mi">1024</span><span class="p">),</span>
+            <span class="n">mimetype</span><span class="o">=</span><span class="s1">&#39;text/csv&#39;</span><span class="p">,</span>
+            <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Content-Disposition&quot;</span><span class="p">:</span> <span class="s2">&quot;attachment;filename=cedars_annotations.csv&quot;</span><span class="p">}</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">flask</span><span class="o">.</span><span class="n">jsonify</span><span class="p">({</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Annotations with filename &#39;</span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&#39; not found.&quot;</span><span class="p">}),</span> <span class="mi">404</span>
 </code></pre></div></td></tr></table></div>
           </details>
   </div>
@@ -1032,6 +1043,10 @@ the relevant sections of the text.</p>
 <h3 id="project-termination">Project Termination</h3>
 <p>Once all events have been tallied and the audit results are satisfactory, if desired the CEDARS project database can be deleted from the MongoDB database. This is an irreversible operation.</p>
 <p>In future, there will be way to archive CEDARS projects, but this feature is not yet available.</p>
+<h3 id="issues">Issues</h3>
+<ul>
+<li>Unable to install <code>thinc</code> - downgrade python version &lt; 3.12</li>
+</ul>
 
 
 
@@ -1048,33 +1063,45 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">974</span>
-<span class="normal">975</span>
-<span class="normal">976</span>
-<span class="normal">977</span>
-<span class="normal">978</span>
-<span class="normal">979</span>
-<span class="normal">980</span>
-<span class="normal">981</span>
-<span class="normal">982</span>
-<span class="normal">983</span>
-<span class="normal">984</span>
-<span class="normal">985</span>
-<span class="normal">986</span>
-<span class="normal">987</span>
-<span class="normal">988</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">terminate_project</span><span class="p">():</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1260</span>
+<span class="normal">1261</span>
+<span class="normal">1262</span>
+<span class="normal">1263</span>
+<span class="normal">1264</span>
+<span class="normal">1265</span>
+<span class="normal">1266</span>
+<span class="normal">1267</span>
+<span class="normal">1268</span>
+<span class="normal">1269</span>
+<span class="normal">1270</span>
+<span class="normal">1271</span>
+<span class="normal">1272</span>
+<span class="normal">1273</span>
+<span class="normal">1274</span>
+<span class="normal">1275</span>
+<span class="normal">1276</span>
+<span class="normal">1277</span>
+<span class="normal">1278</span>
+<span class="normal">1279</span>
+<span class="normal">1280</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">terminate_project</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Terminate the Project</span>
 
 <span class="sd">    Reset the database to the initial state.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Terminating project.&quot;</span><span class="p">)</span>
+    <span class="c1"># Delete all mongo DB collections</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;ANNOTATIONS&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;NOTES&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;PATIENTS&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;USERS&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;QUERY&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;PINES&quot;</span><span class="p">)</span>
+    <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;TASK&quot;</span><span class="p">)</span>
+
+    <span class="c1"># reset all rq queues</span>
+    <span class="n">flask</span><span class="o">.</span><span class="n">current_app</span><span class="o">.</span><span class="n">task_queue</span><span class="o">.</span><span class="n">empty</span><span class="p">()</span>
+
     <span class="n">create_project</span><span class="p">(</span><span class="n">project_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">slug</span><span class="p">(),</span>
                    <span class="n">investigator_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">name</span><span class="p">())</span>
 </code></pre></div></td></tr></table></div>
