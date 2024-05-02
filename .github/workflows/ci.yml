@@ -40,6 +40,26 @@ jobs:
       - name: Install everything, run the tests, produce the .coverage file
         run: |
           cd cedars
+          touch .env
+          echo "PROJECT_NAME=demo" >> .env
+          echo "INVESTIGATOR_NAME=demo_user" >> .env
+          echo "SECRET_KEY=cedars" >> .env
+          echo "HOST=localhost" >> .env
+          echo "PORT=5000" >> .env
+          echo "DB_HOST=localhost" >> .env
+          echo "DB_NAME=cedars" >> .env
+          echo "DB_PORT=27017" >> .env
+          echo "DB_USER=admin" >> .env
+          echo "DB_PWD=password" >> .env
+          echo "MINIO_HOST=localhost" >> .env
+          echo "MINIO_PORT=9000" >> .env
+          echo "MINIO_ACCESS_KEY=ROOT_USER" >> .env
+          echo "MINIO_SECRET_KEY=CHANGEME123" >> .env
+          echo "ENV=dev" >> .env
+          echo "PINES_API_URL=http://localhost:8036" >> .env
+          echo "REDIS_URL=localhost" >> .env
+          echo "REDIS_PORT=6379" >> .env
+
           python -m pytest --cov=app
 
       - name: Coverage comment
