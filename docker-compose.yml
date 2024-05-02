@@ -1,4 +1,3 @@
-version: '3.8'
 # Settings and configurations that are common for all containers
 x-minio-common: &minio-common
   image: docker.io/minio/minio
