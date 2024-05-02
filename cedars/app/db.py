@@ -549,6 +549,11 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
             ('text_date', 1),
             ("sentence_number", 1)])
 
+    if key == "sentence":
+        res = []
+        for id in annotation_ids:
+            res.append(f'{id["note_id"]}:{str(id["text_date"])[:10]}:{id[key]}')
+        return res
     return [str(id[key]) for id in annotation_ids]
 
 
@@ -1219,7 +1224,7 @@ def download_annotations(filename: str = "annotations.csv"):
         first_note_date = get_first_note_date_for_patient(patient_id)
         last_note_date = get_last_note_date_for_patient(patient_id)
         data.append([patient_id, len(notes), len(reviewed_notes),
-                     total_sentences, len(reviewed_sentences), reviewed_sentences,
+                     total_sentences, len(reviewed_sentences), "\n".join(reviewed_sentences),
                      event_date, first_note_date, last_note_date])
         count += 1
 
