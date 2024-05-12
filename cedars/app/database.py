@@ -10,11 +10,8 @@ config = dotenv_values(".env")
 
 
 def get_mongo():
-    mongo = getattr(g, "mongo", None)
-
-    if mongo is None:
-        mongo = g.mongo = flask_pymongo.PyMongo(current_app)
-
+    # https://pymongo.readthedocs.io/en/stable/faq.html#is-pymongo-fork-safe
+    mongo = flask_pymongo.PyMongo(current_app)
     return mongo
 
 

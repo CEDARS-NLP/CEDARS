@@ -15,10 +15,13 @@
         <br>
         <label class="h4">Additional Parameters</label>
         <br>
-        <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply"> Enable PINES</input>
+        {% if tag_query %}
+          <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply" {{ 'checked' if tag_query.nlp_apply else '' }}> Enable PINES
+        {% else %}
+          <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply"> Enable PINES
+        {% endif %}
         <br>
-        <input type="checkbox" class="form-check-input" id="skip_after_event" name="skip_after_event" checked={{ True }}> Skip After Event</input>
-        <br>
+        <input type="checkbox" class="form-check-input" id="skip_after_event" name="skip_after_event" {{ '' if not skip_after_event else 'checked' }}> Skip After Event
         <!-- <input type="checkbox" class="form-check-input" id="keep_duplicates" name="keep_duplicates"> Keep Duplicates</input> -->
       </div>
       <br>
