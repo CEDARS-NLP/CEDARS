@@ -13,9 +13,6 @@ import pandas as pd
 from werkzeug.security import check_password_hash
 from faker import Faker
 from bson import ObjectId
-import rq
-import redis
-from rq import Retry
 from loguru import logger
 from typing import Optional
 from .database import mongo, minio
@@ -171,8 +168,8 @@ def add_user(username, password, is_admin=False):
 
 
 def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
-               skip_after_event, tag_query, date_min=None,
-               date_max=None):
+               skip_after_event, tag_query, date_min=datetime.now(),
+               date_max=datetime.now()):
 
     """
     This function is used to save a regex query to the database.
@@ -207,7 +204,9 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
     # TODO: make a query history and enable multiple queries.
     info["current"] = True
 
-    if query == get_search_query():
+    if (query == get_search_query() and
+            skip_after_event == get_search_query("skip_after_event") and
+            tag_query.get('nlp_apply', False) == get_search_query("tag_query").get('nlp_apply', False)):
         logger.info(f"Query already saved : {query}.")
         return False
 
@@ -296,6 +295,20 @@ def get_search_query(query_key="query"):
         return query[query_key]
 
     return ""
+
+
+def get_search_query_details():
+    """
+    This function is used to get the current search query details
+    from the database.
+    """
+    query = mongo.db["QUERY"].find_one({"current": True})
+
+    if query:
+        query.pop("_id")
+        return query
+
+    return {}
 
 
 def get_info():
@@ -412,12 +425,9 @@ def get_patients_to_annotate():
         patient_to_annotate: A single patient that needs to manually reviewed
     """
     logger.debug("Retriving all un-reviewed patients from database.")
-    patients_to_annotate = mongo.db["PATIENTS"].find({"reviewed": False,
-                                                      "locked": False})
 
     # check is this patient has any unreviewed annotations
-    for patient in patients_to_annotate:
-        patient_id = patient["patient_id"]
+    for patient_id in get_patient_ids():
         annotations = get_patient_annotation_ids(patient_id)
         if len(annotations) > 0:
             return patient_id
@@ -706,8 +716,9 @@ def get_patient_ids():
         patient_ids (list) : List of all patient IDs in this project
     """
     patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False})
-
-    return [patient["patient_id"] for patient in patients]
+    res = [patient["patient_id"] for patient in patients]
+    logger.info(f"Retrived {len(res)} patient IDs from the database.")
+    return res
 
 
 def get_patient_lock_status(patient_id):
@@ -880,8 +891,10 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
+                                               "locked": False,
                                                "comments": []}})
-    mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False}})
+    mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
+                                                "reviewed_by": ""}})
 
 
 def add_comment(annotation_id, comment):
@@ -959,6 +972,10 @@ def empty_annotations():
     logger.info("Deleting all data in annotations collection.")
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
+
+    # also reset the queue
+    flask.current_app.task_queue.empty()
+    mongo.db["TASK"].delete_many({})
 
 
 def drop_database(name):
@@ -1130,42 +1147,12 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
         count += 1
 
 
-def add_task(func, description, user, *args, **kwargs):
+def add_task(task):
     """
     Launch a task and add it to Mongo if it doesn't already exist.
     """
     task_db = mongo.db["TASK"]
-    job_id = kwargs.get("job_id")
-    patient_id = kwargs.get("patient_id")
-    logger.info(f"Adding task to queue: {job_id}")
-    exists = get_task(job_id)
-
-    logger.debug(f"Task exists: {exists}")
-    rq_job = None
-    if exists:
-        try:
-            rq_job = rq.job.Job.fetch(job_id, connection=flask.current_app.redis)
-        except (redis.exceptions.RedisError, rq.exceptions.NoSuchJobError):
-            logger.warning(f"Task {job_id} exists in MongoDB but not in RQ queue. Re-enqueuing.")
-            exists = None  # If the job cannot be fetched, treat it as non-existent
-
-    if not exists:
-        rq_job = flask.current_app.task_queue.enqueue(
-            func, retry=Retry(max=3), *args, **kwargs
-        )
-        task = {
-            "job_id": rq_job.get_id(),
-            "name": func.__name__,
-            "description": description,
-            "user": user,
-            "complete": False,
-            "progress": 0
-        }
-        task_db.insert_one(task)
-        # when the patient is being processed, lock it
-        set_patient_lock_status(patient_id, True)
-
-    return rq_job.get_id()
+    task_db.insert_one(task)
 
 
 def get_tasks_in_progress():

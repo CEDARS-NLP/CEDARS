@@ -2,13 +2,14 @@ import pandas as pd
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from flask import g, request
+from flask import request
 from dotenv import load_dotenv
 from mongomock import MongoClient
 from redis import Redis
 import fakeredis
 from flask_login import FlaskLoginClient
 from app.auth import User
+
 
 load_dotenv()
 test_data = pd.read_csv(Path(__file__).parent / "simulated_patients.csv")
@@ -21,8 +22,9 @@ def cedars_app():
         from app import create_app
         cedars_app = create_app(f"config.{environment.title()}")
         with cedars_app.test_request_context():
-            g.mongo = MongoClient()
-            yield cedars_app
+            with patch('flask_pymongo.PyMongo') as mock_pymongo:
+                mock_pymongo.return_value = MongoClient()
+                yield cedars_app
 
 
 @pytest.fixture(scope="session")

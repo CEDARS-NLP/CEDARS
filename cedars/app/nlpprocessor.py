@@ -2,11 +2,9 @@
 This module contatins the class to perform NLP operations for the CEDARS project
 """
 import sys
-from flask_login import current_user
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
-from rq import Callback
 from . import db
 
 logger.enable(__name__)
@@ -188,13 +186,11 @@ class NlpProcessor:
         count = 0
         docs_with_annotations = 0
         for document, doc in zip(document_list, annotations):
-            docs_with_annotations += 1
             match_count = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
                 matches = matcher(sentence_annotation)
                 for match in matches:
-                    match_count += 1
                     _, start, end = match
                     token = sentence_annotation[start:end]
                     has_negation = is_negated(token)
@@ -218,6 +214,11 @@ class NlpProcessor:
                     annotation["event_date"] = None
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
+                    if not has_negation:
+                        if match_count == 0:
+                            docs_with_annotations += 1
+                        match_count += 1
+
             if match_count == 0:
                 db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
             count += 1
@@ -263,7 +264,7 @@ class NlpProcessor:
             db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
             logger.debug(f"Marked patient {patient_id} as reviewed")
 
-    def automatic_nlp_processor(self, patient_id=None):
+    def automatic_nlp_processor(self, patient_id=None, **kwargs):
         """
         This function is used to perform and save NLP annotations
         on one or all patients saved in the database.
@@ -271,17 +272,22 @@ class NlpProcessor:
         """
 
         # Retrieve all patient ids where patient was not reviewed
-        for patient_id in db.get_patient_ids():
-            try:
-                db.add_task(self.process_notes,
-                            job_id=f"spacy:{patient_id}",
-                            patient_id=patient_id,
-                            user=current_user.username,
-                            description="cedars service",
-                            on_success=Callback(db.report_success),
-                            on_failure=Callback(db.report_failure)
-                            )
-            except Exception:
-                logger.debug(f"error while processing patient: {sys.exc_info()}")
-            finally:
-                logger.debug(f"error while processing patient: {sys.exc_info()}")
+        if not patient_id:
+            patient_ids = db.get_patient_ids()
+            logger.info(f"Found {len(patient_ids)} patients to process")
+        else:
+            patient_ids = [patient_id]
+            logger.info(f"Processing patient {patient_id}")
+
+        for patient_id in patient_ids:
+            task = {
+                "job_id": kwargs.get("job_id", None),
+                "name": "nlp_processor",
+                "description": kwargs.get("description", "NLP Processor"),
+                "user": kwargs.get("user", None),
+                "complete": False,
+                "progress": 0
+            }
+            db.add_task(task)
+            db.set_patient_lock_status(patient_id, True)
+            self.process_notes(patient_id)

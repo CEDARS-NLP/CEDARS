@@ -14,6 +14,7 @@ from flask import (
 from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
+from rq import Retry, Callback
 from . import db
 from . import nlpprocessor
 from . import auth
@@ -211,7 +212,6 @@ def upload_data():
                                  size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
-
             except Exception as e:
                 filename = None
                 flash(f"Failed to upload file: {str(e)}")
@@ -249,7 +249,8 @@ def upload_query():
         current_query = db.get_search_query()
         return render_template("ops/upload_query.html",
                                current_query=current_query,
-                               **db.get_info())
+                               **db.get_info(),
+                               **db.get_search_query_details())
 
     tag_query = {
         "exact": False,
@@ -299,7 +300,22 @@ def do_nlp_processing():
     Run NLP workers
     """
     nlp_processor = nlpprocessor.NlpProcessor()
-    nlp_processor.automatic_nlp_processor()
+    # add task to the queue
+    for patient in db.get_patient_ids():
+        flask.current_app.task_queue.enqueue(
+            nlp_processor.automatic_nlp_processor,
+            args=(patient,),
+            job_id=f'spacy:{patient}',
+            description=f"Processing patient {patient} with spacy",
+            retry=Retry(max=3),
+            on_success=Callback(db.report_success),
+            on_failure=Callback(db.report_failure),
+            kwargs={
+                "user": current_user.username,
+                "job_id": f'spacy:{patient}',
+                "description": f"Processing patient {patient} with spacy"
+            }
+        )
     return redirect(url_for("ops.get_job_status"))
 
 
