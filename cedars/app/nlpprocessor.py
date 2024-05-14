@@ -1,7 +1,6 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
-import sys
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger

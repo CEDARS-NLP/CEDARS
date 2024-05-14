@@ -1260,8 +1260,5 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
 
-    # reset all rq queues
-    flask.current_app.task_queue.empty()
-
     create_project(project_name=fake.slug(),
                    investigator_name=fake.name())

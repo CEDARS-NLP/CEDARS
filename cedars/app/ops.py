@@ -92,8 +92,11 @@ def project_details():
             terminate_clause = request.form.get("terminate_conf")
             if len(terminate_clause.strip()) > 0:
                 if terminate_clause == 'DELETE EVERYTHING':
-                    session.clear()
                     db.terminate_project()
+                    # reset all rq queues
+                    flask.current_app.task_queue.empty()
+                    auth.logout_user()
+                    session.clear()
                     flash("Project Terminated.")
                     return render_template("index.html", **db.get_info())
             else:
@@ -184,9 +187,9 @@ def upload_data():
     """
     filename = None
     if request.method == "POST":
-        if db.get_task(f"upload_and_process:{current_user.username}"):
-            flash("A file is already being processed.")
-            return redirect(request.url)
+        # if db.get_task(f"upload_and_process:{current_user.username}"):
+        #     flash("A file is already being processed.")
+        #     return redirect(request.url)
         minio_file = request.form.get("miniofile")
         if minio_file != "None" and minio_file is not None:
             logger.info(f"Using minio file: {minio_file}")
