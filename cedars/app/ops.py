@@ -301,10 +301,12 @@ def upload_query():
 def do_nlp_processing():
     """
     Run NLP workers
+    TODO: requeue failed jobs
     """
     nlp_processor = nlpprocessor.NlpProcessor()
+    pt_ids = db.get_patient_ids()
     # add task to the queue
-    for patient in db.get_patient_ids():
+    for patient in pt_ids:
         flask.current_app.task_queue.enqueue(
             nlp_processor.automatic_nlp_processor,
             args=(patient,),

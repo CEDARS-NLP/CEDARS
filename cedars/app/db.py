@@ -1248,7 +1248,7 @@ def terminate_project():
     """
     ##### Terminate the Project
 
-    Reset the database to the initial state.
+    Reset the database to the initial state.  
     """
     logger.info("Terminating project.")
     # Delete all mongo DB collections
