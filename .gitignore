@@ -26,3 +26,4 @@ site
 **/annotations.csv
 **/scratch.py
 .vscode
+global-bundle.pem

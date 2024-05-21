@@ -6,7 +6,7 @@ COPY ./cedars/requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
 COPY ./cedars .
-COPY ./cedars/.docker-env .env
+COPY .env .env
 
 EXPOSE 5001
 
