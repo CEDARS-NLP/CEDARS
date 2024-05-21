@@ -1,18 +1,19 @@
 # Settings and configurations that are common for all containers
 x-minio-common: &minio-common
-  image: quay.io/minio/minio:RELEASE.2024-05-10T01-41-38Z
+  image: quay.io/minio/minio:${MINIO_VERSION}
   command: server --console-address ":9001" http://minio/data{1...2}
   expose:
-    - "9000"
+    - ${MINIO_PORT}
     - "9001"
   environment:
-    MINIO_ROOT_USER: ROOTUSER
-    MINIO_ROOT_PASSWORD: CHANGEME123
+    MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+    MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
   healthcheck:
     test: ["CMD", "mc", "ready", "local"]
     interval: 5s
     timeout: 5s
     retries: 5
+
 services:
   web:
     build:
@@ -23,36 +24,47 @@ services:
     # flask requires SIGINT to stop gracefully
     # (default stop signal from Compose is SIGTERM)
     stop_signal: SIGINT
-    depends_on:
-      - db
     networks:
       - cedars
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
   db:
     image: mongo:latest
     ports:
-      - 27018:27017
+      - "${DB_HOST_PORT}:${DB_PORT}"
     restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_ROOT_USERNAME: ${DB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PWD}
     volumes:
       - cedars_db:/data/db
     command: mongod --quiet --logpath /dev/null 
     networks:
       - cedars
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+
   minio:
     <<: *minio-common
     hostname: minio
     restart: always
     ports:
-      - "9000:9000"
+      - "9000:${MINIO_PORT}"
       - "9001:9001"
     volumes:
       - data2-1:/data1
       - data2-2:/data2
     networks:
       - cedars
-  
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+
   nginx:
     image: nginx:1.19.2-alpine
     hostname: nginx
@@ -67,19 +79,43 @@ services:
       - pines
     networks:
       - cedars
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+
   pines:
     build:
       context: ./PINES
     deploy:
       mode: replicated
-      replicas: 2
+      replicas: ${PINES_WORKERS}
     restart: on-failure:5
     networks:
       - cedars
+    profiles: [cpu]
+
+  pines-gpu:
+    build:
+      context: ./PINES
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_SCALE}
+              capabilities: [gpu]
+      mode: replicated
+      replicas: ${PINES_WORKERS}
+    restart: on-failure:5
+    networks:
+      - cedars
+    profiles: [gpu]
+
   redis:
     image: redis:latest
     ports:
-      - 6379:6379
+      - "${REDIS_PORT}:${REDIS_PORT}"
     volumes:
       - redis_data:/data1
     healthcheck:
@@ -89,15 +125,23 @@ services:
       retries: 3
     networks:
       - cedars
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+
   worker:
     image: cedars
     command: python -m app.make_rq
-    scale: 2
+    scale: ${WORKER_SCALE}
     networks:
       - cedars
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted   
+    
 volumes:
-  data1-1:
-  data1-2:
   data2-1:
   data2-2:
   cedars_db:
