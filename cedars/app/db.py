@@ -1150,6 +1150,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
 def add_task(task):
     """
     Launch a task and add it to Mongo if it doesn't already exist.
+    # TODO: insert only once
     """
     task_db = mongo.db["TASK"]
     task_db.insert_one(task)
