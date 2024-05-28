@@ -10,9 +10,11 @@ logger.enable(__name__)
 
 
 def get_regex_dict(token):
-    # Replace '*' with '.*' and '?' with '\w?'
-    regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\\w?')
-    return {"TEXT": {"REGEX": regex_pattern}}
+    if "*" in token:
+        token = token.replace("*", ".*")
+    if "?" in token:
+        token = token.replace("?", ".")
+    return {"TEXT": {"REGEX": rf"\b{token}\b"}}
 
 
 def get_lemma_dict(token):
@@ -67,7 +69,7 @@ def query_to_patterns(query: str) -> list:
                 spacy_pattern.append(get_negated_dict(tok.replace("!", "")))
             else:
                 spacy_pattern.append(get_lemma_dict(tok))
-        # logger.debug(f"{expression} -> {spacy_pattern}")
+        logger.debug(f"{expression} -> {spacy_pattern}")
         res[i] = spacy_pattern
     return res
 
@@ -287,6 +289,9 @@ class NlpProcessor:
                 "complete": False,
                 "progress": 0
             }
-            db.add_task(task)
-            db.set_patient_lock_status(patient_id, True)
-            self.process_notes(patient_id)
+            # check if the task is completed for the patient already
+            # if not, add the task to the database
+            if not db.check_task_exists(patient_id, task["job_id"]):
+                db.add_task(task)
+                db.set_patient_lock_status(patient_id, True)
+                self.process_notes(patient_id)
