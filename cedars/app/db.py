@@ -145,6 +145,17 @@ def populate_query():
     logger.info("Created %s collection.", query.name)
 
 
+def populate_task():
+    """
+    This database stores tasks in rq
+    """
+    # Pylint disabled for pointless statement.
+    # This statement is used to create a collection.
+    task = mongo.db["TASK"]
+    task.create_index("job_id", unique=True)
+    logger.info("Created %s collection.", task.name)
+
+
 # Insert functions
 def add_user(username, password, is_admin=False):
     """

@@ -138,6 +138,10 @@ class NlpProcessor:
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
+    def __init__(self):
+        self.matcher = Matcher(self.nlp_model.vocab)
+        self.query = db.get_search_query()
+
     def process_notes(self, patient_id, processes=1, batch_size=20):
         """
         ##### Process Query Matching
@@ -146,15 +150,14 @@ class NlpProcessor:
         the relevant sections of the text.
         """
         # nlp_model = spacy.load(model_name)
-        matcher = Matcher(self.nlp_model.vocab)
-        assert len(matcher) == 0
+        assert len(self.matcher) == 0
         query = db.get_search_query()
 
         # load previosly processed documents
         # document_processed = load_progress()
         spacy_patterns = query_to_patterns(query)
         for i, item in enumerate(spacy_patterns):
-            matcher.add(f"DVT_{i}", [item])
+            self.matcher.add(f"DVT_{i}", [item])
 
         # check all documents already processed
         documents_to_process = []
@@ -190,7 +193,7 @@ class NlpProcessor:
             match_count = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
-                matches = matcher(sentence_annotation)
+                matches = self.matcher(sentence_annotation)
                 for match in matches:
                     _, start, end = match
                     token = sentence_annotation[start:end]
@@ -291,7 +294,12 @@ class NlpProcessor:
             }
             # check if the task is completed for the patient already
             # if not, add the task to the database
-            if not db.check_task_exists(patient_id, task["job_id"]):
-                db.add_task(task)
+            existing_task = db.get_task(task["job_id"])
+
+            if not existing_task or existing_task["complete"] is False:
+                if not existing_task:
+                    db.add_task(task)
                 db.set_patient_lock_status(patient_id, True)
                 self.process_notes(patient_id)
+            else:
+                logger.info(f"Task {task['job_id']} already completed")

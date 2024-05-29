@@ -21,7 +21,9 @@ class Base:  # pylint: disable=too-few-public-methods
         f'{config["DB_NAME"]}?{config["DB_PARAMS"]}'
     )
     RQ = {
-        "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
+        "host": config["REDIS_URL"],
+        "port": config["REDIS_PORT"],
+        "db": 0,
         "queue_name": "cedars",
         "job_timeout": 3600
     }
