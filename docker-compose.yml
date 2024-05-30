@@ -55,8 +55,6 @@ services:
     networks:
       - cedars
     profiles:
-      - cpu
-      - gpu
       - selfhosted
 
   minio:
