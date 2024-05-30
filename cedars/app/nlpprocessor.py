@@ -133,14 +133,13 @@ class NlpProcessor:
 
             try:
                 cls.nlp_model = spacy.load(model_name)
+                # TODO make sure this is correct
+                cls.matcher = Matcher(cls.nlp_model.vocab)
+                cls.query = db.get_search_query()
             except Exception as exc:
                 logger.critical("Spacy model %s failed to load.", model_name)
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
-
-    def __init__(self):
-        self.matcher = Matcher(self.nlp_model.vocab)
-        self.query = db.get_search_query()
 
     def process_notes(self, patient_id, processes=1, batch_size=20):
         """
