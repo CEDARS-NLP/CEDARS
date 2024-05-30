@@ -18,9 +18,7 @@ sess = Session()
 
 def rq_init_app(cedars_rq):
     """Initialize the rq app"""
-    cedars_rq.redis = Redis(host=cedars_rq.config["RQ"]['host'],
-                            port=int(cedars_rq.config["RQ"]['port']),
-                            db=int(cedars_rq.config["RQ"]['db']))
+    cedars_rq.redis = Redis.from_url(cedars_rq.config["RQ"]['redis_url'])
     cedars_rq.task_queue = rq.Queue(cedars_rq.config["RQ"]['queue_name'],
                                     connection=cedars_rq.redis,
                                     default_timeout=cedars_rq.config["RQ"]['job_timeout'])
@@ -37,9 +35,7 @@ def create_app(config_filename=None):
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
     cedars_app.config["SESSION_TYPE"] = "redis"
-    cedars_app.config["SESSION_REDIS"] = Redis(host=cedars_app.config["RQ"]['host'],
-                                               port=int(cedars_app.config["RQ"]['port']),
-                                               db=int(cedars_app.config["RQ"]['db']))
+    cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)

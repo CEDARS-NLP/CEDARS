@@ -29,8 +29,15 @@ jobs:
       
       - name: install deps
         run: |
+          export POETRY_NO_INTERACTION=1 \
+            POETRY_VIRTUALENVS_IN_PROJECT=1 \
+            POETRY_VIRTUALENVS_CREATE=1 \
+            POETRY_CACHE_DIR=/tmp/poetry_cache
           python -m pip install --upgrade pip
-          pip install -r cedars/requirements-dev.txt
+          python -m pip install poetry==1.7.1
+          python -m peotry install
+          export VIRTUAL_ENV=/.venv
+          export PATH="/.venv/bin:$PATH"
 
       - name: Lint with flake8
         run: |

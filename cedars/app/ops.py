@@ -329,6 +329,24 @@ def get_job_status():
     return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
+def get_rq_status():
+    """
+    Get the status of the rq tasks.
+    Details:
+    1. Total number of tasks in the queue.
+    2. Total number of tasks that are currently running.
+    3. Total number of tasks that have been completed.
+    4. Total number of tasks that have failed.
+    # TODO
+    """
+    return {
+        "total_tasks": flask.current_app.task_queue.count,
+        "running_tasks": flask.current_app.task_queue.count,
+        "completed_tasks": flask.current_app.task_queue.count,
+        "failed_tasks": flask.current_app.task_queue.count
+    }
+
+
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 def save_adjudications():
