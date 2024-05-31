@@ -71,6 +71,8 @@
     </li>
     <li class="toctree-l4"><a class="reference internal" href="#docker-deployment">Docker Deployment</a>
     </li>
+    <li class="toctree-l4"><a class="reference internal" href="#awsserver-deployment">AWS/Server Deployment</a>
+    </li>
         </ul>
     </li>
         </ul>
@@ -106,6 +108,16 @@
     <li class="toctree-l3"><a class="reference internal" href="#event-pre-loading">Event Pre-Loading</a>
     </li>
     <li class="toctree-l3"><a class="reference internal" href="#manual-assessment-for-clinical-events">Manual Assessment for Clinical Events</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#error-handling-and-queues">Error Handling and Queues</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#queue-operations">Queue Operations</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.add_task">add_task</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#cedars.app.db.add_task--todo-insert-only-one">TODO: insert only one</a>
+    </li>
+        </ul>
     </li>
     <li class="toctree-l3"><a class="reference internal" href="#dataset-download">Dataset Download</a>
         <ul>
@@ -164,14 +176,40 @@
 <p><strong>CEDARS is provided as-is with no guarantee whatsoever and users agree to be held responsible for compliance with their local government/institutional regulations.</strong> All CEDARS installations should be reviewed with institutional information security authorities.</p>
 </blockquote>
 <h2 id="software-installation">Software Installation</h2>
+<ol>
+<li>
+<p>Minimum CPU requirements: <strong>32GB Memory and 8 cores</strong> [t2.2xlarge on AWS]</p>
+</li>
+<li>
+<p>In order to run, you will need two <code>.env</code> files</p>
+<ul>
+<li>The first .env file will be placed under the ROOT DIR</li>
+<li>The second the <code>.env</code> file under the <code>CEDARS/cedars</code> directory.</li>
+</ul>
+<p>.sample.env files are available - please modify them with your settings and rename it to .env</p>
+<p><code>bash
+CEDARS/
+│
+├── .env
+├── docker-compose.yml
+├── cedars/
+│   ├── .env
+│   ├── Dockerfile
+│   └── ...</code></p>
+<ul>
+<li><code>CEDARS/.env</code>: This file contains environment variables used by Docker Compose.</li>
+<li><code>CEDARS/cedars/.env</code>: This file contains environment variables specific to cedars application.</li>
+<li><code>docker-compose.yml</code>: The Docker Compose configuration file.</li>
+<li><code>cedars/Dockerfile</code>: The Dockerfile for building cedars app.</li>
+</ul>
+</li>
+</ol>
 <h3 id="detailed-requirements">Detailed Requirements</h3>
 <h4 id="local-installation-requirement">Local Installation Requirement</h4>
 <div class="admonition warning">
 <p class="admonition-title">WARNING</p>
 <p>Local installation is not recommended unless you want to modify the underlying codebase. It is recommended to use the Docker deployment method.</p>
 </div>
-<p>In order to run the app locally, you will need a <code>.env</code> file with at least the flask <code>SECRET_KEY</code>, MONGODB and MINIO details and the host IP.
-Place the <code>.env</code> file under the <code>cedars/cedars</code> directory.</p>
 <p>For example:</p>
 <pre><code>SECRET_KEY = \xcfR\xd9D\xaa\x06\x84S\x19\xc0\xdcA\t\xf7it
 HOST=0.0.0.0 
@@ -236,6 +274,10 @@ for running the <code>rq</code> workers</p>
 <p>This is the easiest way to run CEDARS and encapsulates all dependencies above."</p>
 </div>
 <p>Install <a href="https://docs.docker.com/get-docker/">Docker</a> and <a href="https://docs.docker.com/compose/install/">Docker Compose</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">TIP</p>
+<p>Please install docker compose v2 as the spec using <code>deploy</code> which is not compatible with v1.</p>
+</div>
 <h3 id="system-architecture">System Architecture</h3>
 <p><img alt="CEDARS Operational Schema" src="../pics/GitHub%20Docker%20Schema%20C.png" /></p>
 <p>The CEDARS application runs on a web server and generates an online graphical user interface (GUI) using Flask. All data are stored in a MongoDB instance hosted separately. However, most CEDARS instances are dockerized in order to streamline the project setup process and ensure adequate compatibility of dependencies.</p>
@@ -273,11 +315,38 @@ $ poetry run python -m app.wsgi
 <li>PINES NLP annotation service (optional)</li>
 </ul>
 <p>Each component runs as a service encapsulated in a docker container. Those three elements a coordinated within a deployment.The PINES service requires a GPU for model training. This is optional for inference (i.e. annotating documents).</p>
-<p>After cloning as described above, run the following commands:</p>
-<pre><code class="language-shell">$ cd cedars
-$ docker-compose up --build -d
+<p>After cloning as described above, create required <code>.env</code> files as mentioned <a href="#software-installation">here</a></p>
+<p>After creating <code>.env</code> files, run the following commands:</p>
+<pre><code class="language-shell">$ cd CEDARS
+# if you do are not using GPU and want all the services to be hosted on docker
+$ docker compose --profile cpu --profile selfhosted up --build -d
+# if you are using a GPU
+$ docker compose --profile gpu --profile selfhosted up --build -d
+# if you want to use a native service such as AWS Document DB
+$ docker compose --profile gpu  up --build -d  # gpu
+$ docker compose --profile cpu  up --build -d  # cpu
 </code></pre>
-<p>and navigate to http://<hostaddress>:5001</p>
+<p>Once all services are started - the app will be available here</p>
+<pre><code>http://&lt;hostaddress&gt;:80
+</code></pre>
+<h4 id="awsserver-deployment">AWS/Server Deployment</h4>
+<ol>
+<li>
+<p>Make sure you have docker compose v2
+    if you are running docker as sudo - please follow this <a href="https://stackoverflow.com/questions/48957195/how-to-fix-docker-got-permission-denied-issue">stackoverflow link</a> to run as a non-sudo  </p>
+</li>
+<li>
+<p>Install compose v2  using this <a href="https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-compose-on-ubuntu-22-04">link</a></p>
+</li>
+</ol>
+<p>For example to use AWS DocumentDB with tls you can create .env (under CEDARS/cedars) file like this</p>
+<pre><code class="language-bash">DB_HOST=&lt;your-cluster-ip&gt;.docdb.amazonaws.com
+DB_NAME=cedars
+DB_PORT=27017
+DB_USER=&lt;docdbuser&gt;
+DB_PWD=&lt;docDBpassword&gt;
+DB_PARAMS=&quot;tls=true&amp;tlsCAFile=global-bundle.pem&amp;replicaSet=rs0&amp;readPreference=secondaryPreferred&amp;retryWrites=false&quot;
+</code></pre>
 <h2 id="project-execution">Project Execution</h2>
 <h3 id="overview">Overview</h3>
 <p>Determining clinical event dates with CEDARS is a simple, sequential process:</p>
@@ -340,7 +409,8 @@ wildcards.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">29</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">28</span>
+<span class="normal">29</span>
 <span class="normal">30</span>
 <span class="normal">31</span>
 <span class="normal">32</span>
@@ -385,8 +455,7 @@ wildcards.</p>
 <span class="normal">71</span>
 <span class="normal">72</span>
 <span class="normal">73</span>
-<span class="normal">74</span>
-<span class="normal">75</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="normal">74</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Expected query will be a set of keywords separated</span>
 <span class="sd">    by OR keyword.</span>
@@ -430,7 +499,7 @@ wildcards.</p>
                 <span class="n">spacy_pattern</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">get_negated_dict</span><span class="p">(</span><span class="n">tok</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)))</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">spacy_pattern</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">get_lemma_dict</span><span class="p">(</span><span class="n">tok</span><span class="p">))</span>
-        <span class="c1"># logger.debug(f&quot;{expression} -&gt; {spacy_pattern}&quot;)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">expression</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">spacy_pattern</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">res</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">spacy_pattern</span>
     <span class="k">return</span> <span class="n">res</span>
 </code></pre></div></td></tr></table></div>
@@ -509,7 +578,8 @@ In the above sentence, the token apple is negated.
 </table>
           <details class="quote">
             <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 78</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 77</span>
+<span class="normal"> 78</span>
 <span class="normal"> 79</span>
 <span class="normal"> 80</span>
 <span class="normal"> 81</span>
@@ -546,8 +616,7 @@ In the above sentence, the token apple is negated.
 <span class="normal">112</span>
 <span class="normal">113</span>
 <span class="normal">114</span>
-<span class="normal">115</span>
-<span class="normal">116</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_negated</span><span class="p">(</span><span class="n">span</span><span class="p">):</span>
+<span class="normal">115</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_negated</span><span class="p">(</span><span class="n">span</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Negation Detection</span>
 
@@ -609,9 +678,7 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/nlpprocessor.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">142</span>
-<span class="normal">143</span>
-<span class="normal">144</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">144</span>
 <span class="normal">145</span>
 <span class="normal">146</span>
 <span class="normal">147</span>
@@ -697,7 +764,11 @@ the relevant sections of the text.</p>
 <span class="normal">227</span>
 <span class="normal">228</span>
 <span class="normal">229</span>
-<span class="normal">230</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">process_notes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient_id</span><span class="p">,</span> <span class="n">processes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">process_notes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient_id</span><span class="p">,</span> <span class="n">processes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Process Query Matching</span>
 
@@ -705,15 +776,14 @@ the relevant sections of the text.</p>
 <span class="sd">    the relevant sections of the text.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="c1"># nlp_model = spacy.load(model_name)</span>
-    <span class="n">matcher</span> <span class="o">=</span> <span class="n">Matcher</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nlp_model</span><span class="o">.</span><span class="n">vocab</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">matcher</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">matcher</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
     <span class="n">query</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">get_search_query</span><span class="p">()</span>
 
     <span class="c1"># load previosly processed documents</span>
     <span class="c1"># document_processed = load_progress()</span>
     <span class="n">spacy_patterns</span> <span class="o">=</span> <span class="n">query_to_patterns</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
     <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">spacy_patterns</span><span class="p">):</span>
-        <span class="n">matcher</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DVT_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">item</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">matcher</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DVT_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">item</span><span class="p">])</span>
 
     <span class="c1"># check all documents already processed</span>
     <span class="n">documents_to_process</span> <span class="o">=</span> <span class="p">[]</span>
@@ -746,13 +816,11 @@ the relevant sections of the text.</p>
     <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="n">docs_with_annotations</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="k">for</span> <span class="n">document</span><span class="p">,</span> <span class="n">doc</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">document_list</span><span class="p">,</span> <span class="n">annotations</span><span class="p">):</span>
-        <span class="n">docs_with_annotations</span> <span class="o">+=</span> <span class="mi">1</span>
         <span class="n">match_count</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="k">for</span> <span class="n">sent_no</span><span class="p">,</span> <span class="n">sentence_annotation</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">sents</span><span class="p">):</span>
             <span class="n">sentence_text</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="o">.</span><span class="n">text</span>
-            <span class="n">matches</span> <span class="o">=</span> <span class="n">matcher</span><span class="p">(</span><span class="n">sentence_annotation</span><span class="p">)</span>
+            <span class="n">matches</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">matcher</span><span class="p">(</span><span class="n">sentence_annotation</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">matches</span><span class="p">:</span>
-                <span class="n">match_count</span> <span class="o">+=</span> <span class="mi">1</span>
                 <span class="n">_</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">match</span>
                 <span class="n">token</span> <span class="o">=</span> <span class="n">sentence_annotation</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">]</span>
                 <span class="n">has_negation</span> <span class="o">=</span> <span class="n">is_negated</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
@@ -776,6 +844,11 @@ the relevant sections of the text.</p>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;event_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
                 <span class="n">annotation</span><span class="p">[</span><span class="s2">&quot;reviewed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
                 <span class="n">db</span><span class="o">.</span><span class="n">insert_one_annotation</span><span class="p">(</span><span class="n">annotation</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">has_negation</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">match_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="n">docs_with_annotations</span> <span class="o">+=</span> <span class="mi">1</span>
+                    <span class="n">match_count</span> <span class="o">+=</span> <span class="mi">1</span>
+
         <span class="k">if</span> <span class="n">match_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
             <span class="n">db</span><span class="o">.</span><span class="n">mark_note_reviewed</span><span class="p">(</span><span class="n">document</span><span class="p">[</span><span class="s2">&quot;text_id&quot;</span><span class="p">],</span> <span class="n">reviewed_by</span><span class="o">=</span><span class="s2">&quot;CEDARS&quot;</span><span class="p">)</span>
         <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
@@ -808,31 +881,31 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1050</span>
-<span class="normal">1051</span>
-<span class="normal">1052</span>
-<span class="normal">1053</span>
-<span class="normal">1054</span>
-<span class="normal">1055</span>
-<span class="normal">1056</span>
-<span class="normal">1057</span>
-<span class="normal">1058</span>
-<span class="normal">1059</span>
-<span class="normal">1060</span>
-<span class="normal">1061</span>
-<span class="normal">1062</span>
-<span class="normal">1063</span>
-<span class="normal">1064</span>
-<span class="normal">1065</span>
-<span class="normal">1066</span>
-<span class="normal">1067</span>
-<span class="normal">1068</span>
-<span class="normal">1069</span>
-<span class="normal">1070</span>
-<span class="normal">1071</span>
-<span class="normal">1072</span>
-<span class="normal">1073</span>
-<span class="normal">1074</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1078</span>
+<span class="normal">1079</span>
+<span class="normal">1080</span>
+<span class="normal">1081</span>
+<span class="normal">1082</span>
+<span class="normal">1083</span>
+<span class="normal">1084</span>
+<span class="normal">1085</span>
+<span class="normal">1086</span>
+<span class="normal">1087</span>
+<span class="normal">1088</span>
+<span class="normal">1089</span>
+<span class="normal">1090</span>
+<span class="normal">1091</span>
+<span class="normal">1092</span>
+<span class="normal">1093</span>
+<span class="normal">1094</span>
+<span class="normal">1095</span>
+<span class="normal">1096</span>
+<span class="normal">1097</span>
+<span class="normal">1098</span>
+<span class="normal">1099</span>
+<span class="normal">1100</span>
+<span class="normal">1101</span>
+<span class="normal">1102</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_prediction</span><span class="p">(</span><span class="n">note</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### PINES predictions</span>
 
@@ -878,37 +951,37 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1100</span>
-<span class="normal">1101</span>
-<span class="normal">1102</span>
-<span class="normal">1103</span>
-<span class="normal">1104</span>
-<span class="normal">1105</span>
-<span class="normal">1106</span>
-<span class="normal">1107</span>
-<span class="normal">1108</span>
-<span class="normal">1109</span>
-<span class="normal">1110</span>
-<span class="normal">1111</span>
-<span class="normal">1112</span>
-<span class="normal">1113</span>
-<span class="normal">1114</span>
-<span class="normal">1115</span>
-<span class="normal">1116</span>
-<span class="normal">1117</span>
-<span class="normal">1118</span>
-<span class="normal">1119</span>
-<span class="normal">1120</span>
-<span class="normal">1121</span>
-<span class="normal">1122</span>
-<span class="normal">1123</span>
-<span class="normal">1124</span>
-<span class="normal">1125</span>
-<span class="normal">1126</span>
-<span class="normal">1127</span>
-<span class="normal">1128</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1128</span>
 <span class="normal">1129</span>
-<span class="normal">1130</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">predict_and_save</span><span class="p">(</span><span class="n">text_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="normal">1130</span>
+<span class="normal">1131</span>
+<span class="normal">1132</span>
+<span class="normal">1133</span>
+<span class="normal">1134</span>
+<span class="normal">1135</span>
+<span class="normal">1136</span>
+<span class="normal">1137</span>
+<span class="normal">1138</span>
+<span class="normal">1139</span>
+<span class="normal">1140</span>
+<span class="normal">1141</span>
+<span class="normal">1142</span>
+<span class="normal">1143</span>
+<span class="normal">1144</span>
+<span class="normal">1145</span>
+<span class="normal">1146</span>
+<span class="normal">1147</span>
+<span class="normal">1148</span>
+<span class="normal">1149</span>
+<span class="normal">1150</span>
+<span class="normal">1151</span>
+<span class="normal">1152</span>
+<span class="normal">1153</span>
+<span class="normal">1154</span>
+<span class="normal">1155</span>
+<span class="normal">1156</span>
+<span class="normal">1157</span>
+<span class="normal">1158</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">predict_and_save</span><span class="p">(</span><span class="n">text_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
                      <span class="n">note_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;NOTES&quot;</span><span class="p">,</span>
                      <span class="n">pines_collection_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;PINES&quot;</span><span class="p">,</span>
                      <span class="n">force_update</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -948,6 +1021,50 @@ the relevant sections of the text.</p>
 <p>Sometimes a cohort of patients will already have been assessed with other methods and CEDARS is used as a redundant method to pick up any previously missed events. In this use case, a list of known clinical events with their dates will exist. This information can be loaded on CEDARS as a "starting point", so as to avoid re-discovering already documented events.</p>
 <h3 id="manual-assessment-for-clinical-events">Manual Assessment for Clinical Events</h3>
 <p>The process by which human abstractors annotate patient records for events is described in the <a href="../CEDARS_annotator_manual/">End User Manual</a>. This step can be skipped altogether if a PINES model was used to classify documents. An estimated event date will be generated by PINES. Transformer models often exhibit sufficient performance to be used without individual record review, but an audit step as detailed below is strongly advised to confirm satisfactory sensitivity, specifcity and event time estimation.</p>
+<h3 id="error-handling-and-queues">Error Handling and Queues</h3>
+<p>All the jobs are processed at a patient level. For each patient, a job is submitted to a <a href="https://python-rq.org/docs/">rq</a>. If a job fails, it is retried 3 times before moving it a failed queue.</p>
+<h4 id="queue-operations">Queue Operations</h4>
+<ul>
+<li><code>docker ps</code> - to see list of all docker contains</li>
+<li><code>docker exec -it &lt;any-worker-docker-container-id&gt; bash</code></li>
+<li><code>export REDIS_HOST=redis</code> - the service name in nginx/nginx.conf</li>
+<li><code>rq info</code> (status)</li>
+<li><code>rq requeue --queue cedars -a</code> (requeue all failed jobs)</li>
+</ul>
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<a id="cedars.app.db.add_task"></a>
+  <div class="doc doc-contents first">
+  
+      <p>Launch a task and add it to Mongo if it doesn't already exist.</p>
+<h4 id="cedars.app.db.add_task--todo-insert-only-one">TODO: insert only one</h4>
+
+          <details class="quote">
+            <summary>Source code in <code>cedars/app/db.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1161</span>
+<span class="normal">1162</span>
+<span class="normal">1163</span>
+<span class="normal">1164</span>
+<span class="normal">1165</span>
+<span class="normal">1166</span>
+<span class="normal">1167</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">add_task</span><span class="p">(</span><span class="n">task</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Launch a task and add it to Mongo if it doesn&#39;t already exist.</span>
+<span class="sd">    # TODO: insert only one</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">task_db</span> <span class="o">=</span> <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="p">[</span><span class="s2">&quot;TASK&quot;</span><span class="p">]</span>
+    <span class="n">task_db</span><span class="o">.</span><span class="n">insert_one</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div><hr />
 <h3 id="dataset-download">Dataset Download</h3>
 <p>Once there are no patient records left to review, event data can be downloaded from the database via the GUI Detailed information is provided including clinical event dates, individual annotator contribution and review times. If a PINES model was used but no manual annotations were applied, estimated event dates can be used in a time-to-event analysis instead of manual entry.</p>
 
@@ -976,35 +1093,35 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/ops.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">549</span>
-<span class="normal">550</span>
-<span class="normal">551</span>
-<span class="normal">552</span>
-<span class="normal">553</span>
-<span class="normal">554</span>
-<span class="normal">555</span>
-<span class="normal">556</span>
-<span class="normal">557</span>
-<span class="normal">558</span>
-<span class="normal">559</span>
-<span class="normal">560</span>
-<span class="normal">561</span>
-<span class="normal">562</span>
-<span class="normal">563</span>
-<span class="normal">564</span>
-<span class="normal">565</span>
-<span class="normal">566</span>
-<span class="normal">567</span>
-<span class="normal">568</span>
-<span class="normal">569</span>
-<span class="normal">570</span>
-<span class="normal">571</span>
-<span class="normal">572</span>
-<span class="normal">573</span>
-<span class="normal">574</span>
-<span class="normal">575</span>
-<span class="normal">576</span>
-<span class="normal">577</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/download_annotations&#39;</span><span class="p">)</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">588</span>
+<span class="normal">589</span>
+<span class="normal">590</span>
+<span class="normal">591</span>
+<span class="normal">592</span>
+<span class="normal">593</span>
+<span class="normal">594</span>
+<span class="normal">595</span>
+<span class="normal">596</span>
+<span class="normal">597</span>
+<span class="normal">598</span>
+<span class="normal">599</span>
+<span class="normal">600</span>
+<span class="normal">601</span>
+<span class="normal">602</span>
+<span class="normal">603</span>
+<span class="normal">604</span>
+<span class="normal">605</span>
+<span class="normal">606</span>
+<span class="normal">607</span>
+<span class="normal">608</span>
+<span class="normal">609</span>
+<span class="normal">610</span>
+<span class="normal">611</span>
+<span class="normal">612</span>
+<span class="normal">613</span>
+<span class="normal">614</span>
+<span class="normal">615</span>
+<span class="normal">616</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s1">&#39;/download_annotations&#39;</span><span class="p">)</span>
 <span class="nd">@auth</span><span class="o">.</span><span class="n">admin_required</span>
 <span class="k">def</span> <span class="nf">download_file</span><span class="p">(</span><span class="n">filename</span><span class="o">=</span><span class="s1">&#39;annotations.csv&#39;</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
@@ -1063,7 +1180,8 @@ the relevant sections of the text.</p>
 
           <details class="quote">
             <summary>Source code in <code>cedars/app/db.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1260</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1259</span>
+<span class="normal">1260</span>
 <span class="normal">1261</span>
 <span class="normal">1262</span>
 <span class="normal">1263</span>
@@ -1079,15 +1197,11 @@ the relevant sections of the text.</p>
 <span class="normal">1273</span>
 <span class="normal">1274</span>
 <span class="normal">1275</span>
-<span class="normal">1276</span>
-<span class="normal">1277</span>
-<span class="normal">1278</span>
-<span class="normal">1279</span>
-<span class="normal">1280</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">terminate_project</span><span class="p">():</span>
+<span class="normal">1276</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">terminate_project</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    ##### Terminate the Project</span>
 
-<span class="sd">    Reset the database to the initial state.</span>
+<span class="sd">    Reset the database to the initial state.  </span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Terminating project.&quot;</span><span class="p">)</span>
     <span class="c1"># Delete all mongo DB collections</span>
@@ -1098,9 +1212,6 @@ the relevant sections of the text.</p>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;QUERY&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;PINES&quot;</span><span class="p">)</span>
     <span class="n">mongo</span><span class="o">.</span><span class="n">db</span><span class="o">.</span><span class="n">drop_collection</span><span class="p">(</span><span class="s2">&quot;TASK&quot;</span><span class="p">)</span>
-
-    <span class="c1"># reset all rq queues</span>
-    <span class="n">flask</span><span class="o">.</span><span class="n">current_app</span><span class="o">.</span><span class="n">task_queue</span><span class="o">.</span><span class="n">empty</span><span class="p">()</span>
 
     <span class="n">create_project</span><span class="p">(</span><span class="n">project_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">slug</span><span class="p">(),</span>
                    <span class="n">investigator_name</span><span class="o">=</span><span class="n">fake</span><span class="o">.</span><span class="n">name</span><span class="p">())</span>
