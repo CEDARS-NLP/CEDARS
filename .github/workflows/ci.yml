@@ -35,7 +35,7 @@ jobs:
             POETRY_CACHE_DIR=/tmp/poetry_cache
           python -m pip install --upgrade pip
           python -m pip install poetry==1.7.1
-          python -m peotry install
+          python -m poetry install
           export VIRTUAL_ENV=/.venv
           export PATH="/.venv/bin:$PATH"
 
