@@ -3,6 +3,29 @@
 > **CEDARS is provided as-is with no guarantee whatsoever and users agree to be held responsible for compliance with their local government/institutional regulations.** All CEDARS installations should be reviewed with institutional information security authorities.
 
 ## Software Installation
+1. Minimum CPU requirements: **32GB Memory and 8 cores** [t2.2xlarge on AWS]
+
+2. In order to run, you will need two `.env` files
+    - The first .env file will be placed under the ROOT DIR
+    - The second the `.env` file under the `CEDARS/cedars` directory.
+
+    .sample.env files are available - please modify them with your settings and rename it to .env
+
+    ```bash
+    CEDARS/
+    │
+    ├── .env
+    ├── docker-compose.yml
+    ├── cedars/
+    │   ├── .env
+    │   ├── Dockerfile
+    │   └── ...
+    ```
+
+    - `CEDARS/.env`: This file contains environment variables used by Docker Compose.
+    - `CEDARS/cedars/.env`: This file contains environment variables specific to cedars application.
+    - `docker-compose.yml`: The Docker Compose configuration file.
+    - `cedars/Dockerfile`: The Dockerfile for building cedars app.
 
 ### Detailed Requirements
 
@@ -12,8 +35,6 @@
 
     Local installation is not recommended unless you want to modify the underlying codebase. It is recommended to use the Docker deployment method.
 
-In order to run the app locally, you will need a `.env` file with at least the flask `SECRET_KEY`, MONGODB and MINIO details and the host IP.
-Place the `.env` file under the `cedars/cedars` directory.
 
 For example:
 ```
@@ -79,6 +100,10 @@ CEDARS is a flask web application and depends on the following software:
 
 Install [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/).
 
+!!! note "TIP"
+
+    Please install docker compose v2 as the spec using `deploy` which is not compatible with v1.
+
 
 ### System Architecture
 
@@ -128,13 +153,42 @@ The most straightforward way to complete a CEDARS project is via docker containe
 
 Each component runs as a service encapsulated in a docker container. Those three elements a coordinated within a deployment.The PINES service requires a GPU for model training. This is optional for inference \(i.e. annotating documents\).
 
-After cloning as described above, run the following commands:
+After cloning as described above, create required `.env` files as mentioned [here](#software-installation)
+
+After creating `.env` files, run the following commands:
 ```shell
-$ cd cedars
-$ docker-compose up --build -d
+$ cd CEDARS
+# if you do are not using GPU and want all the services to be hosted on docker
+$ docker compose --profile cpu --profile selfhosted up --build -d
+# if you are using a GPU
+$ docker compose --profile gpu --profile selfhosted up --build -d
+# if you want to use a native service such as AWS Document DB
+$ docker compose --profile gpu  up --build -d  # gpu
+$ docker compose --profile cpu  up --build -d  # cpu
 ```
 
-and navigate to http://<hostaddress>:5001
+Once all services are started - the app will be available here
+
+```
+http://<hostaddress>:80
+```
+
+#### AWS/Server Deployment
+
+1. Make sure you have docker compose v2
+    if you are running docker as sudo - please follow this [stackoverflow link](https://stackoverflow.com/questions/48957195/how-to-fix-docker-got-permission-denied-issue) to run as a non-sudo  
+
+2. Install compose v2  using this [link](https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-compose-on-ubuntu-22-04)
+
+For example to use AWS DocumentDB with tls you can create .env (under CEDARS/cedars) file like this
+```bash
+DB_HOST=<your-cluster-ip>.docdb.amazonaws.com
+DB_NAME=cedars
+DB_PORT=27017
+DB_USER=<docdbuser>
+DB_PWD=<docDBpassword>
+DB_PARAMS="tls=true&tlsCAFile=global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+```
 
 ## Project Execution
 
