@@ -27,3 +27,5 @@ site
 **/scratch.py
 .vscode
 global-bundle.pem
+lf-mets-35k-keywords-clindoc/
+mets-longformer-4k-pycedars
