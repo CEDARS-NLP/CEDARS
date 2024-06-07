@@ -139,9 +139,9 @@ services:
       - gpu
       - selfhosted
 
-  worker:
+  worker-task:
     image: cedars
-    command: python -m app.make_rq
+    command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
       - cedars
@@ -156,6 +156,27 @@ services:
         limits:
           memory: '4g'
           cpus: '1.5'
+        reservations:
+          memory: '1g'
+          cpus: '1.0'
+    
+  worker-ops:
+    image: cedars
+    command: python -m app.make_rq ops
+    scale: 1
+    networks:
+      - cedars
+    env_file:
+      - .env
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted   
+    deploy:
+      resources:
+        limits:
+          memory: '2g'
+          cpus: '1.0'
         reservations:
           memory: '1g'
           cpus: '1.0'

@@ -2,6 +2,7 @@ import os
 from dotenv import dotenv_values, load_dotenv
 from . import create_app
 from rq import Worker
+import argparse
 
 load_dotenv()
 
@@ -15,14 +16,29 @@ def create_rq_app():
     return rq_app
 
 
-def create_worker():
+def create_task_worker():
     rq_app = create_rq_app()
     with rq_app.app_context():
         worker = Worker(rq_app.task_queue,
+                        connection=rq_app.redis
+                        )
+        worker.work()
+
+
+def create_ops_worker():
+    rq_app = create_rq_app()
+    with rq_app.app_context():
+        worker = Worker(rq_app.ops_queue,
                         connection=rq_app.redis,
                         )
         worker.work()
 
 
 if __name__ == "__main__":
-    create_worker()
+    parser = argparse.ArgumentParser(description="Create RQ worker")
+    parser.add_argument("worker", choices=["task", "ops"], help="Worker type")
+    args = parser.parse_args()
+    if args.worker == "task":
+        create_task_worker()
+    else:
+        create_ops_worker()

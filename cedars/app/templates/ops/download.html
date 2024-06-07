@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<!-- Create row showing available files and a button to download with file creation time-->
+<div class="container-md col-8">
+  <div class="row">
+    <div class="col-md-12">
+      <h2>Available Files</h2>
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Size</th>
+            <th>Last Modified</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obj in files %}
+          <tr>
+            <td>{{ obj[0] }}</td>
+            {% if obj[1] > 1000000 %}
+              <td>{{ obj[1] // 1000000 }} GB</td>
+            {% elif obj[1] > 1000 %}
+              <td>{{ obj[1] // 1000 }} MB</td>
+            {% else %}
+              <td>{{ obj[1] }} KB</td>
+            {% endif %}
+            <td>
+              {% if obj[2] > 60*24 %}
+                {{ obj[2] // (60*24) }} days ago
+              {% elif obj[2] > 60 %}
+                {{ obj[2] // 60 }} hours ago
+              {% else %}
+                {{ obj[2] }} minutes ago
+              {% endif %}
+            </td>
+            <td>
+              <form action="/ops/download_annotations" method="POST" class="form-inline">
+                <input type="hidden" name="filename" value="{{ obj[0] }}">
+                <button class="btn btn-primary cedars-btn" type="submit">Download</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <!-- Add more list items for each available file -->
+      </table>
+    </div>
+    <br>
+    <div class="col-md-12">
+      <h2>Actions</h2><br>
+      <div id="create_download_task">
+        <!-- This div will be updated with the download status -->
+        <form id="createTaskForm" class="form-inline">
+          <button class="btn btn-primary cedars-btn" type="button" onclick="startNewDownload()">Create New Download Task</button>
+        </form>
+      </div>
+      <div id="downloadStatus" class="mt-3">
+        <!-- This div will be updated with the download status -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .spinner-border {
+    width: 3rem;
+    height: 3rem;
+    display: inline-block;
+    border-width: .2em;
+  }
+</style>
+
+<script>
+  function checkJobStatus(jobId) {
+    fetch(`/ops/check_job/${jobId}`)
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === 'finished') {
+          document.getElementById('downloadStatus').innerHTML = `
+            <div>Download ready (click download above)</div>
+          `;
+        } else if (data.status === 'failed') {
+          document.getElementById('downloadStatus').innerHTML = `
+            <div>Job failed: ${data.error}</div>
+          `;
+        } else {
+          setTimeout(() => checkJobStatus(jobId), 2000);
+        }
+      });
+  }
+
+  function startNewDownload() {
+    fetch('/ops/create_download_task')
+      .then(response => response.json())
+      .then(data => {
+        const jobId = data.job_id;
+        checkJobStatus(jobId);
+        document.getElementById('downloadStatus').innerHTML = `
+          <div class="spinner-border text-primary" role="status">
+            <span class="sr-only">cedars...</span>
+          </div>
+          <p>Download initiated, please wait...</p>
+        `;
+      });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const jobId = '{{ job_id }}';
+    if (jobId != 'None') {
+      checkJobStatus(jobId);
+    }
+  });
+</script>
+
+{% endblock %}
