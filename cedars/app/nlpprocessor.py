@@ -1,7 +1,6 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
-import sys
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
@@ -11,9 +10,11 @@ logger.enable(__name__)
 
 
 def get_regex_dict(token):
-    # Replace '*' with '.*' and '?' with '\w?'
-    regex_pattern = '(?i)' + token.replace('*', '.*').replace('?', '\\w?')
-    return {"TEXT": {"REGEX": regex_pattern}}
+    if "*" in token:
+        token = token.replace("*", ".*")
+    if "?" in token:
+        token = token.replace("?", ".")
+    return {"TEXT": {"REGEX": rf"\b{token}\b"}}
 
 
 def get_lemma_dict(token):
@@ -68,7 +69,7 @@ def query_to_patterns(query: str) -> list:
                 spacy_pattern.append(get_negated_dict(tok.replace("!", "")))
             else:
                 spacy_pattern.append(get_lemma_dict(tok))
-        # logger.debug(f"{expression} -> {spacy_pattern}")
+        logger.debug(f"{expression} -> {spacy_pattern}")
         res[i] = spacy_pattern
     return res
 
@@ -132,6 +133,9 @@ class NlpProcessor:
 
             try:
                 cls.nlp_model = spacy.load(model_name)
+                # TODO make sure this is correct
+                cls.matcher = Matcher(cls.nlp_model.vocab)
+                cls.query = db.get_search_query()
             except Exception as exc:
                 logger.critical("Spacy model %s failed to load.", model_name)
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
@@ -145,15 +149,14 @@ class NlpProcessor:
         the relevant sections of the text.
         """
         # nlp_model = spacy.load(model_name)
-        matcher = Matcher(self.nlp_model.vocab)
-        assert len(matcher) == 0
+        assert len(self.matcher) == 0
         query = db.get_search_query()
 
         # load previosly processed documents
         # document_processed = load_progress()
         spacy_patterns = query_to_patterns(query)
         for i, item in enumerate(spacy_patterns):
-            matcher.add(f"DVT_{i}", [item])
+            self.matcher.add(f"DVT_{i}", [item])
 
         # check all documents already processed
         documents_to_process = []
@@ -189,7 +192,7 @@ class NlpProcessor:
             match_count = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
-                matches = matcher(sentence_annotation)
+                matches = self.matcher(sentence_annotation)
                 for match in matches:
                     _, start, end = match
                     token = sentence_annotation[start:end]
@@ -288,6 +291,21 @@ class NlpProcessor:
                 "complete": False,
                 "progress": 0
             }
-            db.add_task(task)
-            db.set_patient_lock_status(patient_id, True)
-            self.process_notes(patient_id)
+            # check if the task is completed for the patient already
+            # if not, add the task to the database
+            existing_task = db.get_task(task["job_id"])
+
+            if not existing_task or existing_task["complete"] is False:
+                if not existing_task:
+                    db.add_task(task)
+                db.set_patient_lock_status(patient_id, True)
+                self.process_notes(patient_id)
+            else:
+                logger.info(f"Task {task['job_id']} already completed")
+
+        # TODO: find a better way to create index - use queue? and add status?
+        logger.info("jobs in progress: %s", len(list(db.get_tasks_in_progress())))
+        if len(list(db.get_tasks_in_progress())) == 0:
+            logger.info("All tasks completed - creating indexes")
+            db.create_index("ANNOTATIONS", ["patient_id", "note_id"])
+            db.create_index("PINES", [("text_id", {"unique": True})])

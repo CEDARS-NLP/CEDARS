@@ -11,10 +11,12 @@ from flask import (
     redirect, session, request,
     url_for, flash, g
 )
+from datetime import datetime, timezone
 from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from rq import Retry, Callback
+from rq import Retry, Callback, Queue
+from rq.registry import FailedJobRegistry, FinishedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
@@ -92,8 +94,11 @@ def project_details():
             terminate_clause = request.form.get("terminate_conf")
             if len(terminate_clause.strip()) > 0:
                 if terminate_clause == 'DELETE EVERYTHING':
-                    session.clear()
                     db.terminate_project()
+                    # reset all rq queues
+                    flask.current_app.task_queue.empty()
+                    auth.logout_user()
+                    session.clear()
                     flash("Project Terminated.")
                     return render_template("index.html", **db.get_info())
             else:
@@ -173,6 +178,9 @@ def EMR_to_mongodb(filepath):  # pylint: disable=C0103
         if i+1 % 100 == 0:
             logger.info(f"Documents uploaded for patient #{i+1}")
 
+    db.create_index("PATIENTS", [("patient_id", {"unique": True})])
+    db.create_index("NOTES", ["patient_id",
+                              ("text_id", {"unique": True})])
     logger.info("Completed document migration to mongodb database.")
 
 
@@ -184,9 +192,9 @@ def upload_data():
     """
     filename = None
     if request.method == "POST":
-        if db.get_task(f"upload_and_process:{current_user.username}"):
-            flash("A file is already being processed.")
-            return redirect(request.url)
+        # if db.get_task(f"upload_and_process:{current_user.username}"):
+        #     flash("A file is already being processed.")
+        #     return redirect(request.url)
         minio_file = request.form.get("miniofile")
         if minio_file != "None" and minio_file is not None:
             logger.info(f"Using minio file: {minio_file}")
@@ -298,10 +306,12 @@ def upload_query():
 def do_nlp_processing():
     """
     Run NLP workers
+    TODO: requeue failed jobs
     """
     nlp_processor = nlpprocessor.NlpProcessor()
+    pt_ids = db.get_patient_ids()
     # add task to the queue
-    for patient in db.get_patient_ids():
+    for patient in pt_ids:
         flask.current_app.task_queue.enqueue(
             nlp_processor.automatic_nlp_processor,
             args=(patient,),
@@ -322,6 +332,19 @@ def do_nlp_processing():
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
     return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
+
+
+@bp.route('/queue_stats', methods=['GET'])
+def queue_stats():
+    queue_length = len(flask.current_app.task_queue)
+    failed_job_registry = FailedJobRegistry(queue=flask.current_app.task_queue)
+    failed_jobs = len(failed_job_registry)
+    finished_job_registry = FinishedJobRegistry(queue=flask.current_app.task_queue)
+    successful_jobs = len(finished_job_registry)
+    return flask.jsonify({'queue_length': queue_length,
+                          'failed_jobs': failed_jobs,
+                          'successful_jobs': successful_jobs
+                          })
 
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
@@ -471,7 +494,6 @@ def adjudicate_records():
     """
 
     patient_id = None
-
     if request.method == "GET":
         if session.get("patient_id") is not None:
             logger.info(f"Getting patient: {session.get('patient_id')} from session")
@@ -562,7 +584,24 @@ def _format_date(date_obj):
     return res
 
 
-@bp.route('/download_annotations')
+@bp.route('/download_page')
+@bp.route('/download_page/<job_id>')
+@auth.admin_required
+def download_page(job_id=None):
+    files = [(obj.object_name.rsplit("/", 1)[-1],
+              obj.size,
+              (
+                  datetime.now(timezone.utc) - obj.last_modified).seconds//60
+              ) for obj in minio.list_objects(
+                   g.bucket_name,
+                   prefix="annotated_files/")]
+
+    if job_id is not None:
+        return flask.jsonify({"files": files}), 202
+    return render_template('ops/download.html', job_id=job_id, files=files, **db.get_info())
+
+
+@bp.route('/download_annotations', methods=["POST"])
 @auth.admin_required
 def download_file(filename='annotations.csv'):
     """
@@ -581,13 +620,48 @@ def download_file(filename='annotations.csv'):
     3. Convert all columns to proper datatypes
     """
     logger.info("Downloading annotations")
-    if db.download_annotations(filename):
-        file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
-        logger.info(f"Downloaded annotations from s3: {filename}")
-        return flask.Response(
-            file.stream(32*1024),
-            mimetype='text/csv',
-            headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
-        )
+    filename = request.form.get("filename")
+    file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
+    logger.info(f"Downloaded annotations from s3: {filename}")
+    return flask.Response(
+        file.stream(32*1024),
+        mimetype='text/csv',
+        headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
+    )
+
+
+@bp.route('/create_download_task', methods=["GET"])
+@auth.admin_required
+def create_download():
+    """
+    Create a download task for annotations
+    """
+    job = flask.current_app.ops_queue.enqueue(
+        db.download_annotations, "annotations.csv",
+    )
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
+
+@bp.route('/create_download_task_full', methods=["GET"])
+@auth.admin_required
+def create_download_full():
+    """
+    Create a download task for annotations
+    """
+    job = flask.current_app.ops_queue.enqueue(
+        db.download_annotations, "annotations_full.csv", True
+    )
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
+
+@bp.route('/check_job/<job_id>')
+@auth.admin_required
+def check_job(job_id):
+    logger.info(f"Checking job {job_id}")
+    job = flask.current_app.ops_queue.fetch_job(job_id)
+    if job.is_finished:
+        return flask.jsonify({'status': 'finished', 'result': job.result}), 200
+    elif job.is_failed:
+        return flask.jsonify({'status': 'failed', 'error': str(job.exc_info)}), 500
     else:
-        flask.jsonify({"error": f"Annotations with filename '{filename}' not found."}), 404
+        return flask.jsonify({'status': 'in_progress'}), 202

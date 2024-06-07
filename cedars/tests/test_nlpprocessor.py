@@ -21,8 +21,8 @@ def test_query_to_pattern(query, expected):
 
 
 @pytest.mark.parametrize("token, expected", [
-    ("thromb*", "(?i)thromb.*"),
-    ("thromb?", "(?i)thromb\\w?")
+    ("thromb*", "\\bthromb.*\\b"),
+    ("thromb?", "\\bthromb.\\b")
 ])
 def test_get_regex_dict(token, expected):
     res = nlpprocessor.get_regex_dict(token)
