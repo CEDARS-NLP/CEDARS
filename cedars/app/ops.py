@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from rq import Retry, Callback
+from rq import Retry, Callback, Queue
+from rq.registry import FailedJobRegistry, FinishedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
@@ -333,22 +334,17 @@ def get_job_status():
     return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
-def get_rq_status():
-    """
-    Get the status of the rq tasks.
-    Details:
-    1. Total number of tasks in the queue.
-    2. Total number of tasks that are currently running.
-    3. Total number of tasks that have been completed.
-    4. Total number of tasks that have failed.
-    # TODO
-    """
-    return {
-        "total_tasks": flask.current_app.task_queue.count,
-        "running_tasks": flask.current_app.task_queue.count,
-        "completed_tasks": flask.current_app.task_queue.count,
-        "failed_tasks": flask.current_app.task_queue.count
-    }
+@bp.route('/queue_stats', methods=['GET'])
+def queue_stats():
+    queue_length = len(flask.current_app.task_queue)
+    failed_job_registry = FailedJobRegistry(queue=flask.current_app.task_queue)
+    failed_jobs = len(failed_job_registry)
+    finished_job_registry = FinishedJobRegistry(queue=flask.current_app.task_queue)
+    successful_jobs = len(finished_job_registry)
+    return flask.jsonify({'queue_length': queue_length,
+                          'failed_jobs': failed_jobs,
+                          'successful_jobs': successful_jobs
+                          })
 
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
@@ -600,6 +596,8 @@ def download_page(job_id=None):
                    g.bucket_name,
                    prefix="annotated_files/")]
 
+    if job_id is not None:
+        return flask.jsonify({"files": files}), 202
     return render_template('ops/download.html', job_id=job_id, files=files, **db.get_info())
 
 
@@ -640,6 +638,18 @@ def create_download():
     """
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations.csv",
+    )
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
+
+@bp.route('/create_download_task_full', methods=["GET"])
+@auth.admin_required
+def create_download_full():
+    """
+    Create a download task for annotations
+    """
+    job = flask.current_app.ops_queue.enqueue(
+        db.download_annotations, "annotations_full.csv", True
     )
     return flask.jsonify({'job_id': job.get_id()}), 202
 
