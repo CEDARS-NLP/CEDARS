@@ -22,7 +22,8 @@ class Base:  # pylint: disable=too-few-public-methods
     )
     RQ = {
         "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
-        "queue_name": "cedars",
+        "task_queue_name": "cedars",
+        "ops_queue_name": "ops",
         "job_timeout": 3600
     }
 
