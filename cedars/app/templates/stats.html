@@ -6,7 +6,7 @@
 
 <div class="container-fluid mb-5">
 <div class="row g-5 p-2">
-  <h3>Project Progress</h3>
+  <h3>Annotation Progress</h3>
   <div class="col-4">
     <table class="table table-sm">
       <tr>
@@ -40,10 +40,63 @@
     <canvas id="UserReviewStats"></canvas>
   </div>
 </div>
+<div class="row g-5 p-2">
+  <h3>NLP Processing Stats</h3>
+  <p class="text-muted">One task is created per patient</p>
+  <!--Add RQ status-->
+  <div class="col-6">
+    <div class="progress">
+      <div id="queue-progress" class="progress-bar progress-bar-striped" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="{{ number_of_patients }}">Queue: 0</div>
+    </div>
+    <div class="progress mt-2">
+      <div id="failed-progress" class="progress-bar bg-danger progress-bar-striped" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="{{ number_of_patients }}">Failed: 0</div>
+    </div>
+    <div class="progress mt-2">
+      <div id="success-progress" class="progress-bar bg-success progress-bar-striped" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="{{ number_of_patients }}">Success: 0</div>
+    </div>
+  </div>
+</div>
 </div>
 </div>
 
 <script>
+  function fetchQueueStats() {
+    fetch('/ops/queue_stats')
+      .then(response => response.json())
+      .then(data => {
+        const maxVal = {{ number_of_patients }};
+        
+        // Update the queue progress bar
+        const queueProgress = document.getElementById('queue-progress');
+        const queuePercentage = (data.queue_length / maxVal) * 100;
+        queueProgress.style.width = `${queuePercentage}%`;
+        queueProgress.setAttribute('aria-valuenow', data.queue_length);
+        queueProgress.textContent = `Queue: ${data.queue_length}`;
+
+        // Update the failed jobs progress bar
+        const failedProgress = document.getElementById('failed-progress');
+        const failedPercentage = (data.failed_jobs / maxVal) * 100;
+        failedProgress.style.width = `${failedPercentage}%`;
+        failedProgress.setAttribute('aria-valuenow', data.failed_jobs);
+        failedProgress.textContent = `Failed: ${data.failed_jobs}`;
+
+        // Update the successful jobs progress bar
+        const successProgress = document.getElementById('success-progress');
+        const successPercentage = (data.successful_jobs / maxVal) * 100;
+        successProgress.style.width = `${successPercentage}%`;
+        successProgress.setAttribute('aria-valuenow', data.successful_jobs);
+        successProgress.textContent = `Success: ${data.successful_jobs}`;
+      });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // Fetch queue stats immediately on page load
+    fetchQueueStats();
+
+    // Set up periodic fetch every 5 seconds
+    setInterval(fetchQueueStats, 5000);
+  });
+
   const ctx = document.getElementById('ProjectProgress');
   const ctx_lemma = document.getElementById('Lemma');
   const ctx_user_review_stats = document.getElementById('UserReviewStats');
