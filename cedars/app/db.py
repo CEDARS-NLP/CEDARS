@@ -3,7 +3,7 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
 import os
-from io import BytesIO
+from io import BytesIO, StringIO
 import re
 import flask
 from flask import g
@@ -160,7 +160,7 @@ def populate_task():
 def create_index(collection, index: list):
     """
     This function is used to create an index in a collection
-    Add support for features such as unique=True etc  
+    Add support for features such as unique=True etc
 
     Args:
         collection (str) : The name of the collection to create the index in.
@@ -592,12 +592,15 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
             ('text_date', 1),
             ("sentence_number", 1)])
 
+    res = []
     if key == "sentence":
-        res = []
         for id in annotation_ids:
             res.append(f'{id["note_id"]}:{str(id["text_date"])[:10]}:{id[key]}')
-        return res
-    return [str(id[key]) for id in annotation_ids]
+
+    else:
+        res = [str(id[key]) for id in annotation_ids]
+
+    return res
 
 
 def get_annotation_date(annotation_id):
@@ -623,6 +626,38 @@ def get_event_date(patient_id):
         return annotations[0]["event_date"]
 
     return None
+
+
+def get_event_date_sentences(patient_id):
+    """
+    Find the event date from the annotations for a patient.
+    """
+    logger.debug(f"Retriving event date for patient #{patient_id}.")
+    annotations = mongo.db["ANNOTATIONS"].find({
+        "patient_id": patient_id,
+        "event_date": {
+            "$ne": None}}).sort(
+                [("event_date", 1)]
+                )
+    annotations = list(annotations)
+    res = []
+    if len(annotations) > 0:
+        res = [f'{annotation["note_id"]}: {annotation["sentence"]}' for annotation in annotations]
+    return res
+
+
+def get_note_date(note_id):
+    """
+    Retrives the date of a note.
+
+    Args:
+        note_id (str) : Unique ID for a note.
+    Returns:
+        note_date (datetime) : The date of the note.
+    """
+    logger.debug(f"Retriving date for note #{note_id}.")
+    note = mongo.db["NOTES"].find_one({"text_id": note_id})
+    return note["text_date"]
 
 
 def get_first_note_date_for_patient(patient_id):
@@ -1121,6 +1156,75 @@ def get_prediction(note: str) -> float:
         raise e
 
 
+def get_max_prediction_score(patient_id):
+    """
+    Get the max predicted note score for a patient
+    """
+    return mongo.db.PINES.aggregate(
+        [
+            {
+                '$match': {
+                    'patient_id': patient_id
+                }
+            }, {
+                '$group': {
+                    '_id': '$patient_id',
+                    'max_score': {
+                        '$max': '$predicted_score'
+                    }
+                }
+            }, {
+                '$lookup': {
+                    'from': 'PINES',
+                    'let': {
+                        'patient_id': '$_id',
+                        'max_score': '$max_score'
+                    },
+                    'pipeline': [
+                        {
+                            '$match': {
+                                '$expr': {
+                                    '$and': [
+                                        {
+                                            '$eq': [
+                                                '$patient_id', '$$patient_id'
+                                            ]
+                                        }, {
+                                            '$eq': [
+                                                '$predicted_score', '$$max_score'
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        }, {
+                            '$project': {
+                                'text_id': 1,
+                                '_id': 0
+                            }
+                        }
+                    ],
+                    'as': 'max_score_texts'
+                }
+            }, {
+                '$addFields': {
+                    'text_id': {
+                        '$arrayElemAt': [
+                            '$max_score_texts.text_id', 0
+                        ]
+                    }
+                }
+            }, {
+                '$project': {
+                    '_id': 1,
+                    'max_score': 1,
+                    'text_id': 1
+                }
+            }
+        ]
+    )
+
+
 def get_note_prediction_from_db(note_id: str,
                                 pines_collection_name: str = "PINES") -> Optional[float]:
     """
@@ -1228,50 +1332,77 @@ def report_failure(job, connection, type, value, *args, **kwargs):
     update_db_task_progress(job.get_id(), 0)
 
 
-def download_annotations(filename: str = "annotations.csv"):
+def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
-    download annotations from the database
+    Download annotations from the database and stream them to MinIO.
     """
-    patients = get_all_patients()
-    data = []
-    count = 0
-    for patient in patients:
-        patient_id = patient["patient_id"]
-        notes = get_all_notes(patient_id)
-        reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
-        reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
-        unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
-        sentences = reviewed_sentences + unreviewed_sentences
-        total_sentences = len(sentences)
-        event_date = get_event_date(patient_id)
-        first_note_date = get_first_note_date_for_patient(patient_id)
-        last_note_date = get_last_note_date_for_patient(patient_id)
-        data.append([patient_id, len(notes), len(reviewed_notes),
-                     total_sentences, len(reviewed_sentences), "\n".join(reviewed_sentences),
-                     event_date, first_note_date, last_note_date])
-        count += 1
+    def data_generator():
+        patients = get_all_patients()
+        for patient in patients:
+            patient_id = patient["patient_id"]
+            notes = get_all_notes(patient_id)
+            reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+            if get_sentences:
+                reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
+                unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
+                sentences_to_show = reviewed_sentences
+            else:
+                reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
+                unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
+                sentences_to_show = get_event_date_sentences(patient_id)
+            sentences = reviewed_sentences + unreviewed_sentences
+            total_sentences = len(sentences)
+            event_date = get_event_date(patient_id)
+            first_note_date = get_first_note_date_for_patient(patient_id)
+            last_note_date = get_last_note_date_for_patient(patient_id)
+            max_score = None
+            max_score_note_id = None
+            max_score_note_date = None
+            try:
+                res = list(get_max_prediction_score(patient_id))
+                if len(res) > 0:
+                    res = res[0]
+                    max_score = res["max_score"]
+                    max_score_note_id = res["text_id"]
+                    max_score_note_date = get_note_date(max_score_note_id)
+            except Exception:
+                logger.info(f"PINES results not available for patient: {patient_id}")
 
-    df = pd.DataFrame(data, columns=["patient_id",
-                                     "total_notes",
-                                     "reviewed_notes",
-                                     "total_sentences",
-                                     "reviewed_sentences",
-                                     "sentences",
-                                     "event_date",
-                                     "first_note_date",
-                                     "last_note_date"])
-    data_bytes = df.to_csv().encode('utf-8')
-    csv_buffer = BytesIO(data_bytes)
+            yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
+                   len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
+                   first_note_date, last_note_date, max_score_note_id, max_score_note_date, max_score]
+
+    column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
+                    "reviewed_sentences", "sentences", "event_date", "first_note_date",
+                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score"]
+
     try:
+        # Create an in-memory buffer for the CSV data
+        csv_buffer = StringIO()
+        writer = pd.DataFrame(columns=column_names)
+        writer.to_csv(csv_buffer, index=False, header=True)
+
+        # Write data in chunks and stream to MinIO
+        for chunk in pd.DataFrame(data_generator(), columns=column_names).to_csv(header=False,
+                                                                                 index=False,
+                                                                                 chunksize=1000):
+            csv_buffer.write(chunk)
+
+        # Move the cursor to the beginning of the buffer
+        csv_buffer.seek(0)
+        data_bytes = csv_buffer.getvalue().encode('utf-8')
+        data_stream = BytesIO(data_bytes)
+
+        # Upload to MinIO
         minio.put_object(g.bucket_name,
                          f"annotated_files/{filename}",
-                         data=csv_buffer,
+                         data_stream,
                          length=len(data_bytes),
                          content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
-    except Exception:
-        logger.error(f"Failed to upload annotations to s3: {filename}")
+    except Exception as e:
+        logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
         return False
 
 
