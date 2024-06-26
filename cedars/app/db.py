@@ -1345,7 +1345,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             if get_sentences:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
                 unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
-                sentences_to_show = reviewed_sentences
+                sentences_to_show = reviewed_sentences + unreviewed_sentences
             else:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
                 unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
@@ -1358,6 +1358,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             max_score = None
             max_score_note_id = None
             max_score_note_date = None
+            comments = "\n".join(patient.get("comments", []))
             try:
                 res = list(get_max_prediction_score(patient_id))
                 if len(res) > 0:
@@ -1370,11 +1371,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
                    len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
-                   first_note_date, last_note_date, max_score_note_id, max_score_note_date, max_score]
+                   first_note_date, last_note_date, max_score_note_id, max_score_note_date, max_score, comments]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
-                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score"]
+                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score", "comments"]
 
     try:
         # Create an in-memory buffer for the CSV data
