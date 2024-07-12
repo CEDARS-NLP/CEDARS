@@ -175,10 +175,11 @@ http://<hostaddress>:80
 
 #### AWS/Server Deployment
 
-1. Make sure you have docker compose v2
+1. Install docker: [Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+2. Make sure you have docker compose v2
     if you are running docker as sudo - please follow this [stackoverflow link](https://stackoverflow.com/questions/48957195/how-to-fix-docker-got-permission-denied-issue) to run as a non-sudo  
 
-2. Install compose v2  using this [link](https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-compose-on-ubuntu-22-04)
+3. Install compose v2  using this [link](https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-compose-on-ubuntu-22-04)
 
 For example to use AWS DocumentDB with tls you can create .env (under CEDARS/cedars) file like this
 ```bash
