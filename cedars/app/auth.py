@@ -1,6 +1,8 @@
 """
 This page contatins the functions and the flask blueprint for the login functionality.
 """
+import os
+import requests
 from functools import wraps
 from flask import (
     Blueprint,
@@ -9,7 +11,8 @@ from flask import (
     redirect,
     request,
     session,
-    url_for
+    url_for,
+    jsonify
 )
 from flask_login import (
     UserMixin,
@@ -18,11 +21,13 @@ from flask_login import (
     login_user,
     current_user
 )
-
+from dotenv import load_dotenv
 from werkzeug.security import check_password_hash, generate_password_hash
 from bson import ObjectId
 from . import db
 # from sentry_sdk import set_user
+
+load_dotenv()
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 login_manager = LoginManager()
@@ -112,6 +117,23 @@ def register():
     return render_template('auth/register.html', **db.get_info())
 
 
+def verify_external_token(token, project_id, user_id):
+    """Verify the bearer token with the external API"""
+    # Replace this URL with your actual external API endpoint
+    api_url = f'{os.getenv("SUPERBIO_API_URL")}/users/{user_id}/cedars_projects/{project_id}'
+    headers = {"Authorization": f"Bearer {token}"}
+    print(f"Verifying token with {api_url}")
+    print(f"Headers: {headers}")
+    try:
+        response = requests.get(api_url, headers=headers, verify=True)
+        if response.status_code == 200:
+            # Assuming the API returns user data on successful verification
+            return response.json()
+        return None
+    except requests.RequestException:
+        return None
+
+
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     """Login a user"""
@@ -131,6 +153,37 @@ def login():
     if len(db.get_project_users()) == 0:
         return redirect(url_for('auth.register'))
     return render_template('auth/login.html',  **db.get_info())
+
+
+@bp.route("/token-login", methods=["POST"])
+def token_login():
+    """Login a user using the bearer token received from the frontend"""
+    token = request.json.get('token')
+    user_id = request.json.get('user_id')
+    if not token:
+        return jsonify({"error": "No token provided"}), 400
+
+    print(f"Token: {token}")
+    print(f"User ID: {user_id}")
+    print(f"Project ID: {os.getenv('CEDARS_PROJECT_ID')}")
+    user_data = verify_external_token(token,
+                                      user_id=user_id,
+                                      project_id=os.getenv("CEDARS_PROJECT_ID"))
+    print(f"User data: {user_data}")
+    if user_data:
+        username = user_data["user"].get('email')
+        existing_user = db.get_user(username)
+        if not existing_user:
+            # Create a new user with data from the external API
+            db.add_user(
+                username=username,
+                password=generate_password_hash(token),  # Store hashed token as password
+                is_admin=True if "admin" in user_data["user"].get('institution_roles') else False
+            )
+        user = User(db.get_user(username))
+        login_user(user)
+        return jsonify({"message": "Login successful via external API."}), 200
+    return jsonify({"error": "Invalid token or API error."}), 401
 
 
 @bp.route('/logout', methods=["GET", "POST"])
