@@ -595,8 +595,8 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
     res = []
     if key == "sentence":
         for id in annotation_ids:
-            res.append(f'{id["note_id"]}:{str(id["text_date"])[:10]}:{id[key]}')
-
+            cleaned_sentence = ' '.join(id[key].split())
+            res.append(f'{id["note_id"]}:{str(id["text_date"])[:10]}:{cleaned_sentence}')
     else:
         res = [str(id[key]) for id in annotation_ids]
 
@@ -1342,10 +1342,19 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             patient_id = patient["patient_id"]
             notes = get_all_notes(patient_id)
             reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+            note_details = []
+            for note in notes:
+                note_id = note["text_id"]
+                note_date = str(note["text_date"])[:10]
+                predicted_score = get_note_prediction_from_db(note_id)
+                if predicted_score is not None:
+                    note_details.append(f"{note_id}:{note_date}:{predicted_score}")
+            all_note_details = "\n".join(note_details)
+
             if get_sentences:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
                 unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
-                sentences_to_show = reviewed_sentences
+                sentences_to_show = reviewed_sentences + unreviewed_sentences
             else:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
                 unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
@@ -1358,6 +1367,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             max_score = None
             max_score_note_id = None
             max_score_note_date = None
+            comments = "\n".join(patient.get("comments", []))
             try:
                 res = list(get_max_prediction_score(patient_id))
                 if len(res) > 0:
@@ -1365,16 +1375,19 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                     max_score = res["max_score"]
                     max_score_note_id = res["text_id"]
                     max_score_note_date = get_note_date(max_score_note_id)
+
             except Exception:
                 logger.info(f"PINES results not available for patient: {patient_id}")
 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
                    len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
-                   first_note_date, last_note_date, max_score_note_id, max_score_note_date, max_score]
+                   first_note_date, last_note_date, max_score_note_id, max_score_note_date,
+                   max_score, comments, all_note_details]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
-                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score"]
+                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score", "comments",
+                    "predicted_notes"]
 
     try:
         # Create an in-memory buffer for the CSV data
