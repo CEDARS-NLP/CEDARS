@@ -54,5 +54,38 @@
         {% endif %}
   </div>
 
+  <script>
+    window.addEventListener("message", (event) => {
+    const data = JSON.parse(event.data);
+    console.log("Received token:", data.access_token);
+    
+    // Send the token to the backend
+    fetch('/auth/token-login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token: data.access_token , user_id: data.id }),
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        console.log('Login successful:', data.message);
+        // Redirect to the main page or update UI as needed
+        window.location.href = '/';
+        var res = {"status": "success"}
+        window.parent.postMessage(res, "*");
+      } else {
+        console.error('Login failed:', data.error);
+        var res = {"status": "fail"}
+        window.parent.postMessage(res, "*");
+        // Handle login failure (e.g., show an error message)
+      }
+    })
+    .catch((error) => {
+      console.error('Error:', error);
+    });
+  });
+  </script>
 
 {% endblock %}
