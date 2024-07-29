@@ -36,7 +36,11 @@
         <div class="mb-4">
           <ul class="list-group">
             <li class="list-group-item">
-              <label for="date_entry">Event Date:</label>
+              <label for="date_entry">Stored Event Date:</label>
+                <time datetime="{{note_date}}" required pattern="\d{2}\d{2}-\d{2}"></time>
+            </li>
+            <li class="list-group-item">
+              <label for="date_entry">Enter New Event Date:</label>
               {% if event_date is none %}
                 <input type="date" class="text-muted" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
               {% else %}

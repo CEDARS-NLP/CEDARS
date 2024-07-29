@@ -213,6 +213,7 @@ def upload_data():
 
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
+            
             try:
                 minio.put_object(g.bucket_name,
                                  filename,
@@ -220,7 +221,7 @@ def upload_data():
                                  size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
-            except Exception as e:
+            except Exception as e:                
                 filename = None
                 flash(f"Failed to upload file: {str(e)}")
                 return redirect(request.url)
@@ -299,7 +300,7 @@ def upload_query():
         session.modified = True
 
     do_nlp_processing()
-    return redirect(url_for("ops.get_job_status"))
+    return redirect(url_for("stats_page.stats_route"))
 
 
 @bp.route("/start_process")
