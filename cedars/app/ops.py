@@ -145,7 +145,15 @@ def load_pandas_dataframe(filepath):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
-        return loaders[extension](obj)
+        data_frame = loaders[extension](obj)
+        required_columns = ['patient_id', 'text_id', 'text', 'text_date']
+
+        for column in required_columns:
+            if column not in data_frame.columns:
+                flash(f"Column {column} missing from uploaded file.")
+                flash(f"Failed to save file to database.")
+                raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+        return data_frame 
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
