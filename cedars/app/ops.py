@@ -355,7 +355,6 @@ def save_adjudications():
     Handle logic for the save_adjudications route.
     Used to edit and review annotations.
     """
-
     current_annotation_id = session["annotations"][session["index"]]
 
     def _update_annotation_date():
@@ -363,12 +362,11 @@ def save_adjudications():
         logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
         _adjudicate_annotation()
+        _add_annotation_comment()
 
     def _delete_annotation_date():
         db.delete_annotation_date(current_annotation_id)
-
-    def _add_annotation_comment():
-        db.add_comment(current_annotation_id, request.form['comment'])
+        _add_annotation_comment()
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
@@ -413,6 +411,11 @@ def save_adjudications():
                 session["index"] += 1
 
         session.modified = True
+    
+    def _add_annotation_comment():
+        db.add_comment(current_annotation_id, request.form['comment'])
+        
+
 
     actions = {
         'new_date': _update_annotation_date,
@@ -426,7 +429,6 @@ def save_adjudications():
     action = request.form['submit_button']
     if action in actions:
         actions[action]()
-
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
         return redirect(url_for("ops.adjudicate_records"))
@@ -442,6 +444,11 @@ def show_annotation():
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
+    
+    if "patient_id" not in session:
+        flash("No current patient ID.")
+        return redirect(url_for("ops.adjudicate_records"))
+
     annotation_data = {
         "pos_start": index + 1,
         "total_pos": session["total_count"],
@@ -449,7 +456,7 @@ def show_annotation():
         "name": current_user.username,
         "note_date": _format_date(annotation.get('text_date')),
         "event_date": _format_date(annotation.get('event_date')),
-        "comments": db.get_patient_by_id(session["patient_id"])["comments"],
+        "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
         "pre_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
         "token_word": annotation['sentence'][annotation['start_index']:annotation['end_index']],
         "post_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
