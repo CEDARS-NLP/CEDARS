@@ -20,6 +20,7 @@ def get_minio():
     from . import db
     project_id = db.get_info()["project_id"]
     g.bucket_name = f"cedars-{project_id}"
+    print("HERE -------------",flush=True)
     if minio is None:
         minio = g.minio = Minio(
             f'{config["MINIO_HOST"]}:{config["MINIO_PORT"]}',
