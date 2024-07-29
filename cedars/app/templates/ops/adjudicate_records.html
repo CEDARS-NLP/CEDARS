@@ -26,7 +26,7 @@
             <li class="list-group-item">Position: {{pos_start}} of {{total_pos}}</li>
             <li class="list-group-item">Patient ID: {{patient_id}}</li>
             {% if note_date  %}
-              <li class="list-group-item">Note Date: {{note_date.strftime("%m/%d/%Y") }}</li>
+              <li class="list-group-item">Note Date: </b> {{note_date.strftime("%m/%d/%Y") }} </b></li>
             {% else %}
               <li class="list-group-item">Note Date: None</li>
             {% endif %}
@@ -36,8 +36,7 @@
         <div class="mb-4">
           <ul class="list-group">
             <li class="list-group-item">
-              <label for="date_entry">Stored Event Date:</label>
-                <time datetime="{{note_date}}" required pattern="\d{2}\d{2}-\d{2}"></time>
+              <label for="date_entry">Current Event Date: <b> {{event_date.strftime("%m/%d/%Y")}} </b> </label>
             </li>
             <li class="list-group-item">
               <label for="date_entry">Enter New Event Date:</label>
