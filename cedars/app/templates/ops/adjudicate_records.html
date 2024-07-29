@@ -36,7 +36,11 @@
         <div class="mb-4">
           <ul class="list-group">
             <li class="list-group-item">
-              <label for="date_entry">Current Event Date: <b> {{event_date.strftime("%m/%d/%Y")}} </b> </label>
+              {% if event_date  %}
+                <label for="date_entry">Current Event Date: <b> {{event_date.strftime("%m/%d/%Y")}} </b> </label>
+              {% else %}
+                <li class="list-group-item">Current Event Date: None</li>
+              {% endif %}
             </li>
             <li class="list-group-item">
               <label for="date_entry">Enter New Event Date:</label>
@@ -62,19 +66,14 @@
           <h2>Comments</h2>
           <div class="form-group">
             <label for="comment" class="form-label">New Comment</label>
-            <textarea class="form-control" rows="4" name="comment" id="comment"></textarea>
+            <textarea class="form-control" rows="4" name="comment" id="comment">  {{note_comment}} </textarea>
           </div>
           <br>
 
           <button class="btn btn-primary" value="comment" type="submit" name="submit_button">Save Comment</button>
 
           <br>
-          <h5 class="mt-4">Existing Comments</h5>
-          <ul class="list-group">
-            {% for comment in comments %}
-            <li class="list-group-item">{{comment}}</li>
-            {% endfor %}
-          </ul>
+          
         </div>
       </form>
     </div>

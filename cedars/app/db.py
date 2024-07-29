@@ -279,7 +279,7 @@ def upload_notes(documents):
                         "reviewed": False,
                         "locked": False,
                         "updated": False,
-                        "comments": [],
+                        "comments": "",
                         "admin_locked": False}
 
         if not patients_collection.find_one({"patient_id": p_id}):
@@ -905,8 +905,7 @@ def update_annotation_date(annotation_id, new_date):
     date_format = '%Y-%m-%d'
     datetime_obj = datetime.strptime(new_date, date_format)
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
-                                       {"$set": {"event_date": datetime_obj}})
-
+                                       {"$set": {"event_date": datetime_obj}})    
 
 def delete_annotation_date(annotation_id):
     """
@@ -957,7 +956,7 @@ def reset_patient_reviewed():
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
                                                "locked": False,
-                                               "comments": []}})
+                                               "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
 
@@ -972,18 +971,19 @@ def add_comment(annotation_id, comment):
     Returns:
         None
     """
+    comment = comment.strip()
     if len(comment) == 0:
-        logger.info("No comment entered.")
-        return
-    logger.debug(f"Adding comment to annotation #{annotation_id}")
+        logger.info(f"Comment deleted on annotation # {annotation_id}.")
+    else:
+        logger.debug(f"Adding comment to annotation #{annotation_id}")
     patient_id = mongo.db["ANNOTATIONS"].find_one(
         {"_id": ObjectId(annotation_id)})["patient_id"]
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
-    comments = patient["comments"]
-    comments.append(comment)
+    #comments = patient["comments"]
+    #comments.append(comment)
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                     {"$set":
-                                     {"comments": comments}
+                                     {"comments": comment}
                                      })
 
 
@@ -1367,7 +1367,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             max_score = None
             max_score_note_id = None
             max_score_note_date = None
-            comments = "\n".join(patient.get("comments", []))
+            comments = patient.get("comments", "")
             try:
                 res = list(get_max_prediction_score(patient_id))
                 if len(res) > 0:
