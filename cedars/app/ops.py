@@ -127,11 +127,11 @@ def load_pandas_dataframe(filepath):
 
     extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
     loaders = {
-        'csv': pd.read_csv,
-        'xlsx': pd.read_excel,
-        'json': pd.read_json,
+        'csv': pd.read_csv, # nrows = 1
+        'xlsx': pd.read_excel, # nrows = 1
+        'json': pd.read_json, # lines = True, nrows = 1
         'parquet': pd.read_parquet,
-        'pickle': pd.read_pickle,
+        'pickle': pd.read_pickle, # 
         'pkl': pd.read_pickle,
         'xml': pd.read_xml
     }
@@ -145,15 +145,31 @@ def load_pandas_dataframe(filepath):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
-        data_frame = loaders[extension](obj)
+        
+        # Read one line of the file to conserve memory and computation
+        if extension == 'csv' or extension == 'xlsx':
+            data_frame_line_1 = loaders[extension](obj, nrows = 1)
+        elif extension == 'json':
+            data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
+        else:
+            # TODO
+            # Add generator to load a single line from other file types
+            data_frame_line_1 = loaders[extension](obj)
+        
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
-
+        
         for column in required_columns:
-            if column not in data_frame.columns:
+            if column not in data_frame_line_1.columns:
                 flash(f"Column {column} missing from uploaded file.")
                 flash(f"Failed to save file to database.")
                 raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+        
+        # Re-initialise object from minio to load it again
+        obj = minio.get_object(g.bucket_name, filepath)
+        data_frame = loaders[extension](obj)
         return data_frame 
+    
+        pass
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
