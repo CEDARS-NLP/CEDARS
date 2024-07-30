@@ -585,7 +585,7 @@ def highlighted_text(note):
             continue
 
         highlighted_note.append(text[prev_end_index:start_index])
-        highlighted_note.append(f'<mark>{text[start_index:end_index]}</mark>')
+        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
         prev_end_index = end_index
 
     highlighted_note.append(text[prev_end_index:])
