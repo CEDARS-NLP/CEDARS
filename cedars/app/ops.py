@@ -3,6 +3,8 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
+from datetime import datetime, timezone
+
 import pandas as pd
 import flask
 from dotenv import dotenv_values
@@ -11,11 +13,11 @@ from flask import (
     redirect, session, request,
     url_for, flash, g
 )
-from datetime import datetime, timezone
+
 from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from rq import Retry, Callback, Queue
+from rq import Retry, Callback
 from rq.registry import FailedJobRegistry, FinishedJobRegistry
 from . import db
 from . import nlpprocessor
@@ -104,7 +106,8 @@ def project_details():
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
-    return render_template("ops/project_details.html", tasks=db.get_tasks_in_progress(), **db.get_info())
+    return render_template("ops/project_details.html",
+                           tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 def load_pandas_dataframe(filepath):
@@ -145,9 +148,9 @@ def load_pandas_dataframe(filepath):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
-        
+
         # Read one line of the file to conserve memory and computation
-        if extension == 'csv' or extension == 'xlsx':
+        if extension in ['csv', 'xlsx']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
         elif extension == 'json':
             data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
@@ -155,21 +158,20 @@ def load_pandas_dataframe(filepath):
             # TODO
             # Add generator to load a single line from other file types
             data_frame_line_1 = loaders[extension](obj)
-        
+
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
-        
+
         for column in required_columns:
             if column not in data_frame_line_1.columns:
                 flash(f"Column {column} missing from uploaded file.")
-                flash(f"Failed to save file to database.")
+                flash("Failed to save file to database.")
                 raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
-        
+
         # Re-initialise object from minio to load it again
         obj = minio.get_object(g.bucket_name, filepath)
         data_frame = loaders[extension](obj)
-        return data_frame 
-    
-        pass
+        return data_frame
+
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
@@ -232,12 +234,13 @@ def upload_data():
                 flash('No selected file')
                 return redirect(request.url)
             if file and not allowed_data_file(file.filename):
-                flash("Invalid file type. Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.")
+                flash("""Invalid file type.
+                      Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.""")
                 return redirect(request.url)
 
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
-            
+
             try:
                 minio.put_object(g.bucket_name,
                                  filename,
@@ -245,7 +248,7 @@ def upload_data():
                                  size)
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
-            except Exception as e:                
+            except Exception as e:
                 filename = None
                 flash(f"Failed to upload file: {str(e)}")
                 return redirect(request.url)
@@ -356,11 +359,19 @@ def do_nlp_processing():
 
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
-    return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
+    """
+    Directs the user to the job status page.
+    """
+    return render_template("ops/job_status.html",
+                           tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 @bp.route('/queue_stats', methods=['GET'])
 def queue_stats():
+    """
+    Returns details of how many jobs are left in the queue and the status of
+    completed jobs. Is used for the project statistics page.
+    """
     queue_length = len(flask.current_app.task_queue)
     failed_job_registry = FailedJobRegistry(queue=flask.current_app.task_queue)
     failed_jobs = len(failed_job_registry)
@@ -435,10 +446,10 @@ def save_adjudications():
                 session["index"] += 1
 
         session.modified = True
-    
+
     def _add_annotation_comment():
         db.add_comment(current_annotation_id, request.form['comment'])
-        
+
 
 
     actions = {
@@ -462,16 +473,24 @@ def save_adjudications():
 
 @bp.route("/show_annotation", methods=["GET"])
 def show_annotation():
+    """
+    Formats and displays the current annotation being viewed by the user.
+    """
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
     note = db.get_annotation_note(str(annotation["_id"]))
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
-    
+
+    '''
+    Code to fix bug patient_id not found in session.
+    Will remain commented till bug is replicated.
+
     if "patient_id" not in session:
         flash("No current patient ID.")
         return redirect(url_for("ops.adjudicate_records"))
+    '''
 
     annotation_data = {
         "pos_start": index + 1,
@@ -481,9 +500,15 @@ def show_annotation():
         "note_date": _format_date(annotation.get('text_date')),
         "event_date": _format_date(annotation.get('event_date')),
         "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
-        "pre_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
+
+        "pre_token_sentence": re.sub(r'\n+|\r\n',
+                                     '\n',
+                                     annotation['sentence'][:annotation['start_index']]).strip(),
         "token_word": annotation['sentence'][annotation['start_index']:annotation['end_index']],
-        "post_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
+        "post_token_sentence": re.sub(r'\n+|\r\n',
+                                      '\n',
+                                      annotation['sentence'][annotation['end_index']:]).strip(),
+
         "note_id": annotation["note_id"],
         "full_note": highlighted_text(note),
         "tags": [note.get("text_tag_1", ""),
@@ -506,7 +531,8 @@ def adjudicate_records():
     ### Get the next available patient
 
     1. The first time this page is hit, get a patient who is not reviewed from the database
-    2. Since the patient is not reviewed in the db, they should have annotations, if not, skip to the next patientd
+    2. Since the patient is not reviewed in the db,
+                            they should have annotations, if not, skip to the next patientd
 
     ### Search for a patient
 
@@ -620,6 +646,10 @@ def _format_date(date_obj):
 @bp.route('/download_page/<job_id>')
 @auth.admin_required
 def download_page(job_id=None):
+    """
+    Loads the page where an admin can download the results
+    of annotations made for that project.
+    """
     files = [(obj.object_name.rsplit("/", 1)[-1],
               obj.size,
               (
@@ -640,7 +670,8 @@ def download_file(filename='annotations.csv'):
     ##### Download Completed Annotations
 
     This generates a CSV file with the following specifications:
-    1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.
+    1. Find all patients in the PATIENTS database,
+            these patients become a single row in the CSV file.
     2. For each patient -
         a. list the number of total notes in the database
         b. list the number of reviewed notes
@@ -689,6 +720,9 @@ def create_download_full():
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
 def check_job(job_id):
+    """
+    Returns the status of a job to the frontend.
+    """
     logger.info(f"Checking job {job_id}")
     job = flask.current_app.ops_queue.fetch_job(job_id)
     if job.is_finished:
