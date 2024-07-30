@@ -5,16 +5,17 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 import os
 from io import BytesIO, StringIO
 import re
+from datetime import datetime
+from faker import Faker
+from typing import Optional
 import flask
 from flask import g
-from datetime import datetime
 import requests
 import pandas as pd
 from werkzeug.security import check_password_hash
-from faker import Faker
 from bson import ObjectId
 from loguru import logger
-from typing import Optional
+
 from .database import mongo, minio
 from uuid import uuid4
 
@@ -236,7 +237,7 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
 
     if (query == get_search_query() and
             skip_after_event == get_search_query("skip_after_event") and
-            tag_query.get('nlp_apply', False) == get_search_query("tag_query").get('nlp_apply', False)):
+            tag_query.get('nlp_apply',False) == get_search_query("tag_query").get('nlp_apply', False)):
         logger.info(f"Query already saved : {query}.")
         return False
 
@@ -461,8 +462,6 @@ def get_patients_to_annotate():
         annotations = get_patient_annotation_ids(patient_id)
         if len(annotations) > 0:
             return patient_id
-        else:
-            continue
 
     return None
 
@@ -520,7 +519,7 @@ def get_all_annotations_for_patient(patient_id):
         result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
         result["all_annotation_index"] = list(range(len(annotations)))
         # set array to 1 if annotation is unreviewed
-        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
+        result["unreviewed_annotations_index"]= [1 if not x["reviewed"] else 0 for x in annotations]
         result["total"] = len(annotations)
 
     return result
@@ -620,7 +619,7 @@ def get_event_date(patient_id):
     """
     logger.debug(f"Retriving event date for patient #{patient_id}.")
     annotations = mongo.db["ANNOTATIONS"].find({"patient_id": patient_id,
-                                               "event_date": {"$ne": None}}).sort([("event_date", 1)])
+                                               "event_date": {"$ne":None}}).sort([("event_date",1)])
     annotations = list(annotations)
     if len(annotations) > 0:
         return annotations[0]["event_date"]
@@ -905,7 +904,7 @@ def update_annotation_date(annotation_id, new_date):
     date_format = '%Y-%m-%d'
     datetime_obj = datetime.strptime(new_date, date_format)
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
-                                       {"$set": {"event_date": datetime_obj}})    
+                                       {"$set": {"event_date": datetime_obj}})
 
 def delete_annotation_date(annotation_id):
     """
@@ -978,9 +977,7 @@ def add_comment(annotation_id, comment):
         logger.debug(f"Adding comment to annotation #{annotation_id}")
     patient_id = mongo.db["ANNOTATIONS"].find_one(
         {"_id": ObjectId(annotation_id)})["patient_id"]
-    patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
-    #comments = patient["comments"]
-    #comments.append(comment)
+
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                     {"$set":
                                      {"comments": comment}
@@ -1123,7 +1120,7 @@ def get_curr_stats():
     ]
     lemma_dist_results = mongo.db.ANNOTATIONS.aggregate(pipeline_lemma_dist)
     total_tokens = mongo.db.ANNOTATIONS.count_documents({"isNegated": False})
-    stats['lemma_dist'] = {doc['token']: 100 * doc['count']/total_tokens for doc in lemma_dist_results}
+    stats['lemma_dist'] = {doc['token']:100*doc['count']/total_tokens for doc in lemma_dist_results}
 
     return stats
 
@@ -1364,8 +1361,12 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             all_note_details = "\n".join(note_details)
 
             if get_sentences:
-                reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True, key="sentence")
-                unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False, key="sentence")
+                reviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                                reviewed=True,
+                                                                key="sentence")
+                unreviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                                  reviewed=False,
+                                                                  key="sentence")
                 sentences_to_show = reviewed_sentences + unreviewed_sentences
             else:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
@@ -1398,7 +1399,8 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
-                    "last_note_date", "max_score_note_id", "max_score_note_date", "max_score", "comments",
+                    "last_note_date", "max_score_note_id",
+                    "max_score_note_date", "max_score", "comments",
                     "predicted_notes", "reviewer"]
 
     try:
