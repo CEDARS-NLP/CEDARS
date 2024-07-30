@@ -1357,7 +1357,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                 note_date = str(note["text_date"])[:10]
                 predicted_score = get_note_prediction_from_db(note_id)
                 reviewed_by = get_note_reviewer(note_id)
-                if reviewed_by:
+                if reviewed_by and reviewed_by != 'CEDARS' and reviewed_by != 'PINES':
                     reviewer = str(reviewed_by)
                 if predicted_score is not None:
                     note_details.append(f"{note_id}:{note_date}:{predicted_score}")
