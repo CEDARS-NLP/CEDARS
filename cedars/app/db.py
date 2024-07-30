@@ -1331,6 +1331,14 @@ def report_failure(job, connection, type, value, *args, **kwargs):
     job.save_meta()
     update_db_task_progress(job.get_id(), 0)
 
+def get_note_reviewer(note_id):
+    """
+    Updates the note's status to reviewed in the database.
+    """
+
+    reviewed_by = mongo.db["NOTES"].find_one({"text_id": note_id})["reviewed_by"]
+
+    return reviewed_by
 
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
@@ -1343,10 +1351,14 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             notes = get_all_notes(patient_id)
             reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
             note_details = []
+            reviewer = ""
             for note in notes:
                 note_id = note["text_id"]
                 note_date = str(note["text_date"])[:10]
                 predicted_score = get_note_prediction_from_db(note_id)
+                reviewed_by = get_note_reviewer(note_id)
+                if reviewed_by:
+                    reviewer = str(reviewed_by)
                 if predicted_score is not None:
                     note_details.append(f"{note_id}:{note_date}:{predicted_score}")
             all_note_details = "\n".join(note_details)
@@ -1382,12 +1394,12 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
                    len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
                    first_note_date, last_note_date, max_score_note_id, max_score_note_date,
-                   max_score, comments, all_note_details]
+                   max_score, comments, all_note_details, reviewer]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
                     "last_note_date", "max_score_note_id", "max_score_note_date", "max_score", "comments",
-                    "predicted_notes"]
+                    "predicted_notes", "reviewer"]
 
     try:
         # Create an in-memory buffer for the CSV data
