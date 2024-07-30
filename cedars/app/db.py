@@ -495,12 +495,13 @@ def get_documents_to_annotate(patient_id=None):
     return documents_to_annotate
 
 
-def get_all_annotations_for_patient(patient_id):
+def get_all_annotations_for_patient(patient_id, unique_sentences = True):
     """
     Retrives all annotations for a patient.
 
     Args:
         patient_id (int) : Unique ID for a patient.
+        unique_sentences (bool) : True if we do not show the same sentence multiple times.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -514,6 +515,36 @@ def get_all_annotations_for_patient(patient_id):
         "unreviewed_annotations_index": [],
         "total": 0
     }
+
+    if unique_sentences:
+        # We first note the indices where duplicate sentences occur
+        prev_note_id = None
+        indices_to_remove = []
+        seen_sentences = set()
+        for i in range(len(annotations)):
+            # If we are on a new note, then the same sentence may be in a different context.
+            # So we only check for the same sentence in that note.
+            if annotations[i]['note_id'] != prev_note_id:
+                seen_sentences.clear()
+            
+            prev_note_id = annotations[i]['note_id']
+            sentence = annotations[i]['sentence']
+            if sentence in seen_sentences:
+                indices_to_remove.append(i)
+                continue
+
+            seen_sentences.add(sentence)
+        
+        # Remove the indices in reverse order to avoid a later index changing
+        # after a prior one is removed.
+
+        indices_to_remove.sort(reverse=True)
+        for index in indices_to_remove:
+            # Mark the annotation as reviewed before poping it
+            # This ensures that 
+            mark_annotation_reviewed(annotations[index]["_id"])
+            annotations.pop(index)
+
 
     if len(annotations) > 0:
         result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
