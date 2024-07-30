@@ -1365,6 +1365,8 @@ def get_note_reviewer(note_id):
     """
 
     reviewed_by = mongo.db["NOTES"].find_one({"text_id": note_id})["reviewed_by"]
+    if reviewed_by.strip() == "":
+        return None
 
     return reviewed_by
 
