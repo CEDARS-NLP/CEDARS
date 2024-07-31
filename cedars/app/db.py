@@ -1359,12 +1359,12 @@ def report_failure(job, connection, type, value, *args, **kwargs):
     job.save_meta()
     update_db_task_progress(job.get_id(), 0)
 
-def get_note_reviewer(note_id):
+def get_patient_reviewer(patient_id):
     """
     Updates the note's status to reviewed in the database.
     """
 
-    reviewed_by = mongo.db["NOTES"].find_one({"text_id": note_id})["reviewed_by"]
+    reviewed_by = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})["reviewed_by"]
     if reviewed_by.strip() == "":
         return None
 
@@ -1382,13 +1382,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
             note_details = []
             reviewer = ""
+            reviewer = get_patient_reviewer(patient_id)
             for note in notes:
                 note_id = note["text_id"]
                 note_date = str(note["text_date"])[:10]
                 predicted_score = get_note_prediction_from_db(note_id)
-                reviewed_by = get_note_reviewer(note_id)
-                if reviewed_by and reviewed_by != 'CEDARS' and reviewed_by != 'PINES':
-                    reviewer = str(reviewed_by)
                 if predicted_score is not None:
                     note_details.append(f"{note_id}:{note_date}:{predicted_score}")
             all_note_details = "\n".join(note_details)
