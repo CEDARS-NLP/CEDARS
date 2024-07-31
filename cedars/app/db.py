@@ -905,12 +905,15 @@ def update_project_name(new_name):
     mongo.db["INFO"].update_one({}, {"$set": {"project": new_name}})
 
 
-def mark_annotation_reviewed(annotation_id):
+def mark_annotation_reviewed(annotation_id, skip_after_event = False):
     """
     Updates the annotation in the database to mark it as reviewed.
 
     Args:
         annotation_id (str) : Unique ID for the annotation.
+        skip_after_event (bool) : If the patient has been adjudicated once, 
+            then skip all future events as we only look for the first event
+            for a patient.
     Returns:
         None
     """
