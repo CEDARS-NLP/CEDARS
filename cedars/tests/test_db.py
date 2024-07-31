@@ -227,6 +227,11 @@ def test_mark_patient_reviewed(db):
     assert patient["reviewed"] is True
     assert patient["reviewed_by"] == "test1"
 
+def test_get_patient_reviewer(db):
+    patient_id = 1111111111
+    reviewer = db.get_patient_reviewer(patient_id)
+    assert reviewer == "test1"
+
 
 def test_mark_note_reviewed(db):
     db.mark_note_reviewed("UNIQUE0000000001", "test1")
@@ -241,8 +246,15 @@ def test_add_comment(db):
     annot_id = str(annot["_id"])
     db.add_comment(annot_id, "test comment")
     patient = db.get_patient_by_id(1111111111)
-    assert patient["comments"] == ["test comment"]
+    assert patient["comments"] == "test comment"
 
+def test_delete_comment(db):
+    note_id = "UNIQUE0000000001"
+    annot = db.get_all_annotations_for_note(note_id)[0]
+    annot_id = str(annot["_id"])
+    db.add_comment(annot_id, "")
+    patient = db.get_patient_by_id(1111111111)
+    assert patient["comments"] == ""
 
 def test_set_patient_lock_status(db):
     db.set_patient_lock_status(1111111111, True)
