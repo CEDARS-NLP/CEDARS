@@ -101,15 +101,22 @@
 
       <div class="mb-4">
             <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
-                <form class="form-inline" action="/ops/save_adjudications" method="POST">
+                <form id = "movement_form" class="form-inline" action="/ops/save_adjudications" method="POST">
                     <div class="btn-group me-2" role="group" aria-label="Second group">
-                        <button class="btn btn-primary cedars-btn" value="adjudicate" type="submit" name="submit_button">Adjudicate Sentence</button>
+                        <button class="btn btn-primary cedars-btn" value="adjudicate" onclick="addComment()" type="submit" name="submit_button">Adjudicate Sentence</button>
                     </div>
                     <div class="btn-group me-2" role="group" aria-label="First group">
-                        <button class="btn btn-outline-secondary" value="prev" type="submit" name="submit_button"><<</button>
-                        <button class="btn btn-outline-secondary" value="next" type="submit" name="submit_button">>></button>
+                        <button class="btn btn-outline-secondary" value="prev" onclick="addComment()" type="submit" name="submit_button"><<</button>
+                        <button class="btn btn-outline-secondary" value="next" onclick="addComment()" type="submit" name="submit_button">>></button>
                     </div>
                 </form>
+
+                <script>
+                  function addComment() {
+                    var comment = document.getElementById("comment").value;
+                    $('#movement_form').append('<input type="text" hidden value="'+comment+'" name="comment" id="comment"/>');
+                  }
+                </script>
             </div>
       </div>
       <div class="mb-4">
