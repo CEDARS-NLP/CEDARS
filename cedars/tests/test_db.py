@@ -1,8 +1,9 @@
-# Test for db.py
+'''
+Automated tests for db.py
+'''
 
-import pytest
 from datetime import datetime
-
+import pytest
 
 @pytest.mark.parametrize("expected_result, patient_id", [
     [103, None],
