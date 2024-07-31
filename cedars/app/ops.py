@@ -396,7 +396,7 @@ def save_adjudications():
         new_date = request.form['date_entry']
         logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
-        _adjudicate_annotation()
+        _adjudicate_annotation(updated_date = True)
         
 
     def _delete_annotation_date():
@@ -412,10 +412,19 @@ def save_adjudications():
             session["index"] += 1
             session.modified = True
 
-    def _adjudicate_annotation():
+    def _adjudicate_annotation(updated_date = False):
+        skip_after_event = db.get_search_query(query_key="skip_after_event")
         if session["unreviewed_annotations_index"][session["index"]] == 1:
-            db.mark_annotation_reviewed(current_annotation_id)
-            session["unreviewed_annotations_index"][session["index"]] = 0
+            if updated_date and skip_after_event:
+                db.mark_annotation_reviewed(current_annotation_id,
+                                            skip_after_event = True)
+                
+                session["unreviewed_annotations_index"] = [1] * len(session["unreviewed_annotations_index"])
+            else:
+                db.mark_annotation_reviewed(current_annotation_id,
+                                            skip_after_event = False)
+                
+                session["unreviewed_annotations_index"][session["index"]] = 0
             session.modified = True
             # if one annotation has the event date, mark the patient
             # as reviewed because we don't need to review the rest
