@@ -919,7 +919,7 @@ def mark_annotation_reviewed(annotation_id):
                                        {"$set": {"reviewed": True}})
 
 
-def update_annotation_date(annotation_id, new_date):
+def update_annotation_date(annotation_id, new_date, update_all_future = True):
     """
     Enters a new event date for an annotation.
 
@@ -927,6 +927,8 @@ def update_annotation_date(annotation_id, new_date):
         annotation_id (str) : Unique ID for the annotation.
         new_date (str) : The new value to update the event date of an annotation with.
             Must be in the format YYYY-MM-DD .
+        update_all_future (bool) : True if we want to update all notes taken on a later 
+            date to have the same event date.
     Returns:
         None
     """
@@ -937,17 +939,41 @@ def update_annotation_date(annotation_id, new_date):
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"event_date": datetime_obj}})
 
-def delete_annotation_date(annotation_id):
+    if update_all_future:
+        annotation = mongo.db["ANNOTATIONS"].find_one({"_id":ObjectId(annotation_id)})
+        note_date = annotation['text_date']
+        patient_id = annotation['patient_id']
+
+        query = {"patient_id" : patient_id,
+                 "text_date" : {"$gte" : note_date}}
+
+        mongo.db["ANNOTATIONS"].update_many(query,
+                                       {"$set": {"event_date": datetime_obj}})
+
+def delete_annotation_date(annotation_id, delete_all_future = True):
     """
     Deletes the event date for an annotation.
 
     Args:
         annotation_id (str) : Unique ID for the annotation.
+        delete_all_future (bool) : True if we want to delete all notes taken on a later 
+            date to ensure that they all have the same event date.
     Returns:
         None
     """
     logger.debug(f"Deleting date on annotation #{ObjectId(annotation_id)}.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
+                                       {"$set": {"event_date": None}})
+    
+    if delete_all_future:
+        annotation = mongo.db["ANNOTATIONS"].find_one({"_id":ObjectId(annotation_id)})
+        note_date = annotation['text_date']
+        patient_id = annotation['patient_id']
+
+        query = {"patient_id" : patient_id,
+                 "text_date" : {"$gte" : note_date}}
+
+        mongo.db["ANNOTATIONS"].update_many(query,
                                        {"$set": {"event_date": None}})
 
 
