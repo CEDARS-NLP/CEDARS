@@ -62,12 +62,12 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
-def convert_to_int(s):
+def convert_to_int(value):
     """Convert to integer if possible, otherwise return the string."""
     try:
-        return int(s)
+        return int(value)
     except ValueError:
-        return s
+        return value
 
 
 @bp.route("/project_details", methods=["GET", "POST"])
@@ -483,15 +483,6 @@ def show_annotation():
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
 
-    '''
-    Code to fix bug patient_id not found in session.
-    Will remain commented till bug is replicated.
-
-    if "patient_id" not in session:
-        flash("No current patient ID.")
-        return redirect(url_for("ops.adjudicate_records"))
-    '''
-
     annotation_data = {
         "pos_start": index + 1,
         "total_pos": session["total_count"],
@@ -689,7 +680,7 @@ def download_file(filename='annotations.csv'):
     return flask.Response(
         file.stream(32*1024),
         mimetype='text/csv',
-        headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
+        headers={"Content-Disposition": f"attachment;filename=cedars_{filename}"}
     )
 
 

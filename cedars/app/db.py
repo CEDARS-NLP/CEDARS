@@ -6,8 +6,9 @@ import os
 from io import BytesIO, StringIO
 import re
 from datetime import datetime
-from faker import Faker
 from typing import Optional
+from uuid import uuid4
+from faker import Faker
 import flask
 from flask import g
 import requests
@@ -17,7 +18,6 @@ from bson import ObjectId
 from loguru import logger
 
 from .database import mongo, minio
-from uuid import uuid4
 
 fake = Faker()
 
@@ -237,7 +237,7 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
 
     if (query == get_search_query() and
             skip_after_event == get_search_query("skip_after_event") and
-            tag_query.get('nlp_apply',False) == get_search_query("tag_query").get('nlp_apply', False)):
+            tag_query.get('nlp_apply',False)==get_search_query("tag_query").get('nlp_apply',False)):
         logger.info(f"Query already saved : {query}.")
         return False
 
@@ -526,7 +526,7 @@ def get_all_annotations_for_patient(patient_id, unique_sentences = True):
             # So we only check for the same sentence in that note.
             if annotations[i]['note_id'] != prev_note_id:
                 seen_sentences.clear()
-            
+
             prev_note_id = annotations[i]['note_id']
             sentence = annotations[i]['sentence']
             if sentence in seen_sentences:
@@ -534,14 +534,14 @@ def get_all_annotations_for_patient(patient_id, unique_sentences = True):
                 continue
 
             seen_sentences.add(sentence)
-        
+
         # Remove the indices in reverse order to avoid a later index changing
         # after a prior one is removed.
 
         indices_to_remove.sort(reverse=True)
         for index in indices_to_remove:
             # Mark the annotation as reviewed before poping it
-            # This ensures that 
+            # This ensures that an unseen annotation cannot be unreviewed
             mark_annotation_reviewed(annotations[index]["_id"])
             annotations.pop(index)
 
