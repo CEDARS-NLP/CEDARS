@@ -80,14 +80,14 @@ def project_details():
 
     if request.method == "POST":
         if "update_project_name" in request.form:
-            project_name = request.form.get("project_name")
-            id = request.form.get("project_id")
-            if id is None:
-                if len(project_name.strip()) > 0:
+            project_name = request.form.get("project_name").strip()
+            old_name = db.get_proj_name()
+            if old_name is None:
+                if len(project_name) > 0:
                     db.create_project(project_name, current_user.username)
                     flash(f"Project **{project_name}** created.")
             else:
-                if len(project_name.strip()) > 0:
+                if len(project_name) > 0:
                     db.update_project_name(project_name)
                     flash(f"Project name updated to {project_name}.")
             return render_template("index.html", **db.get_info())
@@ -397,11 +397,10 @@ def save_adjudications():
         logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
         _adjudicate_annotation()
-        _add_annotation_comment()
+        
 
     def _delete_annotation_date():
         db.delete_annotation_date(current_annotation_id)
-        _add_annotation_comment()
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
@@ -464,6 +463,8 @@ def save_adjudications():
     action = request.form['submit_button']
     if action in actions:
         actions[action]()
+    _add_annotation_comment()
+            
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
         return redirect(url_for("ops.adjudicate_records"))
