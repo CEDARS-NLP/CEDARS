@@ -503,13 +503,7 @@ def show_annotation():
         "event_date": _format_date(annotation.get('event_date')),
         "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
 
-        "pre_token_sentence": re.sub(r'\n+|\r\n',
-                                     '\n',
-                                     annotation['sentence'][:annotation['start_index']]).strip(),
-        "token_word": annotation['sentence'][annotation['start_index']:annotation['end_index']],
-        "post_token_sentence": re.sub(r'\n+|\r\n',
-                                      '\n',
-                                      annotation['sentence'][annotation['end_index']:]).strip(),
+        "highlighted_sentence" : get_highlighted_sentence(annotation, note),
 
         "note_id": annotation["note_id"],
         "full_note": highlighted_text(note),
@@ -519,6 +513,7 @@ def show_annotation():
                  note.get("text_tag_4", ""),
                  note.get("text_tag_5", "")]
     }
+
     return render_template("ops/adjudicate_records.html",
                            **annotation_data,
                            **db.get_info())
@@ -636,6 +631,36 @@ def highlighted_text(note):
     logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>")
 
+def get_highlighted_sentence(annotation, note):
+    """
+    Returns highlighted text for a sentence in a note.
+    """
+
+    highlighted_note = []
+    text = note["text"]
+
+    sentence_start = annotation["sentence_start"]
+    sentence_end = annotation["sentence_end"]
+    prev_end_index = sentence_start
+
+    annotations = db.get_all_annotations_for_sentence(note["text_id"],
+                                                      annotation["sentence_number"])
+    logger.info(annotations)
+
+    for annotation in annotations:
+        start_index = annotation['note_start_index']
+        end_index = annotation['note_end_index']
+        # Make sure the annotations don't overlap
+        if start_index < prev_end_index:
+            continue
+
+        highlighted_note.append(text[prev_end_index:start_index])
+        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
+        prev_end_index = end_index
+
+    highlighted_note.append(text[prev_end_index:sentence_end])
+    logger.info(highlighted_note)
+    return " ".join(highlighted_note).replace("\n", "<br>")
 
 def _format_date(date_obj):
     res = None
