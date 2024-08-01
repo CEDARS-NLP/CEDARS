@@ -400,7 +400,8 @@ def save_adjudications():
         
 
     def _delete_annotation_date():
-        db.delete_annotation_date(current_annotation_id)
+        skip_after_event = db.get_search_query(query_key="skip_after_event")
+        db.delete_annotation_date(current_annotation_id, skip_after_event)
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
