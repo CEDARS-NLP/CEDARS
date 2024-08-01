@@ -538,15 +538,16 @@ def get_all_annotations_for_patient(patient_id):
         
         # We first note the indices where duplicate sentences occur
         indices_to_remove = []
-        prev_note_id = None
+        prev_patient_id = None
         seen_sentences = set()
         for i in range(len(annotations)):
-            # If we are on a new note, then the same sentence may be in a different context.
-            # So we only check for the same sentence in that note.
-            if annotations[i]['note_id'] != prev_note_id:
+            # If we are on a new patient, then clear the hashset of sentences.
+            # This is done so that we only check for the same sentence
+            # in the logs of that patient.
+            if annotations[i]['patient_id'] != prev_patient_id:
                 seen_sentences.clear()
 
-            prev_note_id = annotations[i]['note_id']
+            prev_patient_id = annotations[i]['patient_id']
             sentence = annotations[i]['sentence']
             if sentence in seen_sentences:
                 indices_to_remove.append(i)
@@ -555,28 +556,28 @@ def get_all_annotations_for_patient(patient_id):
             seen_sentences.add(sentence)
     else:
         # If hide_duplicates is false then each sentence will still only be shown once.
-        
+
         # We first note the indices where duplicate sentences occur
         indices_to_remove = []
         prev_note_id = None
-        seen_sentences = set()
+        seen_sentence_indices = set()
         for i in range(len(annotations)):
-            # If we are on a new note, then the same sentence may be in a different context.
-            # So we only check for the same sentence in that note.
+            # If we are on a new note, then clear the hashset of sentences.
+            # This is done so that we only check for the same sentence
+            # in that note.
             if annotations[i]['note_id'] != prev_note_id:
-                seen_sentences.clear()
+                seen_sentence_indices.clear()
 
             prev_note_id = annotations[i]['note_id']
-            sentence = annotations[i]['sentence_number']
-            if sentence in seen_sentences:
+            sentence_index = annotations[i]['sentence_start']
+            if sentence_index in seen_sentence_indices:
                 indices_to_remove.append(i)
                 continue
 
-            seen_sentences.add(sentence)
+            seen_sentence_indices.add(sentence_index)
 
     # Remove the indices in reverse order to avoid a later index changing
     # after a prior one is removed.
-
     indices_to_remove.sort(reverse=True)
     for index in indices_to_remove:
         # Mark the annotation as reviewed before poping it
