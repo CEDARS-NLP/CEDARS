@@ -237,7 +237,7 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
 
     if (query == get_search_query() and
             skip_after_event == get_search_query("skip_after_event") and
-            tag_query.get('nlp_apply',False)==get_search_query("tag_query").get('nlp_apply',False)):
+            tag_query.get('nlp_apply', False) == get_search_query("tag_query").get('nlp_apply', False)):
         logger.info(f"Query already saved : {query}.")
         return False
 
@@ -462,6 +462,8 @@ def get_patients_to_annotate():
         annotations = get_patient_annotation_ids(patient_id)
         if len(annotations) > 0:
             return patient_id
+        else:
+            continue
 
     return None
 
@@ -501,7 +503,8 @@ def get_all_annotations_for_patient(patient_id, unique_sentences = True):
 
     Args:
         patient_id (int) : Unique ID for a patient.
-        unique_sentences (bool) : True if we do not show the same sentence multiple times.
+        unique_sentences (bool) : True if we do not show the same sentence
+            multiple times in the same note.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -550,7 +553,7 @@ def get_all_annotations_for_patient(patient_id, unique_sentences = True):
         result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
         result["all_annotation_index"] = list(range(len(annotations)))
         # set array to 1 if annotation is unreviewed
-        result["unreviewed_annotations_index"]= [1 if not x["reviewed"] else 0 for x in annotations]
+        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
         result["total"] = len(annotations)
 
     return result
@@ -905,7 +908,7 @@ def update_project_name(new_name):
     mongo.db["INFO"].update_one({}, {"$set": {"project": new_name}})
 
 
-def mark_annotation_reviewed(annotation_id, skip_after_event = False):
+def mark_annotation_reviewed(annotation_id):
     """
     Updates the annotation in the database to mark it as reviewed.
 
