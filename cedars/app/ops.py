@@ -397,7 +397,7 @@ def save_adjudications():
         logger.info(f"Updating {current_annotation_id}: {new_date}")
         db.update_annotation_date(current_annotation_id, new_date)
         _adjudicate_annotation(updated_date = True)
-        
+
 
     def _delete_annotation_date():
         skip_after_event = db.get_search_query(query_key="skip_after_event")
@@ -419,7 +419,7 @@ def save_adjudications():
             db.mark_annotation_reviewed(current_annotation_id)
             if updated_date and skip_after_event:
                 session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
-                
+
             session["unreviewed_annotations_index"][session["index"]] = 0
             session.modified = True
             # if one annotation has the event date, mark the patient
@@ -469,7 +469,7 @@ def save_adjudications():
     if action in actions:
         actions[action]()
     _add_annotation_comment()
-            
+
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
         return redirect(url_for("ops.adjudicate_records"))
@@ -497,9 +497,7 @@ def show_annotation():
         "note_date": _format_date(annotation.get('text_date')),
         "event_date": _format_date(annotation.get('event_date')),
         "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
-
         "highlighted_sentence" : get_highlighted_sentence(annotation, note),
-
         "note_id": annotation["note_id"],
         "full_note": highlighted_text(note),
         "tags": [note.get("text_tag_1", ""),
