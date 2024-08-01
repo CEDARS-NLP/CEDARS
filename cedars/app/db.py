@@ -367,6 +367,19 @@ def get_all_annotations_for_note(note_id):
                                                                            ("setence_number", 1)])
     return list(annotations)
 
+def get_all_annotations_for_sentence(note_id, sentence_number):
+    """
+    This function is used to get all the annotations for a particular sentence
+        in a note after removing negated annotations.
+    Order of annotations -
+        text_date (ascending)
+        note_start_index (ascending)
+    """
+    annotations = mongo.db["ANNOTATIONS"].find({"note_id": note_id,
+                                                "sentence_number" : sentence_number,
+                                                "isNegated": False}).sort([("text_date", 1),
+                                                                           ("setence_number", 1)])
+    return list(annotations)
 
 def get_annotation(annotation_id):
     """

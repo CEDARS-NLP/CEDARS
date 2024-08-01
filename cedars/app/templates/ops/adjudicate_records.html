@@ -30,20 +30,20 @@
             {% else %}
               <li class="list-group-item">Note Date: None</li>
             {% endif %}
+            
+            {% if event_date  %}
+            <li class="list-group-item">Current Event Date: <b> {{event_date.strftime("%m/%d/%Y")}} </b> </li>
+            {% else %}
+            <li class="list-group-item">Current Event Date: None</li>
+            {% endif %}
+           
           </ul>
         </div>
 
         <div class="mb-4">
           <ul class="list-group">
             <li class="list-group-item">
-              {% if event_date  %}
-                <label for="date_entry">Current Event Date: <b> {{event_date.strftime("%m/%d/%Y")}} </b> </label>
-              {% else %}
-                <li class="list-group-item">Current Event Date: None</li>
-              {% endif %}
-            </li>
-            <li class="list-group-item">
-              <label for="date_entry">Enter New Event Date:</label>
+              <label for="date_entry">Enter Event Date:</label>
               {% if event_date is none %}
                 <input type="date" class="text-muted" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
               {% else %}
@@ -95,7 +95,9 @@
               {{token_word|safe}}
             </b>
             </mark>
-          {{post_token_sentence|safe}}
+            {{post_token_sentence|safe}}
+
+          {{highlighted_sentence|safe}}
         </div>
       </div>
 
