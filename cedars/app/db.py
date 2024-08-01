@@ -535,7 +535,7 @@ def get_all_annotations_for_patient(patient_id):
     if hide_duplicates:
         # If hide_duplicates sentences that are exact matches for sentences in
         # the same note are removed.
-        
+
         # We first note the indices where duplicate sentences occur
         indices_to_remove = []
         prev_patient_id = None
@@ -584,7 +584,6 @@ def get_all_annotations_for_patient(patient_id):
         # This ensures that an unseen annotation cannot be unreviewed
         mark_annotation_reviewed(annotations[index]["_id"])
         annotations.pop(index)
-    
 
 
     if len(annotations) > 0:
@@ -1008,7 +1007,7 @@ def delete_annotation_date(annotation_id, delete_all_future = True):
     logger.debug(f"Deleting date on annotation #{ObjectId(annotation_id)}.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"event_date": None}})
-    
+
     if delete_all_future:
         annotation = mongo.db["ANNOTATIONS"].find_one({"_id":ObjectId(annotation_id)})
         note_date = annotation['text_date']
