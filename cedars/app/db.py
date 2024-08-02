@@ -379,7 +379,7 @@ def get_all_annotations_for_sentence(note_id, sentence_number):
     annotations = mongo.db["ANNOTATIONS"].find({"note_id": note_id,
                                                 "sentence_number" : sentence_number,
                                                 "isNegated": False}).sort([("text_date", 1),
-                                                                           ("setence_number", 1)])
+                                                                           ("note_start_index", 1)])
     return list(annotations)
 
 def get_annotation(annotation_id):
@@ -539,16 +539,8 @@ def get_all_annotations_for_patient(patient_id):
 
         # We first note the indices where duplicate sentences occur
         indices_to_remove = []
-        prev_patient_id = None
         seen_sentences = set()
         for i in range(len(annotations)):
-            # If we are on a new patient, then clear the hashset of sentences.
-            # This is done so that we only check for the same sentence
-            # in the logs of that patient.
-            if annotations[i]['patient_id'] != prev_patient_id:
-                seen_sentences.clear()
-
-            prev_patient_id = annotations[i]['patient_id']
             sentence = annotations[i]['sentence']
             if sentence in seen_sentences:
                 indices_to_remove.append(i)
