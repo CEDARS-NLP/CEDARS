@@ -130,11 +130,11 @@ def load_pandas_dataframe(filepath):
 
     extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
     loaders = {
-        'csv': pd.read_csv, # nrows = 1
-        'xlsx': pd.read_excel, # nrows = 1
-        'json': pd.read_json, # lines = True, nrows = 1
+        'csv': pd.read_csv,
+        'xlsx': pd.read_excel,
+        'json': pd.read_json,
         'parquet': pd.read_parquet,
-        'pickle': pd.read_pickle, # 
+        'pickle': pd.read_pickle,
         'pkl': pd.read_pickle,
         'xml': pd.read_xml
     }

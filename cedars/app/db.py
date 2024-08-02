@@ -1191,7 +1191,7 @@ def get_curr_stats():
     ]
     lemma_dist_results = mongo.db.ANNOTATIONS.aggregate(pipeline_lemma_dist)
     total_tokens = mongo.db.ANNOTATIONS.count_documents({"isNegated": False})
-    stats['lemma_dist'] = {doc['token']:100*doc['count']/total_tokens for doc in lemma_dist_results}
+    stats['lemma_dist'] = {doc['token']: 100 * doc['count']/total_tokens for doc in lemma_dist_results}
 
     return stats
 
