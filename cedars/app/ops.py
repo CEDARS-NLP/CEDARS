@@ -656,7 +656,7 @@ def get_highlighted_sentence(annotation, note):
 
     highlighted_note.append(text[prev_end_index:sentence_end])
     logger.info(highlighted_note)
-    return " ".join(highlighted_note).replace("\n", "<br>")
+    return " ".join(highlighted_note).replace("\n", "<br>").strip()
 
 def _format_date(date_obj):
     res = None
