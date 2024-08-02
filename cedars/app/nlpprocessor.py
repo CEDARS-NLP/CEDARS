@@ -226,7 +226,7 @@ class NlpProcessor:
                             docs_with_annotations += 1
                         match_count += 1
                 
-                sentence_start = sentence_end
+                sentence_start = sentence_end + 1
 
             if match_count == 0:
                 db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")

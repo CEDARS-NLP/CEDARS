@@ -541,7 +541,7 @@ def get_all_annotations_for_patient(patient_id):
         indices_to_remove = []
         seen_sentences = set()
         for i in range(len(annotations)):
-            sentence = annotations[i]['sentence']
+            sentence = annotations[i]['sentence'].lower().strip()
             if sentence in seen_sentences:
                 indices_to_remove.append(i)
                 continue
