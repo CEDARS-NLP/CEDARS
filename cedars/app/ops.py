@@ -401,7 +401,7 @@ def save_adjudications():
 
     def _delete_annotation_date():
         skip_after_event = db.get_search_query(query_key="skip_after_event")
-        db.delete_annotation_date(current_annotation_id, skip_after_event)
+        db.delete_annotation_date(current_annotation_id)
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
@@ -495,7 +495,7 @@ def show_annotation():
         "patient_id": session["patient_id"],
         "name": current_user.username,
         "note_date": _format_date(annotation.get('text_date')),
-        "event_date": _format_date(annotation.get('event_date')),
+        "event_date": _format_date(db.get_event_date(session["patient_id"])),
         "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
         "highlighted_sentence" : get_highlighted_sentence(annotation, note),
         "note_id": annotation["note_id"],

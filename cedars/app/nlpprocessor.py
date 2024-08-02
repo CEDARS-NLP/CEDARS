@@ -219,7 +219,6 @@ class NlpProcessor:
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
-                    annotation["event_date"] = None
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
                     if not has_negation:
@@ -307,6 +306,10 @@ class NlpProcessor:
                     db.add_task(task)
                 db.set_patient_lock_status(patient_id, True)
                 self.process_notes(patient_id)
+                annotations = db.get_patient_annotation_ids(patient_id)
+                logger.info(f"Found {len(annotations)} annotations for patient {patient_id}")
+                if len(annotations) == 0:
+                    db.mark_patient_reviewed(patient_id, reviewed_by="CEDARS")
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 
