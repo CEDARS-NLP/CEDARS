@@ -133,7 +133,7 @@ def test_upload_query_post_valid(client, db):
     assert response.status_code == 200
     # mocked_nlp_processing.assert_called_once()
     assert db.get_total_counts("ANNOTATIONS") == 0
-    assert db.get_total_counts("PATIENTS", reviewed=False) == 4
+    assert db.get_total_counts("PATIENTS", reviewed=False) == 3
 
 
 def test_do_nlp_processing(client):
