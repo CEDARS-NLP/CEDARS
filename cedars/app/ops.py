@@ -631,8 +631,6 @@ def get_highlighted_sentence(annotation, note):
     highlighted_note = []
     text = note["text"]
 
-    
-
     sentence_start = annotation["sentence_start"]
     sentence_end = annotation["sentence_end"]
     if sentence_start == 0:

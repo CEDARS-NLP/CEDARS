@@ -225,7 +225,7 @@ class NlpProcessor:
                         if match_count == 0:
                             docs_with_annotations += 1
                         match_count += 1
-                
+
                 sentence_start = sentence_end + 1
 
             if match_count == 0:
