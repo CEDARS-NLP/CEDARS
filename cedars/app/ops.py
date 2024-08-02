@@ -628,13 +628,18 @@ def get_highlighted_sentence(annotation, note):
     """
     Returns highlighted text for a sentence in a note.
     """
-
     highlighted_note = []
     text = note["text"]
 
+    
+
     sentence_start = annotation["sentence_start"]
     sentence_end = annotation["sentence_end"]
-    prev_end_index = sentence_start
+    if sentence_start == 0:
+        prev_end_index = sentence_start
+    else:
+        # Padding to the left to ensure that all characters are caught
+        prev_end_index = sentence_start - 1
 
     annotations = db.get_all_annotations_for_sentence(note["text_id"],
                                                       annotation["sentence_number"])
