@@ -203,7 +203,8 @@ def test_update_event_date(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
     patient_id = annot["patient_id"]
-    db.update_event_date(patient_id, "2020-01-01")
+    anno_id = annot["_id"]
+    db.update_event_date(patient_id, "2020-01-01", anno_id)
     assert db.get_event_date(patient_id) == datetime(2020, 1, 1)
 
 
