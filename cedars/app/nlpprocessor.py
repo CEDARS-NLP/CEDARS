@@ -190,8 +190,11 @@ class NlpProcessor:
         docs_with_annotations = 0
         for document, doc in zip(document_list, annotations):
             match_count = 0
+            sentence_start = 0
+            sentence_end = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
                 sentence_text = sentence_annotation.text
+                sentence_end = sentence_start + len(sentence_text)
                 matches = self.matcher(sentence_annotation)
                 for match in matches:
                     _, start, end = match
@@ -209,18 +212,21 @@ class NlpProcessor:
                                     "end_index": end_index,
                                     "note_start_index": token_start,
                                     "note_end_index": token_end,
-                                    "sentence_number": sent_no
+                                    "sentence_number": sent_no,
+                                    "sentence_start" : sentence_start,
+                                    "sentence_end" : sentence_end
                                     }
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
-                    annotation["event_date"] = None
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
                     if not has_negation:
                         if match_count == 0:
                             docs_with_annotations += 1
                         match_count += 1
+
+                sentence_start = sentence_end + 1
 
             if match_count == 0:
                 db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")

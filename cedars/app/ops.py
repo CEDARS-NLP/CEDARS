@@ -3,6 +3,8 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
+from datetime import datetime, timezone
+
 import pandas as pd
 import flask
 from dotenv import dotenv_values
@@ -11,11 +13,11 @@ from flask import (
     redirect, session, request,
     url_for, flash, g
 )
-from datetime import datetime, timezone
+
 from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-from rq import Retry, Callback, Queue
+from rq import Retry, Callback
 from rq.registry import FailedJobRegistry, FinishedJobRegistry
 from . import db
 from . import nlpprocessor
@@ -60,12 +62,12 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
-def convert_to_int(s):
+def convert_to_int(value):
     """Convert to integer if possible, otherwise return the string."""
     try:
-        return int(s)
+        return int(value)
     except ValueError:
-        return s
+        return value
 
 
 @bp.route("/project_details", methods=["GET", "POST"])
@@ -78,14 +80,14 @@ def project_details():
 
     if request.method == "POST":
         if "update_project_name" in request.form:
-            project_name = request.form.get("project_name")
-            id = request.form.get("project_id")
-            if id is None:
-                if len(project_name.strip()) > 0:
+            project_name = request.form.get("project_name").strip()
+            old_name = db.get_proj_name()
+            if old_name is None:
+                if len(project_name) > 0:
                     db.create_project(project_name, current_user.username)
                     flash(f"Project **{project_name}** created.")
             else:
-                if len(project_name.strip()) > 0:
+                if len(project_name) > 0:
                     db.update_project_name(project_name)
                     flash(f"Project name updated to {project_name}.")
             return render_template("index.html", **db.get_info())
@@ -104,7 +106,8 @@ def project_details():
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
-    return render_template("ops/project_details.html", tasks=db.get_tasks_in_progress(), **db.get_info())
+    return render_template("ops/project_details.html",
+                           tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 def load_pandas_dataframe(filepath):
@@ -145,7 +148,30 @@ def load_pandas_dataframe(filepath):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
-        return loaders[extension](obj)
+
+        # Read one line of the file to conserve memory and computation
+        if extension in ['csv', 'xlsx']:
+            data_frame_line_1 = loaders[extension](obj, nrows = 1)
+        elif extension == 'json':
+            data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
+        else:
+            # TODO
+            # Add generator to load a single line from other file types
+            data_frame_line_1 = loaders[extension](obj)
+
+        required_columns = ['patient_id', 'text_id', 'text', 'text_date']
+
+        for column in required_columns:
+            if column not in data_frame_line_1.columns:
+                flash(f"Column {column} missing from uploaded file.")
+                flash("Failed to save file to database.")
+                raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+
+        # Re-initialise object from minio to load it again
+        obj = minio.get_object(g.bucket_name, filepath)
+        data_frame = loaders[extension](obj)
+        return data_frame
+
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
@@ -208,11 +234,13 @@ def upload_data():
                 flash('No selected file')
                 return redirect(request.url)
             if file and not allowed_data_file(file.filename):
-                flash("Invalid file type. Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.")
+                flash("""Invalid file type.
+                      Please upload a .csv, .xlsx, .json, .parquet, .pickle, .pkl, or .xml file.""")
                 return redirect(request.url)
 
             filename = f"uploaded_files/{secure_filename(file.filename)}"
             size = os.fstat(file.fileno()).st_size
+
             try:
                 minio.put_object(g.bucket_name,
                                  filename,
@@ -299,7 +327,7 @@ def upload_query():
         session.modified = True
 
     do_nlp_processing()
-    return redirect(url_for("ops.get_job_status"))
+    return redirect(url_for("stats_page.stats_route"))
 
 
 @bp.route("/start_process")
@@ -331,11 +359,19 @@ def do_nlp_processing():
 
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
-    return render_template("ops/job_status.html", tasks=db.get_tasks_in_progress(), **db.get_info())
+    """
+    Directs the user to the job status page.
+    """
+    return render_template("ops/job_status.html",
+                           tasks=db.get_tasks_in_progress(), **db.get_info())
 
 
 @bp.route('/queue_stats', methods=['GET'])
 def queue_stats():
+    """
+    Returns details of how many jobs are left in the queue and the status of
+    completed jobs. Is used for the project statistics page.
+    """
     queue_length = len(flask.current_app.task_queue)
     failed_job_registry = FailedJobRegistry(queue=flask.current_app.task_queue)
     failed_jobs = len(failed_job_registry)
@@ -354,20 +390,21 @@ def save_adjudications():
     Handle logic for the save_adjudications route.
     Used to edit and review annotations.
     """
-
     current_annotation_id = session["annotations"][session["index"]]
+    patient_id = session['patient_id']
 
-    def _update_annotation_date():
+    def _update_event_date():
         new_date = request.form['date_entry']
-        logger.info(f"Updating {current_annotation_id}: {new_date}")
-        db.update_annotation_date(current_annotation_id, new_date)
-        _adjudicate_annotation()
+        logger.info(f"Updating {patient_id}: {new_date}")
+        db.update_event_date(patient_id, new_date)
+        _adjudicate_annotation(updated_date = True)
+        db.update_event_annotation_id(patient_id,
+                                      current_annotation_id)
 
-    def _delete_annotation_date():
-        db.delete_annotation_date(current_annotation_id)
 
-    def _add_annotation_comment():
-        db.add_comment(current_annotation_id, request.form['comment'])
+    def _delete_event_date():
+        db.delete_event_date(patient_id)
+        db.delete_event_annotation_id(patient_id)
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
@@ -379,9 +416,13 @@ def save_adjudications():
             session["index"] += 1
             session.modified = True
 
-    def _adjudicate_annotation():
+    def _adjudicate_annotation(updated_date = False):
+        skip_after_event = db.get_search_query(query_key="skip_after_event")
         if session["unreviewed_annotations_index"][session["index"]] == 1:
             db.mark_annotation_reviewed(current_annotation_id)
+            if updated_date and skip_after_event:
+                session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
+
             session["unreviewed_annotations_index"][session["index"]] = 0
             session.modified = True
             # if one annotation has the event date, mark the patient
@@ -393,7 +434,7 @@ def save_adjudications():
                                          reviewed_by=current_user.username)
                 db.set_patient_lock_status(session["patient_id"], False)
                 session.pop("patient_id")
-            elif db.get_annotation_date(current_annotation_id) is not None:
+            elif db.get_event_date(session["patient_id"]) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
                                       reviewed_by=current_user.username)
                 db.mark_patient_reviewed(session["patient_id"],
@@ -413,9 +454,14 @@ def save_adjudications():
 
         session.modified = True
 
+    def _add_annotation_comment():
+        db.add_comment(current_annotation_id, request.form['comment'])
+
+
+
     actions = {
-        'new_date': _update_annotation_date,
-        'del_date': _delete_annotation_date,
+        'new_date': _update_event_date,
+        'del_date': _delete_event_date,
         'comment': _add_annotation_comment,
         'prev': _move_to_previous_annotation,
         'next': _move_to_next_annotation,
@@ -425,6 +471,7 @@ def save_adjudications():
     action = request.form['submit_button']
     if action in actions:
         actions[action]()
+    _add_annotation_comment()
 
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
@@ -435,23 +482,25 @@ def save_adjudications():
 
 @bp.route("/show_annotation", methods=["GET"])
 def show_annotation():
+    """
+    Formats and displays the current annotation being viewed by the user.
+    """
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
     note = db.get_annotation_note(str(annotation["_id"]))
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
+
     annotation_data = {
         "pos_start": index + 1,
         "total_pos": session["total_count"],
         "patient_id": session["patient_id"],
         "name": current_user.username,
         "note_date": _format_date(annotation.get('text_date')),
-        "event_date": _format_date(annotation.get('event_date')),
-        "comments": db.get_patient_by_id(session["patient_id"])["comments"],
-        "pre_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][:annotation['start_index']]).strip(),
-        "token_word": annotation['sentence'][annotation['start_index']:annotation['end_index']],
-        "post_token_sentence": re.sub(r'\n+|\r\n', '\n', annotation['sentence'][annotation['end_index']:]).strip(),
+        "event_date": _format_date(db.get_event_date(session["patient_id"])),
+        "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
+        "highlighted_sentence" : get_highlighted_sentence(annotation, note),
         "note_id": annotation["note_id"],
         "full_note": highlighted_text(note),
         "tags": [note.get("text_tag_1", ""),
@@ -460,6 +509,7 @@ def show_annotation():
                  note.get("text_tag_4", ""),
                  note.get("text_tag_5", "")]
     }
+
     return render_template("ops/adjudicate_records.html",
                            **annotation_data,
                            **db.get_info())
@@ -474,7 +524,8 @@ def adjudicate_records():
     ### Get the next available patient
 
     1. The first time this page is hit, get a patient who is not reviewed from the database
-    2. Since the patient is not reviewed in the db, they should have annotations, if not, skip to the next patientd
+    2. Since the patient is not reviewed in the db,
+                            they should have annotations, if not, skip to the next patientd
 
     ### Search for a patient
 
@@ -516,7 +567,9 @@ def adjudicate_records():
     if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
 
-    res = db.get_all_annotations_for_patient(patient_id)
+    raw_annotations = db.get_all_annotations_for_patient(patient_id)
+    hide_duplicates = db.get_search_query("hide_duplicates")
+    res = format_annotations(raw_annotations, hide_duplicates)
 
     annotations = res["annotations"]
     total_count = res["total"]
@@ -569,13 +622,119 @@ def highlighted_text(note):
             continue
 
         highlighted_note.append(text[prev_end_index:start_index])
-        highlighted_note.append(f'<mark>{text[start_index:end_index]}</mark>')
+        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
         prev_end_index = end_index
 
     highlighted_note.append(text[prev_end_index:])
     logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>")
 
+def get_highlighted_sentence(current_annotation, note):
+    """
+    Returns highlighted text for a sentence in a note.
+    """
+    highlighted_note = []
+    text = note["text"]
+
+    sentence_start = current_annotation["sentence_start"]
+    sentence_end = current_annotation["sentence_end"]
+    if sentence_start == 0:
+        prev_end_index = sentence_start
+    else:
+        # Padding to the left to ensure that all characters are caught
+        prev_end_index = sentence_start - 1
+
+    annotations = db.get_all_annotations_for_sentence(note["text_id"],
+                                                      current_annotation["sentence_number"])
+    logger.info(annotations)
+
+    for annotation in annotations:
+        start_index = annotation['note_start_index']
+        end_index = annotation['note_end_index']
+        # Make sure the annotations don't overlap
+        if start_index < prev_end_index:
+            continue
+
+        highlighted_note.append(text[prev_end_index:start_index])
+        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
+        prev_end_index = end_index
+
+    highlighted_note.append(text[prev_end_index:sentence_end])
+    logger.info(highlighted_note)
+    return " ".join(highlighted_note).replace("\n", "<br>").strip()
+
+def format_annotations(annotations, hide_duplicates):
+    """
+    Formats annotations to keep only relevant occurrences as well
+        as some additional data such as their review status.
+
+    Args:
+        annotations (list) : A list of all annotations for a paticular patient.
+        hide_duplicates (bool) : True if we want to discard duplicate sentences
+            from the annotations of this patient.
+    Returns:
+        result (dictionary) : A dictionary of all relevant annotations with some metadata.
+    """
+    if hide_duplicates:
+        # If hide_duplicates sentences that are exact matches for sentences in
+        # the same note are removed.
+
+        # We first note the indices where duplicate sentences occur
+        indices_to_remove = []
+        seen_sentences = set()
+        for i in range(len(annotations)):
+            sentence = annotations[i]['sentence'].lower().strip()
+            if sentence in seen_sentences:
+                indices_to_remove.append(i)
+                continue
+
+            seen_sentences.add(sentence)
+    else:
+        # If hide_duplicates is false then each sentence will still only be shown once.
+
+        # We first note the indices where duplicate sentences occur
+        indices_to_remove = []
+        prev_note_id = None
+        seen_sentence_indices = set()
+        for i in range(len(annotations)):
+            # If we are on a new note, then clear the hashset of sentences.
+            # This is done so that we only check for the same sentence
+            # in that note.
+            if annotations[i]['note_id'] != prev_note_id:
+                seen_sentence_indices.clear()
+
+            prev_note_id = annotations[i]['note_id']
+            sentence_index = annotations[i]['sentence_start']
+            if sentence_index in seen_sentence_indices:
+                indices_to_remove.append(i)
+                continue
+
+            seen_sentence_indices.add(sentence_index)
+
+    # Remove the indices in reverse order to avoid a later index changing
+    # after a prior one is removed.
+    indices_to_remove.sort(reverse=True)
+    for index in indices_to_remove:
+        # Mark the annotation as reviewed before poping it
+        # This ensures that an unseen annotation cannot be unreviewed
+        db.mark_annotation_reviewed(annotations[index]["_id"])
+        annotations.pop(index)
+
+    result = {
+        "annotations": [],
+        "all_annotation_index": [],
+        "unreviewed_annotations_index": [],
+        "total": 0
+    }
+
+    if len(annotations) > 0:
+        result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
+        result["all_annotation_index"] = list(range(len(annotations)))
+        # set array to 1 if annotation is unreviewed
+        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
+        result["total"] = len(annotations)
+
+    return result
 
 def _format_date(date_obj):
     res = None
@@ -588,6 +747,10 @@ def _format_date(date_obj):
 @bp.route('/download_page/<job_id>')
 @auth.admin_required
 def download_page(job_id=None):
+    """
+    Loads the page where an admin can download the results
+    of annotations made for that project.
+    """
     files = [(obj.object_name.rsplit("/", 1)[-1],
               obj.size,
               (
@@ -608,7 +771,8 @@ def download_file(filename='annotations.csv'):
     ##### Download Completed Annotations
 
     This generates a CSV file with the following specifications:
-    1. Find all patients in the PATIENTS database, these patients become a single row in the CSV file.
+    1. Find all patients in the PATIENTS database,
+            these patients become a single row in the CSV file.
     2. For each patient -
         a. list the number of total notes in the database
         b. list the number of reviewed notes
@@ -626,7 +790,7 @@ def download_file(filename='annotations.csv'):
     return flask.Response(
         file.stream(32*1024),
         mimetype='text/csv',
-        headers={"Content-Disposition": "attachment;filename=cedars_annotations.csv"}
+        headers={"Content-Disposition": f"attachment;filename=cedars_{filename}"}
     )
 
 
@@ -657,6 +821,9 @@ def create_download_full():
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
 def check_job(job_id):
+    """
+    Returns the status of a job to the frontend.
+    """
     logger.info(f"Checking job {job_id}")
     job = flask.current_app.ops_queue.fetch_job(job_id)
     if job.is_finished:
