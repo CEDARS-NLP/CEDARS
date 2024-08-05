@@ -524,69 +524,7 @@ def get_all_annotations_for_patient(patient_id):
                        .find({"patient_id": patient_id, "isNegated": False})
                        .sort([("text_date", 1), ("note_id", 1), ("note_start_index", 1)]))
 
-    result = {
-        "annotations": [],
-        "all_annotation_index": [],
-        "unreviewed_annotations_index": [],
-        "total": 0
-    }
-
-    hide_duplicates = get_search_query("hide_duplicates")
-
-    if hide_duplicates:
-        # If hide_duplicates sentences that are exact matches for sentences in
-        # the same note are removed.
-
-        # We first note the indices where duplicate sentences occur
-        indices_to_remove = []
-        seen_sentences = set()
-        for i in range(len(annotations)):
-            sentence = annotations[i]['sentence'].lower().strip()
-            if sentence in seen_sentences:
-                indices_to_remove.append(i)
-                continue
-
-            seen_sentences.add(sentence)
-    else:
-        # If hide_duplicates is false then each sentence will still only be shown once.
-
-        # We first note the indices where duplicate sentences occur
-        indices_to_remove = []
-        prev_note_id = None
-        seen_sentence_indices = set()
-        for i in range(len(annotations)):
-            # If we are on a new note, then clear the hashset of sentences.
-            # This is done so that we only check for the same sentence
-            # in that note.
-            if annotations[i]['note_id'] != prev_note_id:
-                seen_sentence_indices.clear()
-
-            prev_note_id = annotations[i]['note_id']
-            sentence_index = annotations[i]['sentence_start']
-            if sentence_index in seen_sentence_indices:
-                indices_to_remove.append(i)
-                continue
-
-            seen_sentence_indices.add(sentence_index)
-
-    # Remove the indices in reverse order to avoid a later index changing
-    # after a prior one is removed.
-    indices_to_remove.sort(reverse=True)
-    for index in indices_to_remove:
-        # Mark the annotation as reviewed before poping it
-        # This ensures that an unseen annotation cannot be unreviewed
-        mark_annotation_reviewed(annotations[index]["_id"])
-        annotations.pop(index)
-
-
-    if len(annotations) > 0:
-        result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
-        result["all_annotation_index"] = list(range(len(annotations)))
-        # set array to 1 if annotation is unreviewed
-        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
-        result["total"] = len(annotations)
-
-    return result
+    return annotations
 
 
 def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):

@@ -564,7 +564,9 @@ def adjudicate_records():
     if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
 
-    res = db.get_all_annotations_for_patient(patient_id)
+    raw_annotations = db.get_all_annotations_for_patient(patient_id)
+    hide_duplicates = db.get_search_query("hide_duplicates")
+    res = format_annotations(raw_annotations, hide_duplicates)
 
     annotations = res["annotations"]
     total_count = res["total"]
@@ -657,6 +659,79 @@ def get_highlighted_sentence(annotation, note):
     highlighted_note.append(text[prev_end_index:sentence_end])
     logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>").strip()
+
+def format_annotations(annotations, hide_duplicates):
+    """
+    Formats annotations to keep only relevant occurrences as well
+        as some additional data such as their review status.
+
+    Args:
+        annotations (list) : A list of all annotations for a paticular patient.
+        hide_duplicates (bool) : True if we want to discard duplicate sentences
+            from the annotations of this patient.
+    Returns:
+        result (dictionary) : A dictionary of all relevant annotations with some metadata.
+    """
+    if hide_duplicates:
+        # If hide_duplicates sentences that are exact matches for sentences in
+        # the same note are removed.
+
+        # We first note the indices where duplicate sentences occur
+        indices_to_remove = []
+        seen_sentences = set()
+        for i in range(len(annotations)):
+            sentence = annotations[i]['sentence'].lower().strip()
+            if sentence in seen_sentences:
+                indices_to_remove.append(i)
+                continue
+
+            seen_sentences.add(sentence)
+    else:
+        # If hide_duplicates is false then each sentence will still only be shown once.
+
+        # We first note the indices where duplicate sentences occur
+        indices_to_remove = []
+        prev_note_id = None
+        seen_sentence_indices = set()
+        for i in range(len(annotations)):
+            # If we are on a new note, then clear the hashset of sentences.
+            # This is done so that we only check for the same sentence
+            # in that note.
+            if annotations[i]['note_id'] != prev_note_id:
+                seen_sentence_indices.clear()
+
+            prev_note_id = annotations[i]['note_id']
+            sentence_index = annotations[i]['sentence_start']
+            if sentence_index in seen_sentence_indices:
+                indices_to_remove.append(i)
+                continue
+
+            seen_sentence_indices.add(sentence_index)
+
+    # Remove the indices in reverse order to avoid a later index changing
+    # after a prior one is removed.
+    indices_to_remove.sort(reverse=True)
+    for index in indices_to_remove:
+        # Mark the annotation as reviewed before poping it
+        # This ensures that an unseen annotation cannot be unreviewed
+        db.mark_annotation_reviewed(annotations[index]["_id"])
+        annotations.pop(index)
+
+    result = {
+        "annotations": [],
+        "all_annotation_index": [],
+        "unreviewed_annotations_index": [],
+        "total": 0
+    }
+
+    if len(annotations) > 0:
+        result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
+        result["all_annotation_index"] = list(range(len(annotations)))
+        # set array to 1 if annotation is unreviewed
+        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
+        result["total"] = len(annotations)
+    
+    return result
 
 def _format_date(date_obj):
     res = None
