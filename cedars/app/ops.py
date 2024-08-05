@@ -396,15 +396,11 @@ def save_adjudications():
     def _update_event_date():
         new_date = request.form['date_entry']
         logger.info(f"Updating {patient_id}: {new_date}")
-        db.update_event_date(patient_id, new_date)
+        db.update_event_date(patient_id, new_date, current_annotation_id)
         _adjudicate_annotation(updated_date = True)
-        db.update_event_annotation_id(patient_id,
-                                      current_annotation_id)
-
 
     def _delete_event_date():
         db.delete_event_date(patient_id)
-        db.delete_event_annotation_id(patient_id)
 
     def _move_to_previous_annotation():
         if session["index"] > 0:

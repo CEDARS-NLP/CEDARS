@@ -882,7 +882,7 @@ def mark_annotation_reviewed(annotation_id):
                                        {"$set": {"reviewed": True}})
 
 
-def update_event_date(patient_id, new_date):
+def update_event_date(patient_id, new_date, annotation_id):
     """
     Enters a new event date for an patient.
 
@@ -890,6 +890,7 @@ def update_event_date(patient_id, new_date):
         patient_id (str) : Unique ID for the patient.
         new_date (str) : The new value to update the event date of the patient with.
             Must be in the format YYYY-MM-DD.
+        annotation_id (str) : ID for the annotation at which the new_date was marked.
     Returns:
         None
     """
@@ -900,6 +901,8 @@ def update_event_date(patient_id, new_date):
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": datetime_obj}})
+    
+    update_event_annotation_id(patient_id, annotation_id)
 
 
 def delete_event_date(patient_id):
@@ -915,6 +918,8 @@ def delete_event_date(patient_id):
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": None}})
+    delete_event_annotation_id(patient_id)
+
 
 def get_event_annotation_id(patient_id):
     """
@@ -1416,7 +1421,13 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             else:
                 reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
                 unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
-                sentences_to_show = get_event_date_sentences(patient_id)
+                key_annotation_id = get_event_annotation_id(patient_id)
+                if key_annotation_id is not None:
+                    key_annotation = get_annotation(key_annotation_id)
+                    sentences_to_show = [key_annotation["sentence"]]
+                else:
+                    sentences_to_show = [""]
+
             sentences = reviewed_sentences + unreviewed_sentences
             total_sentences = len(sentences)
             event_date = get_event_date(patient_id)
@@ -1437,26 +1448,18 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             except Exception:
                 logger.info(f"PINES results not available for patient: {patient_id}")
 
-            key_annotation_id = get_event_annotation_id(patient_id)
-            if key_annotation_id is not None:
-                key_annotation = get_annotation(key_annotation_id)
-                event_sentence = key_annotation["sentence"]
-                detected_token = key_annotation["token"]
-            else:
-                event_sentence = ""
-                detected_token = ""
+
 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
                    len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
                    first_note_date, last_note_date, max_score_note_id, max_score_note_date,
-                   max_score, comments, all_note_details, reviewer, event_sentence,
-                   detected_token]
+                   max_score, comments, all_note_details, reviewer]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
                     "last_note_date", "max_score_note_id",
                     "max_score_note_date", "max_score", "comments",
-                    "predicted_notes", "reviewer", "event_sentence", "detected_token"]
+                    "predicted_notes", "reviewer"]
 
     try:
         # Create an in-memory buffer for the CSV data
