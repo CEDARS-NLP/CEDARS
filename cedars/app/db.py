@@ -872,9 +872,6 @@ def mark_annotation_reviewed(annotation_id):
 
     Args:
         annotation_id (str) : Unique ID for the annotation.
-        skip_after_event (bool) : If the patient has been adjudicated once, 
-            then skip all future events as we only look for the first event
-            for a patient.
     Returns:
         None
     """
@@ -1348,7 +1345,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             notes = get_all_notes(patient_id)
             reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
             note_details = []
-            reviewer = ""
             reviewer = get_patient_reviewer(patient_id)
             for note in notes:
                 note_id = note["text_id"]

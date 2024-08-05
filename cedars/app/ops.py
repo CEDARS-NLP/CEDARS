@@ -625,15 +625,15 @@ def highlighted_text(note):
     logger.info(highlighted_note)
     return " ".join(highlighted_note).replace("\n", "<br>")
 
-def get_highlighted_sentence(annotation, note):
+def get_highlighted_sentence(current_annotation, note):
     """
     Returns highlighted text for a sentence in a note.
     """
     highlighted_note = []
     text = note["text"]
 
-    sentence_start = annotation["sentence_start"]
-    sentence_end = annotation["sentence_end"]
+    sentence_start = current_annotation["sentence_start"]
+    sentence_end = current_annotation["sentence_end"]
     if sentence_start == 0:
         prev_end_index = sentence_start
     else:
@@ -641,7 +641,7 @@ def get_highlighted_sentence(annotation, note):
         prev_end_index = sentence_start - 1
 
     annotations = db.get_all_annotations_for_sentence(note["text_id"],
-                                                      annotation["sentence_number"])
+                                                      current_annotation["sentence_number"])
     logger.info(annotations)
 
     for annotation in annotations:
@@ -729,7 +729,7 @@ def format_annotations(annotations, hide_duplicates):
         # set array to 1 if annotation is unreviewed
         result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
         result["total"] = len(annotations)
-    
+
     return result
 
 def _format_date(date_obj):
