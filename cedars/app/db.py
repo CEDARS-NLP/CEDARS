@@ -603,16 +603,6 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
 
     return res
 
-def get_annotation_date(annotation_id):
-    """
-    Retrives the event date for an annotation.
-    """
-    logger.debug(f"Retriving date on annotation #{ObjectId(annotation_id)}.")
-    annotation = mongo.db["ANNOTATIONS"].find_one({"_id": ObjectId(annotation_id)})
-    patient_id = annotation["patient_id"]
-
-    return get_event_date(patient_id)
-
 def get_event_date(patient_id):
     """
     Find the event date for a patient.
@@ -620,7 +610,12 @@ def get_event_date(patient_id):
     logger.debug(f"Retriving event date for patient #{patient_id}.")
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
 
-    return patient['event_date']
+    if patient and patient['event_date'] is not None:
+        #date_format = '%Y-%m-%d'
+        #event_date = datetime.strptime(patient['event_date'], date_format)
+        return patient['event_date']
+
+    return None
 
 
 def get_event_date_sentences(patient_id):
@@ -888,44 +883,38 @@ def mark_annotation_reviewed(annotation_id):
                                        {"$set": {"reviewed": True}})
 
 
-def update_annotation_date(annotation_id, new_date):
+def update_event_date(patient_id, new_date):
     """
-    Enters a new event date for an annotation.
+    Enters a new event date for an patient.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
-        new_date (str) : The new value to update the event date of an annotation with.
+        patient_id (str) : Unique ID for the patient.
+        new_date (str) : The new value to update the event date of the patient with.
             Must be in the format YYYY-MM-DD.
     Returns:
         None
     """
     # TODO: UTC dates
-    logger.debug(f"Updating date on annotation #{annotation_id} to {new_date}.")
+    logger.debug(f"Updating date on patient #{patient_id} to {new_date}.")
     date_format = '%Y-%m-%d'
     datetime_obj = datetime.strptime(new_date, date_format)
-    anno = mongo.db["ANNOTATIONS"].find_one({"_id": ObjectId(annotation_id)})
-    p_id = anno["patient_id"]
 
-
-    mongo.db["PATIENTS"].update_one({"patient_id": p_id},
+    mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": datetime_obj}})
 
 
-def delete_annotation_date(annotation_id):
+def delete_event_date(patient_id):
     """
-    Deletes the event date for an annotation.
+    Deletes the event date for a patient.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
+        patient_id (str) : Unique ID for the patient.
     Returns:
         None
     """
-    logger.debug(f"Deleting date on annotation #{ObjectId(annotation_id)}.")
-    anno = mongo.db["ANNOTATIONS"].find_one({"_id": ObjectId(annotation_id)})
-    p_id = anno["patient_id"]
+    logger.debug(f"Deleting date on patient #{patient_id}.")
 
-
-    mongo.db["PATIENTS"].update_one({"patient_id": p_id},
+    mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": None}})
 
 

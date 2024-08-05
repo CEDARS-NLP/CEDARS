@@ -115,7 +115,7 @@ def test_get_patients_to_annotate(db):
 
 def test_get_all_annotations_for_patient(db):
     result = db.get_all_annotations_for_patient(1111111111)
-    assert result["total"] == 3
+    assert len(result) == 3
 
 
 def test_get_all_annotations_for_patient_paged(db):
@@ -127,13 +127,6 @@ def test_get_all_annotations_for_patient_paged(db):
 def test_get_patient_annotation_ids(db):
     result = db.get_patient_annotation_ids(1111111111)
     assert len(result) == 3
-
-
-def test_get_annotation_date(db):
-    note_id = "UNIQUE0000000001"
-    annot = db.get_all_annotations_for_note(note_id)[0]
-    annot_id = annot["_id"]
-    assert db.get_annotation_date(annot_id) is None
 
 
 def test_get_event_date(db):
@@ -206,20 +199,20 @@ def test_mark_annotation_reviewed(db):
     assert db.get_annotation(annot_id)["reviewed"] is True
 
 
-def test_update_annotation_date(db):
+def test_update_event_date(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
-    annot_id = str(annot["_id"])
-    db.update_annotation_date(annot_id, "2020-01-01")
-    assert db.get_annotation_date(annot_id) == datetime(2020, 1, 1)
+    patient_id = annot["patient_id"]
+    db.update_event_date(patient_id, "2020-01-01")
+    assert db.get_event_date(patient_id) == datetime(2020, 1, 1)
 
 
-def test_delete_annotation_date(db):
+def test_delete_event_date(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
-    annot_id = str(annot["_id"])
-    db.delete_annotation_date(annot_id)
-    assert db.get_annotation_date(annot_id) is None
+    patient_id = annot["patient_id"]
+    db.delete_event_date(patient_id)
+    assert db.get_event_date(patient_id) is None
 
 
 def test_mark_patient_reviewed(db):
