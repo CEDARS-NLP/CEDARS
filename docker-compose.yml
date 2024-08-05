@@ -147,6 +147,8 @@ services:
       - cedars
     env_file:
       - .env
+    depends_on:
+      - web
     profiles:
       - cpu
       - gpu
@@ -168,6 +170,8 @@ services:
       - cedars
     env_file:
       - .env
+    depends_on:
+      - web
     profiles:
       - cpu
       - gpu
