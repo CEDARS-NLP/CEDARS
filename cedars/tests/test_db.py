@@ -214,6 +214,26 @@ def test_delete_event_date(db):
     db.delete_event_date(patient_id)
     assert db.get_event_date(patient_id) is None
 
+def test_get_event_annotation_id(db):
+    patient_id = 1111111111
+    event_anno_id = db.get_event_annotation_id(patient_id)
+    # Event annotation should be none by default
+    assert event_anno_id is None
+
+def test_update_event_annotation_id(db):
+    patient_id = 1111111111
+    note_id = "UNIQUE0000000001"
+    annot = db.get_all_annotations_for_note(note_id)[0]
+    anno_id = annot["_id"]
+    db.update_event_annotation_id(patient_id, anno_id)
+    event_anno_id = db.get_event_annotation_id(patient_id)
+    assert anno_id == event_anno_id
+
+def test_delete_event_annotation_id(db):
+    patient_id = 1111111111
+    db.delete_event_annotation_id(patient_id)
+    event_anno_id = db.get_event_annotation_id(patient_id)
+    assert event_anno_id is None
 
 def test_mark_patient_reviewed(db):
     db.mark_patient_reviewed(1111111111, "test1")
