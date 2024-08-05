@@ -392,16 +392,15 @@ def save_adjudications():
     """
     current_annotation_id = session["annotations"][session["index"]]
 
-    def _update_annotation_date():
+    def _update_event_date():
         new_date = request.form['date_entry']
-        logger.info(f"Updating {current_annotation_id}: {new_date}")
-        db.update_annotation_date(current_annotation_id, new_date)
+        logger.info(f"Updating {session['patient_id']}: {new_date}")
+        db.update_event_date(session["patient_id"], new_date)
         _adjudicate_annotation(updated_date = True)
 
 
-    def _delete_annotation_date():
-        skip_after_event = db.get_search_query(query_key="skip_after_event")
-        db.delete_annotation_date(current_annotation_id)
+    def _delete_event_date():
+        db.delete_event_date(session['patient_id'])
 
     def _move_to_previous_annotation():
         if session["index"] > 0:
@@ -431,7 +430,7 @@ def save_adjudications():
                                          reviewed_by=current_user.username)
                 db.set_patient_lock_status(session["patient_id"], False)
                 session.pop("patient_id")
-            elif db.get_annotation_date(current_annotation_id) is not None:
+            elif db.get_event_date(session["patient_id"]) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
                                       reviewed_by=current_user.username)
                 db.mark_patient_reviewed(session["patient_id"],
@@ -457,8 +456,8 @@ def save_adjudications():
 
 
     actions = {
-        'new_date': _update_annotation_date,
-        'del_date': _delete_annotation_date,
+        'new_date': _update_event_date,
+        'del_date': _delete_event_date,
         'comment': _add_annotation_comment,
         'prev': _move_to_previous_annotation,
         'next': _move_to_next_annotation,
