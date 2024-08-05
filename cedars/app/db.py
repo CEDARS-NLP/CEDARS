@@ -281,6 +281,8 @@ def upload_notes(documents):
                         "locked": False,
                         "updated": False,
                         "comments": "",
+                        "reviewed_by" : "",
+                        "event_annotation_id" : None,
                         "event_date" : None,
                         "admin_locked": False}
 
@@ -914,6 +916,55 @@ def delete_event_date(patient_id):
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": None}})
 
+def get_event_annotation_id(patient_id):
+    """
+    Retrives the ID for the annotation where 
+            the event date for a patient was found.
+
+    Args:
+        patient_id (str) : Unique ID for the patient.
+    Returns:
+        None
+    """
+    logger.debug(f"Retriving event_annotation_id for patient #{patient_id}.")
+
+    patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
+
+    return patient["event_annotation_id"]
+
+def update_event_annotation_id(patient_id, annotation_id):
+    """
+    Updates the ID for the annotation where 
+            the event date for a patient was found.
+
+    Args:
+        patient_id (str) : Unique ID for the patient.
+        annotation_id (str) : ID of the annotation where the
+            event date for this patient was entered.
+    Returns:
+        None
+    """
+    logger.debug(f"Updating event_annotation_id on patient #{patient_id}.")
+
+    mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
+                                       {"$set": {"event_annotation_id": annotation_id}})
+    
+def delete_event_annotation_id(patient_id):
+    """
+    Deletes the ID for the annotation where 
+            the event date for a patient was found.
+
+    Args:
+        patient_id (str) : Unique ID for the patient.
+    Returns:
+        None
+    """
+    logger.debug(f"Deleting event_annotation_id on patient #{patient_id}.")
+
+    mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
+                                       {"$set": {"event_annotation_id": None}})
+    
+
 
 def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed=True):
     """
@@ -1386,16 +1437,26 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             except Exception:
                 logger.info(f"PINES results not available for patient: {patient_id}")
 
+            key_annotation_id = get_event_annotation_id(patient_id)
+            if key_annotation_id is not None:
+                key_annotation = get_annotation(key_annotation_id)
+                event_sentence = key_annotation["sentence"]
+                detected_token = key_annotation["token"]
+            else:
+                event_sentence = ""
+                detected_token = ""
+
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
                    len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
                    first_note_date, last_note_date, max_score_note_id, max_score_note_date,
-                   max_score, comments, all_note_details, reviewer]
+                   max_score, comments, all_note_details, reviewer, event_sentence,
+                   detected_token]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
                     "last_note_date", "max_score_note_id",
                     "max_score_note_date", "max_score", "comments",
-                    "predicted_notes", "reviewer"]
+                    "predicted_notes", "reviewer", "event_sentence", "detected_token"]
 
     try:
         # Create an in-memory buffer for the CSV data
