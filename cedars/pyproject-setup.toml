@@ -23,7 +23,8 @@ dependencies = [
     "sqlalchemy",
     "negspacy",
     "flask-session",
-    "faker"
+    "faker",
+    "tenacity"
 ]
 
 [build-system]
