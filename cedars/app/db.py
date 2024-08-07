@@ -1188,8 +1188,9 @@ def get_prediction(note: str) -> float:
     port=12345
 
     #pines_api_url = os.getenv("PINES_API_URL")
+    logger.info(f"Waiting for pines url from {host}:{port}.")
     pines_api_url = get_pines_url(host, port)
-    print(f"\n\nRecived url : {pines_api_url} for pines from {host}", flush=True)
+    logger.info(f"\n\nRecived url : {pines_api_url} for pines from {host}")
     url = f'{pines_api_url}/predict'
     data = {'text': note}
     log_notes = None
