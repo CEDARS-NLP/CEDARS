@@ -18,6 +18,7 @@ from bson import ObjectId
 from loguru import logger
 
 from .database import mongo, minio
+from .network_conn import get_pines_url
 
 fake = Faker()
 
@@ -1182,7 +1183,14 @@ def get_prediction(note: str) -> float:
 
     Get prediction from endpoint. Text goes in the POST request.
     """
-    url = f'{os.getenv("PINES_API_URL")}/predict'
+
+    host = "ec2-15-206-209-23.ap-south-1.compute.amazonaws.com"
+    port=12345
+
+    #pines_api_url = os.getenv("PINES_API_URL")
+    pines_api_url = get_pines_url(host, port)
+    print(f"\n\nRecived url : {pines_api_url} for pines from {host}", flush=True)
+    url = f'{pines_api_url}/predict'
     data = {'text': note}
     log_notes = None
     try:
