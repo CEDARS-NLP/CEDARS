@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import pandas as pd
 import flask
 from dotenv import dotenv_values
-import requests
 from flask import (
     Blueprint, render_template,
     redirect, session, request,
@@ -407,7 +406,7 @@ def save_adjudications():
             new_index = session["index"] - shift_value
             session["index"] = max(0, new_index)
             session.modified = True
-        
+
         return shift_index_backwards
 
     def _move_to_next_annotation(shift_value):
@@ -416,7 +415,7 @@ def save_adjudications():
             session_index_max = session["total_count"] - 1
             session["index"] = min(session_index_max, new_index)
             session.modified = True
-        
+
         return shift_index_forwards
 
     def _adjudicate_annotation(updated_date = False):
@@ -461,7 +460,6 @@ def save_adjudications():
         db.add_comment(current_annotation_id, request.form['comment'])
 
 
-
     actions = {
         'new_date': _update_event_date,
         'del_date': _delete_event_date,
@@ -494,7 +492,7 @@ def show_annotation():
     """
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
-    
+
     note = db.get_annotation_note(str(annotation["_id"]))
     if not note:
         flash("Annotation note not found.")
@@ -555,13 +553,13 @@ def adjudicate_records():
     patient_id = None
     if request.method == "GET":
         if session.get("patient_id") is not None:
-            if db.get_patient_lock_status(session.get("patient_id")) == False:
+            if db.get_patient_lock_status(session.get("patient_id")) is False:
                 logger.info(f"Getting patient: {session.get('patient_id')} from session")
                 return redirect(url_for("ops.show_annotation"))
-            else:
-                logger.info(f"Patient {session.get('patient_id')} is locked.")
-                logger.info("Retrieving next patient.")
-        
+
+            logger.info(f"Patient {session.get('patient_id')} is locked.")
+            logger.info("Retrieving next patient.")
+
         patient_id = db.get_patients_to_annotate()
     else:
         if session.get("patient_id") is not None:
@@ -572,7 +570,7 @@ def adjudicate_records():
         is_patient_locked = False
         if search_patient and len(search_patient.strip()) > 0:
             is_patient_locked = db.get_patient_lock_status(search_patient)
-            if is_patient_locked == False:
+            if is_patient_locked is False:
                 search_patient = convert_to_int(search_patient)
                 patient = db.get_patient_by_id(search_patient)
                 if patient:
@@ -639,7 +637,7 @@ def unlock_current_patient():
         db.set_patient_lock_status(patient_id, False)
         session["patient_id"] = None
         return jsonify({"message": f"Unlocking patient # {patient_id}."}), 200
-    
+
     return jsonify({"error": "No patient to unlock."}), 200
 
 def highlighted_text(note):
@@ -721,8 +719,8 @@ def format_annotations(annotations, hide_duplicates):
         # We first note the indices where duplicate sentences occur
         indices_to_remove = []
         seen_sentences = set()
-        for i in range(len(annotations)):
-            sentence = annotations[i]['sentence'].lower().strip()
+        for i, annotation in enumerate(annotations):
+            sentence = annotation['sentence'].lower().strip()
             if sentence in seen_sentences:
                 indices_to_remove.append(i)
                 continue
@@ -735,15 +733,15 @@ def format_annotations(annotations, hide_duplicates):
         indices_to_remove = []
         prev_note_id = None
         seen_sentence_indices = set()
-        for i in range(len(annotations)):
+        for i, annotation in enumerate(annotations):
             # If we are on a new note, then clear the hashset of sentences.
             # This is done so that we only check for the same sentence
             # in that note.
-            if annotations[i]['note_id'] != prev_note_id:
+            if annotation['note_id'] != prev_note_id:
                 seen_sentence_indices.clear()
 
-            prev_note_id = annotations[i]['note_id']
-            sentence_index = annotations[i]['sentence_start']
+            prev_note_id = annotation['note_id']
+            sentence_index = annotation['sentence_start']
             if sentence_index in seen_sentence_indices:
                 indices_to_remove.append(i)
                 continue
