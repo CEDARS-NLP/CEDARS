@@ -8,10 +8,11 @@ from datetime import datetime, timezone
 import pandas as pd
 import flask
 from dotenv import dotenv_values
+import requests
 from flask import (
     Blueprint, render_template,
     redirect, session, request,
-    url_for, flash, g
+    url_for, flash, g, jsonify
 )
 
 from loguru import logger
@@ -68,7 +69,6 @@ def convert_to_int(value):
         return int(value)
     except ValueError:
         return value
-
 
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
@@ -402,15 +402,22 @@ def save_adjudications():
     def _delete_event_date():
         db.delete_event_date(patient_id)
 
-    def _move_to_previous_annotation():
-        if session["index"] > 0:
-            session["index"] -= 1
+    def _move_to_previous_annotation(shift_value):
+        def shift_index_backwards():
+            new_index = session["index"] - shift_value
+            session["index"] = max(0, new_index)
             session.modified = True
+        
+        return shift_index_backwards
 
-    def _move_to_next_annotation():
-        if session["index"] < session["total_count"] - 1:
-            session["index"] += 1
+    def _move_to_next_annotation(shift_value):
+        def shift_index_forwards():
+            new_index = session["index"] + shift_value
+            session_index_max = session["total_count"] - 1
+            session["index"] = min(session_index_max, new_index)
             session.modified = True
+        
+        return shift_index_forwards
 
     def _adjudicate_annotation(updated_date = False):
         skip_after_event = db.get_search_query(query_key="skip_after_event")
@@ -459,8 +466,12 @@ def save_adjudications():
         'new_date': _update_event_date,
         'del_date': _delete_event_date,
         'comment': _add_annotation_comment,
-        'prev': _move_to_previous_annotation,
-        'next': _move_to_next_annotation,
+        'prev_100': _move_to_previous_annotation(100),
+        'prev_10': _move_to_previous_annotation(10),
+        'prev_1': _move_to_previous_annotation(1),
+        'next_1': _move_to_next_annotation(1),
+        'next_10': _move_to_next_annotation(10),
+        'next_100': _move_to_next_annotation(100),
         'adjudicate': _adjudicate_annotation
     }
 
@@ -483,6 +494,7 @@ def show_annotation():
     """
     index = session.get("index", 0)
     annotation = db.get_annotation(session["annotations"][index])
+    
     note = db.get_annotation_note(str(annotation["_id"]))
     if not note:
         flash("Annotation note not found.")
@@ -543,21 +555,39 @@ def adjudicate_records():
     patient_id = None
     if request.method == "GET":
         if session.get("patient_id") is not None:
-            logger.info(f"Getting patient: {session.get('patient_id')} from session")
-            return redirect(url_for("ops.show_annotation"))
+            if db.get_patient_lock_status(session.get("patient_id")) == False:
+                logger.info(f"Getting patient: {session.get('patient_id')} from session")
+                return redirect(url_for("ops.show_annotation"))
+            else:
+                logger.info(f"Patient {session.get('patient_id')} is locked.")
+                logger.info("Retrieving next patient.")
+        
         patient_id = db.get_patients_to_annotate()
     else:
-        session.pop("patient_id", None)
+        if session.get("patient_id") is not None:
+            db.set_patient_lock_status(session.get("patient_id"), False)
+            session.pop("patient_id", None)
+
         search_patient = request.form.get("patient_id")
+        is_patient_locked = False
         if search_patient and len(search_patient.strip()) > 0:
-            search_patient = convert_to_int(search_patient)
-            patient = db.get_patient_by_id(search_patient)
-            if patient:
-                patient_id = patient["patient_id"]
+            is_patient_locked = db.get_patient_lock_status(search_patient)
+            if is_patient_locked == False:
+                search_patient = convert_to_int(search_patient)
+                patient = db.get_patient_by_id(search_patient)
+                if patient:
+                    patient_id = patient["patient_id"]
+                else:
+                    patient_id = None
+            else:
+                patient_id = None
 
         if patient_id is None:
             # if the search return no patient, get the next patient
-            flash(f"Patient {search_patient} does not exist. Showing next patient")
+            if is_patient_locked:
+                flash(f"Patient {search_patient} is currently being reviewed by another user. Showing next patient")
+            else:
+                flash(f"Patient {search_patient} does not exist. Showing next patient")
             patient_id = db.get_patients_to_annotate()
 
     if patient_id is None:
@@ -575,6 +605,7 @@ def adjudicate_records():
     if total_count == 0:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
+        db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
     elif unreviewed_annotations_index.count(1) == 0:
         flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
@@ -594,10 +625,22 @@ def adjudicate_records():
         session["unreviewed_annotations_index"] = unreviewed_annotations_index
         session["index"] = all_annotation_index[unreviewed_annotations_index.index(1)]
 
-    # db.set_patient_lock_status(patient_id, True)
+    db.set_patient_lock_status(patient_id, True)
     session.modified = True
     return redirect(url_for("ops.show_annotation"))
 
+@bp.route("/unlock_patient", methods=["POST"])
+def unlock_current_patient():
+    """
+    Sets the locked status of the patient in the session to False.
+    """
+    patient_id = session["patient_id"]
+    if patient_id is not None:
+        db.set_patient_lock_status(patient_id, False)
+        session["patient_id"] = None
+        return jsonify({"message": f"Unlocking patient # {patient_id}."}), 200
+    
+    return jsonify({"error": "No patient to unlock."}), 200
 
 def highlighted_text(note):
     """
