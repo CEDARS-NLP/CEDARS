@@ -478,8 +478,8 @@ def get_patients_to_annotate():
         annotations = get_patient_annotation_ids(patient_id)
         if len(annotations) > 0:
             return patient_id
-        else:
-            mark_patient_reviewed(patient_id, "CEDARS")
+
+        mark_patient_reviewed(patient_id, "CEDARS")
 
     return None
 
@@ -597,11 +597,11 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
 
     res = []
     if key == "sentence":
-        for id in annotation_ids:
-            cleaned_sentence = ' '.join(id[key].split())
-            res.append(f'{id["note_id"]}:{str(id["text_date"])[:10]}:{cleaned_sentence}')
+        for _id in annotation_ids:
+            cleaned_sentence = ' '.join(_id[key].split())
+            res.append(f'{_id["note_id"]}:{str(_id["text_date"])[:10]}:{cleaned_sentence}')
     else:
-        res = [str(id[key]) for id in annotation_ids]
+        res = [str(_id[key]) for _id in annotation_ids]
 
     return res
 
@@ -792,6 +792,7 @@ def get_patient_lock_status(patient_id):
     Raises:
         None
     """
+    patient_id = int(patient_id)
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
 
@@ -901,7 +902,7 @@ def update_event_date(patient_id, new_date, annotation_id):
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_date": datetime_obj}})
-    
+
     update_event_annotation_id(patient_id, annotation_id)
 
 
@@ -953,7 +954,7 @@ def update_event_annotation_id(patient_id, annotation_id):
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": annotation_id}})
-    
+
 def delete_event_annotation_id(patient_id):
     """
     Deletes the ID for the annotation where 
@@ -968,7 +969,6 @@ def delete_event_annotation_id(patient_id):
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": None}})
-    
 
 
 def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed=True):
@@ -1005,7 +1005,6 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
-                                               "locked": False,
                                                "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
@@ -1339,22 +1338,35 @@ def add_task(task):
 
 
 def get_tasks_in_progress():
+    """
+    Returns tasks that have not been completed yet.
+    """
     task_db = mongo.db["TASK"]
     return task_db.find({"complete": False})
 
 
 def get_task_in_progress(task_id):
+    """
+    Returns the task with this ID, if it has not been completed.
+    """
     task_db = mongo.db["TASK"]
     return task_db.find_one({"job_id": task_id,
                              "complete": False})
 
 
 def get_task(task_id):
+    """
+    Returns the task with this ID, regardless of it's completion status.
+    """
     task_db = mongo.db["TASK"]
     return task_db.find_one({"job_id": task_id})
 
 
 def update_db_task_progress(task_id, progress):
+    """
+    Updates the progress of a task and checks if it has completed.
+    This function will also automatically unlock the patient after completion.
+    """
     task_db = mongo.db["TASK"]
     task = task_db.find_one({"job_id": task_id})
     completed = False
@@ -1369,12 +1381,18 @@ def update_db_task_progress(task_id, progress):
 
 
 def report_success(job, connection, result, *args, **kwargs):
+    """
+    Saves the data associated with a successful job after completion.
+    """
     job.meta['progress'] = 100
     job.save_meta()
     update_db_task_progress(job.get_id(), 100)
 
 
 def report_failure(job, connection, type, value, *args, **kwargs):
+    """
+    Saves the data associated with a job that failed to complete.
+    """
     job.meta['progress'] = 0
     job.save_meta()
     update_db_task_progress(job.get_id(), 0)
