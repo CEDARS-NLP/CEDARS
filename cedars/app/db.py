@@ -792,8 +792,10 @@ def get_patient_lock_status(patient_id):
     Raises:
         None
     """
+    patient_id = int(patient_id)
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
+    
 
 
 def get_all_notes(patient_id):
@@ -1005,7 +1007,6 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
-                                               "locked": False,
                                                "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
