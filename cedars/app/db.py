@@ -68,6 +68,8 @@ def create_info_col(project_name, project_id, investigator_name, cedars_version)
         None
     """
     collection = mongo.db["INFO"]
+    # TODO: add pines URL to the info collection
+    # 
     info = {"creation_time": datetime.now(),
             "project": project_name,
             "project_id": project_id,
@@ -1182,15 +1184,23 @@ def get_prediction(note: str) -> float:
     ##### PINES predictions
 
     Get prediction from endpoint. Text goes in the POST request.
+
+    if PINES_URL is not available in the ENV then
+    - Start a PINES SERVER
+    - With retry logic - keep making get requests
+    - Get request gives a PINES URL
+    - Call this URL for PINES predictions
+
     """
 
+    # make the host =  SUPERBIO_API_URL=https://test.superbio.ai:446/api in .env
     host = "ec2-15-206-209-23.ap-south-1.compute.amazonaws.com"
     port=12345
 
     #pines_api_url = os.getenv("PINES_API_URL")
     logger.info(f"Waiting for pines url from {host}:{port}.")
     pines_api_url = get_pines_url(host, port)
-    logger.info(f"\n\nRecived url : {pines_api_url} for pines from {host}")
+    logger.info(f"\n\nReceived url : {pines_api_url} for pines from {host}")
     url = f'{pines_api_url}/predict'
     data = {'text': note}
     log_notes = None
@@ -1395,6 +1405,16 @@ def report_success(job, connection, result, *args, **kwargs):
     """
     job.meta['progress'] = 100
     job.save_meta()
+
+    # TODO: Check if the TASK queue has anything processing
+    # if not - 
+    # 1. Start indexing the annotations and notes db
+    # 2. send a spin down request to the PINES Server if we are using superbio,
+    # update the info col to say PINES disabled
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # kill PINES server if superbio
+        pass
     update_db_task_progress(job.get_id(), 100)
 
 
