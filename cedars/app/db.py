@@ -18,7 +18,8 @@ from bson import ObjectId
 from loguru import logger
 
 from .database import mongo, minio
-from .network_conn import get_pines_url
+import requests
+from tenacity import retry, wait_fixed
 
 fake = Faker()
 
@@ -40,6 +41,12 @@ def create_project(project_name,
     """
     if mongo.db["INFO"].find_one() is not None:
         logger.info("Database already created.")
+
+        # Even if the db already exists,
+        # the PINES server info must be reloaded to
+        # ensure it's correctness, in the event of an update to the
+        # environment variable or if the url is being retrieved dynamically.
+        create_pines_info()
         return
 
     create_info_col(project_name=project_name,
@@ -54,6 +61,14 @@ def create_project(project_name,
 
     logger.info("Database creation successful!")
 
+def create_pines_info():
+    """
+    Retrives the PINES url from the relevant source and
+        updates the INFO col with the information.
+    """
+    pines_url, is_url_from_api = load_pines_url()
+    update_pines_api_url(pines_url)
+    update_pines_api_status(is_url_from_api)
 
 def create_info_col(project_name, project_id, investigator_name, cedars_version):
     """
@@ -68,13 +83,16 @@ def create_info_col(project_name, project_id, investigator_name, cedars_version)
         None
     """
     collection = mongo.db["INFO"]
-    # TODO: add pines URL to the info collection
-    # 
+
+    
     info = {"creation_time": datetime.now(),
             "project": project_name,
             "project_id": project_id,
             "investigator": investigator_name,
             "CEDARS_version": cedars_version}
+
+    # Create the PINES fields and store their data in the INFO col.
+    create_pines_info()
 
     collection.insert_one(info)
     logger.info("Created INFO collection.")
@@ -178,6 +196,15 @@ def create_index(collection, index: list):
             mongo.db[collection].create_index(i)
         logger.info(f"Created index {i} in collection {collection}.")
 
+def create_db_indices():
+    '''
+    Creates indices for the ANNOTATIONS and PINES cols in the db.
+    '''
+    logger.info("All tasks completed.")
+    logger.info("Creating indexes for ANNOTATIONS.")
+    create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    logger.info("Creating indexes for PINES.")
+    create_index("PINES", [("text_id", {"unique": True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
@@ -871,6 +898,35 @@ def update_project_name(new_name):
     logger.info(f"Updating project name to #{new_name}")
     mongo.db["INFO"].update_one({}, {"$set": {"project": new_name}})
 
+def update_pines_api_status(new_status):
+    """
+    Updates the is_pines_server_enabled in the INFO collection of the database
+        to reflect the status of the PINES server.
+
+    Args:
+        new_status (bool) : True if the PINES server is running.
+    Returns:
+        None
+    """
+    logger.info(f"Setting PINES API status to {new_status}")
+    mongo.db["INFO"].update_one({},
+                                {"$set": {"is_pines_server_enabled": new_status}})
+
+def update_pines_api_url(new_url):
+    """
+    Updates the PINES API url in the INFO collection of the database
+        to reflect the address of the PINES server.
+
+    Args:
+        new_url (str) : The url of the PINES server's API.
+    Returns:
+        None
+    """
+    logger.info(f"Setting PINES API url to {new_url}")
+    mongo.db["INFO"].update_one({},
+                                {"$set": {"pines_url": new_url}})
+
+
 
 def mark_annotation_reviewed(annotation_id):
     """
@@ -1184,23 +1240,10 @@ def get_prediction(note: str) -> float:
     ##### PINES predictions
 
     Get prediction from endpoint. Text goes in the POST request.
-
-    if PINES_URL is not available in the ENV then
-    - Start a PINES SERVER
-    - With retry logic - keep making get requests
-    - Get request gives a PINES URL
-    - Call this URL for PINES predictions
-
     """
 
-    # make the host =  SUPERBIO_API_URL=https://test.superbio.ai:446/api in .env
-    host = "ec2-15-206-209-23.ap-south-1.compute.amazonaws.com"
-    port=12345
+    pines_api_url = get_pines_url()
 
-    #pines_api_url = os.getenv("PINES_API_URL")
-    logger.info(f"Waiting for pines url from {host}:{port}.")
-    pines_api_url = get_pines_url(host, port)
-    logger.info(f"\n\nReceived url : {pines_api_url} for pines from {host}")
     url = f'{pines_api_url}/predict'
     data = {'text': note}
     log_notes = None
@@ -1398,23 +1441,27 @@ def update_db_task_progress(task_id, progress):
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
-
 def report_success(job, connection, result, *args, **kwargs):
     """
     Saves the data associated with a successful job after completion.
+    This will also automatically check for the completion of all current tasks.
+    If the tasks are completed will then create all required indices and shutdown
+    the PINES server if it is running via a SUPERBIO api.
     """
     job.meta['progress'] = 100
     job.save_meta()
 
-    # TODO: Check if the TASK queue has anything processing
-    # if not - 
+    # If the TASK queue does not have any jobs :
     # 1. Start indexing the annotations and notes db
     # 2. send a spin down request to the PINES Server if we are using superbio,
     # update the info col to say PINES disabled
     queue_length = len(flask.current_app.task_queue)
     if queue_length == 0:
-        # kill PINES server if superbio
-        pass
+        # Index database and spin down PINES if all tasks are completed
+        create_db_indices()
+        kill_pines_api()
+        
+        
     update_db_task_progress(job.get_id(), 100)
 
 
@@ -1424,6 +1471,15 @@ def report_failure(job, connection, type, value, *args, **kwargs):
     """
     job.meta['progress'] = 0
     job.save_meta()
+    # If the TASK queue does not have any jobs :
+    # 1. Start indexing the annotations and notes db
+    # 2. send a spin down request to the PINES Server if we are using superbio,
+    # update the info col to say PINES disabled
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # Index database and spin down PINES if all tasks are completed
+        create_db_indices()
+        kill_pines_api()
     update_db_task_progress(job.get_id(), 0)
 
 def get_patient_reviewer(patient_id):
@@ -1436,6 +1492,83 @@ def get_patient_reviewer(patient_id):
         return None
 
     return reviewed_by
+
+def get_pines_url():
+    '''
+    Retrives PINES url from INFO col.
+    '''
+
+    info_col = mongo.db["INFO"].find_one()
+    if info_col:
+        return info_col["pines_url"]
+    
+    return None
+
+def is_pines_api_running():
+    '''
+    Returns True if a SuperBIO PINES API server is running.
+    '''
+
+    info_col = mongo.db["INFO"].find_one()
+    if info_col:
+        return info_col["is_pines_server_enabled"]
+    
+    return False
+
+def load_pines_url():
+    '''
+    if PINES_URL is not available in the ENV then
+    - Start a PINES SERVER
+    - With retry logic - keep making get requests
+    - Get request gives a PINES URL
+    - Call this URL for PINES predictions
+    '''
+
+    env_url = os.getenv("PINES_API_URL")
+    if env_url is not None:
+        # Get PINES api from .env
+        pines_api_url = env_url
+        is_url_from_api = False
+        logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
+    else:
+        # Get PINES api from API
+        api_url = os.getenv("SUPERBIO_API_URL")
+        api_endpoint = os.getenv("SUPERBIO_API_ENDPOINT")
+        # Send a POST request to start the SERVER
+        requests.post(f'{api_url}/{api_endpoint}', data={})
+
+        pines_api_url = load_pines_from_api(api_url, api_endpoint)
+        is_url_from_api = True
+        logger.info(f"Received url : {pines_api_url} for pines from API.")
+
+    return pines_api_url, is_url_from_api
+
+@retry(wait=wait_fixed(2))
+def load_pines_from_api(api_url, api_endpoint):
+    '''
+    Gets the PINES url from an api using a get request.
+
+    Expected return format from API :
+    {
+        'status': <status from cloudformation>,
+        'url': <pines URL if it was spun up>
+    }
+    '''
+
+    data = requests.get(f'{api_url}/{api_endpoint}')
+    json_data = data.json()
+    return json_data['url']
+
+def kill_pines_api():
+    if is_pines_api_running():
+        # kill PINES server if using superbio API
+        logger.info("Killing PINES server.")
+        api_url = os.getenv("SUPERBIO_API_URL")
+        api_endpoint = os.getenv("SUPERBIO_API_ENDPOINT")
+        requests.delete(f'{api_url}/{api_endpoint}')
+
+        # Set pines server status to False and delete the old url.
+        update_pines_api_status(False)
 
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
