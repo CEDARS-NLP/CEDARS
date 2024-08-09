@@ -1534,18 +1534,17 @@ def load_pines_url():
     else:
         # Get PINES api from API
         api_url = os.getenv("SUPERBIO_API_URL")
-        api_endpoint = os.getenv("SUPERBIO_API_ENDPOINT")
         # Send a POST request to start the SERVER
-        requests.post(f'{api_url}/{api_endpoint}', data={})
+        requests.post(f'{api_url}', data={})
 
-        pines_api_url = load_pines_from_api(api_url, api_endpoint)
+        pines_api_url = load_pines_from_api(api_url)
         is_url_from_api = True
         logger.info(f"Received url : {pines_api_url} for pines from API.")
 
     return pines_api_url, is_url_from_api
 
 @retry(wait=wait_fixed(2))
-def load_pines_from_api(api_url, api_endpoint):
+def load_pines_from_api(api_url):
     '''
     Gets the PINES url from an api using a get request.
 
@@ -1556,7 +1555,7 @@ def load_pines_from_api(api_url, api_endpoint):
     }
     '''
 
-    data = requests.get(f'{api_url}/{api_endpoint}')
+    data = requests.get(f'{api_url}')
     json_data = data.json()
     return json_data['url']
 
@@ -1569,8 +1568,7 @@ def kill_pines_api():
         # kill PINES server if using superbio API
         logger.info("Killing PINES server.")
         api_url = os.getenv("SUPERBIO_API_URL")
-        api_endpoint = os.getenv("SUPERBIO_API_ENDPOINT")
-        requests.delete(f'{api_url}/{api_endpoint}')
+        requests.delete(f'{api_url}')
 
         # Set pines server status to False and delete the old url.
         update_pines_api_status(False)
