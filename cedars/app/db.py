@@ -12,13 +12,13 @@ from uuid import uuid4
 from faker import Faker
 
 import flask
-from flask import g
+from flask import g, flash, redirect
 import requests
 import pandas as pd
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
-from tenacity import retry, wait_fixed
+from tenacity import retry, wait_exponential
 
 from .database import mongo, minio
 
@@ -67,8 +67,13 @@ def create_pines_info():
         updates the INFO col with the information.
     """
     pines_url, is_url_from_api = load_pines_url()
+    if pines_url is None:
+        logger.error("No PINES URL found.")
+        return None
     update_pines_api_url(pines_url)
     update_pines_api_status(is_url_from_api)
+
+    return pines_url
 
 def create_info_col(project_name, project_id, investigator_name, cedars_version):
     """
@@ -1241,6 +1246,10 @@ def get_prediction(note: str) -> float:
     Get prediction from endpoint. Text goes in the POST request.
     """
 
+    if not is_pines_api_running():
+        pines_url = create_pines_info()
+        if pines_url is None:
+            raise Exception("No PINES url found.")
     pines_api_url = get_pines_url()
 
     url = f'{pines_api_url}/predict'
@@ -1526,25 +1535,40 @@ def load_pines_url():
     '''
 
     env_url = os.getenv("PINES_API_URL")
+    api_url = os.getenv("SUPERBIO_API_URL")
     if env_url is not None:
         # Get PINES api from .env
         pines_api_url = env_url
         is_url_from_api = False
         logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
-    else:
+    elif api_url is not None:
         # Get PINES api from API
-        api_url = os.getenv("SUPERBIO_API_URL")
         # Send a POST request to start the SERVER
-        requests.post(f'{api_url}', data={})
+        project_id = get_info()['project_id']
+        endpoint = f"api/cedars_projects/{project_id}/pines"
 
-        pines_api_url = load_pines_from_api(api_url)
+        try:
+            response = requests.post(f'{api_url}/{endpoint}', data={})
+        except Exception as e:
+            logger.error(f"Encountered error {e} when trying to start PINES server")
+            return None, False
+        
+        if response.status_code != 200:
+            logger.error(f"""Expected response with status code 200 from POST request to start PINES server.
+                  Got {response.status_code}""")
+            return None, False
+
+        pines_api_url = load_pines_from_api(api_url, endpoint)
         is_url_from_api = True
         logger.info(f"Received url : {pines_api_url} for pines from API.")
+    else:
+        logger.error("Unable to find any URL for PINES.")
+        raise Exception("Unable to find any URL for PINES.")
 
     return pines_api_url, is_url_from_api
 
-@retry(wait=wait_fixed(2))
-def load_pines_from_api(api_url):
+@retry(wait=wait_exponential(multiplier=1, min=4, max=600))
+def load_pines_from_api(api_url, endpoint):
     '''
     Gets the PINES url from an api using a get request.
 
@@ -1555,7 +1579,7 @@ def load_pines_from_api(api_url):
     }
     '''
 
-    data = requests.get(f'{api_url}')
+    data = requests.get(f'{api_url}/{endpoint}')
     json_data = data.json()
     return json_data['url']
 
@@ -1568,10 +1592,16 @@ def kill_pines_api():
         # kill PINES server if using superbio API
         logger.info("Killing PINES server.")
         api_url = os.getenv("SUPERBIO_API_URL")
-        requests.delete(f'{api_url}')
+        if api_url is not None:
+            project_id = get_info()['project_id']
+            endpoint = f"api/cedars_projects/{project_id}/pines"
+            try:
+                requests.delete(f'{api_url}/{endpoint}')
+            except Exception as e:
+                logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
 
-        # Set pines server status to False and delete the old url.
-        update_pines_api_status(False)
+            # Set pines server status to False and delete the old url.
+            update_pines_api_status(False)
 
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
