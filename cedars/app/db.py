@@ -6,9 +6,11 @@ import os
 from io import BytesIO, StringIO
 import re
 from datetime import datetime
+
 from typing import Optional
 from uuid import uuid4
 from faker import Faker
+
 import flask
 from flask import g
 import requests
@@ -16,13 +18,11 @@ import pandas as pd
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
-
-from .database import mongo, minio
-import requests
 from tenacity import retry, wait_fixed
 
-fake = Faker()
+from .database import mongo, minio
 
+fake = Faker()
 
 # Create collections and indexes
 def create_project(project_name,
@@ -84,7 +84,6 @@ def create_info_col(project_name, project_id, investigator_name, cedars_version)
     """
     collection = mongo.db["INFO"]
 
-    
     info = {"creation_time": datetime.now(),
             "project": project_name,
             "project_id": project_id,
@@ -1460,14 +1459,16 @@ def report_success(job, connection, result, *args, **kwargs):
         # Index database and spin down PINES if all tasks are completed
         create_db_indices()
         kill_pines_api()
-        
-        
+
     update_db_task_progress(job.get_id(), 100)
 
 
 def report_failure(job, connection, type, value, *args, **kwargs):
     """
     Saves the data associated with a job that failed to complete.
+    This will also automatically check for the completion of all current tasks.
+    If the tasks are completed will then create all required indices and shutdown
+    the PINES server if it is running via a SUPERBIO api.
     """
     job.meta['progress'] = 0
     job.save_meta()
@@ -1501,7 +1502,7 @@ def get_pines_url():
     info_col = mongo.db["INFO"].find_one()
     if info_col:
         return info_col["pines_url"]
-    
+
     return None
 
 def is_pines_api_running():
@@ -1512,7 +1513,7 @@ def is_pines_api_running():
     info_col = mongo.db["INFO"].find_one()
     if info_col:
         return info_col["is_pines_server_enabled"]
-    
+
     return False
 
 def load_pines_url():
@@ -1560,6 +1561,10 @@ def load_pines_from_api(api_url, api_endpoint):
     return json_data['url']
 
 def kill_pines_api():
+    '''
+    Shutsdown remote PINES server if it is running.
+    Currently only applicable when using the superbio API system.
+    '''
     if is_pines_api_running():
         # kill PINES server if using superbio API
         logger.info("Killing PINES server.")
