@@ -798,6 +798,7 @@ def download_page(job_id=None):
 
     if job_id is not None:
         return flask.jsonify({"files": files}), 202
+
     return render_template('ops/download.html', job_id=job_id, files=files, **db.get_info())
 
 
@@ -837,6 +838,7 @@ def create_download():
     """
     Create a download task for annotations
     """
+
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations.csv",
     )
@@ -849,11 +851,13 @@ def create_download_full():
     """
     Create a download task for annotations
     """
+
+
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations_full.csv", True
     )
-    return flask.jsonify({'job_id': job.get_id()}), 202
 
+    return flask.jsonify({'job_id': job.get_id()}), 202
 
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
