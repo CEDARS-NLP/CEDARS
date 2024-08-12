@@ -88,7 +88,6 @@ services:
     depends_on:
       - web
       - minio
-      - pines
     networks:
       - cedars
     profiles:

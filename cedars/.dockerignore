@@ -13,3 +13,4 @@ npm-debug.log
 **/*.ipynb
 **/.DS_Store
 **/.pytest_cache
+.venv
