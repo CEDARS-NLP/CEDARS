@@ -19,6 +19,7 @@ from flask_login import (
     current_user
 )
 
+from password_strength import PasswordPolicy
 from werkzeug.security import check_password_hash, generate_password_hash
 from bson import ObjectId
 from . import db
@@ -26,8 +27,7 @@ from . import db
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 login_manager = LoginManager()
-login_manager.needs_refresh_message = (u"Session timed out, please re-login")
-
+login_manager.needs_refresh_message = u"Session timed out, please re-login"
 
 def admin_required(func):
     """Admin required decorator"""
@@ -72,6 +72,15 @@ class User(UserMixin):
 @bp.route("/register", methods=["GET", "POST"])
 def register():
     """Register a new user"""
+
+    # Password strength policy
+    policy = PasswordPolicy.from_names(
+                    length=8,  # min length: 8
+                    uppercase=2,  # need min. 2 uppercase letters
+                    numbers=2,  # need min. 2 digits
+                    special=2,  # need min. 2 special characters
+                    )
+
     if request.method == 'POST':
         username = request.form.get("username")
         password = request.form.get("password")
@@ -79,15 +88,29 @@ def register():
         is_admin = request.form.get("isadmin") == "on"
         print(f"Registering user {username} as admin: {is_admin}")
 
+        # This result holds all of the tests that failed the password policy check
+        password_test_results = policy.test(password)
+
         error = None
         existing_user = db.get_user(username)
         if password != confirm_password:
             error = 'Passwords do not match.'
         elif not username or not password or len(username.strip()) == 0 or len(password.strip()) == 0:
             error = "Username and password are required."
-
         elif existing_user or username.lower() in ['cedars', 'pines']:
             error = 'Username already exists or reserved. Please choose a different one.'
+        elif len(password_test_results) != 0:
+            # There are policy checks which failed
+            # Ask to correct the first failed check
+            failed_test = password_test_results[0]
+            if 'Length' in str(failed_test):
+                error = f'Your password needs to be atleast {failed_test.length} characters long.'
+            elif 'Uppercase' in str(failed_test):
+                error = f'Your password needs atleast {failed_test.count} uppercase characters.'
+            elif 'Numbers' in str(failed_test):
+                error = f'Your password needs atleast {failed_test.count} numeric digits.'
+            elif 'Special' in str(failed_test):
+                error = f'Your password needs atleast {failed_test.count} special characters / symbols.'
 
         if error is None:
             hashed_password = generate_password_hash(password)
