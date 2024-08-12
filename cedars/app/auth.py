@@ -122,6 +122,7 @@ def verify_external_token(token, project_id, user_id):
     # Replace this URL with your actual external API endpoint
     api_url = f'{os.getenv("SUPERBIO_API_URL")}/users/{user_id}/cedars_projects/{project_id}'
     headers = {"Authorization": f"Bearer {token}"}
+    # TODO: print to log
     print(f"Verifying token with {api_url}")
     print(f"Headers: {headers}")
     try:
@@ -163,6 +164,7 @@ def token_login():
     if not token:
         return jsonify({"error": "No token provided"}), 400
 
+    # TODO: print to log
     print(f"Token: {token}")
     print(f"User ID: {user_id}")
     print(f"Project ID: {os.getenv('CEDARS_PROJECT_ID')}")
