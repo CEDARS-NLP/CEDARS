@@ -569,16 +569,17 @@ def adjudicate_records():
         search_patient = request.form.get("patient_id")
         is_patient_locked = False
         if search_patient and len(search_patient.strip()) > 0:
-            is_patient_locked = db.get_patient_lock_status(search_patient)
-            if is_patient_locked is False:
-                search_patient = convert_to_int(search_patient)
-                patient = db.get_patient_by_id(search_patient)
-                if patient:
-                    patient_id = patient["patient_id"]
+            search_patient = convert_to_int(search_patient)
+            patient = db.get_patient_by_id(search_patient)
+            if patient is None:
+                patient_id = None
+            else:
+                is_patient_locked = db.get_patient_lock_status(search_patient)
+                if is_patient_locked is False:
+                    if patient:
+                        patient_id = patient["patient_id"]
                 else:
                     patient_id = None
-            else:
-                patient_id = None
 
         if patient_id is None:
             # if the search return no patient, get the next patient
