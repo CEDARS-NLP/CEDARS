@@ -12,7 +12,7 @@ from uuid import uuid4
 from faker import Faker
 
 import flask
-from flask import g, flash, redirect
+from flask import g, session
 import requests
 import pandas as pd
 from werkzeug.security import check_password_hash
@@ -1551,8 +1551,13 @@ def load_pines_url():
         project_id = get_info()['project_id']
         endpoint = f"api/cedars_projects/{project_id}/pines"
 
+        if 'superbio_token' in session:
+            headers = {"Authorization": f"Bearer {session['superbio_token']}"}
+        else:
+            headers = {}
+
         try:
-            response = requests.post(f'{api_url}/{endpoint}', data={})
+            response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
         except Exception as e:
             logger.error(f"Encountered error {e} when trying to start PINES server")
             return None, False
@@ -1562,7 +1567,7 @@ def load_pines_url():
                   Got {response.status_code}""")
             return None, False
 
-        pines_api_url = load_pines_from_api(api_url, endpoint)
+        pines_api_url = load_pines_from_api(api_url, endpoint, headers)
         is_url_from_api = True
         logger.info(f"Received url : {pines_api_url} for pines from API.")
     else:
@@ -1572,7 +1577,7 @@ def load_pines_url():
     return pines_api_url, is_url_from_api
 
 @retry(wait=wait_exponential(multiplier=1, min=4, max=600))
-def load_pines_from_api(api_url, endpoint):
+def load_pines_from_api(api_url, endpoint, headers):
     '''
     Gets the PINES url from an api using a get request.
 
@@ -1583,7 +1588,7 @@ def load_pines_from_api(api_url, endpoint):
     }
     '''
 
-    data = requests.get(f'{api_url}/{endpoint}')
+    data = requests.get(f'{api_url}/{endpoint}', headers=headers)
     json_data = data.json()
     return json_data['url']
 
@@ -1599,8 +1604,12 @@ def kill_pines_api():
         if api_url is not None:
             project_id = get_info()['project_id']
             endpoint = f"api/cedars_projects/{project_id}/pines"
+            if 'superbio_token' in session:
+                headers = {"Authorization": f"Bearer {session['superbio_token']}"}
+            else:
+                headers = {}
             try:
-                requests.delete(f'{api_url}/{endpoint}')
+                requests.delete(f'{api_url}/{endpoint}', headers=headers)
             except Exception as e:
                 logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
 

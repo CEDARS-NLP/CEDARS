@@ -153,6 +153,8 @@ def verify_external_token(token, project_id, user_id):
         response = requests.get(api_url, headers=headers, verify=True)
         if response.status_code == 200:
             # Assuming the API returns user data on successful verification
+            # Save the token once it is validated.
+            session['superbio_token'] = token
             return response.json()
         return None
     except requests.RequestException:
