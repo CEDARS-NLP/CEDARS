@@ -47,7 +47,6 @@ def create_project(project_name,
         # environment variable or if the url is being retrieved dynamically.
         create_pines_info()
         return
-    
 
     project_id = os.getenv("PROJECT_ID")
     if project_id is None:
@@ -1561,7 +1560,7 @@ def load_pines_url():
         except Exception as e:
             logger.error(f"Encountered error {e} when trying to start PINES server")
             return None, False
-        
+
         if response.status_code != 200:
             logger.error(f"""Expected response with status code 200 from POST request to start PINES server.
                   Got {response.status_code}""")
