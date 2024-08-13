@@ -2,8 +2,8 @@
 This page contatins the functions and the flask blueprint for the login functionality.
 """
 import os
-import requests
 from functools import wraps
+import requests
 from flask import (
     Blueprint,
     render_template,

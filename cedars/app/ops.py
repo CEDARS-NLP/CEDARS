@@ -408,11 +408,11 @@ def save_adjudications():
             session.modified = True
 
         return shift_index_backwards
-    
+
     def _shift_first_index():
         session["index"] = 0
         session.modified = True
-    
+
     def _shift_last_index():
         session["index"] = session["total_count"] - 1
         session.modified = True
