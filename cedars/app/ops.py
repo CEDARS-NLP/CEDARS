@@ -106,7 +106,7 @@ def project_details():
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
     return render_template("ops/project_details.html",
-                           tasks=db.get_tasks_in_progress(), **db.get_info())
+                            **db.get_info())
 
 
 def load_pandas_dataframe(filepath):
