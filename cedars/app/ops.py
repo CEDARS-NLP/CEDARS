@@ -408,6 +408,14 @@ def save_adjudications():
             session.modified = True
 
         return shift_index_backwards
+    
+    def _shift_first_index():
+        session["index"] = 0
+        session.modified = True
+    
+    def _shift_last_index():
+        session["index"] = session["total_count"] - 1
+        session.modified = True
 
     def _move_to_next_annotation(shift_value):
         def shift_index_forwards():
@@ -464,12 +472,12 @@ def save_adjudications():
         'new_date': _update_event_date,
         'del_date': _delete_event_date,
         'comment': _add_annotation_comment,
-        'prev_100': _move_to_previous_annotation(100),
+        'first_anno': _shift_first_index,
         'prev_10': _move_to_previous_annotation(10),
         'prev_1': _move_to_previous_annotation(1),
         'next_1': _move_to_next_annotation(1),
         'next_10': _move_to_next_annotation(10),
-        'next_100': _move_to_next_annotation(100),
+        'last_anno': _shift_last_index,
         'adjudicate': _adjudicate_annotation
     }
 
