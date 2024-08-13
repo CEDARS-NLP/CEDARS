@@ -24,6 +24,7 @@ from flask_login import (
 
 from password_strength import PasswordPolicy
 from dotenv import load_dotenv
+from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
 from bson import ObjectId
 from . import db
@@ -92,7 +93,7 @@ def register():
         password = request.form.get("password")
         confirm_password = request.form.get("confirm_password")
         is_admin = request.form.get("isadmin") == "on"
-        print(f"Registering user {username} as admin: {is_admin}")
+        logger.info(f"Registering user {username} as admin: {is_admin}")
 
         # This result holds all of the tests that failed the password policy check
         password_test_results = policy.test(password)
@@ -146,9 +147,8 @@ def verify_external_token(token, project_id, user_id):
     # Replace this URL with your actual external API endpoint
     api_url = f'{os.getenv("SUPERBIO_API_URL")}/users/{user_id}/cedars_projects/{project_id}'
     headers = {"Authorization": f"Bearer {token}"}
-    # TODO: print to log
-    print(f"Verifying token with {api_url}")
-    print(f"Headers: {headers}")
+    logger.info(f"Verifying token with {api_url}")
+    logger.info(f"Headers: {headers}")
     try:
         response = requests.get(api_url, headers=headers, verify=True)
         if response.status_code == 200:
@@ -190,14 +190,13 @@ def token_login():
     if not token:
         return jsonify({"error": "No token provided"}), 400
 
-    # TODO: print to log
-    print(f"Token: {token}")
-    print(f"User ID: {user_id}")
-    print(f"Project ID: {os.getenv('CEDARS_PROJECT_ID')}")
+    logger.info(f"Token: {token}")
+    logger.info(f"User ID: {user_id}")
+    logger.info(f"Project ID: {os.getenv('CEDARS_PROJECT_ID')}")
     user_data = verify_external_token(token,
                                       user_id=user_id,
                                       project_id=os.getenv("CEDARS_PROJECT_ID"))
-    print(f"User data: {user_data}")
+    logger.info(f"User data: {user_data}")
     if user_data:
         username = user_data["user"].get('email')
         existing_user = db.get_user(username)
