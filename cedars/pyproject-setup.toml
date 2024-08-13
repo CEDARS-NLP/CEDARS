@@ -24,8 +24,7 @@ dependencies = [
     "negspacy",
     "flask-session",
     "faker",
-    "tenacity",
-    "password-strength"
+    "tenacity"
 ]
 
 [build-system]

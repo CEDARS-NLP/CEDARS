@@ -22,7 +22,7 @@ from flask_login import (
     current_user
 )
 
-from password_strength import PasswordPolicy
+import re
 from dotenv import load_dotenv
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -66,27 +66,61 @@ class User(UserMixin):
     """
     A user object based on the flask_login specifications.
     """
-    def __init__(self, data):
+    def __init__(self, data, api_token = None):
         self._id = ObjectId(data["_id"])
         self.username = data["user"]
         self.password = data["password"]
         self.is_admin = data["is_admin"]
+        self.superbio_api_token = api_token
 
     def get_id(self):
         return str(self.username)
 
+def check_password_policy(password):
+    '''
+    Checks a password to ensure that it meets our password strength policy.
+    These checks include :
+        1. Min length 8
+        2. Atleast 2 uppercase letters
+        3. Atleast 2 lowercase letters
+        4. Atleast 2 numeric digits
+        5. Atleast 2 special characters
+    
+    Args :
+        - password (str) = password to be checked
+    Returns :
+        str = String containing the issue with the password.
+                None if no issues are found.
+    '''
+    length_req = 8
+    req_uppercase_chars = 2
+    req_lowercase_chars = 2
+    req_digits = 2
+    req_special_chars = 2
+
+    uppercase_chars = r"[A-Z]"
+    lowercase_chars = r"[a-z]"
+    digits = r"[0-9]"
+    special_chars = r"[ !#$%&'()*+,-./[\\\]^_`{|}~"+r'"]'
+
+    if len(password) < length_req:
+        return f'Your password needs to be atleast {length_req} characters long.'
+    elif ' ' in password:
+        return f'No spaces are allowed in your password.'
+    elif len(re.findall(uppercase_chars, password)) < req_uppercase_chars:
+        return f'Your password needs atleast {req_uppercase_chars} uppercase characters.'
+    elif len(re.findall(lowercase_chars, password)) < req_lowercase_chars:
+        return f'Your password needs atleast {req_lowercase_chars} lowercase characters.'
+    elif len(re.findall(digits, password)) < req_digits:
+        return f'Your password needs atleast {req_digits} numeric digits.'
+    elif len(re.findall(special_chars, password)) < req_special_chars:
+        return f'Your password needs atleast {req_special_chars} special characters / symbols.'
+
+    return None
 
 @bp.route("/register", methods=["GET", "POST"])
 def register():
     """Register a new user"""
-
-    # Password strength policy
-    policy = PasswordPolicy.from_names(
-                    length=8,  # min length: 8
-                    uppercase=2,  # need min. 2 uppercase letters
-                    numbers=2,  # need min. 2 digits
-                    special=2,  # need min. 2 special characters
-                    )
 
     if request.method == 'POST':
         username = request.form.get("username")
@@ -95,8 +129,9 @@ def register():
         is_admin = request.form.get("isadmin") == "on"
         logger.info(f"Registering user {username} as admin: {is_admin}")
 
-        # This result holds all of the tests that failed the password policy check
-        password_test_results = policy.test(password)
+        # None if the password is in accordance with the policy.
+        # A string with the error message if not.
+        password_test_results = check_password_policy(password)
 
         error = None
         existing_user = db.get_user(username)
@@ -106,18 +141,8 @@ def register():
             error = "Username and password are required."
         elif existing_user or username.lower() in ['cedars', 'pines']:
             error = 'Username already exists or reserved. Please choose a different one.'
-        elif len(password_test_results) != 0:
-            # There are policy checks which failed
-            # Ask to correct the first failed check
-            failed_test = password_test_results[0]
-            if 'Length' in str(failed_test):
-                error = f'Your password needs to be atleast {failed_test.length} characters long.'
-            elif 'Uppercase' in str(failed_test):
-                error = f'Your password needs atleast {failed_test.count} uppercase characters.'
-            elif 'Numbers' in str(failed_test):
-                error = f'Your password needs atleast {failed_test.count} numeric digits.'
-            elif 'Special' in str(failed_test):
-                error = f'Your password needs atleast {failed_test.count} special characters / symbols.'
+        elif password_test_results is not None:
+            error = password_test_results
 
         if error is None:
             hashed_password = generate_password_hash(password)
@@ -153,8 +178,6 @@ def verify_external_token(token, project_id, user_id):
         response = requests.get(api_url, headers=headers, verify=True)
         if response.status_code == 200:
             # Assuming the API returns user data on successful verification
-            # Save the token once it is validated.
-            session['superbio_token'] = token
             return response.json()
         return None
     except requests.RequestException:
@@ -207,7 +230,7 @@ def token_login():
                 password=generate_password_hash(token),  # Store hashed token as password
                 is_admin=True if "admin" in user_data["user"].get('institution_roles') else False
             )
-        user = User(db.get_user(username))
+        user = User(db.get_user(username), api_token = token)
         login_user(user)
         return jsonify({"message": "Login successful via external API."}), 200
     return jsonify({"error": "Invalid token or API error."}), 401

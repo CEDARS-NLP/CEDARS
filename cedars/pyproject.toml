@@ -34,7 +34,6 @@ flask = "^3.0.3"
 pymongo = "=4.2"
 rq = "^1.16.2"
 tenacity = "9.0.0"
-password-strength = "0.0.3.post2"
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^2.17.4"
