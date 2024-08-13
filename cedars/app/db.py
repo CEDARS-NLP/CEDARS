@@ -12,7 +12,8 @@ from uuid import uuid4
 from faker import Faker
 
 import flask
-from flask import g, session
+from flask import g
+from flask_login import current_user
 import requests
 import pandas as pd
 from werkzeug.security import check_password_hash
@@ -1550,8 +1551,8 @@ def load_pines_url():
         project_id = get_info()['project_id']
         endpoint = f"api/cedars_projects/{project_id}/pines"
 
-        if 'superbio_token' in session:
-            headers = {"Authorization": f"Bearer {session['superbio_token']}"}
+        if current_user.superbio_api_token is not None:
+            headers = {"Authorization": f"Bearer {current_user.superbio_api_token}"}
         else:
             headers = {}
 
@@ -1559,11 +1560,6 @@ def load_pines_url():
             response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
         except Exception as e:
             logger.error(f"Encountered error {e} when trying to start PINES server")
-            return None, False
-
-        if response.status_code != 200:
-            logger.error(f"""Expected response with status code 200 from POST request to start PINES server.
-                  Got {response.status_code}""")
             return None, False
 
         pines_api_url = load_pines_from_api(api_url, endpoint, headers)
@@ -1603,8 +1599,8 @@ def kill_pines_api():
         if api_url is not None:
             project_id = get_info()['project_id']
             endpoint = f"api/cedars_projects/{project_id}/pines"
-            if 'superbio_token' in session:
-                headers = {"Authorization": f"Bearer {session['superbio_token']}"}
+            if current_user.superbio_api_token is not None:
+                headers = {"Authorization": f"Bearer {current_user.superbio_api_token}"}
             else:
                 headers = {}
             try:
