@@ -26,6 +26,7 @@ import re
 from dotenv import load_dotenv
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
+from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
 # from sentry_sdk import set_user
@@ -76,48 +77,6 @@ class User(UserMixin):
     def get_id(self):
         return str(self.username)
 
-def check_password_policy(password):
-    '''
-    Checks a password to ensure that it meets our password strength policy.
-    These checks include :
-        1. Min length 8
-        2. Atleast 2 uppercase letters
-        3. Atleast 2 lowercase letters
-        4. Atleast 2 numeric digits
-        5. Atleast 2 special characters
-    
-    Args :
-        - password (str) = password to be checked
-    Returns :
-        str = String containing the issue with the password.
-                None if no issues are found.
-    '''
-    length_req = 8
-    req_uppercase_chars = 2
-    req_lowercase_chars = 2
-    req_digits = 2
-    req_special_chars = 2
-
-    uppercase_chars = r"[A-Z]"
-    lowercase_chars = r"[a-z]"
-    digits = r"[0-9]"
-    special_chars = r"[ !#$%&'()*+,-./[\\\]^_`{|}~"+r'"]'
-
-    if len(password) < length_req:
-        return f'Your password needs to be atleast {length_req} characters long.'
-    elif ' ' in password:
-        return f'No spaces are allowed in your password.'
-    elif len(re.findall(uppercase_chars, password)) < req_uppercase_chars:
-        return f'Your password needs atleast {req_uppercase_chars} uppercase characters.'
-    elif len(re.findall(lowercase_chars, password)) < req_lowercase_chars:
-        return f'Your password needs atleast {req_lowercase_chars} lowercase characters.'
-    elif len(re.findall(digits, password)) < req_digits:
-        return f'Your password needs atleast {req_digits} numeric digits.'
-    elif len(re.findall(special_chars, password)) < req_special_chars:
-        return f'Your password needs atleast {req_special_chars} special characters / symbols.'
-
-    return None
-
 @bp.route("/register", methods=["GET", "POST"])
 def register():
     """Register a new user"""
@@ -129,9 +88,16 @@ def register():
         is_admin = request.form.get("isadmin") == "on"
         logger.info(f"Registering user {username} as admin: {is_admin}")
 
-        # None if the password is in accordance with the policy.
-        # A string with the error message if not.
-        password_test_results = check_password_policy(password)
+        password_policy = PasswordPolicy(
+            min_length=8,
+            min_uppercase=2,
+            min_lowercase=2,
+            min_digits=2,
+            min_special=2,
+            special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
+            allow_spaces=False
+        )
+        password_result, password_issues = password_policy.check_password(password)
 
         error = None
         existing_user = db.get_user(username)
@@ -141,8 +107,10 @@ def register():
             error = "Username and password are required."
         elif existing_user or username.lower() in ['cedars', 'pines']:
             error = 'Username already exists or reserved. Please choose a different one.'
-        elif password_test_results is not None:
-            error = password_test_results
+        elif password_result is False:
+            # If the password is not in compliance with our policy,
+            # display the first issue found with this password
+            error = password_issues[0]
 
         if error is None:
             hashed_password = generate_password_hash(password)
