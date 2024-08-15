@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import flask
+from uuid import uuid4
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template,
@@ -23,6 +24,7 @@ from . import db
 from . import nlpprocessor
 from . import auth
 from .database import minio
+from .api import kill_pines_api
 
 logger.enable(__name__)
 
@@ -81,9 +83,13 @@ def project_details():
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name").strip()
             old_name = db.get_proj_name()
+            project_info = db.get_info()
+            project_id = project_info["project_id"]
             if old_name is None:
+                    
                 if len(project_name) > 0:
-                    db.create_project(project_name, current_user.username)
+                    db.create_project(project_name, current_user.username,
+                                      project_id = project_id)
                     flash(f"Project **{project_name}** created.")
             else:
                 if len(project_name) > 0:
@@ -337,6 +343,8 @@ def do_nlp_processing():
     """
     nlp_processor = nlpprocessor.NlpProcessor()
     pt_ids = db.get_patient_ids()
+    superbio_api_token = session.get('superbio_api_token')
+
     # add task to the queue
     for patient in pt_ids:
         flask.current_app.task_queue.enqueue(
@@ -345,16 +353,51 @@ def do_nlp_processing():
             job_id=f'spacy:{patient}',
             description=f"Processing patient {patient} with spacy",
             retry=Retry(max=3),
-            on_success=Callback(db.report_success),
-            on_failure=Callback(db.report_failure),
+            on_success=Callback(callback_job_success),
+            on_failure=Callback(callback_job_failure),
             kwargs={
                 "user": current_user.username,
                 "job_id": f'spacy:{patient}',
+                "superbio_api_token" : superbio_api_token,
                 "description": f"Processing patient {patient} with spacy"
             }
         )
     return redirect(url_for("ops.get_job_status"))
 
+
+def callback_job_success(job, connection, result, *args, **kwargs):
+    '''
+    A callback function to handle the event where
+    a job from the task queue is completed successfully.
+    '''
+    db.report_success(job)
+    
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # Send a spin down request to the PINES Server if we are using superbio
+        # This will occur when all tasks are completed
+        close_pines_connection(job.kwargs['superbio_api_token'])
+
+def callback_job_failure(job, connection, result, *args, **kwargs):
+    '''
+    A callback function to handle the event where
+    a job from the task queue has failed.
+    '''
+    db.report_failure(job)
+
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # Send a spin down request to the PINES Server if we are using superbio
+        # This will occur when all tasks are completed
+        close_pines_connection(job.kwargs['superbio_api_token'])
+
+def close_pines_connection(superbio_api_token):
+    '''
+    Closes the PINES server if using a superbio API.
+    '''
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
+    kill_pines_api(project_id, superbio_api_token)
 
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
