@@ -28,13 +28,17 @@ def load_pines_url(project_id, superbio_api_token = None):
         if superbio_api_token is not None:
             headers = {"Authorization": f"Bearer {superbio_api_token}"}
         else:
-            headers = {}
+            logger.error("No API token found, cannot authenticate with the server.")
+            return None, False
 
         try:
-            print("\n\nPinging", f'{api_url}/{endpoint}', flush=True)
-            print("With header : ", headers, flush=True)
+            logger.info("\n\nPinging", f'{api_url}/{endpoint}')
+            logger.info("With header : ", headers, flush=True)
             response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
-            print("POST responce", response, flush=True)
+            logger.info("POST responce", response, flush=True)
+
+            if response.status_code != 200:
+                raise requests.exceptions.HTTPError
         except Exception as e:
             logger.error(f"Encountered error {e} when trying to start PINES server")
             return None, False
@@ -59,10 +63,10 @@ def load_pines_from_api(api_url, endpoint, headers):
         'url': <pines URL if it was spun up>
     }
     '''
-    print("Sending GET request to", f'{api_url}/{endpoint}', flush=True)
+    logger.info("Sending GET request to", f'{api_url}/{endpoint}', flush=True)
     data = requests.get(f'{api_url}/{endpoint}', headers=headers)
     json_data = data.json()
-    print("\n\nGot JSON", json_data, flush=True)
+    logger.info("\n\nGot JSON", json_data, flush=True)
     return json_data['url']
 
 def kill_pines_api(project_id, superbio_api_token):
