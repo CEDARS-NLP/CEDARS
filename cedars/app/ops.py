@@ -19,7 +19,8 @@ from loguru import logger
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from rq import Retry, Callback
-from rq.registry import FailedJobRegistry, FinishedJobRegistry
+from rq.registry import FailedJobRegistry
+from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
@@ -373,7 +374,13 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     db.report_success(job)
     
     queue_length = len(flask.current_app.task_queue)
-    if queue_length == 0:
+    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
+    num_running_jobs = len(all_jobs.get_job_ids())
+
+    if queue_length == 0 and num_running_jobs == 1:
+        # We use num_running_jobs == 1 after the queue is empty to
+        # ensure that the job that got over was the last job from the queue.
+
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         close_pines_connection(job.kwargs['superbio_api_token'])
@@ -386,7 +393,13 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     db.report_failure(job)
 
     queue_length = len(flask.current_app.task_queue)
-    if queue_length == 0:
+    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
+    num_running_jobs = len(all_jobs.get_job_ids())
+
+    if queue_length == 0 and num_running_jobs == 1:
+        # We use num_running_jobs == 1 after the queue is empty to
+        # ensure that the job that got over was the last job from the queue.
+
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         close_pines_connection(job.kwargs['superbio_api_token'])
