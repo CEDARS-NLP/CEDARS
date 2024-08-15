@@ -68,11 +68,11 @@ class User(UserMixin):
     """
     A user object based on the flask_login specifications.
     """
-    def __init__(self, data, api_token = None):
+    def __init__(self, data):
         self._id = ObjectId(data["_id"])
         self.username = data["user"]
         self.password = data["password"]
-        self.is_admin = data["is_admin"]            
+        self.is_admin = data["is_admin"]
 
     def get_id(self):
         return str(self.username)
