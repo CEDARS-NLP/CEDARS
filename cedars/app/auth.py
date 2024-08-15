@@ -29,6 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
+from .api import load_pines_url
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -71,8 +72,7 @@ class User(UserMixin):
         self._id = ObjectId(data["_id"])
         self.username = data["user"]
         self.password = data["password"]
-        self.is_admin = data["is_admin"]
-        self.superbio_api_token = api_token
+        self.is_admin = data["is_admin"]            
 
     def get_id(self):
         return str(self.username)
@@ -129,7 +129,7 @@ def register():
             flash('Registration successful.')
             if no_admin:
                 login_user(User(db.get_user(username)))
-
+            init_pines()
             return render_template('index.html', **db.get_info())
         flash(error)
     return render_template('auth/register.html', **db.get_info())
@@ -163,6 +163,7 @@ def login():
 
         if user and check_password_hash(user['password'], password):
             login_user(User(user))
+            init_pines()
             flash('Login successful.')
             return render_template('index.html', **db.get_info())
 
@@ -180,13 +181,17 @@ def token_login():
     user_id = request.json.get('user_id')
     if not token:
         return jsonify({"error": "No token provided"}), 400
+    
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
 
     logger.info(f"Token: {token}")
     logger.info(f"User ID: {user_id}")
-    logger.info(f"Project ID: {os.getenv('CEDARS_PROJECT_ID')}")
+    logger.info(f"Project ID: {project_id}")
+    
     user_data = verify_external_token(token,
                                       user_id=user_id,
-                                      project_id=os.getenv("CEDARS_PROJECT_ID"))
+                                      project_id=project_id)
     logger.info(f"User data: {user_data}")
     if user_data:
         username = user_data["user"].get('email')
@@ -198,11 +203,19 @@ def token_login():
                 password=generate_password_hash(token),  # Store hashed token as password
                 is_admin=True if "admin" in user_data["user"].get('institution_roles') else False
             )
-        user = User(db.get_user(username), api_token = token)
+        user = User(db.get_user(username))
+        session["superbio_api_token"] = token
+        init_pines(session["superbio_api_token"])
         login_user(user)
         return jsonify({"message": "Login successful via external API."}), 200
     return jsonify({"error": "Invalid token or API error."}), 401
 
+def init_pines(superbio_api_token = None):
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
+    pines_url, is_url_from_api = load_pines_url(project_id,
+                                        superbio_api_token=superbio_api_token)
+    db.create_pines_info(pines_url, is_url_from_api)
 
 @bp.route('/logout', methods=["GET", "POST"])
 def logout():

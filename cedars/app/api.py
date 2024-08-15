@@ -1,0 +1,90 @@
+import os
+from loguru import logger
+from tenacity import retry, wait_exponential
+import requests
+from . import db
+
+def load_pines_url(project_id, superbio_api_token = None):
+    '''
+    if PINES_URL is not available in the ENV then
+    - Start a PINES SERVER
+    - With retry logic - keep making get requests
+    - Get request gives a PINES URL
+    - Call this URL for PINES predictions
+    '''
+
+    env_url = os.getenv("PINES_API_URL")
+    api_url = os.getenv("SUPERBIO_API_URL")
+    if env_url is not None:
+        # Get PINES api from .env
+        pines_api_url = env_url
+        is_url_from_api = False
+        logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
+    elif api_url is not None:
+        # Get PINES api from API
+        # Send a POST request to start the SERVER
+        endpoint = f"cedars_projects/{project_id}/pines"
+
+        if superbio_api_token is not None:
+            headers = {"Authorization": f"Bearer {superbio_api_token}"}
+        else:
+            headers = {}
+
+        try:
+            print("\n\nPinging", f'{api_url}/{endpoint}', flush=True)
+            print("With header : ", headers, flush=True)
+            response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
+            print("POST responce", response, flush=True)
+        except Exception as e:
+            logger.error(f"Encountered error {e} when trying to start PINES server")
+            return None, False
+
+        pines_api_url = load_pines_from_api(api_url, endpoint, headers)
+        is_url_from_api = True
+        logger.info(f"Received url : {pines_api_url} for pines from API.")
+    else:
+        logger.error("Unable to find any URL for PINES.")
+        raise Exception("Unable to find any URL for PINES.")
+
+    return pines_api_url, is_url_from_api
+
+@retry(wait=wait_exponential(multiplier=1, min=4, max=600))
+def load_pines_from_api(api_url, endpoint, headers):
+    '''
+    Gets the PINES url from an api using a get request.
+
+    Expected return format from API :
+    {
+        'status': <status from cloudformation>,
+        'url': <pines URL if it was spun up>
+    }
+    '''
+    print("Sending GET request to", f'{api_url}/{endpoint}', flush=True)
+    data = requests.get(f'{api_url}/{endpoint}', headers=headers)
+    json_data = data.json()
+    print("\n\nGot JSON", json_data, flush=True)
+    return json_data['url']
+
+def kill_pines_api(project_id, superbio_api_token):
+    '''
+    Shutsdown remote PINES server if it is running.
+    Currently only applicable when using the superbio API system.
+    '''
+
+    if db.is_pines_api_running() and superbio_api_token is not None:
+        # kill PINES server if using superbio API
+        logger.info("Killing PINES server.")
+        api_url = os.getenv("SUPERBIO_API_URL")
+        if api_url is not None:
+            endpoint = f"api/cedars_projects/{project_id}/pines"
+            if superbio_api_token is not None:
+                headers = {"Authorization": f"Bearer {superbio_api_token}"}
+            else:
+                headers = {}
+            try:
+                requests.delete(f'{api_url}/{endpoint}', headers=headers)
+            except Exception as e:
+                logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
+
+            # Set pines server status to False and delete the old url.
+            db.update_pines_api_status(False)
