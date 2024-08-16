@@ -25,7 +25,7 @@ from . import db
 from . import nlpprocessor
 from . import auth
 from .database import minio
-from .api import kill_pines_api
+from .api import kill_pines_api, check_token_expiry
 
 logger.enable(__name__)
 
@@ -410,7 +410,13 @@ def close_pines_connection(superbio_api_token):
     '''
     project_info = db.get_info()
     project_id = project_info["project_id"]
-    kill_pines_api(project_id, superbio_api_token)
+    has_token_expired = check_token_expiry(superbio_api_token)
+
+    if has_token_expired is False:
+        kill_pines_api(project_id, superbio_api_token)
+    else:
+        # If has_token_expired returns None (invalid token).
+        logger.error("Cannot shut down remote PINES server with an API call as this is not a valid token.")
 
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
