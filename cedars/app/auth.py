@@ -29,7 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
-from .api import load_pines_url, check_validity_api_token
+from .api import load_pines_url, check_token_expiry
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -110,7 +110,7 @@ def register():
         elif password_result is False:
             # If the password is not in compliance with our policy,
             # display the first issue found with this password
-            error = password_issues[0]
+            error = "\n".join(password_issues)
 
         if error is None:
             hashed_password = generate_password_hash(password)
