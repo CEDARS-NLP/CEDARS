@@ -11,6 +11,16 @@ def load_pines_url(project_id, superbio_api_token = None):
     - With retry logic - keep making get requests
     - Get request gives a PINES URL
     - Call this URL for PINES predictions
+
+    Args :
+        - project_id (str) : The ID of the current CEDARS project.
+        - superbio_api_token(str / None) : API token if using a superbio server,
+                                    None if loading PINES via a different method.
+
+    Returns :
+        (pines_api_url, is_url_from_api)
+        - pines_api_url (str / None) : The url of the PINES server if one is available.
+        - is_url_from_api (bool) : True if this url belongs to a superbio server running PINES.
     '''
 
     env_url = os.getenv("PINES_API_URL")
@@ -76,6 +86,11 @@ def load_pines_from_api(api_url, endpoint, headers):
         'status': <status from cloudformation>,
         'url': <pines URL if it was spun up>
     }
+
+    Args :
+        - api_url (str) : URL for superbio server running PINES.
+        - endpoint (str) : The endpoint on this server we are trying to reach.
+        - headers (dict) : Any headers to provide with the request (such as passing a token).
     '''
     logger.info("Sending GET request to", f'{api_url}/{endpoint}', flush=True)
     data = requests.get(f'{api_url}/{endpoint}', headers=headers)
@@ -123,6 +138,10 @@ def kill_pines_api(project_id, superbio_api_token):
     '''
     Shutsdown remote PINES server if it is running.
     Currently only applicable when using the superbio API system.
+
+    Args :
+        - project_id (str) : The ID of the current CEDARS project.
+        - superbio_api_token(str / None) : API token for the superbio server running PINES.
     '''
 
     if db.is_pines_api_running() and superbio_api_token is not None:
