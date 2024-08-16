@@ -20,6 +20,18 @@ def load_pines_url(project_id, superbio_api_token = None):
         pines_api_url = env_url
         is_url_from_api = False
         logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
+
+        try:
+            health_check = requests.get(f'{pines_api_url}/healthcheck')
+            health_check = health_check.json()
+            if health_check['status'] != 'Healthy':
+                logger.error(f'Issue with PINES server {pines_api_url}, got status : {health_check['status']}.')
+                return None, False
+        except requests.exceptions.HTTPError as e:
+            logger.error(f'Got error when trying to check status of PINES server {pines_api_url} : {e}.')
+            return None, False
+
+
     elif api_url is not None:
         # Get PINES api from API
         # Send a POST request to start the SERVER
@@ -39,6 +51,8 @@ def load_pines_url(project_id, superbio_api_token = None):
 
             if response.status_code != 200:
                 raise requests.exceptions.HTTPError
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Got unexpected status code {response.status_code} when trying to startup PINES server.")
         except Exception as e:
             logger.error(f"Encountered error {e} when trying to start PINES server")
             return None, False
