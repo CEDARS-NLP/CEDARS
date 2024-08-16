@@ -346,6 +346,14 @@ def do_nlp_processing():
     pt_ids = db.get_patient_ids()
     superbio_api_token = session.get('superbio_api_token')
 
+    has_token_expired = check_token_expiry(superbio_api_token)
+
+    if superbio_api_token is not None and has_token_expired is True:
+        # If we are using a token, and this token has expired
+        # then we cancell the process and do not add anything to the queue.
+        logger.info('The current token has expired. Logging our user.')
+        redirect(url_for('auth.logout'))
+
     # add task to the queue
     for patient in pt_ids:
         flask.current_app.task_queue.enqueue(
