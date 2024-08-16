@@ -22,7 +22,6 @@ from flask_login import (
     current_user
 )
 
-import re
 from dotenv import load_dotenv
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -180,14 +179,14 @@ def token_login():
     user_id = request.json.get('user_id')
     if not token:
         return jsonify({"error": "No token provided"}), 400
-    
+
     project_info = db.get_info()
     project_id = project_info["project_id"]
 
     logger.info(f"Token: {token}")
     logger.info(f"User ID: {user_id}")
     logger.info(f"Project ID: {project_id}")
-    
+
     user_data = verify_external_token(token,
                                       user_id=user_id,
                                       project_id=project_id)
@@ -210,6 +209,10 @@ def token_login():
     return jsonify({"error": "Invalid token or API error."}), 401
 
 def init_pines(superbio_api_token = None):
+    '''
+    Initializes the PINES url in the INFO col.
+    If no server is available this is marked as None.
+    '''
     project_info = db.get_info()
     project_id = project_info["project_id"]
 
