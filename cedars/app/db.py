@@ -1536,8 +1536,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                 if key_annotation_id is not None:
                     key_annotation = get_annotation(key_annotation_id)
                     sentences_to_show = [key_annotation["sentence"]]
+                    note_id = key_annotation["note_id"]
+                    sentences_to_show.append(f"\nNote_id : {note_id}")
                 else:
                     sentences_to_show = [""]
+
 
             sentences = reviewed_sentences + unreviewed_sentences
             total_sentences = len(sentences)
@@ -1558,7 +1561,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
             except Exception:
                 logger.info(f"PINES results not available for patient: {patient_id}")
-
 
 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
