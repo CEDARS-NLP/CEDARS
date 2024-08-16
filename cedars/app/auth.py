@@ -29,7 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
-from .api import load_pines_url
+from .api import load_pines_url, check_validity_api_token
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -213,9 +213,20 @@ def token_login():
 def init_pines(superbio_api_token = None):
     project_info = db.get_info()
     project_id = project_info["project_id"]
-    pines_url, is_url_from_api = load_pines_url(project_id,
-                                        superbio_api_token=superbio_api_token)
-    db.create_pines_info(pines_url, is_url_from_api)
+
+    has_token_expired = check_token_expiry(superbio_api_token)
+
+    if has_token_expired is True:
+        pines_url, is_url_from_api = load_pines_url(project_id,
+                                            superbio_api_token=superbio_api_token)
+        db.create_pines_info(pines_url, is_url_from_api)
+    elif has_token_expired is True:
+        logger.info("PINES token is no longer valid.")
+        redirect(url_for("auth.logout"))
+    else:
+        logger.error("Pines token is not valid.")
+        session["superbio_api_token"] = None
+        db.create_pines_info(None, False)
 
 @bp.route('/logout', methods=["GET", "POST"])
 def logout():
