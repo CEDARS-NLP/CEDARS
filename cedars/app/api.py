@@ -35,7 +35,7 @@ def load_pines_url(project_id, superbio_api_token = None):
             health_check = requests.get(f'{pines_api_url}/healthcheck')
             health_check = health_check.json()
             if health_check['status'] != 'Healthy':
-                logger.error(f'Issue with PINES server {pines_api_url}, got status : {health_check['status']}.')
+                logger.error(f'Issue with PINES server {pines_api_url}, got status : {health_check["status"]}.')
                 return None, False
         except requests.exceptions.HTTPError as e:
             logger.error(f'Got error when trying to check status of PINES server {pines_api_url} : {e}.')
@@ -119,7 +119,7 @@ def check_token_expiry(superbio_api_token):
         return None
     elif superbio_api_token is None:
         return None
-    
+
     endpoint = "cedars_projects"
     headers = {"Authorization": f"Bearer {superbio_api_token}"}
     try:
@@ -130,7 +130,7 @@ def check_token_expiry(superbio_api_token):
     except requests.exceptions.HTTPError as e:
         logger.error(f"Encountered error {e} when trying to check token validity.")
         return None
-    
+
     return False
 
 

@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import flask
-from uuid import uuid4
 from dotenv import dotenv_values
 from flask import (
     Blueprint, render_template,
@@ -87,7 +86,6 @@ def project_details():
             project_info = db.get_info()
             project_id = project_info["project_id"]
             if old_name is None:
-                    
                 if len(project_name) > 0:
                     db.create_project(project_name, current_user.username,
                                       project_id = project_id)
@@ -380,7 +378,7 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     a job from the task queue is completed successfully.
     '''
     db.report_success(job)
-    
+
     queue_length = len(flask.current_app.task_queue)
     all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
     num_running_jobs = len(all_jobs.get_job_ids())
@@ -654,8 +652,7 @@ def adjudicate_records():
             else:
                 is_patient_locked = db.get_patient_lock_status(search_patient)
                 if is_patient_locked is False:
-                    if patient:
-                        patient_id = patient["patient_id"]
+                    patient_id = patient["patient_id"]
                 else:
                     patient_id = None
 
