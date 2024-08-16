@@ -147,8 +147,7 @@ def verify_external_token(token, project_id, user_id):
         if response.status_code == 200:
             # Assuming the API returns user data on successful verification
             return response.json()
-        return None
-    except requests.RequestException:
+    finally:
         return None
 
 
