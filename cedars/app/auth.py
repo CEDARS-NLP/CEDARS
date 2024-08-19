@@ -28,7 +28,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
-from .api import load_pines_url, check_token_expiry
+from .api import load_pines_url
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -128,7 +128,6 @@ def register():
             flash('Registration successful.')
             if no_admin:
                 login_user(User(db.get_user(username)))
-            init_pines()
             return render_template('index.html', **db.get_info())
         flash(error)
     return render_template('auth/register.html', **db.get_info())
@@ -146,7 +145,7 @@ def verify_external_token(token, project_id, user_id):
         if response.status_code == 200:
             # Assuming the API returns user data on successful verification
             return response.json()
-    finally:
+    except Exception:
         return None
 
 
@@ -161,7 +160,6 @@ def login():
 
         if user and check_password_hash(user['password'], password):
             login_user(User(user))
-            init_pines()
             flash('Login successful.')
             return render_template('index.html', **db.get_info())
 
@@ -203,32 +201,16 @@ def token_login():
             )
         user = User(db.get_user(username))
         session["superbio_api_token"] = token
-        init_pines(session["superbio_api_token"])
+        if 'project' in user_data and 'model' in user_data['project']:
+            # If we are are using any model with this login,
+            # then we start the PINES server and get it's URL
+            pines_url, is_url_from_api = load_pines_url(project_id,
+                                        superbio_api_token=token)
+            db.create_pines_info(pines_url, is_url_from_api)
+
         login_user(user)
         return jsonify({"message": "Login successful via external API."}), 200
     return jsonify({"error": "Invalid token or API error."}), 401
-
-def init_pines(superbio_api_token = None):
-    '''
-    Initializes the PINES url in the INFO col.
-    If no server is available this is marked as None.
-    '''
-    project_info = db.get_info()
-    project_id = project_info["project_id"]
-
-    has_token_expired = check_token_expiry(superbio_api_token)
-
-    if has_token_expired is True:
-        pines_url, is_url_from_api = load_pines_url(project_id,
-                                            superbio_api_token=superbio_api_token)
-        db.create_pines_info(pines_url, is_url_from_api)
-    elif has_token_expired is True:
-        logger.info("PINES token is no longer valid.")
-        redirect(url_for("auth.logout"))
-    else:
-        logger.error("Pines token is not valid.")
-        session["superbio_api_token"] = None
-        db.create_pines_info(None, False)
 
 @bp.route('/logout', methods=["GET", "POST"])
 def logout():

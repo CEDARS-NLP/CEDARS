@@ -38,7 +38,13 @@ def load_pines_url(project_id, superbio_api_token = None):
                 logger.error(f'Issue with PINES server {pines_api_url}, got status : {health_check["status"]}.')
                 return None, False
         except requests.exceptions.HTTPError as e:
-            logger.error(f'Got error when trying to check status of PINES server {pines_api_url} : {e}.')
+            logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
+            return None, False
+        except requests.exceptions.InvalidURL as e:
+            logger.error(f'Invalid URL for PINES server {pines_api_url}.')
+            return None, False
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
             return None, False
 
 
@@ -123,13 +129,19 @@ def check_token_expiry(superbio_api_token):
     endpoint = "cedars_projects"
     headers = {"Authorization": f"Bearer {superbio_api_token}"}
     try:
-        data = requests.get(f'{api_url}/{endpoint}', headers=headers)
-        if data['msg'] == "Token has expired":
+        response = requests.get(f'{api_url}/{endpoint}', headers=headers)
+        data = response.json()
+        if 'hits' in data:
+            return False
+        elif 'msg' in data and data['msg'] == "Token has expired":
             logger.info("Superbio token has expired.")
             return True
     except requests.exceptions.HTTPError as e:
         logger.error(f"Encountered error {e} when trying to check token validity.")
         return None
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f'Could not connect to superbio server to check token validity.')
+        return None, False
 
     return False
 
