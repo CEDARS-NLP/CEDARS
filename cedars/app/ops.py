@@ -24,7 +24,8 @@ from . import db
 from . import nlpprocessor
 from . import auth
 from .database import minio
-from .api import kill_pines_api, check_token_expiry
+from .api import load_pines_url, kill_pines_api
+from .api import check_token_expiry
 
 logger.enable(__name__)
 
@@ -292,11 +293,6 @@ def upload_query():
                                **db.get_info(),
                                **db.get_search_query_details())
 
-    tag_query = {
-        "exact": False,
-        "nlp_apply": bool(request.form.get("nlp_apply"))
-    }
-
     search_query = request.form.get("regex_query")
     search_query_pattern = (
         r'^\s*('
@@ -314,10 +310,41 @@ def upload_query():
         flash("Invalid query.")
         return render_template("ops/upload_query.html", **db.get_info())
 
+    use_pines = bool(request.form.get("nlp_apply"))
+    if use_pines:
+        if "superbio_api_token" in session:
+            if (session["superbio_api_token"] is not None) and (db.is_pines_api_running() is False):
+                # If we have a superbio API token, but no external API is running
+                # Then we try to start a PINES connection with the token.
+                has_token_expired = check_token_expiry(session["superbio_api_token"])
+                if has_token_expired is True:
+                    logger.info("PINES token is no longer valid.")
+                    flash("Superbio token has expired.")
+                    return redirect(url_for("auth.logout"))
+                elif has_token_expired is None:
+                    # Indicates invalid token
+                    logger.error("Superbio token is not valid.")
+                    session["superbio_api_token"] = None
+                    db.create_pines_info(None, False)
+
+                is_pines_available = init_pines_connection(session["superbio_api_token"])
+        else:
+            is_pines_available = init_pines_connection(superbio_api_token=None)
+
+    if is_pines_available is False:
+        # PINES could not load successfully
+        flash("Could not load PINES server.")
+        return redirect(url_for("ops.upload_query"))
+
+
     use_negation = False  # bool(request.form.get("view_negations"))
     hide_duplicates = not bool(request.form.get("keep_duplicates"))
     skip_after_event = bool(request.form.get("skip_after_event"))
 
+    tag_query = {
+        "exact": False,
+        "nlp_apply": use_pines
+    }
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
 
@@ -409,6 +436,36 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         close_pines_connection(job.kwargs['superbio_api_token'])
+
+def init_pines_connection(superbio_api_token = None):
+    '''
+    Initializes the PINES url in the INFO col.
+    If no server is available this is marked as None.
+
+    Args :
+        - superbio_api_token (str) : Access token for superbio server if one is being used.
+    
+    Returns :
+        (bool) : True if a valid pines url has been found.
+                            False if not valid pines url available.
+    '''
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
+
+    if superbio_api_token is None:
+        pines_url, is_url_from_api = load_pines_url(project_id,
+                                            superbio_api_token=None)
+        db.create_pines_info(pines_url, is_url_from_api)
+        if pines_url is not None:
+            return True
+
+    pines_url, is_url_from_api = load_pines_url(project_id,
+                                        superbio_api_token=superbio_api_token)
+    db.create_pines_info(pines_url, is_url_from_api)
+    if pines_url is not None:
+        return True
+
+    return False
 
 def close_pines_connection(superbio_api_token):
     '''
