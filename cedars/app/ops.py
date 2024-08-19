@@ -40,8 +40,16 @@ def allowed_data_file(filename):
         (bool) : True if the file is of a supported type.
     """
     allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
+    allowed_zip_extensions = {'csv'}
 
-    extension = filename.split(".")[-1]
+    filename_elements = filename.split(".")
+    extension = filename_elements[-1]
+    if extension == 'gz':
+        # Zipped format accepts (filename.csv.gz)
+        if len(filename_elements) < 2:
+            return False
+        extension = filename_elements[-2]
+        return extension in allowed_zip_extensions
 
     return extension in allowed_extensions
 
@@ -108,6 +116,12 @@ def project_details():
     return render_template("ops/project_details.html",
                            tasks=db.get_tasks_in_progress(), **db.get_info())
 
+def read_gz_csv(filename, *args, **kwargs):
+    '''
+    Function to read a GZIP compressed csv to a pandas DataFrame.
+    '''
+    return pd.read_csv(filename, compression='gzip', *args, **kwargs)
+
 
 def load_pandas_dataframe(filepath):
     """
@@ -128,6 +142,8 @@ def load_pandas_dataframe(filepath):
         raise ValueError("Filepath must be provided.")
 
     extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
+    # If the extension is gz, we can assume it is a csv.gz file as this
+    # is the only filecheck supported in the allowed_data_file check
     loaders = {
         'csv': pd.read_csv,
         'xlsx': pd.read_excel,
@@ -135,7 +151,8 @@ def load_pandas_dataframe(filepath):
         'parquet': pd.read_parquet,
         'pickle': pd.read_pickle,
         'pkl': pd.read_pickle,
-        'xml': pd.read_xml
+        'xml': pd.read_xml,
+        'gz' : read_gz_csv,
     }
 
     if extension not in loaders:
