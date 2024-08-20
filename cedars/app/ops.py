@@ -15,6 +15,7 @@ from flask import (
 )
 
 from loguru import logger
+import requests
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from rq import Retry, Callback
@@ -452,15 +453,16 @@ def init_pines_connection(superbio_api_token = None):
     project_info = db.get_info()
     project_id = project_info["project_id"]
 
-    if superbio_api_token is None:
+    try:
         pines_url, is_url_from_api = load_pines_url(project_id,
-                                            superbio_api_token=None)
-        db.create_pines_info(pines_url, is_url_from_api)
-        if pines_url is not None:
-            return True
-
-    pines_url, is_url_from_api = load_pines_url(project_id,
                                         superbio_api_token=superbio_api_token)
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Got HTTP error when trying to start PINES server : {e}")
+        pines_url, is_url_from_api = None, False
+    except Exception as e:
+        logger.error(f"Got error when trying to access PINES server : {e}")
+        pines_url, is_url_from_api = None, False
+
     db.create_pines_info(pines_url, is_url_from_api)
     if pines_url is not None:
         return True

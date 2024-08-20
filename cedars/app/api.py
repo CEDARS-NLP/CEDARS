@@ -21,6 +21,10 @@ def load_pines_url(project_id, superbio_api_token = None):
         (pines_api_url, is_url_from_api)
         - pines_api_url (str / None) : The url of the PINES server if one is available.
         - is_url_from_api (bool) : True if this url belongs to a superbio server running PINES.
+    
+    Raises :
+        - requests.exceptions.HTTPError
+        - Custom error for PINES healthcheck
     '''
 
     env_url = os.getenv("PINES_API_URL")
@@ -35,8 +39,8 @@ def load_pines_url(project_id, superbio_api_token = None):
             health_check = requests.get(f'{pines_api_url}/healthcheck')
             health_check = health_check.json()
             if health_check['status'] != 'Healthy':
-                logger.error(f'Issue with PINES server {pines_api_url}, got status : {health_check["status"]}.')
-                return None, False
+                raise Exception(f'''Issue found while performing healthcheck on the 
+                                PINES server {pines_api_url}, got status : {health_check["status"]}.''')
         except requests.exceptions.HTTPError as e:
             logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
             return None, False
@@ -59,19 +63,13 @@ def load_pines_url(project_id, superbio_api_token = None):
             logger.error("No API token found, cannot authenticate with the server.")
             return None, False
 
-        try:
-            logger.info("\n\nPinging", f'{api_url}/{endpoint}')
-            logger.info("With header : ", headers, flush=True)
-            response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
-            logger.info("POST responce", response, flush=True)
+        logger.info("Pinging", f'{api_url}/{endpoint}')
+        logger.info("With header : ", headers, flush=True)
+        response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
+        logger.info("POST responce", response, flush=True)
 
-            if response.status_code != 200:
-                raise requests.exceptions.HTTPError
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"Got unexpected status code {response.status_code} when trying to startup PINES server.")
-        except Exception as e:
-            logger.error(f"Encountered error {e} when trying to start PINES server")
-            return None, False
+        if response.status_code != 200:
+            raise requests.exceptions.HTTPError
 
         pines_api_url = load_pines_from_api(api_url, endpoint, headers)
         is_url_from_api = True

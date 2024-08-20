@@ -28,7 +28,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
-from .api import load_pines_url
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -201,13 +200,6 @@ def token_login():
             )
         user = User(db.get_user(username))
         session["superbio_api_token"] = token
-        if 'project' in user_data and 'model' in user_data['project']:
-            # If we are are using any model with this login,
-            # then we start the PINES server and get it's URL
-            pines_url, is_url_from_api = load_pines_url(project_id,
-                                        superbio_api_token=token)
-            db.create_pines_info(pines_url, is_url_from_api)
-
         login_user(user)
         return jsonify({"message": "Login successful via external API."}), 200
     return jsonify({"error": "Invalid token or API error."}), 401
