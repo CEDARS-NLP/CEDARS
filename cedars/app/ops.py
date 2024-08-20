@@ -160,7 +160,7 @@ def load_pandas_dataframe(filepath):
         obj = minio.get_object(g.bucket_name, filepath)
 
         # Read one line of the file to conserve memory and computation
-        if extension in ['csv', 'xlsx']:
+        if extension in ['csv', 'xlsx', 'gz']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
         elif extension == 'json':
             data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
