@@ -6,9 +6,11 @@ import os
 from io import BytesIO, StringIO
 import re
 from datetime import datetime
-from typing import Optional
 from uuid import uuid4
+
+from typing import Optional
 from faker import Faker
+
 import flask
 from flask import g
 import requests
@@ -16,16 +18,14 @@ import pandas as pd
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
-
 from .database import mongo, minio
 
 fake = Faker()
 
-
 # Create collections and indexes
 def create_project(project_name,
                    investigator_name,
-                   project_id=str(uuid4()),
+                   project_id,
                    cedars_version="0.1.0"):
     """
     This function creates all the collections in the mongodb database for CEDARS.
@@ -53,8 +53,18 @@ def create_project(project_name,
 
     logger.info("Database creation successful!")
 
+def create_pines_info(pines_url, is_url_from_api):
+    """
+    Retrives the PINES url from the relevant source and
+        updates the INFO col with the information.
+    """
+    update_pines_api_url(pines_url)
+    update_pines_api_status(is_url_from_api)
 
-def create_info_col(project_name, project_id, investigator_name, cedars_version):
+    return pines_url
+
+def create_info_col(project_name, project_id, investigator_name,
+                    cedars_version):
     """
     This function creates the info collection in the mongodb database.
     The info collection is used to store meta-data regarding the current project.
@@ -67,6 +77,7 @@ def create_info_col(project_name, project_id, investigator_name, cedars_version)
         None
     """
     collection = mongo.db["INFO"]
+
     info = {"creation_time": datetime.now(),
             "project": project_name,
             "project_id": project_id,
@@ -175,6 +186,15 @@ def create_index(collection, index: list):
             mongo.db[collection].create_index(i)
         logger.info(f"Created index {i} in collection {collection}.")
 
+def create_db_indices():
+    '''
+    Creates indices for the ANNOTATIONS and PINES cols in the db.
+    '''
+    logger.info("All tasks completed.")
+    logger.info("Creating indexes for ANNOTATIONS.")
+    create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    logger.info("Creating indexes for PINES.")
+    create_index("PINES", [("text_id", {"unique": True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
@@ -868,6 +888,35 @@ def update_project_name(new_name):
     logger.info(f"Updating project name to #{new_name}")
     mongo.db["INFO"].update_one({}, {"$set": {"project": new_name}})
 
+def update_pines_api_status(new_status):
+    """
+    Updates the is_pines_server_enabled in the INFO collection of the database
+        to reflect the status of the PINES server.
+
+    Args:
+        new_status (bool) : True if the PINES server is running.
+    Returns:
+        None
+    """
+    logger.info(f"Setting PINES API status to {new_status}")
+    mongo.db["INFO"].update_one({},
+                                {"$set": {"is_pines_server_enabled": new_status}})
+
+def update_pines_api_url(new_url):
+    """
+    Updates the PINES API url in the INFO collection of the database
+        to reflect the address of the PINES server.
+
+    Args:
+        new_url (str) : The url of the PINES server's API.
+    Returns:
+        None
+    """
+    logger.info(f"Setting PINES API url to {new_url}")
+    mongo.db["INFO"].update_one({},
+                                {"$set": {"pines_url": new_url}})
+
+
 
 def mark_annotation_reviewed(annotation_id):
     """
@@ -1182,7 +1231,10 @@ def get_prediction(note: str) -> float:
 
     Get prediction from endpoint. Text goes in the POST request.
     """
-    url = f'{os.getenv("PINES_API_URL")}/predict'
+
+    pines_api_url = get_pines_url()
+
+    url = f'{pines_api_url}/predict'
     data = {'text': note}
     log_notes = None
     try:
@@ -1379,22 +1431,41 @@ def update_db_task_progress(task_id, progress):
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
-
-def report_success(job, connection, result, *args, **kwargs):
+def report_success(job):
     """
     Saves the data associated with a successful job after completion.
+    This will also automatically check for the completion of all current tasks.
+    If the tasks are completed will then create all required indices and shutdown
+    the PINES server if it is running via a SUPERBIO api.
     """
     job.meta['progress'] = 100
     job.save_meta()
+
+    # If the TASK queue does not have any jobs :
+    # 1. Start indexing the annotations and notes db
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # Index database if all tasks are completed
+        create_db_indices()
+
     update_db_task_progress(job.get_id(), 100)
 
 
-def report_failure(job, connection, type, value, *args, **kwargs):
+def report_failure(job):
     """
     Saves the data associated with a job that failed to complete.
+    This will also automatically check for the completion of all current tasks.
+    If the tasks are completed will then create all required indices and shutdown
+    the PINES server if it is running via a SUPERBIO api.
     """
     job.meta['progress'] = 0
     job.save_meta()
+    # If the TASK queue does not have any jobs :
+    # 1. Start indexing the annotations and notes db
+    queue_length = len(flask.current_app.task_queue)
+    if queue_length == 0:
+        # Index database if all tasks are completed
+        create_db_indices()
     update_db_task_progress(job.get_id(), 0)
 
 def get_patient_reviewer(patient_id):
@@ -1407,6 +1478,28 @@ def get_patient_reviewer(patient_id):
         return None
 
     return reviewed_by
+
+def get_pines_url():
+    '''
+    Retrives PINES url from INFO col.
+    '''
+
+    info_col = mongo.db["INFO"].find_one()
+    if info_col:
+        return info_col["pines_url"]
+
+    return None
+
+def is_pines_api_running():
+    '''
+    Returns True if a SuperBIO PINES API server is running.
+    '''
+
+    info_col = mongo.db["INFO"].find_one()
+    if info_col:
+        return info_col["is_pines_server_enabled"]
+
+    return False
 
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
@@ -1443,8 +1536,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                 if key_annotation_id is not None:
                     key_annotation = get_annotation(key_annotation_id)
                     sentences_to_show = [key_annotation["sentence"]]
+                    note_id = key_annotation["note_id"]
+                    sentences_to_show.append(f"\nNote_id : {note_id}")
                 else:
                     sentences_to_show = [""]
+
 
             sentences = reviewed_sentences + unreviewed_sentences
             total_sentences = len(sentences)
@@ -1465,7 +1561,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
             except Exception:
                 logger.info(f"PINES results not available for patient: {patient_id}")
-
 
 
             yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
@@ -1525,5 +1620,10 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
 
+    project_id = os.getenv("PROJECT_ID")
+    if project_id is None:
+        project_id=str(uuid4())
+
     create_project(project_name=fake.slug(),
-                   investigator_name=fake.name())
+                   investigator_name=fake.name(),
+                   project_id = project_id)

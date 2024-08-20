@@ -15,14 +15,18 @@ from flask import (
 )
 
 from loguru import logger
+import requests
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from rq import Retry, Callback
-from rq.registry import FailedJobRegistry, FinishedJobRegistry
+from rq.registry import FailedJobRegistry
+from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
 from .database import minio
+from .api import load_pines_url, kill_pines_api
+from .api import get_token_status
 
 logger.enable(__name__)
 
@@ -83,9 +87,12 @@ def project_details():
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name").strip()
             old_name = db.get_proj_name()
+            project_info = db.get_info()
+            project_id = project_info["project_id"]
             if old_name is None:
                 if len(project_name) > 0:
-                    db.create_project(project_name, current_user.username)
+                    db.create_project(project_name, current_user.username,
+                                      project_id = project_id)
                     flash(f"Project **{project_name}** created.")
             else:
                 if len(project_name) > 0:
@@ -108,7 +115,7 @@ def project_details():
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
     return render_template("ops/project_details.html",
-                           tasks=db.get_tasks_in_progress(), **db.get_info())
+                            **db.get_info())
 
 def read_gz_csv(filename, *args, **kwargs):
     '''
@@ -298,11 +305,6 @@ def upload_query():
                                **db.get_info(),
                                **db.get_search_query_details())
 
-    tag_query = {
-        "exact": False,
-        "nlp_apply": bool(request.form.get("nlp_apply"))
-    }
-
     search_query = request.form.get("regex_query")
     search_query_pattern = (
         r'^\s*('
@@ -320,10 +322,37 @@ def upload_query():
         flash("Invalid query.")
         return render_template("ops/upload_query.html", **db.get_info())
 
+    use_pines = bool(request.form.get("nlp_apply"))
+    superbio_api_token = session.get('superbio_api_token')
+    if superbio_api_token is not None and use_pines:
+        # If using a PINES server via superbio,
+        # ensure that the current token works properly
+        token_status = get_token_status(superbio_api_token)
+        if token_status['has_expired'] is True:
+            # If we are using a token, and this token has expired
+            # then we cancell the process and do not add anything to the queue.
+            logger.info('The current token has expired. Logging our user.')
+            redirect(url_for('auth.logout'))
+        elif token_status['is_valid'] is False:
+            logger.error(f'Passed invalid token : {superbio_api_token}')
+            flash("Invalid superbio token.")
+            return redirect(url_for("ops.upload_query"))
+
+    if use_pines:
+        is_pines_available = init_pines_connection(superbio_api_token)
+        if is_pines_available is False:
+            # PINES could not load successfully
+            flash("Could not load PINES server.")
+            return redirect(url_for("ops.upload_query"))
+
     use_negation = False  # bool(request.form.get("view_negations"))
     hide_duplicates = not bool(request.form.get("keep_duplicates"))
     skip_after_event = bool(request.form.get("skip_after_event"))
 
+    tag_query = {
+        "exact": False,
+        "nlp_apply": use_pines
+    }
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
 
@@ -339,7 +368,6 @@ def upload_query():
     do_nlp_processing()
     return redirect(url_for("stats_page.stats_route"))
 
-
 @bp.route("/start_process")
 def do_nlp_processing():
     """
@@ -348,6 +376,8 @@ def do_nlp_processing():
     """
     nlp_processor = nlpprocessor.NlpProcessor()
     pt_ids = db.get_patient_ids()
+    superbio_api_token = session.get('superbio_api_token')
+
     # add task to the queue
     for patient in pt_ids:
         flask.current_app.task_queue.enqueue(
@@ -356,16 +386,100 @@ def do_nlp_processing():
             job_id=f'spacy:{patient}',
             description=f"Processing patient {patient} with spacy",
             retry=Retry(max=3),
-            on_success=Callback(db.report_success),
-            on_failure=Callback(db.report_failure),
+            on_success=Callback(callback_job_success),
+            on_failure=Callback(callback_job_failure),
             kwargs={
                 "user": current_user.username,
                 "job_id": f'spacy:{patient}',
+                "superbio_api_token" : superbio_api_token,
                 "description": f"Processing patient {patient} with spacy"
             }
         )
     return redirect(url_for("ops.get_job_status"))
 
+
+def callback_job_success(job, connection, result, *args, **kwargs):
+    '''
+    A callback function to handle the event where
+    a job from the task queue is completed successfully.
+    '''
+    db.report_success(job)
+
+    queue_length = len(flask.current_app.task_queue)
+    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
+    num_running_jobs = len(all_jobs.get_job_ids())
+
+    if queue_length == 0 and num_running_jobs == 1:
+        # We use num_running_jobs == 1 after the queue is empty to
+        # ensure that the job that got over was the last job from the queue.
+
+        # Send a spin down request to the PINES Server if we are using superbio
+        # This will occur when all tasks are completed
+        close_pines_connection(job.kwargs['superbio_api_token'])
+
+def callback_job_failure(job, connection, result, *args, **kwargs):
+    '''
+    A callback function to handle the event where
+    a job from the task queue has failed.
+    '''
+    db.report_failure(job)
+
+    queue_length = len(flask.current_app.task_queue)
+    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
+    num_running_jobs = len(all_jobs.get_job_ids())
+
+    if queue_length == 0 and num_running_jobs == 1:
+        # We use num_running_jobs == 1 after the queue is empty to
+        # ensure that the job that got over was the last job from the queue.
+
+        # Send a spin down request to the PINES Server if we are using superbio
+        # This will occur when all tasks are completed
+        close_pines_connection(job.kwargs['superbio_api_token'])
+
+def init_pines_connection(superbio_api_token = None):
+    '''
+    Initializes the PINES url in the INFO col.
+    If no server is available this is marked as None.
+
+    Args :
+        - superbio_api_token (str) : Access token for superbio server if one is being used.
+    
+    Returns :
+        (bool) : True if a valid pines url has been found.
+                            False if not valid pines url available.
+    '''
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
+
+    try:
+        pines_url, is_url_from_api = load_pines_url(project_id,
+                                        superbio_api_token=superbio_api_token)
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Got HTTP error when trying to start PINES server : {e}")
+        pines_url, is_url_from_api = None, False
+    except Exception as e:
+        logger.error(f"Got error when trying to access PINES server : {e}")
+        pines_url, is_url_from_api = None, False
+
+    db.create_pines_info(pines_url, is_url_from_api)
+    if pines_url is not None:
+        return True
+
+    return False
+
+def close_pines_connection(superbio_api_token):
+    '''
+    Closes the PINES server if using a superbio API.
+    '''
+    project_info = db.get_info()
+    project_id = project_info["project_id"]
+    token_status = get_token_status(superbio_api_token)
+
+    if token_status['is_valid'] and token_status['has_expired'] is False:
+        kill_pines_api(project_id, superbio_api_token)
+    else:
+        # If has_token_expired returns None (invalid token).
+        logger.error("Cannot shut down remote PINES server with an API call as this is not a valid token.")
 
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
@@ -419,6 +533,14 @@ def save_adjudications():
             session.modified = True
 
         return shift_index_backwards
+
+    def _shift_first_index():
+        session["index"] = 0
+        session.modified = True
+
+    def _shift_last_index():
+        session["index"] = session["total_count"] - 1
+        session.modified = True
 
     def _move_to_next_annotation(shift_value):
         def shift_index_forwards():
@@ -475,12 +597,12 @@ def save_adjudications():
         'new_date': _update_event_date,
         'del_date': _delete_event_date,
         'comment': _add_annotation_comment,
-        'prev_100': _move_to_previous_annotation(100),
+        'first_anno': _shift_first_index,
         'prev_10': _move_to_previous_annotation(10),
         'prev_1': _move_to_previous_annotation(1),
         'next_1': _move_to_next_annotation(1),
         'next_10': _move_to_next_annotation(10),
-        'next_100': _move_to_next_annotation(100),
+        'last_anno': _shift_last_index,
         'adjudicate': _adjudicate_annotation
     }
 
@@ -580,16 +702,16 @@ def adjudicate_records():
         search_patient = request.form.get("patient_id")
         is_patient_locked = False
         if search_patient and len(search_patient.strip()) > 0:
-            is_patient_locked = db.get_patient_lock_status(search_patient)
-            if is_patient_locked is False:
-                search_patient = convert_to_int(search_patient)
-                patient = db.get_patient_by_id(search_patient)
-                if patient:
+            search_patient = convert_to_int(search_patient)
+            patient = db.get_patient_by_id(search_patient)
+            if patient is None:
+                patient_id = None
+            else:
+                is_patient_locked = db.get_patient_lock_status(search_patient)
+                if is_patient_locked is False:
                     patient_id = patient["patient_id"]
                 else:
                     patient_id = None
-            else:
-                patient_id = None
 
         if patient_id is None:
             # if the search return no patient, get the next patient
@@ -809,6 +931,7 @@ def download_page(job_id=None):
 
     if job_id is not None:
         return flask.jsonify({"files": files}), 202
+
     return render_template('ops/download.html', job_id=job_id, files=files, **db.get_info())
 
 
@@ -848,6 +971,7 @@ def create_download():
     """
     Create a download task for annotations
     """
+
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations.csv",
     )
@@ -860,11 +984,13 @@ def create_download_full():
     """
     Create a download task for annotations
     """
+
+
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations_full.csv", True
     )
-    return flask.jsonify({'job_id': job.get_id()}), 202
 
+    return flask.jsonify({'job_id': job.get_id()}), 202
 
 @bp.route('/check_job/<job_id>')
 @auth.admin_required

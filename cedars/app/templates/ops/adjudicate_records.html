@@ -113,12 +113,13 @@
                         <button class="btn btn-primary cedars-btn" value="adjudicate" onclick="addComment()" type="submit" name="submit_button">Adjudicate Sentence</button>
                     </div>
                     <div class="btn-group me-2" role="group" aria-label="First group">
-                      <button class="btn btn-outline-secondary" value="prev_100" onclick="addComment()" type="submit" name="submit_button">100<</button>
-                      <button class="btn btn-outline-secondary" value="prev_10" onclick="addComment()" type="submit" name="submit_button">10<</button>
-                      <button class="btn btn-outline-secondary" value="prev_1" onclick="addComment()" type="submit" name="submit_button"><<</button>
-                      <button class="btn btn-outline-secondary" value="next_1" onclick="addComment()" type="submit" name="submit_button">>></button>
-                      <button class="btn btn-outline-secondary" value="next_10" onclick="addComment()" type="submit" name="submit_button">>10</button>
-                      <button class="btn btn-outline-secondary" value="next_100" onclick="addComment()" type="submit" name="submit_button">>100</button>
+                      <button class="btn btn-outline-secondary" value="prev_1" title="Prev annotation" onclick="addComment()" type="submit" name="submit_button"><</button>
+                      <button class="btn btn-outline-secondary" value="next_1" title="Next annotation" onclick="addComment()" type="submit" name="submit_button">></button>
+                      
+                      <button class="btn btn-outline-secondary" value="first_anno" title="First annotation" onclick="addComment()" type="submit" name="submit_button">|<</button>
+                      <button class="btn btn-outline-secondary" value="prev_10" title="Go back 10 annotations" onclick="addComment()" type="submit" name="submit_button"><<</button>
+                      <button class="btn btn-outline-secondary" value="next_10" title="Go forward 10 annotations" onclick="addComment()" type="submit" name="submit_button">>></button>
+                      <button class="btn btn-outline-secondary" value="last_anno" title="Last annotation" onclick="addComment()" type="submit" name="submit_button">>|</button>
                     </div>
                 </form>
 
