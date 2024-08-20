@@ -39,19 +39,13 @@ def allowed_data_file(filename):
     Returns:
         (bool) : True if the file is of a supported type.
     """
-    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
-    allowed_zip_extensions = {'csv'}
+    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml', 'csv.gz'}
 
-    filename_elements = filename.split(".")
-    extension = filename_elements[-1]
-    if extension == 'gz':
-        # Zipped format accepts (filename.csv.gz)
-        if len(filename_elements) < 2:
-            return False
-        extension = filename_elements[-2]
-        return extension in allowed_zip_extensions
+    for extension in allowed_extensions:
+        if filename.endswith('.' + extension):
+            return True
 
-    return extension in allowed_extensions
+    return False
 
 
 def allowed_image_file(filename):
