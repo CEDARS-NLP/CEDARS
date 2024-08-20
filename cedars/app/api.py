@@ -169,12 +169,12 @@ def kill_pines_api(project_id, superbio_api_token):
         api_url = os.getenv("SUPERBIO_API_URL")
         if api_url is not None:
             endpoint = f"api/cedars_projects/{project_id}/pines"
-            if superbio_api_token is not None:
-                headers = {"Authorization": f"Bearer {superbio_api_token}"}
-            else:
-                headers = {}
+            headers = {"Authorization": f"Bearer {superbio_api_token}"}
+
             try:
                 requests.delete(f'{api_url}/{endpoint}', headers=headers)
+            # TODO : Handle more types of exceptions
+            # Might retry in case of certain exceptions
             except Exception as e:
                 logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
 
