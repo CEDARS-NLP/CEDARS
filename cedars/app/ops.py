@@ -39,11 +39,13 @@ def allowed_data_file(filename):
     Returns:
         (bool) : True if the file is of a supported type.
     """
-    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml'}
+    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml', 'csv.gz'}
 
-    extension = filename.split(".")[-1]
+    for extension in allowed_extensions:
+        if filename.endswith('.' + extension):
+            return True
 
-    return extension in allowed_extensions
+    return False
 
 
 def allowed_image_file(filename):
@@ -108,6 +110,12 @@ def project_details():
     return render_template("ops/project_details.html",
                            tasks=db.get_tasks_in_progress(), **db.get_info())
 
+def read_gz_csv(filename, *args, **kwargs):
+    '''
+    Function to read a GZIP compressed csv to a pandas DataFrame.
+    '''
+    return pd.read_csv(filename, compression='gzip', *args, **kwargs)
+
 
 def load_pandas_dataframe(filepath):
     """
@@ -128,6 +136,8 @@ def load_pandas_dataframe(filepath):
         raise ValueError("Filepath must be provided.")
 
     extension = str(filepath).rsplit('.', maxsplit=1)[-1].lower()
+    # If the extension is gz, we can assume it is a csv.gz file as this
+    # is the only filecheck supported in the allowed_data_file check
     loaders = {
         'csv': pd.read_csv,
         'xlsx': pd.read_excel,
@@ -135,7 +145,8 @@ def load_pandas_dataframe(filepath):
         'parquet': pd.read_parquet,
         'pickle': pd.read_pickle,
         'pkl': pd.read_pickle,
-        'xml': pd.read_xml
+        'xml': pd.read_xml,
+        'gz' : read_gz_csv,
     }
 
     if extension not in loaders:
@@ -149,7 +160,7 @@ def load_pandas_dataframe(filepath):
         obj = minio.get_object(g.bucket_name, filepath)
 
         # Read one line of the file to conserve memory and computation
-        if extension in ['csv', 'xlsx']:
+        if extension in ['csv', 'xlsx', 'gz']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
         elif extension == 'json':
             data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
