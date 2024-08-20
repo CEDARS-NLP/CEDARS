@@ -312,6 +312,27 @@ def upload_query():
         return render_template("ops/upload_query.html", **db.get_info())
 
     use_pines = bool(request.form.get("nlp_apply"))
+    superbio_api_token = session.get('superbio_api_token')
+    if superbio_api_token is not None and use_pines:
+        # If using a PINES server via superbio,
+        # ensure that the current token works properly
+        token_status = get_token_status(superbio_api_token)
+        if token_status['has_expired'] is True:
+            # If we are using a token, and this token has expired
+            # then we cancell the process and do not add anything to the queue.
+            logger.info('The current token has expired. Logging our user.')
+            redirect(url_for('auth.logout'))
+        elif token_status['is_valid'] is False:
+            logger.error(f'Passed invalid token : {superbio_api_token}')
+            flash("Invalid superbio token.")
+            return redirect(url_for("ops.upload_query"))
+
+    if use_pines:
+        is_pines_available = init_pines_connection(superbio_api_token)
+        if is_pines_available is False:
+            # PINES could not load successfully
+            flash("Could not load PINES server.")
+            return redirect(url_for("ops.upload_query"))
 
     use_negation = False  # bool(request.form.get("view_negations"))
     hide_duplicates = not bool(request.form.get("keep_duplicates"))
@@ -344,29 +365,7 @@ def do_nlp_processing():
     """
     nlp_processor = nlpprocessor.NlpProcessor()
     pt_ids = db.get_patient_ids()
-    is_using_pines = db.get_search_query(query_key='tag_query')['nlp_apply']
-
     superbio_api_token = session.get('superbio_api_token')
-    if superbio_api_token is not None and is_using_pines:
-        # If using a PINES server via superbio,
-        # ensure that the current token works properly
-        token_status = get_token_status(superbio_api_token)
-        if token_status['has_expired'] is True:
-            # If we are using a token, and this token has expired
-            # then we cancell the process and do not add anything to the queue.
-            logger.info('The current token has expired. Logging our user.')
-            redirect(url_for('auth.logout'))
-        elif token_status['is_valid'] is False:
-            logger.error(f'Passed invalid token : {superbio_api_token}')
-            flash("Invalid superbio token.")
-            return redirect(url_for("ops.upload_query"))
-
-    if is_using_pines:
-        is_pines_available = init_pines_connection(superbio_api_token)
-        if is_pines_available is False:
-            # PINES could not load successfully
-            flash("Could not load PINES server.")
-            return redirect(url_for("ops.upload_query"))
 
     # add task to the queue
     for patient in pt_ids:
