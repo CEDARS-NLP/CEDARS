@@ -102,7 +102,7 @@ def load_pines_from_api(api_url, endpoint, headers):
     logger.info("Got JSON", json_data, flush=True)
     return json_data['url']
 
-def check_token_expiry(superbio_api_token):
+def get_token_status(superbio_api_token):
     '''
     Function to test if a superbio token is still valid.
 
@@ -111,18 +111,25 @@ def check_token_expiry(superbio_api_token):
                                         superbio PINES servers.
     
     Returns :
-        bool : True if the token has expired, 
-                False if the token is still valid.
-        
-        None : Returns None if the input is not a valid token.
+        dict : {
+                is_valid (bool) : True if this is a valid API token.
+                has_expired (bool) : True if this is a valid token that has expired.
+                token_info (str) : Details of token status, will contain an error message if
+                                    the token is not valid.
+        }
 
     '''
+    result = {
+        'is_valid' : False,
+        'has_expired' : False,
+        'token_info' : ''
+    }
+
     api_url = os.getenv("SUPERBIO_API_URL")
-    if api_url is None:
+    if api_url is None or superbio_api_token is None:
         logger.error("No server found to connect to.")
-        return None
-    elif superbio_api_token is None:
-        return None
+        result['token_info'] = 'Invalid API url or token.'
+        return result
 
     endpoint = "cedars_projects"
     headers = {"Authorization": f"Bearer {superbio_api_token}"}
@@ -130,18 +137,20 @@ def check_token_expiry(superbio_api_token):
         response = requests.get(f'{api_url}/{endpoint}', headers=headers)
         data = response.json()
         if 'hits' in data:
-            return False
+            result['is_valid'] = True
+            result['token_info'] = 'Token is working and has not expired.'
         elif 'msg' in data and data['msg'] == "Token has expired":
             logger.info("Superbio token has expired.")
-            return True
+            result['token_info'] = "Superbio token has expired."
+            result['has_expired'] = True
     except requests.exceptions.HTTPError as e:
         logger.error(f"Encountered error {e} when trying to check token validity.")
-        return None
+        result['token_info'] = f"Encountered HTTP error {e}."
     except requests.exceptions.ConnectionError as e:
         logger.error(f'Could not connect to superbio server to check token validity.')
-        return None, False
+        result['token_info'] = f"Encountered Connection error {e}."
 
-    return False
+    return result
 
 
 def kill_pines_api(project_id, superbio_api_token):
