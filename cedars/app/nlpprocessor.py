@@ -311,7 +311,3 @@ class NlpProcessor:
 
         # TODO: find a better way to create index - use queue? and add status?
         logger.info("jobs in progress: %s", len(list(db.get_tasks_in_progress())))
-        if len(list(db.get_tasks_in_progress())) == 0:
-            logger.info("All tasks completed - creating indexes")
-            db.create_index("ANNOTATIONS", ["patient_id", "note_id"])
-            db.create_index("PINES", [("text_id", {"unique": True})])

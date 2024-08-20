@@ -4,6 +4,7 @@ from minio import Minio
 from werkzeug.local import LocalProxy
 from dotenv import dotenv_values
 from flask import current_app, g
+from loguru import logger
 
 
 config = dotenv_values(".env")
@@ -30,7 +31,7 @@ def get_minio():
         if not minio.bucket_exists(g.bucket_name):
             minio.make_bucket(g.bucket_name)
         else:
-            print(f"Bucket '{g.bucket_name}' already exists")
+            logger.info(f"Bucket '{g.bucket_name}' already exists")
 
     return minio
 

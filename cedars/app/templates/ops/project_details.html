@@ -42,29 +42,6 @@
         </form>
       </div>
     </div>
-    <div class="col-md-12">
-      <div class="tile full-width">
-        <h2>Job Status</h2>
-          <table class="table table-sm">
-            <tr>
-              <th>Job ID</th>
-              <th>Name</th>
-              <th>User</th>
-              <th>Completed</th>
-              <th>Progress</th>
-            </tr>
-            {% for task in tasks %}
-            <tr>
-              <td>{{ task.job_id }}</td>
-              <td>{{ task.name }}</td>
-              <td>{{ task.user }}</td>
-              <td>{{ task.complete }}</td>
-              <td>{{ task.progress }}</td>
-            </tr>
-            {% endfor %}
-          </table>
-      </div>
-    </div>
   </div>
 </div>
 

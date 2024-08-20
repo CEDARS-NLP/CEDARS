@@ -33,6 +33,7 @@ services:
       - cpu
       - gpu
       - selfhosted
+      - superbio
     deploy:
       resources:
         limits:
@@ -56,6 +57,7 @@ services:
       - cedars
     profiles:
       - selfhosted
+      - superbio
 
   minio:
     <<: *minio-common
@@ -73,6 +75,7 @@ services:
       - cpu
       - gpu
       - selfhosted
+      - superbio
 
   nginx:
     image: nginx:1.19.2-alpine
@@ -85,13 +88,13 @@ services:
     depends_on:
       - web
       - minio
-      - pines
     networks:
       - cedars
     profiles:
       - cpu
       - gpu
       - selfhosted
+      - superbio
 
   pines:
     build:
@@ -138,6 +141,7 @@ services:
       - cpu
       - gpu
       - selfhosted
+      - superbio
 
   worker-task:
     image: cedars
@@ -153,6 +157,7 @@ services:
       - cpu
       - gpu
       - selfhosted   
+      - superbio
     deploy:
       resources:
         limits:
@@ -175,7 +180,8 @@ services:
     profiles:
       - cpu
       - gpu
-      - selfhosted   
+      - selfhosted
+      - superbio
     deploy:
       resources:
         limits:
