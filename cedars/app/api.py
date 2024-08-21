@@ -1,9 +1,44 @@
 import os
+from functools import wraps
 from loguru import logger
+import httpx
 from tenacity import retry, wait_exponential
 import requests
 from . import db
 
+
+class APIError(Exception):
+    """An API Error Exception"""
+
+    def __init__(self, error_msg):
+        self.error_msg = error_msg
+
+    def __str__(self):
+        return "Got error when contacting API: ".format(self.error_msg)
+
+def api_error_handler(func):
+    """Decorator to handle API errors consistently."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error occurred: {e}")
+            raise APIError(f"API request failed: {e.response.text}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error occurred: {e}")
+            raise APIError(f"Request failed: {str(e)}")
+        except requests.exceptions.InvalidURL as e:
+            logger.error(f'Invalid URL for API {e}.')
+            raise APIError(f"API request failed due to invalid URL: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f'Connection to API failed.')
+            raise APIError(f"API request failed to connect: {str(e)}")
+
+    return wrapper
+
+
+@api_error_handler
 def load_pines_url(project_id, superbio_api_token = None):
     '''
     if PINES_URL is not available in the ENV then
@@ -102,6 +137,7 @@ def load_pines_from_api(api_url, endpoint, headers):
     logger.info("Got JSON", json_data, flush=True)
     return json_data['url']
 
+@api_error_handler
 def get_token_status(superbio_api_token):
     '''
     Function to test if a superbio token is still valid.
@@ -152,7 +188,7 @@ def get_token_status(superbio_api_token):
 
     return result
 
-
+@api_error_handler
 def kill_pines_api(project_id, superbio_api_token):
     '''
     Shutsdown remote PINES server if it is running.
