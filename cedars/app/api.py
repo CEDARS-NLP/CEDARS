@@ -207,12 +207,7 @@ def kill_pines_api(project_id, superbio_api_token):
             endpoint = f"api/cedars_projects/{project_id}/pines"
             headers = {"Authorization": f"Bearer {superbio_api_token}"}
 
-            try:
-                requests.delete(f'{api_url}/{endpoint}', headers=headers)
-            # TODO : Handle more types of exceptions
-            # Might retry in case of certain exceptions
-            except Exception as e:
-                logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
+            requests.delete(f'{api_url}/{endpoint}', headers=headers)
 
             # Set pines server status to False and delete the old url.
             db.update_pines_api_status(False)
