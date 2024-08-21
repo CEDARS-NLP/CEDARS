@@ -18,6 +18,7 @@ import pandas as pd
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
+import polars as pl
 from .database import mongo, minio
 
 fake = Faker()
@@ -1573,17 +1574,35 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                     "last_note_date", "max_score_note_id",
                     "max_score_note_date", "max_score", "comments",
                     "predicted_notes", "reviewer"]
+    
+    polars_schema = pl.Schema({
+                            "patient_id" : pl.Int64(),
+                            "total_notes" : pl.Int16(),
+                            "reviewed_notes" : pl.Int16(),
+                            "total_sentences" : pl.Int16(),
+                            "reviewed_sentences" : pl.Int16(),
+                            "sentences" : pl.String(),
+                            "event_date" : pl.Date(),
+                            "first_note_date" : pl.Date(),
+                            "last_note_date" : pl.Date(),
+                            "max_score_note_id" : pl.String(),
+                            "max_score_note_date" : pl.Date(),
+                            "max_score" : pl.Float64(),
+                            "comments" : pl.String(),
+                            "predicted_notes" : pl.String(),
+                            "reviewer" : pl.String()
+                            })
 
     try:
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
-        writer = pd.DataFrame(columns=column_names)
-        writer.to_csv(csv_buffer, index=False, header=True)
+        writer = pl.DataFrame(schema=polars_schema, strict=False)
+        writer.write_csv(csv_buffer, include_header=True)
 
         # Write data in chunks and stream to MinIO
-        for chunk in pd.DataFrame(data_generator(), columns=column_names).to_csv(header=False,
-                                                                                 index=False,
-                                                                                 chunksize=1000):
+        for chunk in pd.DataFrame(data_generator(), schema=polars_schema,
+                                  strict=False).write_csv(include_header=False,
+                                                                    batch_size=1000):
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
