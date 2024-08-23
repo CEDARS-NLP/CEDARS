@@ -195,6 +195,7 @@ def create_db_indices():
     create_index("ANNOTATIONS", ["patient_id", "note_id"])
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
+    create_index("PINES", [("patient_id")])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
