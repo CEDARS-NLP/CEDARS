@@ -1573,40 +1573,40 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                     "max_score_note_date", "max_score", "comments",
                     "predicted_notes", "reviewer"]
 
-    #try:
-    # Create an in-memory buffer for the CSV data
-    csv_buffer = StringIO()
-    writer = pd.DataFrame(columns=column_names)
-    writer.to_csv(csv_buffer, index=False, header=True)
+    try:
+        # Create an in-memory buffer for the CSV data
+        csv_buffer = StringIO()
+        writer = pd.DataFrame(columns=column_names)
+        writer.to_csv(csv_buffer, index=False, header=True)
 
-    patients = get_all_patients()
-    buffer_elements = []
-    for patient in patients:
-        for chunk in pd.DataFrame(data_generator(patient),
-                                columns=column_names).to_csv(header=False,
-                                                                index=False,
-                                                                chunksize=1000):
-            csv_buffer.write(chunk)
+        patients = get_all_patients()
+        buffer_elements = []
+        for patient in patients:
+            for chunk in pd.DataFrame(data_generator(patient),
+                                    columns=column_names).to_csv(header=False,
+                                                                    index=False,
+                                                                    chunksize=1000):
+                csv_buffer.write(chunk)
 
-    for element in buffer_elements:
-        csv_buffer.write(element.getvalue())
+        for element in buffer_elements:
+            csv_buffer.write(element.getvalue())
 
-    # Move the cursor to the beginning of the buffer
-    csv_buffer.seek(0)
-    data_bytes = csv_buffer.getvalue().encode('utf-8')
-    data_stream = BytesIO(data_bytes)
+        # Move the cursor to the beginning of the buffer
+        csv_buffer.seek(0)
+        data_bytes = csv_buffer.getvalue().encode('utf-8')
+        data_stream = BytesIO(data_bytes)
 
-    # Upload to MinIO
-    minio.put_object(g.bucket_name,
-                        f"annotated_files/{filename}",
-                        data_stream,
-                        length=len(data_bytes),
-                        content_type="application/csv")
-    logger.info(f"Uploaded annotations to s3: {filename}")
-    return True
-    #except Exception as e:
-    #    logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
-    #    return False
+        # Upload to MinIO
+        minio.put_object(g.bucket_name,
+                            f"annotated_files/{filename}",
+                            data_stream,
+                            length=len(data_bytes),
+                            content_type="application/csv")
+        logger.info(f"Uploaded annotations to s3: {filename}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
+        return False
 
 
 def terminate_project():
