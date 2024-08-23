@@ -1598,10 +1598,10 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
         # Upload to MinIO
         minio.put_object(g.bucket_name,
-                            f"annotated_files/{filename}",
-                            data_stream,
-                            length=len(data_bytes),
-                            content_type="application/csv")
+                        f"annotated_files/{filename}",
+                        data_stream,
+                        length=len(data_bytes),
+                        content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
     except Exception as e:
