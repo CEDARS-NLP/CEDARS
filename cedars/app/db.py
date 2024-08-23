@@ -1506,66 +1506,68 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
     """
     Download annotations from the database and stream them to MinIO.
     """
-    def data_generator(patient_info):
-        patient_id = patient_info["patient_id"]
-        notes = get_all_notes(patient_id)
-        reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
-        note_details = []
-        reviewer = get_patient_reviewer(patient_id)
-        for note in notes:
-            note_id = note["text_id"]
-            note_date = str(note["text_date"])[:10]
-            predicted_score = get_note_prediction_from_db(note_id)
-            if predicted_score is not None:
-                note_details.append(f"{note_id}:{note_date}:{predicted_score}")
-        all_note_details = "\n".join(note_details)
+    def data_generator():
+        patients = get_all_patients()
+        for patient in patients:
+            patient_id = patient["patient_id"]
+            notes = get_all_notes(patient_id)
+            reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+            note_details = []
+            reviewer = get_patient_reviewer(patient_id)
+            for note in notes:
+                note_id = note["text_id"]
+                note_date = str(note["text_date"])[:10]
+                predicted_score = get_note_prediction_from_db(note_id)
+                if predicted_score is not None:
+                    note_details.append(f"{note_id}:{note_date}:{predicted_score}")
+            all_note_details = "\n".join(note_details)
 
-        if get_sentences:
-            reviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                            reviewed=True,
-                                                            key="sentence")
-            unreviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                                reviewed=False,
+            if get_sentences:
+                reviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                                reviewed=True,
                                                                 key="sentence")
-            sentences_to_show = reviewed_sentences + unreviewed_sentences
-        else:
-            reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
-            unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
-            key_annotation_id = get_event_annotation_id(patient_id)
-            if key_annotation_id is not None:
-                key_annotation = get_annotation(key_annotation_id)
-                sentences_to_show = [key_annotation["sentence"]]
-                note_id = key_annotation["note_id"]
-                sentences_to_show.append(f"\nNote_id : {note_id}")
+                unreviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                                  reviewed=False,
+                                                                  key="sentence")
+                sentences_to_show = reviewed_sentences + unreviewed_sentences
             else:
-                sentences_to_show = [""]
+                reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
+                unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
+                key_annotation_id = get_event_annotation_id(patient_id)
+                if key_annotation_id is not None:
+                    key_annotation = get_annotation(key_annotation_id)
+                    sentences_to_show = [key_annotation["sentence"]]
+                    note_id = key_annotation["note_id"]
+                    sentences_to_show.append(f"\nNote_id : {note_id}")
+                else:
+                    sentences_to_show = [""]
 
 
-        sentences = reviewed_sentences + unreviewed_sentences
-        total_sentences = len(sentences)
-        event_date = get_event_date(patient_id)
-        first_note_date = get_first_note_date_for_patient(patient_id)
-        last_note_date = get_last_note_date_for_patient(patient_id)
-        max_score = None
-        max_score_note_id = None
-        max_score_note_date = None
-        comments = patient_info.get("comments", "")
-        try:
-            res = list(get_max_prediction_score(patient_id))
-            if len(res) > 0:
-                res = res[0]
-                max_score = res["max_score"]
-                max_score_note_id = res["text_id"]
-                max_score_note_date = get_note_date(max_score_note_id)
+            sentences = reviewed_sentences + unreviewed_sentences
+            total_sentences = len(sentences)
+            event_date = get_event_date(patient_id)
+            first_note_date = get_first_note_date_for_patient(patient_id)
+            last_note_date = get_last_note_date_for_patient(patient_id)
+            max_score = None
+            max_score_note_id = None
+            max_score_note_date = None
+            comments = patient.get("comments", "")
+            try:
+                res = list(get_max_prediction_score(patient_id))
+                if len(res) > 0:
+                    res = res[0]
+                    max_score = res["max_score"]
+                    max_score_note_id = res["text_id"]
+                    max_score_note_date = get_note_date(max_score_note_id)
 
-        except Exception:
-            logger.info(f"PINES results not available for patient: {patient_id}")
+            except Exception:
+                logger.info(f"PINES results not available for patient: {patient_id}")
 
 
-        yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
-                len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
-                first_note_date, last_note_date, max_score_note_id, max_score_note_date,
-                max_score, comments, all_note_details, reviewer]
+            yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
+                   len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
+                   first_note_date, last_note_date, max_score_note_id, max_score_note_date,
+                   max_score, comments, all_note_details, reviewer]
 
     column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
                     "reviewed_sentences", "sentences", "event_date", "first_note_date",
@@ -1579,17 +1581,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         writer = pd.DataFrame(columns=column_names)
         writer.to_csv(csv_buffer, index=False, header=True)
 
-        patients = get_all_patients()
-        buffer_elements = []
-        for patient in patients:
-            for chunk in pd.DataFrame(data_generator(patient),
-                                    columns=column_names).to_csv(header=False,
-                                                                    index=False,
-                                                                    chunksize=1000):
-                csv_buffer.write(chunk)
-
-        for element in buffer_elements:
-            csv_buffer.write(element.getvalue())
+        # Write data in chunks and stream to MinIO
+        for chunk in pd.DataFrame(data_generator(), columns=column_names).to_csv(header=False,
+                                                                                 index=False,
+                                                                                 chunksize=1000):
+            csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
         csv_buffer.seek(0)
@@ -1598,10 +1594,10 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
         # Upload to MinIO
         minio.put_object(g.bucket_name,
-                        f"annotated_files/{filename}",
-                        data_stream,
-                        length=len(data_bytes),
-                        content_type="application/csv")
+                         f"annotated_files/{filename}",
+                         data_stream,
+                         length=len(data_bytes),
+                         content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
     except Exception as e:
