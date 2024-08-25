@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timezone
 import io
 import pandas as pd
+import pyarrow.parquet as pq
 import flask
 from dotenv import dotenv_values
 from flask import (
@@ -124,7 +125,7 @@ def read_gz_csv(filename, *args, **kwargs):
     return pd.read_csv(filename, compression='gzip', *args, **kwargs)
 
 
-def load_pandas_dataframe(filepath):
+def load_pandas_dataframe(filepath, chunk_size=1000):
     """
     Load tabular data from a file into a pandas DataFrame.
 
@@ -166,12 +167,19 @@ def load_pandas_dataframe(filepath):
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
 
-        data_frame_line_1 = None
+        file_columns = []
         # Read one line of the file to conserve memory and computation
         if extension in ['csv', 'xlsx', 'gz']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
+            file_columns = data_frame_line_1.columns
         elif extension == 'json':
             data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
+            file_columns = data_frame_line_1.columns
+        elif extension == 'parquet':
+            # For Parquet, we'll check columns using pyarrow
+            parquet_file = pq.ParquetFile(obj)
+            file_columns = parquet_file.schema.names
+            obj.seek(0)
         else:
             # TODO
             # Add generator to load a single line from other file types
@@ -179,22 +187,26 @@ def load_pandas_dataframe(filepath):
 
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
 
-        if data_frame_line_1 is None:
-            flash("Can't very columns for the uploaded file (Only csv, csv.gz and xlsx supported).")
+        if len(file_columns) == 0:
+            flash("Can't very columns for the uploaded file (Only csv, csv.gz and xlsx supported)... Reading whole file")
         else:
+            missing_columns = []
             for column in required_columns:
-                if column not in data_frame_line_1.columns:
-                    flash(f"Column {column} missing from uploaded file.")
-                    flash("Failed to save file to database.")
-                    raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+                if column not in file_columns:
+                    missing_columns.append(column)
+            if len(missing_columns) > 0:
+                flash(f'Column {"\n".join(missing_columns)} missing from uploaded file.')
+                flash("Failed to save file to database.")
+                raise RuntimeError(f"Uploaded file does not contain column '{"\n".join(missing_columns)}'.")
 
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
-            parquet_data = io.BytesIO(obj.read())
-            data_frame = pd.read_parquet(parquet_data)
+            parquet_file = pq.ParquetFile(obj)
+            for batch in parquet_file.iter_batches(batch_size=chunk_size):
+                yield batch.to_pandas()
         else:
-            data_frame = loaders[extension](obj)
-        return data_frame
+            for chunk in loaders[extension](obj, chunksize=chunk_size):
+                yield chunk
 
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
@@ -206,7 +218,7 @@ def load_pandas_dataframe(filepath):
 
 
 # Pylint disabled due to naming convention.
-def EMR_to_mongodb(filepath):  # pylint: disable=C0103
+def EMR_to_mongodb(filepath, chunk_size=10000):  # pylint: disable=C0103
     """
     This function is used to open a csv file and load it's contents into the mongodb database.
 
@@ -216,20 +228,12 @@ def EMR_to_mongodb(filepath):  # pylint: disable=C0103
     Returns:
         None
     """
-
-    data_frame = load_pandas_dataframe(filepath)
-    if data_frame is None:
-        return
-
-    logger.info(f"columns in dataframe:\n {data_frame.columns}")
-    logger.debug(data_frame.head())
-    id_list = data_frame["patient_id"].unique()
-    logger.info("Starting document migration to mongodb database.")
-    for i, p_id in enumerate(id_list):
-        documents = data_frame[data_frame["patient_id"] == p_id]
-        db.upload_notes(documents)
-        if i+1 % 100 == 0:
-            logger.info(f"Documents uploaded for patient #{i+1}")
+    total_patients = 0
+    for i, chunk in enumerate(load_pandas_dataframe(filepath, chunk_size)):
+        logger.info(f"Processing chunk {i+1}")
+        logger.debug(f"Columns in chunk:\n {chunk.columns}")
+        logger.debug(chunk.head())
+        db.upload_notes(chunk)
 
     db.create_index("PATIENTS", [("patient_id", {"unique": True})])
     db.create_index("NOTES", ["patient_id",
