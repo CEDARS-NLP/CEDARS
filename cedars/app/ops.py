@@ -87,14 +87,14 @@ def project_details():
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name").strip()
             old_name = db.get_proj_name()
-            project_info = db.get_info()
-            project_id = project_info["project_id"]
             if old_name is None:
-                if len(project_name) > 0:
-                    db.create_project(project_name, current_user.username,
-                                      project_id = project_id)
-                    flash(f"Project **{project_name}** created.")
+                project_id = os.getenv("PROJECT_ID", None)
+                db.create_project(project_name, current_user.username,
+                                    project_id = project_id)
+                flash(f"Project **{project_name}** created.")
             else:
+                project_info = db.get_info()
+                project_id = project_info["project_id"]
                 if len(project_name) > 0:
                     db.update_project_name(project_name)
                     flash(f"Project name updated to {project_name}.")
