@@ -195,9 +195,10 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
                 if column not in file_columns:
                     missing_columns.append(column)
             if len(missing_columns) > 0:
-                flash(f'Column {"\n".join(missing_columns)} missing from uploaded file.')
+                missing_columns_error = "\n".join(missing_columns)
+                flash(f'Column {missing_columns_error} missing from uploaded file.')
                 flash("Failed to save file to database.")
-                raise RuntimeError(f"Uploaded file does not contain column '{"\n".join(missing_columns)}'.")
+                raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
 
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
