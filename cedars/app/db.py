@@ -41,6 +41,8 @@ def create_project(project_name,
         logger.info("Database already created.")
         return
 
+    if project_id is None:
+        project_id = str(uuid4())
     create_info_col(project_name=project_name,
                     project_id=project_id,
                     investigator_name=investigator_name,
@@ -63,7 +65,9 @@ def create_pines_info(pines_url, is_url_from_api):
 
     return pines_url
 
-def create_info_col(project_name, project_id, investigator_name,
+def create_info_col(project_name,
+                    project_id,
+                    investigator_name,
                     cedars_version):
     """
     This function creates the info collection in the mongodb database.
