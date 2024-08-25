@@ -4,7 +4,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 from datetime import datetime, timezone
-
+import io
 import pandas as pd
 import flask
 from dotenv import dotenv_values
@@ -166,6 +166,7 @@ def load_pandas_dataframe(filepath):
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
 
+        data_frame_line_1 = None
         # Read one line of the file to conserve memory and computation
         if extension in ['csv', 'xlsx', 'gz']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
@@ -174,25 +175,34 @@ def load_pandas_dataframe(filepath):
         else:
             # TODO
             # Add generator to load a single line from other file types
-            data_frame_line_1 = loaders[extension](obj)
+            pass
 
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
 
-        for column in required_columns:
-            if column not in data_frame_line_1.columns:
-                flash(f"Column {column} missing from uploaded file.")
-                flash("Failed to save file to database.")
-                raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+        if data_frame_line_1 is None:
+            flash("Can't very columns for the uploaded file (Only csv, csv.gz and xlsx supported).")
+        else:
+            for column in required_columns:
+                if column not in data_frame_line_1.columns:
+                    flash(f"Column {column} missing from uploaded file.")
+                    flash("Failed to save file to database.")
+                    raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
 
         # Re-initialise object from minio to load it again
-        obj = minio.get_object(g.bucket_name, filepath)
-        data_frame = loaders[extension](obj)
+        if extension == 'parquet':
+            parquet_data = io.BytesIO(obj.read())
+            data_frame = pd.read_parquet(parquet_data)
+        else:
+            data_frame = loaders[extension](obj)
         return data_frame
 
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
         raise RuntimeError(f"Failed to load the file '{filepath}' due to: {str(exc)}") from exc
+    finally:
+        obj.close()
+        obj.release_conn()
 
 
 # Pylint disabled due to naming convention.
