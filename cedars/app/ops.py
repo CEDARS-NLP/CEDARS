@@ -43,7 +43,7 @@ def allowed_data_file(filename):
     Returns:
         (bool) : True if the file is of a supported type.
     """
-    allowed_extensions = {'csv', 'xlsx', 'json', 'parquet', 'pickle', 'pkl', 'xml', 'csv.gz'}
+    allowed_extensions = {'csv', 'parquet', 'pickle', 'pkl', 'csv.gz'}
 
     for extension in allowed_extensions:
         if filename.endswith('.' + extension):
@@ -147,12 +147,12 @@ def load_pandas_dataframe(filepath):
     # is the only filecheck supported in the allowed_data_file check
     loaders = {
         'csv': pd.read_csv,
-        'xlsx': pd.read_excel,
-        'json': pd.read_json,
+        #'xlsx': pd.read_excel,
+        #'json': pd.read_json,
         'parquet': pd.read_parquet,
         'pickle': pd.read_pickle,
         'pkl': pd.read_pickle,
-        'xml': pd.read_xml,
+        #'xml': pd.read_xml,
         'gz' : read_gz_csv,
     }
 
