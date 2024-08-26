@@ -29,7 +29,6 @@ from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
 
-logger.enable(__name__)
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")
@@ -179,16 +178,14 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
             # For Parquet, we'll check columns using pyarrow
             parquet_file = pq.ParquetFile(obj)
             file_columns = parquet_file.schema.names
-            obj.seek(0)
         else:
             # TODO
             # Add generator to load a single line from other file types
             pass
-
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
 
         if len(file_columns) == 0:
-            flash("Can't very columns for the uploaded file (Only csv, csv.gz and xlsx supported)... Reading whole file")
+            flash("Can't verify columns for the uploaded file (Only csv, csv.gz and xlsx supported)... Reading whole file")
         else:
             missing_columns = []
             for column in required_columns:
@@ -199,14 +196,16 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
                 flash(f'Column {missing_columns_error} missing from uploaded file.')
                 flash("Failed to save file to database.")
                 raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
-
+        
+        obj = minio.get_object(g.bucket_name, filepath)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(obj)
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
                 yield batch.to_pandas()
         else:
-            for chunk in loaders[extension](obj, chunksize=chunk_size):
+            chunks = loaders[extension](obj, chunksize=chunk_size)
+            for chunk in chunks:
                 yield chunk
 
     except FileNotFoundError as exc:
@@ -218,28 +217,88 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         obj.release_conn()
 
 
-# Pylint disabled due to naming convention.
-def EMR_to_mongodb(filepath, chunk_size=10000):  # pylint: disable=C0103
+def prepare_note(note_info):
+    date_format = '%Y-%m-%d'
+    note_info["text_date"] = datetime.strptime(note_info["text_date"], date_format)
+    note_info["reviewed"] = False
+    return note_info
+
+
+def EMR_to_mongodb(filepath, chunk_size=10000):
     """
-    This function is used to open a csv file and load it's contents into the mongodb database.
+    This function is used to open a file and load its contents into the MongoDB database in chunks.
 
     Args:
-        filename (str) : The path to the file to load data from.
-        For valid file extensions refer to the allowed_data_file function above.
+        filepath (str): The path to the file to load data from.
+        chunk_size (int): Number of rows to process per chunk.
+
     Returns:
         None
     """
-    total_patients = 0
-    for i, chunk in enumerate(load_pandas_dataframe(filepath, chunk_size)):
-        logger.info(f"Processing chunk {i+1}")
-        logger.debug(f"Columns in chunk:\n {chunk.columns}")
-        logger.debug(chunk.head())
-        db.upload_notes(chunk)
+    logger.info("Starting document migration to MongoDB database.")
+    
+    total_rows = 0
+    total_chunks = 0
+    all_patient_ids = set()
 
-    db.create_index("PATIENTS", [("patient_id", {"unique": True})])
-    db.create_index("NOTES", ["patient_id",
-                              ("text_id", {"unique": True})])
-    logger.info("Completed document migration to mongodb database.")
+    try:
+        for chunk in load_pandas_dataframe(filepath, chunk_size):
+            total_chunks += 1
+            rows_in_chunk = len(chunk)
+            total_rows += rows_in_chunk
+
+            logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
+
+            # Prepare notes
+            notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
+            
+            # Collect patient IDs
+            chunk_patient_ids = set(chunk['patient_id'])
+            all_patient_ids.update(chunk_patient_ids)
+
+            # Bulk insert notes
+            inserted_count = db.bulk_insert_notes(notes_to_insert)
+            logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
+
+        # Bulk upsert patients
+        upserted_count = db.bulk_upsert_patients(all_patient_ids)
+        logger.info(f"Upserted {upserted_count} patients")
+
+        # Create indexes
+        db.create_post_upload_indexes()
+        
+        logger.info(f"Completed document migration to MongoDB database. "
+                    f"Total rows processed: {total_rows}, "
+                    f"Total chunks processed: {total_chunks}, "
+                    f"Total unique patients: {len(all_patient_ids)}")
+
+    except Exception as e:
+        logger.error(f"An error occurred during document migration: {str(e)}")
+        flash(f"Failed to upload data: {str(e)}")
+        raise
+
+
+# Pylint disabled due to naming convention.
+# def EMR_to_mongodb(filepath, chunk_size=10000):  # pylint: disable=C0103
+#     """
+#     This function is used to open a csv file and load it's contents into the mongodb database.
+
+#     Args:
+#         filename (str) : The path to the file to load data from.
+#         For valid file extensions refer to the allowed_data_file function above.
+#     Returns:
+#         None
+#     """
+#     for i, chunk in enumerate(load_pandas_dataframe(filepath, chunk_size)):
+#         logger.info(f"Processing chunk {i+1}")
+#         logger.debug(f"Columns in chunk:\n {chunk.columns}")
+#         logger.debug(chunk.head())
+#         db.upload_notes(chunk)
+
+#     db.create_index("PATIENTS", [("patient_id", {"unique": True})])
+#     db.create_index("NOTES", ["patient_id",
+#                               ("text_id", {"unique": True})])
+#     logger.info("Completed document migration to mongodb database.")
 
 
 @bp.route("/upload_data", methods=["GET", "POST"])
