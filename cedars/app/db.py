@@ -504,8 +504,6 @@ def get_patients_to_annotate():
         if len(annotations) > 0:
             return patient_id
 
-        mark_patient_reviewed(patient_id, "CEDARS")
-
     return None
 
 
