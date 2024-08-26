@@ -4,7 +4,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 from datetime import datetime, timezone
-
+import io
 import pandas as pd
 import flask
 from dotenv import dotenv_values
@@ -13,7 +13,7 @@ from flask import (
     redirect, session, request,
     url_for, flash, g, jsonify
 )
-
+import pyarrow.parquet as pq
 from loguru import logger
 import requests
 from flask_login import current_user, login_required
@@ -169,24 +169,35 @@ def load_pandas_dataframe(filepath):
         # Read one line of the file to conserve memory and computation
         if extension in ['csv', 'xlsx', 'gz']:
             data_frame_line_1 = loaders[extension](obj, nrows = 1)
+            df_columns = data_frame_line_1.columns
         elif extension == 'json':
             data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
+            df_columns = data_frame_line_1.columns
+        elif extension == 'parquet':
+            reader_obj = obj.read()
+            parquet_data = io.BytesIO(reader_obj)
+            dataset = pq.read_table(parquet_data)
+            df_columns = dataset.column_names
         else:
             # TODO
             # Add generator to load a single line from other file types
             data_frame_line_1 = loaders[extension](obj)
+            df_columns = data_frame_line_1.columns
 
         required_columns = ['patient_id', 'text_id', 'text', 'text_date']
 
         for column in required_columns:
-            if column not in data_frame_line_1.columns:
+            if column not in df_columns:
                 flash(f"Column {column} missing from uploaded file.")
                 flash("Failed to save file to database.")
                 raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
 
         # Re-initialise object from minio to load it again
         obj = minio.get_object(g.bucket_name, filepath)
-        data_frame = loaders[extension](obj)
+        if extension == 'parquet':
+            data_frame = dataset.to_pandas()
+        else:
+            data_frame = loaders[extension](obj)
         return data_frame
 
     except FileNotFoundError as exc:
