@@ -178,6 +178,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
             # For Parquet, we'll check columns using pyarrow
             parquet_file = pq.ParquetFile(obj)
             file_columns = parquet_file.schema.names
+            obj.seek(0)
         else:
             # TODO
             # Add generator to load a single line from other file types
@@ -197,7 +198,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
                 flash("Failed to save file to database.")
                 raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
         
-        obj = minio.get_object(g.bucket_name, filepath)
+        obj = minio.get_object(g.bucket_name, filepath, offset=0)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(obj)
