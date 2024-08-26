@@ -23,6 +23,8 @@ from .database import mongo, minio
 
 fake = Faker()
 
+logger.enable(__name__)
+
 # Create collections and indexes
 def create_project(project_name,
                    investigator_name,
