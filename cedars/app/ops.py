@@ -4,7 +4,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 import os
 import re
 from datetime import datetime, timezone
-import io
+import tempfile
 import pandas as pd
 import pyarrow.parquet as pq
 import flask
@@ -167,6 +167,11 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
+        local_directory = tempfile.gettempdir()
+        os.makedirs(local_directory, exist_ok=True)
+        local_filename = os.path.join(local_directory, os.path.basename(filepath))
+        minio.fget_object(g.bucket_name, filepath, local_filename)
+        logger.info(f"File downloaded successfully to {local_filename}")
 
         # file_columns = []
         # # Read one line of the file to conserve memory and computation
@@ -202,11 +207,11 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         # obj = minio.get_object(g.bucket_name, filepath)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
-            parquet_file = pq.ParquetFile(obj)
+            parquet_file = pq.ParquetFile(local_filename)
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
                 yield batch.to_pandas()
         else:
-            chunks = loaders[extension](obj, chunksize=chunk_size)
+            chunks = loaders[extension](local_filename, chunksize=chunk_size)
             for chunk in chunks:
                 yield chunk
 
@@ -338,7 +343,10 @@ def upload_data():
                 minio.put_object(g.bucket_name,
                                  filename,
                                  file,
-                                 size)
+                                 size,
+                                 part_size=10*1024*1024,
+                                 num_parallel_uploads=10
+                                 )
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
             except Exception as e:
