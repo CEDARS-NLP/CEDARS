@@ -86,16 +86,6 @@ def register():
         is_admin = request.form.get("isadmin") == "on"
         logger.info(f"Registering user {username} as admin: {is_admin}")
 
-        password_policy = PasswordPolicy(
-            min_length=8,
-            min_uppercase=2,
-            min_lowercase=2,
-            min_digits=2,
-            min_special=2,
-            special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
-            allow_spaces=False
-        )
-        password_result, password_issues = password_policy.check_password(password)
 
         error = None
         existing_user = db.get_user(username)
@@ -105,10 +95,21 @@ def register():
             error = "Username and password are required."
         elif existing_user or username.lower() in ['cedars', 'pines']:
             error = 'Username already exists or reserved. Please choose a different one.'
-        elif password_result is False:
-            # If the password is not in compliance with our policy,
-            # display the first issue found with this password
-            error = "\n".join(password_issues)
+        else:
+            password_policy = PasswordPolicy(
+                min_length=8,
+                min_uppercase=2,
+                min_lowercase=2,
+                min_digits=2,
+                min_special=2,
+                special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
+                allow_spaces=False
+            )
+            password_result, password_issues = password_policy.check_password(password)
+            if password_result is False:
+                # If the password is not in compliance with our policy,
+                # display the first issue found with this password
+                error = "\n".join(password_issues)
 
         if error is None:
             hashed_password = generate_password_hash(password)

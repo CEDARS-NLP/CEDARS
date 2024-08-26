@@ -25,7 +25,7 @@ fake = Faker()
 # Create collections and indexes
 def create_project(project_name,
                    investigator_name,
-                   project_id,
+                   project_id=None,
                    cedars_version="0.1.0"):
     """
     This function creates all the collections in the mongodb database for CEDARS.
