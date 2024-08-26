@@ -10,7 +10,8 @@ from uuid import uuid4
 
 from typing import Optional
 from faker import Faker
-
+from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError
 import flask
 from flask import g
 import requests
@@ -25,7 +26,7 @@ fake = Faker()
 # Create collections and indexes
 def create_project(project_name,
                    investigator_name,
-                   project_id,
+                   project_id=None,
                    cedars_version="0.1.0"):
     """
     This function creates all the collections in the mongodb database for CEDARS.
@@ -273,46 +274,92 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
     return True
 
 
-def upload_notes(documents):
-    """
-    This function is used to take a dataframe of patient records
-    and save it to the mongodb database.
-
-    Args:
-        documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
-    Returns:
-        None
-    """
+def bulk_insert_notes(notes):
     notes_collection = mongo.db["NOTES"]
-    patient_ids = set()
-    for i in range(len(documents)):
-        note_info = documents.iloc[i].to_dict()
+    try:
+        result = notes_collection.insert_many(notes)
+        return len(result.inserted_ids)
+    except BulkWriteError as bwe:
+        logger.error(f"Bulk write error: {bwe.details}")
+        return bwe.details['nInserted']
+    
 
-        date_format = '%Y-%m-%d'
-        datetime_obj = datetime.strptime(note_info["text_date"], date_format)
-        note_info["text_date"] = datetime_obj
-        note_info["reviewed"] = False
-
-        # text_id should be unique
-        notes_collection.insert_one(note_info)
-        patient_ids.add(note_info["patient_id"])
-        if i+1 % 100 == 0:
-            logger.info(f"Uploaded {i}/{len(documents)} notes")
-
+def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
+    operations = []
     for p_id in patient_ids:
-        patient_info = {"patient_id": p_id,
-                        "reviewed": False,
-                        "locked": False,
-                        "updated": False,
-                        "comments": "",
-                        "reviewed_by" : "",
-                        "event_annotation_id" : None,
-                        "event_date" : None,
-                        "admin_locked": False}
+        patient_info = {
+            "patient_id": p_id,
+            "reviewed": False,
+            "locked": False,
+            "updated": False,
+            "comments": "",
+            "reviewed_by": "",
+            "event_annotation_id": None,
+            "event_date": None,
+            "admin_locked": False
+        }
+        operations.append(
+            UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_info},
+                upsert=True
+            )
+        )
+    
+    try:
+        result = patients_collection.bulk_write(operations, ordered=False)
+        return result.upserted_count
+    except BulkWriteError as bwe:
+        logger.error(f"Bulk write error: {bwe.details}")
+        return bwe.details['nUpserted']
+    
 
-        if not patients_collection.find_one({"patient_id": p_id}):
-            patients_collection.insert_one(patient_info)
+def create_post_upload_indexes():
+    mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
+    mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
+
+
+# def upload_notes(documents):
+#     """
+#     This function is used to take a dataframe of patient records
+#     and save it to the mongodb database.
+
+#     Args:
+#         documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
+#     Returns:
+#         None
+#     """
+#     notes_collection = mongo.db["NOTES"]
+#     patient_ids = set()
+#     for i in range(len(documents)):
+#         note_info = documents.iloc[i].to_dict()
+
+#         date_format = '%Y-%m-%d'
+#         datetime_obj = datetime.strptime(note_info["text_date"], date_format)
+#         note_info["text_date"] = datetime_obj
+#         note_info["reviewed"] = False
+
+#         # text_id should be unique
+#         notes_collection.insert_one(note_info)
+#         patient_ids.add(note_info["patient_id"])
+#         if i+1 % 100 == 0:
+#             logger.info(f"Uploaded {i}/{len(documents)} notes")
+
+#     patients_collection = mongo.db["PATIENTS"]
+#     for p_id in patient_ids:
+#         patient_info = {"patient_id": p_id,
+#                         "reviewed": False,
+#                         "locked": False,
+#                         "updated": False,
+#                         "comments": "",
+#                         "reviewed_by" : "",
+#                         "event_annotation_id" : None,
+#                         "event_date" : None,
+#                         "admin_locked": False}
+
+#         if not patients_collection.find_one({"patient_id": p_id}):
+#             patients_collection.insert_one(patient_info)
 
 
 def insert_one_annotation(annotation):
