@@ -234,6 +234,10 @@ class NlpProcessor:
             if (count) % 10 == 0:
                 logger.info(f"Processed {count} / {len(document_list)} documents")
 
+        # Mark the patient as reviewed if no annotations are found.
+        if docs_with_annotations == 0:
+            db.mark_patient_reviewed(patient_id, "CEDARS")
+
         # check if nlp processing is enabled
         if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
