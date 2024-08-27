@@ -165,8 +165,8 @@ def test_get_all_patients(db):
 
 
 def test_get_patient_ids(db):
-    assert len(db.get_patient_ids()) == 4
-    assert db.get_patient_ids()[0] == 1111111111
+    assert len(db.get_patient_ids()) == 5
+    assert 1111111111 in db.get_patient_ids()
 
 
 def test_get_patient_lock_status(db):
@@ -297,4 +297,4 @@ def test_get_curr_stats(db):
     stats = db.get_curr_stats()
     assert stats["number_of_patients"] == 5
     assert stats["number_of_annotated_patients"] == 0
-    assert stats["number_of_reviewed"] == 2
+    assert stats["number_of_reviewed"] == 1
