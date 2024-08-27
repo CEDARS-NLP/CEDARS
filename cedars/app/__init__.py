@@ -24,7 +24,7 @@ def rq_init_app(cedars_rq):
                                     default_timeout=cedars_rq.config["RQ"]['job_timeout'])
     cedars_rq.ops_queue = rq.Queue(cedars_rq.config["RQ"]['ops_queue_name'],
                                    connection=cedars_rq.redis,
-                                   default_timeout=cedars_rq.config["RQ"]['job_timeout'])
+                                   default_timeout=cedars_rq.config["RQ"]['operation_timeout'])
 
     cedars_rq.extensions['rq'] = cedars_rq
     return cedars_rq
