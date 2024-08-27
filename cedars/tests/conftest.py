@@ -9,6 +9,7 @@ from redis import Redis
 import fakeredis
 from flask_login import FlaskLoginClient
 from app.auth import User
+from app.ops import prepare_note
 
 
 load_dotenv()
@@ -34,7 +35,15 @@ def db(cedars_app):
                       investigator_name="test_investigator",
                       cedars_version="test_version")
     db.add_user("test_user", "test_password")
-    db.upload_notes(test_data)
+    # db.upload_notes(test_data)
+    notes_to_insert = [prepare_note(row.to_dict()) for _, row in test_data.iterrows()]
+    db.bulk_insert_notes(notes_to_insert)
+
+    patient_ids = set(test_data['patient_id'])
+    db.bulk_upsert_patients(patient_ids)
+
+    db.create_post_upload_indexes()
+
     yield db
 
 
