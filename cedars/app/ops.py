@@ -231,8 +231,11 @@ def prepare_note(note_info):
     date_format = '%Y-%m-%d'
     note_info["text_date"] = datetime.strptime(note_info["text_date"], date_format)
     note_info["reviewed"] = False
+    note_info["text_id"] = str(note_info["text_id"])
     return note_info
 
+def prepare_patients(patient_ids):
+    return {int(p_id) for p_id in patient_ids}
 
 def EMR_to_mongodb(filepath, chunk_size=1000):
     """
@@ -264,6 +267,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
             
             # Collect patient IDs
             chunk_patient_ids = set(chunk['patient_id'])
+            chunk_patient_ids = prepare_patients(chunk_patient_ids)
             all_patient_ids.update(chunk_patient_ids)
 
             # Bulk insert notes
@@ -882,20 +886,19 @@ def get_highlighted_sentence(current_annotation, note):
     text = note["text"]
 
     sentence_start = current_annotation["sentence_start"]
-    sentence_end = current_annotation["sentence_end"]
-    if sentence_start == 0:
-        prev_end_index = sentence_start
-    else:
-        # Padding to the left to ensure that all characters are caught
-        prev_end_index = sentence_start - 1
+    sentence_end = current_annotation["sentence_end"] - sentence_start
+
+    # Take characters from the start of the sentence, excluding spaces and new lines.
+    text = text[sentence_start:].strip()
+    prev_end_index = 0
 
     annotations = db.get_all_annotations_for_sentence(note["text_id"],
                                                       current_annotation["sentence_number"])
     logger.info(annotations)
 
     for annotation in annotations:
-        start_index = annotation['note_start_index']
-        end_index = annotation['note_end_index']
+        start_index = annotation['start_index']
+        end_index = annotation['end_index']
         # Make sure the annotations don't overlap
         if start_index < prev_end_index:
             continue
@@ -906,7 +909,7 @@ def get_highlighted_sentence(current_annotation, note):
 
     highlighted_note.append(text[prev_end_index:sentence_end])
     logger.info(highlighted_note)
-    return " ".join(highlighted_note).replace("\n", "<br>").strip()
+    return " ".join(highlighted_note).strip().replace("\n", "<br>")
 
 def format_annotations(annotations, hide_duplicates):
     """
