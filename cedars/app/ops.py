@@ -222,6 +222,9 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
     finally:
         obj.close()
         obj.release_conn()
+        if 'local_filepath' in locals() and os.path.exists(local_filename):
+            os.remove(local_filename)
+            logger.info(f"Removed temporary file: {local_filename}")
 
 
 def prepare_note(note_info):
@@ -499,6 +502,7 @@ def callback_job_success(job, connection, result, *args, **kwargs):
 
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
+        db.create_db_indices()
         close_pines_connection(job.kwargs['superbio_api_token'])
 
 def callback_job_failure(job, connection, result, *args, **kwargs):
@@ -518,6 +522,7 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
 
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
+        db.create_db_indices()
         close_pines_connection(job.kwargs['superbio_api_token'])
 
 def init_pines_connection(superbio_api_token = None):
