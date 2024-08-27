@@ -193,7 +193,7 @@ class NlpProcessor:
             sentence_start = 0
             sentence_end = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
-                sentence_text = sentence_annotation.text
+                sentence_text = sentence_annotation.text.strip()
                 sentence_end = sentence_start + len(sentence_text)
                 matches = self.matcher(sentence_annotation)
                 for match in matches:
