@@ -203,7 +203,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         #         flash(f'Column {missing_columns_error} missing from uploaded file.')
         #         flash("Failed to save file to database.")
         #         raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
-        
+
         # obj = minio.get_object(g.bucket_name, filepath)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
@@ -249,7 +249,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         None
     """
     logger.info("Starting document migration to MongoDB database.")
-    
+
     total_rows = 0
     total_chunks = 0
     all_patient_ids = set()
@@ -264,7 +264,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
 
             # Prepare notes
             notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
-            
+
             # Collect patient IDs
             chunk_patient_ids = set(chunk['patient_id'])
             chunk_patient_ids = prepare_patients(chunk_patient_ids)
@@ -278,9 +278,6 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         upserted_count = db.bulk_upsert_patients(all_patient_ids)
         logger.info(f"Upserted {upserted_count} patients")
 
-        # Create indexes
-        db.create_post_upload_indexes()
-        
         logger.info(f"Completed document migration to MongoDB database. "
                     f"Total rows processed: {total_rows}, "
                     f"Total chunks processed: {total_chunks}, "
@@ -499,7 +496,6 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        db.create_db_indices()
         close_pines_connection(job.kwargs['superbio_api_token'])
 
 def callback_job_failure(job, connection, result, *args, **kwargs):
@@ -512,7 +508,6 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        db.create_db_indices()
         close_pines_connection(job.kwargs['superbio_api_token'])
 
 def init_pines_connection(superbio_api_token = None):
