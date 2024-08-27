@@ -492,7 +492,7 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     '''
     db.report_success(job)
 
-    if len(db.get_tasks_in_progress()) == 0:
+    if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         db.create_db_indices()
@@ -505,7 +505,7 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
     db.report_failure(job)
 
-    if len(db.get_tasks_in_progress()) == 0:
+    if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         db.create_db_indices()

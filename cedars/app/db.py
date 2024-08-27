@@ -1493,13 +1493,6 @@ def report_success(job):
     job.meta['progress'] = 100
     job.save_meta()
 
-    # If the TASK queue does not have any jobs :
-    # 1. Start indexing the annotations and notes db
-    # queue_length = len(flask.current_app.task_queue)
-    # if queue_length == 0:
-    #     # Index database if all tasks are completed
-    #     create_db_indices()
-
     update_db_task_progress(job.get_id(), 100)
 
 
@@ -1512,12 +1505,6 @@ def report_failure(job):
     """
     job.meta['progress'] = 0
     job.save_meta()
-    # # If the TASK queue does not have any jobs :
-    # # 1. Start indexing the annotations and notes db
-    # queue_length = len(flask.current_app.task_queue)
-    # if queue_length == 0:
-    #     # Index database if all tasks are completed
-    #     create_db_indices()
     update_db_task_progress(job.get_id(), 0)
 
 def get_patient_reviewer(patient_id):
