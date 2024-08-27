@@ -492,11 +492,7 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     '''
     db.report_success(job)
 
-    queue_length = len(flask.current_app.task_queue)
-    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
-    num_running_jobs = len(all_jobs.get_job_ids())
-
-    if queue_length == 0 and num_running_jobs == 1:
+    if len(db.get_tasks_in_progress()) == 0:
         # We use num_running_jobs == 1 after the queue is empty to
         # ensure that the job that got over was the last job from the queue.
 
@@ -512,11 +508,7 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
     db.report_failure(job)
 
-    queue_length = len(flask.current_app.task_queue)
-    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
-    num_running_jobs = len(all_jobs.get_job_ids())
-
-    if queue_length == 0 and num_running_jobs == 1:
+    if len(db.get_tasks_in_progress()) == 0:
         # We use num_running_jobs == 1 after the queue is empty to
         # ensure that the job that got over was the last job from the queue.
 
