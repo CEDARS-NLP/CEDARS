@@ -40,6 +40,7 @@ def create_project(project_name,
     Returns:
         None
     """
+    create_db_indices()
     if mongo.db["INFO"].find_one() is not None:
         logger.info("Database already created.")
         return
@@ -199,6 +200,8 @@ def create_db_indices():
     '''
     logger.info("All tasks completed.")
     logger.info("Creating indexes for ANNOTATIONS.")
+    mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
+    mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
     create_index("ANNOTATIONS", ["patient_id", "note_id"])
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
@@ -284,7 +287,7 @@ def bulk_insert_notes(notes):
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nInserted']
-    
+
 
 def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
@@ -308,18 +311,13 @@ def bulk_upsert_patients(patient_ids):
                 upsert=True
             )
         )
-    
+
     try:
         result = patients_collection.bulk_write(operations, ordered=False)
         return result.upserted_count
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nUpserted']
-    
-
-def create_post_upload_indexes():
-    mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
-    mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
 
 
 # def upload_notes(documents):
