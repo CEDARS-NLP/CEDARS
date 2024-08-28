@@ -129,7 +129,6 @@ def register():
                 project_id = os.getenv("PROJECT_ID")
                 if project_id is None:
                     project_id=str(uuid4())
-                print("project id ", project_id, flush=True)
                 db.create_project(project_name=db.fake.slug(),
                             investigator_name=db.fake.name(),
                             project_id = project_id)
