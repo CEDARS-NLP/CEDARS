@@ -164,7 +164,7 @@ def login():
 
         flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
-    if len(db.get_project_users()) == 0:
+    if len(db.get_project_users()) == 0 and not os.getenv("SUPERBIO_API_URL"):
         return redirect(url_for('auth.register'))
     return render_template('auth/login.html',  **db.get_info())
 
