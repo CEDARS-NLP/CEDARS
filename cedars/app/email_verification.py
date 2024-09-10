@@ -63,7 +63,7 @@ def generate_otp(num_digits = 6):
     Returns :
         - int : Randomly generated OTP
     '''
-    otp = 0
+    otp = randint(1, 9)
 
     for _ in range(num_digits):
         otp = (10 * otp) + randint(0, 9)
