@@ -28,6 +28,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from passvalidate import PasswordPolicy
 from bson import ObjectId
 from . import db
+from .email_verification import send_otp_mail, generate_otp, send_mail_acknowledgement
 # from sentry_sdk import set_user
 
 load_dotenv()
@@ -81,6 +82,7 @@ def register():
 
     if request.method == 'POST':
         username = request.form.get("username")
+        email_id = request.form.get("email")
         password = request.form.get("password")
         confirm_password = request.form.get("confirm_password")
         is_admin = request.form.get("isadmin") == "on"
@@ -115,21 +117,66 @@ def register():
             # Making the first registered user an admin
             no_admin = not len(db.get_project_users()) > 0
 
-            if no_admin and not is_admin:
-                is_admin = True
-                flash('First user registered is an admin.')
+            session["user_details"] = {'username' : username,
+                                    'email' : email_id,
+                                    'hashed_password' : hashed_password,
+                                    'is_admin' : is_admin}
+            session["no_admin"] = no_admin
+            session["current_otp"] = generate_otp()
 
-            db.add_user(
-                username=username,
-                password=hashed_password,
-                is_admin=is_admin)
+            send_otp_mail(session["current_otp"], email_id)
 
-            flash('Registration successful.')
-            if no_admin:
-                login_user(User(db.get_user(username)))
-            return render_template('index.html', **db.get_info())
+            return redirect(url_for('auth.verify_email'))
         flash(error)
     return render_template('auth/register.html', **db.get_info())
+
+@bp.route("/verify_email", methods=["GET", "POST"])
+def verify_email():
+    """Verifies the email of a user who is being registered"""
+
+    user_details = session.get("user_details")
+    if user_details is None:
+        return redirect(url_for('auth.register'))
+    username = user_details["username"]
+
+    if request.method == 'POST':
+        no_admin = session["no_admin"]
+
+        received_otp = int(request.form.get("OTP"))
+        if received_otp != session["current_otp"]:
+            flash("OTP does not match the one sent to this email.")
+            return redirect(url_for('auth.verify_email'))
+
+        project_info = db.get_info()
+        if "project" in project_info:
+            project_name = project_info["project"]
+        else:
+            project_name = None
+
+        if no_admin and not user_details["is_admin"]:
+            user_details["is_admin"] = True
+            flash('First user registered is an admin.')
+
+
+        db.add_user(
+            username=username,
+            email=user_details["email"],
+            password=user_details["hashed_password"],
+            is_admin=user_details["is_admin"])
+
+        send_mail_acknowledgement(user_details["email"],
+                                  username,
+                                  project_name)
+
+        flash('Registration successful.')
+        if no_admin:
+            login_user(User(db.get_user(username)))
+        return render_template('index.html', **db.get_info())
+
+    return render_template('auth/verify_email.html',
+                           username = username,
+                           email_id = user_details["email"].strip(),
+                           **db.get_info())
 
 
 def verify_external_token(token, project_id, user_id):
@@ -195,6 +242,7 @@ def token_login():
             # Create a new user with data from the external API
             db.add_user(
                 username=username,
+                email=username,
                 password=generate_password_hash(token),  # Store hashed token as password
                 is_admin=True if "admin" in user_data["user"].get('institution_roles') else False
             )

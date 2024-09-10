@@ -8,13 +8,15 @@ __author__ = "Rohan Singh"
 import os
 from flask import Flask, render_template
 from flask_session import Session
+from flask_mail import Mail
 from loguru import logger
 import rq
 from redis import Redis
+from dotenv import load_dotenv
 
-
+load_dotenv()
 sess = Session()
-
+EMAIL_CONNECTOR = None
 
 def rq_init_app(cedars_rq):
     """Initialize the rq app"""
@@ -29,9 +31,29 @@ def rq_init_app(cedars_rq):
     cedars_rq.extensions['rq'] = cedars_rq
     return cedars_rq
 
+def init_app_email_config(cedars_app, host_email, app_password):
+    """
+    Initializes the configuration to allow the CEDARS application to send emails
+    in order to verify a user's email address and send them project updates over email.
+    """
+    if host_email is not None and app_password is not None:
+        cedars_app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+        cedars_app.config['MAIL_PORT'] = 587
+        cedars_app.config['MAIL_USERNAME'] = host_email
+        cedars_app.config['MAIL_PASSWORD'] = app_password
+        cedars_app.config['MAIL_USE_TLS'] = True
+        cedars_app.config['MAIL_USE_SSL'] = False
+        cedars_app.config['MAIL_DEFAULT_SENDER'] = host_email
+        mail_connection = Mail(cedars_app)
+        return mail_connection
+    else:
+        logger.error("No host email / app password found. Skipping email configuration.")
+        return None
 
 def create_app(config_filename=None):
     """Create flask application"""
+    global EMAIL_CONNECTOR
+
     cedars_app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
         logger.info(f"Loading config from {config_filename}")
@@ -43,6 +65,10 @@ def create_app(config_filename=None):
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
+
+    EMAIL_CONNECTOR = init_app_email_config(cedars_app,
+                                            os.getenv("HOST_EMAIL"),
+                                            os.getenv("HOST_EMAIL_APP_PASSWORD"))
 
     from . import auth
     auth.login_manager.init_app(cedars_app)

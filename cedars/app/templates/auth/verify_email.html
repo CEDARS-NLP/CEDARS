@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+
+<div class="container-md col-4">
+  <form class="form-inline" method="POST">
+
+    <div class="p-5">
+      <h2>Email Verification</h2>
+
+      <p>Verifying user {{ username }}. Enter the OTP sent to {{ email_id }}. </p>
+
+      <div class="mb-3">
+        <label>Enter Your OTP</label>
+        <input type="text" class="form-control" name="OTP">
+      </div>
+
+      <input type="submit" class="btn btn-primary"></button>
+  </form>
+</div>
+
+{% endblock %}

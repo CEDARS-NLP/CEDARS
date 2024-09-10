@@ -25,7 +25,8 @@ dependencies = [
     "flask-session",
     "faker",
     "tenacity",
-    "passvalidate"
+    "passvalidate",
+    "Flask-Mail"
 ]
 
 [build-system]

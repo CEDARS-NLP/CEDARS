@@ -198,7 +198,7 @@ def create_db_indices():
     create_index("PINES", [("patient_id")])
 
 # Insert functions
-def add_user(username, password, is_admin=False):
+def add_user(username, email, password, is_admin=False):
     """
     This function is used to add a new user to the database.
     All this data is kept in the USERS collection.
@@ -211,6 +211,7 @@ def add_user(username, password, is_admin=False):
     """
     info = {
         "user": username,
+        "email" : email,
         "password": password,
         "is_admin": is_admin,
         "date_created": datetime.now()

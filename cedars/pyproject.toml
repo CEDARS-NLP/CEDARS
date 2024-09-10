@@ -35,6 +35,7 @@ pymongo = "=4.2"
 rq = "^1.16.2"
 tenacity = "9.0.0"
 passvalidate = "0.1.2"
+Flask-Mail = "0.10.0"
 
 [tool.poetry.group.dev.dependencies]
 pylint = "^2.17.4"
