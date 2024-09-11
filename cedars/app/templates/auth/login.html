@@ -53,6 +53,15 @@ $(window).on('load', function() {
 
 <script>
   window.addEventListener("message", (event) => {
+  var origin = event.origin;
+  const TRUSTED_ORIGINS = ['http://localhost']; // Add superbio link here if needed
+
+  if (!TRUSTED_ORIGINS.includes(origin)) {
+    console.log("Event recived from invalid URL", origin, ". Halting event.");
+    return ;
+  }
+
+
   const data = JSON.parse(event.data);
   console.log("Received token:", data.access_token);
   
