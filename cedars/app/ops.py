@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 from rq import Retry, Callback
 from rq.registry import FailedJobRegistry
 from rq.registry import FinishedJobRegistry, StartedJobRegistry
+import httpx
 from . import db
 from . import nlpprocessor
 from . import auth
@@ -327,7 +328,13 @@ def upload_query():
     if superbio_api_token is not None and use_pines:
         # If using a PINES server via superbio,
         # ensure that the current token works properly
-        token_status = get_token_status(superbio_api_token)
+        try:
+            token_status = get_token_status(superbio_api_token)
+        except Exception as e:
+            logger.error(f'Got error when trying to validate token : {e}')
+            token_status = {'has_expired' : False,
+                            'is_valid' : False}
+
         if token_status['has_expired'] is True:
             # If we are using a token, and this token has expired
             # then we cancell the process and do not add anything to the queue.
@@ -451,15 +458,20 @@ def init_pines_connection(superbio_api_token = None):
     project_info = db.get_info()
     project_id = project_info["project_id"]
 
+    pines_url, is_url_from_api = None, False
     try:
         pines_url, is_url_from_api = load_pines_url(project_id,
                                         superbio_api_token=superbio_api_token)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Got HTTP status error when trying to start PINES server : {e}")
+    except httpx.RequestError as e:
+        logger.error(f"Got request error when trying to start PINES server : {e}")
+    except requests.exceptions.InvalidURL as e:
+        logger.error(f"Invalid URL passed when trying to access PINES server. Got error : {e}")
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Failed to connect to PINES server due to error : {e}")
     except requests.exceptions.HTTPError as e:
         logger.error(f"Got HTTP error when trying to start PINES server : {e}")
-        pines_url, is_url_from_api = None, False
-    except Exception as e:
-        logger.error(f"Got error when trying to access PINES server : {e}")
-        pines_url, is_url_from_api = None, False
 
     db.create_pines_info(pines_url, is_url_from_api)
     if pines_url is not None:
@@ -473,10 +485,26 @@ def close_pines_connection(superbio_api_token):
     '''
     project_info = db.get_info()
     project_id = project_info["project_id"]
-    token_status = get_token_status(superbio_api_token)
+    try:
+        token_status = get_token_status(superbio_api_token)
+    except Exception as e:
+        logger.error(f'Got error when trying to validate token : {e}')
+        token_status = {'has_expired' : False,
+                        'is_valid' : False}
 
     if token_status['is_valid'] and token_status['has_expired'] is False:
-        kill_pines_api(project_id, superbio_api_token)
+        try:
+            kill_pines_api(project_id, superbio_api_token)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Got HTTP status error when trying to shutdown PINES server : {e}")
+        except httpx.RequestError as e:
+            logger.error(f"Got request error when trying to shutdown PINES server : {e}")
+        except requests.exceptions.InvalidURL as e:
+            logger.error(f"Invalid URL passed when trying to shutdown PINES server. Got error : {e}")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Failed to shutdown PINES server due to error : {e}")
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Got HTTP error when trying to shutdown PINES server : {e}")
     else:
         # If has_token_expired returns None (invalid token).
         logger.error("Cannot shut down remote PINES server with an API call as this is not a valid token.")
