@@ -2,6 +2,7 @@
 This page contatins the functions and the flask blueprint for the login functionality.
 """
 import os
+from uuid import uuid4
 from functools import wraps
 import requests
 from flask import (
@@ -21,7 +22,6 @@ from flask_login import (
     login_user,
     current_user
 )
-
 from dotenv import load_dotenv
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -113,9 +113,9 @@ def register():
         if error is None:
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
-            no_admin = not len(db.get_project_users()) > 0
+            is_first_user = not len(db.get_project_users()) > 0
 
-            if no_admin and not is_admin:
+            if is_first_user and not is_admin:
                 is_admin = True
                 flash('First user registered is an admin.')
 
@@ -125,8 +125,16 @@ def register():
                 is_admin=is_admin)
 
             flash('Registration successful.')
-            if no_admin:
+            if is_first_user:
+                project_id = os.getenv("PROJECT_ID")
+                if project_id is None:
+                    project_id=str(uuid4())
+                db.create_project(project_name=db.fake.slug(),
+                            investigator_name=db.fake.name(),
+                            project_id = project_id)
+                logger.info("Initialized project.")
                 login_user(User(db.get_user(username)))
+
             return render_template('index.html', **db.get_info())
         flash(error)
     return render_template('auth/register.html', **db.get_info())
