@@ -79,6 +79,10 @@ $(window).on('load', function() {
       .then(data => {
         if (data.message) {
           console.log('Login successful:', data.message);
+          
+          // Send a login confirmation message to superbio server
+          window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
+
           // Redirect to the main page or update UI as needed
           window.location.href = '/';
         } else {
