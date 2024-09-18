@@ -1,0 +1,1 @@
+const TRUSTED_ORIGINS = ['http://localhost'];

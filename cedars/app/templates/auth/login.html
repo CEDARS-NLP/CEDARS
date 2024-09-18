@@ -51,51 +51,8 @@ $(window).on('load', function() {
 </script>
 {% endif %}
 
-<script>
-  window.addEventListener("message", (event) => {
-  var origin = event.origin;
-  const TRUSTED_ORIGINS = ['http://localhost']; // Add superbio link here if needed
 
-  if (!TRUSTED_ORIGINS.includes(origin)) {
-    console.log("Event recived from invalid URL", origin, ". Halting event.");
-    return ;
-  }
-
-
-  const data = JSON.parse(event.data);
-  console.log("Received token:", data.access_token);
-  console.log("Event type :", data.event_type);
-
-  if (data.event_type === "auth") {
-      // Send the token to the backend
-      fetch('/auth/token-login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ token: data.access_token , user_id: data.id }),
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.message) {
-          console.log('Login successful:', data.message);
-          
-          // Send a login confirmation message to superbio server
-          window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
-
-          // Redirect to the main page or update UI as needed
-          window.location.href = '/';
-        } else {
-          console.error('Login failed:', data.error);
-          // Handle login failure (e.g., show an error message)
-        }
-      })
-      .catch((error) => {
-        console.error('Error:', error);
-      });
-  }
-  
-});
-</script>
+<!-- Adds and event listener for authentication messages -->
+<script src="{{ url_for('static', filename='superbio_login_listener.js') }}"></script>
 
 {% endblock %}
