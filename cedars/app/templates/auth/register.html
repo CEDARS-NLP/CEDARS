@@ -22,10 +22,19 @@
         <label>Confirm Your password</label>
         <input type="password" class="form-control" name="confirm_password" autocomplete="new-password">
       </div>
-      <div class="mb-3" form-check>
-        <input type="checkbox" class="form-check-input" id="isadmin" name="isadmin">
-        <label class="form-check-label" for="isadmin"> Is Admin </label>
-      </div>
+
+      {% if is_first_user == false %}
+          <div class="mb-3" form-check>
+            <input type="checkbox" class="form-check-input" id="isadmin" name="isadmin">
+            <label class="form-check-label" for="isadmin"> Is Admin </label>
+          </div>
+      {% else %}
+          <div class="mb-3">
+            <label> Note : This user will be granted admin privileges as this is the first user being registered for this CEDARS project. </label>
+          </div>
+      {% endif %}
+
+
       <input type="submit" class="btn btn-primary"></button>
   </form>
 </div>

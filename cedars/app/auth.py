@@ -40,7 +40,7 @@ def admin_required(func):
     """Admin required decorator"""
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_admin:
+        if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
             flash('You do not have admin access.')
             return render_template('index.html', **db.get_info())
         return func(*args, **kwargs)
@@ -75,7 +75,47 @@ class User(UserMixin):
     def get_id(self):
         return str(self.username)
 
+def is_valid_new_user(username, password, confirm_password):
+    '''
+    Checks the details of a new user being registered and ensures that they are correct.
+
+    Args :
+        - username (str) : Username of user being registered
+        - password (str) : Password for new user
+        - confirm_password (str) : Confirmation of the password
+    
+    Returns :
+        - error (str / None) : None if there are no issues with these registration details,
+                                a string containing the issue with this registration if one exists.
+    '''
+    password_policy = PasswordPolicy(
+        min_length=8,
+        min_uppercase=2,
+        min_lowercase=2,
+        min_digits=2,
+        min_special=2,
+        special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
+        allow_spaces=False
+    )
+    password_result, password_issues = password_policy.check_password(password)
+
+    error = None
+    existing_user = db.get_user(username)
+    if password != confirm_password:
+        error = 'Passwords do not match.'
+    elif not username or not password or len(username.strip()) == 0 or len(password.strip()) == 0:
+        error = "Username and password are required."
+    elif existing_user or username.lower() in ['cedars', 'pines']:
+        error = 'Username already exists or reserved. Please choose a different one.'
+    elif password_result is False:
+        # If the password is not in compliance with our policy,
+        # display the first issue found with this password
+        error = "\n".join(password_issues)
+
+    return error
+
 @bp.route("/register", methods=["GET", "POST"])
+@admin_required
 def register():
     """Register a new user"""
 
@@ -86,38 +126,10 @@ def register():
         is_admin = request.form.get("isadmin") == "on"
         logger.info(f"Registering user {username} as admin: {is_admin}")
 
-        password_policy = PasswordPolicy(
-            min_length=8,
-            min_uppercase=2,
-            min_lowercase=2,
-            min_digits=2,
-            min_special=2,
-            special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
-            allow_spaces=False
-        )
-        password_result, password_issues = password_policy.check_password(password)
-
-        error = None
-        existing_user = db.get_user(username)
-        if password != confirm_password:
-            error = 'Passwords do not match.'
-        elif not username or not password or len(username.strip()) == 0 or len(password.strip()) == 0:
-            error = "Username and password are required."
-        elif existing_user or username.lower() in ['cedars', 'pines']:
-            error = 'Username already exists or reserved. Please choose a different one.'
-        elif password_result is False:
-            # If the password is not in compliance with our policy,
-            # display the first issue found with this password
-            error = "\n".join(password_issues)
+        error = is_valid_new_user(username, password, confirm_password)
 
         if error is None:
             hashed_password = generate_password_hash(password)
-            # Making the first registered user an admin
-            is_first_user = not len(db.get_project_users()) > 0
-
-            if is_first_user and not is_admin:
-                is_admin = True
-                flash('First user registered is an admin.')
 
             db.add_user(
                 username=username,
@@ -125,19 +137,47 @@ def register():
                 is_admin=is_admin)
 
             flash('Registration successful.')
-            if is_first_user:
-                project_id = os.getenv("PROJECT_ID")
-                if project_id is None:
-                    project_id=str(uuid4())
-                db.create_project(project_name=db.fake.slug(),
-                            investigator_name=db.fake.name(),
-                            project_id = project_id)
-                logger.info("Initialized project.")
-                login_user(User(db.get_user(username)))
 
             return render_template('index.html', **db.get_info())
         flash(error)
-    return render_template('auth/register.html', **db.get_info())
+    return render_template('auth/register.html', **db.get_info(),
+                           is_first_user = False)
+
+@bp.route("/register_first_user", methods=["GET", "POST"])
+def register_first_user():
+    """Register a new user"""
+
+    if request.method == 'POST':
+        username = request.form.get("username")
+        password = request.form.get("password")
+        confirm_password = request.form.get("confirm_password")
+        is_admin = True
+        logger.info(f"Registering user {username} as admin: {is_admin}")
+
+        error = is_valid_new_user(username, password, confirm_password)
+
+        if error is None:
+            hashed_password = generate_password_hash(password)
+            flash('First user registered is an admin.')
+            db.add_user(
+                username=username,
+                password=hashed_password,
+                is_admin=is_admin)
+
+            flash('Registration successful.')
+            project_id = os.getenv("PROJECT_ID")
+            if project_id is None:
+                project_id=str(uuid4())
+            db.create_project(project_name="CEDARS Project",
+                        investigator_name=username,
+                        project_id = project_id)
+            logger.info("Initialized project.")
+            login_user(User(db.get_user(username)))
+
+            return render_template('index.html', **db.get_info())
+        flash(error)
+    return render_template('auth/register.html', **db.get_info(),
+                           is_first_user = True)
 
 
 def verify_external_token(token, project_id, user_id):
@@ -173,7 +213,7 @@ def login():
         flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
     if len(db.get_project_users()) == 0:
-        return redirect(url_for('auth.register'))
+        return redirect(url_for('auth.register_first_user'))
     return render_template('auth/login.html',  **db.get_info())
 
 
