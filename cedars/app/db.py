@@ -1495,7 +1495,7 @@ def is_pines_api_running():
     '''
 
     info_col = mongo.db["INFO"].find_one()
-    if info_col:
+    if info_col and ("is_pines_server_enabled" in info_col):
         return info_col["is_pines_server_enabled"]
 
     return False
