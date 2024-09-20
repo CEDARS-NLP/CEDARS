@@ -2,11 +2,9 @@
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
-import os
 from io import BytesIO, StringIO
 import re
 from datetime import datetime
-from uuid import uuid4
 
 from typing import Optional
 from faker import Faker

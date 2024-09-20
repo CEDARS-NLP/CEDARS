@@ -17,7 +17,6 @@ from flask import (
 )
 from flask_login import (
     UserMixin,
-    AnonymousUserMixin,
     LoginManager,
     logout_user,
     login_user,
