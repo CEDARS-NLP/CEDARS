@@ -141,7 +141,8 @@ def register():
 
             return render_template('index.html', **db.get_info())
         flash(error)
-    return render_template('auth/register.html', **db.get_info())
+    return render_template('auth/register.html', **db.get_info(),
+                           is_first_user = False)
 
 @bp.route("/register_first_user", methods=["GET", "POST"])
 def register_first_user():
@@ -176,7 +177,8 @@ def register_first_user():
 
             return render_template('index.html', **db.get_info())
         flash(error)
-    return render_template('auth/register.html', **db.get_info())
+    return render_template('auth/register.html', **db.get_info(),
+                           is_first_user = True)
 
 
 def verify_external_token(token, project_id, user_id):
