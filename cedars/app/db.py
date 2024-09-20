@@ -1618,11 +1618,3 @@ def terminate_project():
     mongo.db.drop_collection("QUERY")
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
-
-    project_id = os.getenv("PROJECT_ID")
-    if project_id is None:
-        project_id=str(uuid4())
-
-    create_project(project_name=fake.slug(),
-                   investigator_name=fake.name(),
-                   project_id = project_id)

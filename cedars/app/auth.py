@@ -129,8 +129,8 @@ def register():
                 project_id = os.getenv("PROJECT_ID")
                 if project_id is None:
                     project_id=str(uuid4())
-                db.create_project(project_name=db.fake.slug(),
-                            investigator_name=db.fake.name(),
+                db.create_project(project_name="CEDARS Project",
+                            investigator_name=username,
                             project_id = project_id)
                 logger.info("Initialized project.")
                 login_user(User(db.get_user(username)))
