@@ -2,6 +2,7 @@
 This page contatins the functions and the flask blueprint for the /proj_details route.
 """
 import os
+from uuid import uuid4
 import re
 from datetime import datetime, timezone
 
@@ -87,13 +88,27 @@ def project_details():
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name").strip()
             old_name = db.get_proj_name()
+
             project_info = db.get_info()
-            project_id = project_info["project_id"]
-            if old_name is None:
+            if 'project_id' in project_info:
+                project_id = project_info["project_id"]
+                db_has_project_id = True
+            else:
+                project_id = os.getenv("PROJECT_ID")
+                if project_id is None:
+                    project_id=str(uuid4())
+                db_has_project_id = False
+                
+
+            if old_name is None or db_has_project_id is False:
                 if len(project_name) > 0:
                     db.create_project(project_name, current_user.username,
                                       project_id = project_id)
                     flash(f"Project **{project_name}** created.")
+                else:
+                    db.create_project("CEDARS Project", current_user.username,
+                                      project_id = project_id)
+                    flash(f"Created new default project.")
             else:
                 if len(project_name) > 0:
                     db.update_project_name(project_name)
@@ -449,6 +464,13 @@ def init_pines_connection(superbio_api_token = None):
                             False if not valid pines url available.
     '''
     project_info = db.get_info()
+    if "project_id" not in project_info:
+        logger.error(f"No project ID found. Failed to startup PINES.")
+        flash(f"No project ID found. Failed to startup PINES.")
+        pines_url, is_url_from_api = None, False
+        db.create_pines_info(pines_url, is_url_from_api)
+        return False
+
     project_id = project_info["project_id"]
 
     try:
@@ -472,6 +494,10 @@ def close_pines_connection(superbio_api_token):
     Closes the PINES server if using a superbio API.
     '''
     project_info = db.get_info()
+    if "project_id" not in project_info:
+        logger.error("Cannot shut down remote PINES server as no project ID is found.")
+        return
+
     project_id = project_info["project_id"]
     token_status = get_token_status(superbio_api_token)
 
