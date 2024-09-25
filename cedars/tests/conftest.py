@@ -31,8 +31,10 @@ def cedars_app():
 @pytest.fixture(scope="session")
 def db(cedars_app):
     from app import db
+    project_id = os.getenv("PROJECT_ID", None)
     db.create_project(project_name="test_project",
                       investigator_name="test_investigator",
+                      project_id=project_id,
                       cedars_version="test_version")
     db.add_user("test_user", "test_password")
     # db.upload_notes(test_data)
