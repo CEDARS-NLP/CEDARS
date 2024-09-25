@@ -496,7 +496,8 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        close_pines_connection(job.kwargs['superbio_api_token'])
+        if job.kwargs['superbio_api_token'] is not None:
+            close_pines_connection(job.kwargs['superbio_api_token'])
 
 def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
@@ -508,7 +509,8 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        close_pines_connection(job.kwargs['superbio_api_token'])
+        if job.kwargs['superbio_api_token'] is not None:
+            close_pines_connection(job.kwargs['superbio_api_token'])
 
 def init_pines_connection(superbio_api_token = None):
     '''
