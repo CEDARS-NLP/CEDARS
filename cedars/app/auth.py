@@ -117,7 +117,7 @@ def register():
 
             if no_admin and not is_admin:
                 is_admin = True
-                project_id = os.getenv("PROJECT_ID")
+                project_id = os.getenv("PROJECT_ID", None)
                 db.create_project(investigator_name=username,
                                   project_name="Default Project",
                                   project_id=project_id)

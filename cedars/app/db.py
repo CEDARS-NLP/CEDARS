@@ -1657,9 +1657,7 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
 
-    project_id = os.getenv("PROJECT_ID")
-    if project_id is None:
-        project_id=str(uuid4())
+    project_id = os.getenv("PROJECT_ID", None)
 
     create_project(project_name=fake.slug(),
                    investigator_name=fake.name(),
