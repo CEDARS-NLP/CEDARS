@@ -493,7 +493,7 @@ def get_annotation_note(annotation_id: str):
     return note
 
 
-def get_patient_by_id(patient_id):
+def get_patient_by_id(patient_id: str):
     """
     Retrives a single patient from mongodb.
 
@@ -862,7 +862,6 @@ def get_patient_lock_status(patient_id):
     Raises:
         None
     """
-    patient_id = int(patient_id)
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
 
@@ -902,7 +901,7 @@ def get_total_counts(collection_name: str, **kwargs) -> int:
     return mongo.db[collection_name].count_documents({**kwargs})
 
 
-def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
+def get_annotated_notes_for_patient(patient_id: str) -> list[str]:
     """
     For a given patient, list all note_ids which have matching keyword
     annotations

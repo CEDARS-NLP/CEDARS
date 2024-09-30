@@ -243,7 +243,7 @@ class NlpProcessor:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
 
-    def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
+    def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
         """
         For each patient who are unreviewed,
 
