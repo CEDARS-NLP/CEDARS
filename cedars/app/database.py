@@ -1,4 +1,5 @@
 """Initialize database connection."""
+import os
 import flask_pymongo
 from minio import Minio
 from werkzeug.local import LocalProxy
