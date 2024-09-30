@@ -70,13 +70,6 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
-def convert_to_int(value):
-    """Convert to integer if possible, otherwise return the string."""
-    try:
-        return int(value)
-    except ValueError:
-        return value
-
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
 def project_details():
@@ -231,11 +224,14 @@ def prepare_note(note_info):
     date_format = '%Y-%m-%d'
     note_info["text_date"] = datetime.strptime(note_info["text_date"], date_format)
     note_info["reviewed"] = False
-    note_info["text_id"] = str(note_info["text_id"])
+    note_info["text_id"] = str(note_info["text_id"]).strip()
+    note_info["patient_id"] = str(note_info["patient_id"]).strip()
     return note_info
 
+
 def prepare_patients(patient_ids):
-    return {int(p_id) for p_id in patient_ids}
+    return {str(p_id).strip() for p_id in patient_ids}
+
 
 def EMR_to_mongodb(filepath, chunk_size=1000):
     """
@@ -427,6 +423,7 @@ def upload_query():
             return redirect(url_for("ops.upload_query"))
 
     if use_pines:
+        # 
         is_pines_available = init_pines_connection(superbio_api_token)
         if is_pines_available is False:
             # PINES could not load successfully
@@ -775,10 +772,9 @@ def adjudicate_records():
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
 
-        search_patient = request.form.get("patient_id")
+        search_patient = str(request.form.get("patient_id")).strip()
         is_patient_locked = False
-        if search_patient and len(search_patient.strip()) > 0:
-            search_patient = convert_to_int(search_patient)
+        if search_patient and len(search_patient) > 0:
             patient = db.get_patient_by_id(search_patient)
             if patient is None:
                 patient_id = None
