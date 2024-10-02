@@ -293,6 +293,7 @@ def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
     operations = []
     for p_id in patient_ids:
+        p_id = str(p_id).strip()
         patient_info = {
             "patient_id": p_id,
             "reviewed": False,
@@ -566,7 +567,7 @@ def get_documents_to_annotate(patient_id=None):
         "reviewed": {"$ne": True}
     }
     if patient_id:
-        match_stage["patient_id"] = patient_id
+        match_stage["patient_id"] = str(patient_id).strip()
 
     documents_to_annotate = mongo.db["NOTES"].aggregate(
         [{
@@ -583,12 +584,12 @@ def get_documents_to_annotate(patient_id=None):
     return documents_to_annotate
 
 
-def get_all_annotations_for_patient(patient_id):
+def get_all_annotations_for_patient(patient_id: str):
     """
     Retrives all annotations for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -599,12 +600,12 @@ def get_all_annotations_for_patient(patient_id):
     return annotations
 
 
-def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):
+def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
     """
     Retrives all annotations for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -646,12 +647,12 @@ def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):
     return {"total": total, "annotations": annotations}
 
 
-def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
+def get_patient_annotation_ids(p_id: str, reviewed=False, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
 
     Args:
-        p_id (int) : Unique ID for a patient.
+        p_id (str) : Unique ID for a patient.
         reviewed (bool) : True if we want to get reviewed annotations.
     Returns:
         annotations (list) : A list of all annotation IDs linked to that patient.
@@ -675,7 +676,7 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
 
     return res
 
-def get_event_date(patient_id):
+def get_event_date(patient_id: str):
     """
     Find the event date for a patient.
     """
@@ -690,7 +691,7 @@ def get_event_date(patient_id):
     return None
 
 
-def get_event_date_sentences(patient_id):
+def get_event_date_sentences(patient_id: str):
     """
     Find the event date from the annotations for a patient.
     """
@@ -723,12 +724,12 @@ def get_note_date(note_id):
     return note["text_date"]
 
 
-def get_first_note_date_for_patient(patient_id):
+def get_first_note_date_for_patient(patient_id: str):
     """
     Retrives the date of the first note for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         note_date (datetime) : The date of the first note for the patient.
     """
@@ -741,12 +742,12 @@ def get_first_note_date_for_patient(patient_id):
     return note["text_date"]
 
 
-def get_last_note_date_for_patient(patient_id):
+def get_last_note_date_for_patient(patient_id: str):
     """
     Retrives the date of the last note for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         note_date (datetime) : The date of the last note for the patient.
     """
@@ -849,7 +850,7 @@ def get_patient_ids():
     return res
 
 
-def get_patient_lock_status(patient_id):
+def get_patient_lock_status(patient_id: str):
     """
     Updates the status of the patient to be locked or unlocked.
 
@@ -866,7 +867,7 @@ def get_patient_lock_status(patient_id):
     return patient["locked"]
 
 
-def get_all_notes(patient_id):
+def get_all_notes(patient_id: str):
     """
     Returns all notes for that patient.
     """
@@ -874,12 +875,12 @@ def get_all_notes(patient_id):
     return list(notes)
 
 
-def get_patient_notes(patient_id, reviewed=False):
+def get_patient_notes(patient_id: str, reviewed=False):
     """
     Returns all notes for that patient.
 
     Args:
-        patient_id (int) : ID for the patient
+        patient_id (str) : ID for the patient
     Returns:
         notes: A list of all notes for that patient
     """
@@ -981,7 +982,7 @@ def mark_annotation_reviewed(annotation_id):
                                        {"$set": {"reviewed": True}})
 
 
-def update_event_date(patient_id, new_date, annotation_id):
+def update_event_date(patient_id: str, new_date, annotation_id):
     """
     Enters a new event date for an patient.
 
@@ -1004,7 +1005,7 @@ def update_event_date(patient_id, new_date, annotation_id):
     update_event_annotation_id(patient_id, annotation_id)
 
 
-def delete_event_date(patient_id):
+def delete_event_date(patient_id: str):
     """
     Deletes the event date for a patient.
 
@@ -1020,7 +1021,7 @@ def delete_event_date(patient_id):
     delete_event_annotation_id(patient_id)
 
 
-def get_event_annotation_id(patient_id):
+def get_event_annotation_id(patient_id: str):
     """
     Retrives the ID for the annotation where 
             the event date for a patient was found.
@@ -1036,7 +1037,7 @@ def get_event_annotation_id(patient_id):
 
     return patient["event_annotation_id"]
 
-def update_event_annotation_id(patient_id, annotation_id):
+def update_event_annotation_id(patient_id: str, annotation_id):
     """
     Updates the ID for the annotation where 
             the event date for a patient was found.
@@ -1053,7 +1054,7 @@ def update_event_annotation_id(patient_id, annotation_id):
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": annotation_id}})
 
-def delete_event_annotation_id(patient_id):
+def delete_event_annotation_id(patient_id: str):
     """
     Deletes the ID for the annotation where 
             the event date for a patient was found.
@@ -1069,7 +1070,7 @@ def delete_event_annotation_id(patient_id):
                                        {"$set": {"event_annotation_id": None}})
 
 
-def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed=True):
+def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
     """
     Updates the patient's status to reviewed in the database.
 
@@ -1132,7 +1133,7 @@ def add_comment(annotation_id, comment):
                                      })
 
 
-def set_patient_lock_status(patient_id, status):
+def set_patient_lock_status(patient_id: str, status):
     """
     Updates the status of the patient to be locked or unlocked.
 
@@ -1304,7 +1305,7 @@ def get_prediction(note: str) -> float:
         raise e
 
 
-def get_max_prediction_score(patient_id):
+def get_max_prediction_score(patient_id: str):
     """
     Get the max predicted note score for a patient
     """
@@ -1421,7 +1422,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
             pines_collection.insert_one({
                 "text_id": note_id,
                 "text": note.get("text"),
-                "patient_id": note.get("patient_id"),
+                "patient_id": str(note.get("patient_id")).strip(),
                 "predicted_score": prediction,
                 "report_type": note.get("text_tag_3"),
                 "document_type": note.get("text_tag_1")
@@ -1476,7 +1477,7 @@ def update_db_task_progress(task_id, progress):
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
                                  "complete": completed}})
-    patient_id = int(task_id.split(":")[1])
+    patient_id = str(task_id.split(":")[1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
@@ -1504,7 +1505,7 @@ def report_failure(job):
     job.save_meta()
     update_db_task_progress(job.get_id(), 0)
 
-def get_patient_reviewer(patient_id):
+def get_patient_reviewer(patient_id: str):
     """
     Updates the note's status to reviewed in the database.
     """

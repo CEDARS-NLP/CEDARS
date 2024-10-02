@@ -812,7 +812,10 @@ def adjudicate_records():
         return redirect(url_for("ops.adjudicate_records"))
     elif unreviewed_annotations_index.count(1) == 0:
         flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
-        session["patient_id"] = patient_id
+        if patient_id is not None:
+            session["patient_id"] = str(patient_id).strip()
+        else:
+            session["patient_id"] = None
         session["total_count"] = total_count
         session["annotations"] = annotations
         session["all_annotation_index"] = all_annotation_index
@@ -821,7 +824,10 @@ def adjudicate_records():
         session["index"] = 0
     else:
         logger.info(f"Total annotations for patient {patient_id}: {total_count}")
-        session["patient_id"] = patient_id
+        if patient_id is not None:
+            session["patient_id"] = str(patient_id).strip()
+        else:
+            session["patient_id"] = None
         session["total_count"] = total_count
         session["annotations"] = annotations
         session["all_annotation_index"] = all_annotation_index
