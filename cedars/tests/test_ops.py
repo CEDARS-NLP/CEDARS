@@ -236,7 +236,7 @@ def test_get_job_status(client, db):
 
 
 def test_highlighted_text(db):
-    note = db.get_all_notes(1111111111)[0]
+    note = db.get_all_notes("1111111111")[0]
     assert "<br>" in highlighted_text(note)
 
 

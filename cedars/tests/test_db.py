@@ -98,6 +98,7 @@ def test_get_annotation_note(db):
 
 
 def test_get_patient_by_id(db):
+    print("\n\n", db.get_all_patients(), flush=True)
     patient = db.get_patient_by_id("1111111111")
     assert patient is not None
     assert patient["patient_id"] == "1111111111"
