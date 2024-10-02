@@ -3,7 +3,6 @@ from flask import request
 from unittest.mock import patch
 from app.ops import (
     allowed_data_file,
-    convert_to_int,
     highlighted_text
 )
 
