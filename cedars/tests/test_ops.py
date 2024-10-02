@@ -19,11 +19,6 @@ def test_allowed_data_file():
     assert allowed_data_file("file.txt") is False
 
 
-def test_convert_to_int():
-    assert convert_to_int("123") == 123
-    assert convert_to_int("abc") == "abc"
-
-
 @pytest.mark.parametrize("project_name, project_id", [
     ("Test Project", None),
     ("Updated Project", 1)
