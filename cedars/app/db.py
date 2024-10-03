@@ -1472,6 +1472,11 @@ def update_db_task_progress(task_id, progress):
     task_db = mongo.db["TASK"]
     task = task_db.find_one({"job_id": task_id})
     completed = False
+    if not task:
+        # this might be the case if we have old messages
+        # in the queue
+        logger.error(f"Task {task_id} not found in database.")
+        return
     if progress >= 100:
         completed = True
     task_db.update_one({"job_id": task["job_id"]},
