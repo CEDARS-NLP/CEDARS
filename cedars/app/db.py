@@ -293,7 +293,6 @@ def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
     operations = []
     for p_id in patient_ids:
-        p_id = str(p_id).strip()
         patient_info = {
             "patient_id": p_id,
             "reviewed": False,
@@ -567,7 +566,7 @@ def get_documents_to_annotate(patient_id=None):
         "reviewed": {"$ne": True}
     }
     if patient_id:
-        match_stage["patient_id"] = str(patient_id).strip()
+        match_stage["patient_id"] = patient_id
 
     documents_to_annotate = mongo.db["NOTES"].aggregate(
         [{
@@ -1422,7 +1421,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
             pines_collection.insert_one({
                 "text_id": note_id,
                 "text": note.get("text"),
-                "patient_id": str(note.get("patient_id")).strip(),
+                "patient_id": note.get("patient_id"),
                 "predicted_score": prediction,
                 "report_type": note.get("text_tag_3"),
                 "document_type": note.get("text_tag_1")
@@ -1482,7 +1481,7 @@ def update_db_task_progress(task_id, progress):
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
                                  "complete": completed}})
-    patient_id = str(task_id.split(":")[1]).strip()
+    patient_id = (task_id.split(":")[1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
