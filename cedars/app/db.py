@@ -293,6 +293,7 @@ def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
     operations = []
     for p_id in patient_ids:
+        p_id = str(p_id).strip()
         patient_info = {
             "patient_id": p_id,
             "reviewed": False,
