@@ -150,6 +150,7 @@
         borderWidth: 1
       }]
     },
+    plugins: [ChartDataLabels],
     options: {
       indexAxis: 'y', // Horizontal bar chart
       scales: {
@@ -162,7 +163,21 @@
         y: {
           beginAtZero: true
         }
-      }
+      },
+      plugins: {
+            datalabels: {
+                anchor: 'end', // Position of the labels (start, end, center, etc.)
+                align: 'end', // Alignment of the labels (start, end, center, etc.)
+                color: 'rgba(11,61,92, 0.6)', // Color of the labels
+                clamp: false,
+                font: {
+                    weight: 'bold',
+                },
+                formatter: function (value, context) {
+                    return ' ' + parseFloat(value).toFixed(2);
+                }
+            }
+        }
     }
   });
 
@@ -182,13 +197,28 @@
         borderWidth: 1
       }]
     },
+    plugins: [ChartDataLabels],
     options: {
       indexAxis: 'y', // Horizontal bar chart
       scales: {
         y: {
           beginAtZero: true
         }
-      }
+      },
+
+      plugins: {
+            datalabels: {
+                anchor: 'end', // Position of the labels (start, end, center, etc.)
+                align: 'end', // Alignment of the labels (start, end, center, etc.)
+                color: 'rgba(11,61,92, 0.6)', // Color of the labels
+                font: {
+                    weight: 'bold',
+                },
+                formatter: function (value, context) {
+                  return ' ' + parseFloat(value).toFixed(2);
+                }
+            }
+        }
     }
   });
 </script>
