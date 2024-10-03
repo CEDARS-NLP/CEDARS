@@ -218,7 +218,7 @@ class NlpProcessor:
                                     }
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
-                    annotation["patient_id"] = str(document["patient_id"]).strip()
+                    annotation["patient_id"] = document["patient_id"]
                     annotation["reviewed"] = False
                     db.insert_one_annotation(annotation)
                     if not has_negation:
@@ -289,7 +289,7 @@ class NlpProcessor:
             patient_ids = db.get_patient_ids()
             logger.info(f"Found {len(patient_ids)} patients to process")
         else:
-            patient_ids = [str(patient_id).strip()]
+            patient_ids = [patient_id]
             logger.info(f"Processing patient {patient_id}")
 
         for patient_id in patient_ids:
