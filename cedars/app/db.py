@@ -432,7 +432,7 @@ def upsert_patient_results(patient_id: str):
         event_information = key_annotation["sentence"]
         key_note_id = key_annotation["note_id"]
         event_information += f"\nNote_id : {key_note_id}"
-    
+
     first_note_date = get_first_note_date_for_patient(patient_id)
     last_note_date = get_last_note_date_for_patient(patient_id)
     patient = get_patient_by_id(patient_id)
@@ -451,7 +451,7 @@ def upsert_patient_results(patient_id: str):
             max_score_note_date = get_note_date(max_score_note_id)
     except Exception:
         logger.info(f"PINES results not available for patient: {patient_id}")
-    
+
     patient_results = {
         'patient_id' : patient_id,
         'total_notes' : len(notes),
