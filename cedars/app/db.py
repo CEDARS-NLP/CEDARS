@@ -199,10 +199,19 @@ def create_db_indices():
     Creates indices for the ANNOTATIONS and PINES cols in the db.
     '''
     logger.info("All tasks completed.")
-    logger.info("Creating indexes for ANNOTATIONS.")
+
+    logger.info("Creating indexes for NOTES.")
+    mongo.db["NOTES"].create_index([("text_id", 1 )], unique=True)
     mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
+
+    logger.info("Creating indexes for PATIENTS.")
     mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
+
+    logger.info("Creating indexes for ANNOTATIONS.")
     create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ] )
+
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
