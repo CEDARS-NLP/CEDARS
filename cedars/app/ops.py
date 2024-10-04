@@ -423,7 +423,6 @@ def upload_query():
             return redirect(url_for("ops.upload_query"))
 
     if use_pines:
-        # 
         is_pines_available = init_pines_connection(superbio_api_token)
         if is_pines_available is False:
             # PINES could not load successfully
