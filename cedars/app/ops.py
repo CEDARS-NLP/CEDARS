@@ -878,8 +878,9 @@ def get_highlighted_sentence(current_annotation, note):
     highlighted_note = []
     text = note["text"]
 
-    sentence_start = current_annotation["sentence_start"]
-    sentence_end = current_annotation["sentence_end"] - sentence_start
+
+    sentence_start = text.lower().index(current_annotation['sentence'])
+    sentence_end = len(current_annotation['sentence'])
 
     # Take characters from the start of the sentence, excluding spaces and new lines.
     text = text[sentence_start:].strip()
