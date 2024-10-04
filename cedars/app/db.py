@@ -56,6 +56,7 @@ def create_project(project_name,
     # populate_notes()
     populate_users()
     # populate_query()
+    populate_results()
 
     logger.info("Database creation successful!")
 
@@ -175,6 +176,10 @@ def populate_task():
     # task.create_index("job_id", unique=True)
     logger.info("Created %s collection.", task.name)
 
+def populate_results():
+    results = mongo.db["RESULTS"]
+    results.create_index("patient_id", unique=True)
+    logger.info(f"Created {results.name} collection")
 
 # index functions
 def create_index(collection, index: list):
@@ -385,6 +390,98 @@ def insert_one_annotation(annotation):
 
     annotations_collection.insert_one(annotation)
 
+def upsert_patient_results(patient_id: str):
+    '''
+    Stores the results of a patient who has been reviewed.
+    If this patient already has results stored, the code will
+    update the results for that patient.
+
+    Args :
+        - patient_id (str) : ID of the patient who has been reviewed.
+
+    Returns :
+        - None
+    '''
+
+    notes = get_all_notes(patient_id)
+    reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+
+    note_details = []
+    for note in notes:
+        note_id = note["text_id"]
+        note_date = str(note["text_date"])[:10]
+        predicted_score = get_note_prediction_from_db(note_id)
+        if predicted_score is not None:
+            note_details.append(f"{note_id}:{note_date}:{predicted_score}")
+    all_note_details = "\n".join(note_details)
+
+    reviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                                reviewed=True,
+                                                                key="sentence")
+    unreviewed_sentences = get_patient_annotation_ids(patient_id,
+                                                        reviewed=False,
+                                                        key="sentence")
+    sentences = reviewed_sentences + unreviewed_sentences
+
+
+    event_date = get_event_date(patient_id)
+    key_annotation_id = get_event_annotation_id(patient_id)
+    event_information = ""
+    if event_date and key_annotation_id:
+        key_annotation = get_annotation(key_annotation_id)
+        event_information = key_annotation["sentence"]
+        key_note_id = key_annotation["note_id"]
+        event_information += f"\nNote_id : {key_note_id}"
+    
+    first_note_date = get_first_note_date_for_patient(patient_id)
+    last_note_date = get_last_note_date_for_patient(patient_id)
+    patient = get_patient_by_id(patient_id)
+    comments = patient.get("comments", "")
+    reviewer = get_patient_reviewer(patient_id)
+
+    max_score = ""
+    max_score_note_id = ""
+    max_score_note_date = ""
+    try:
+        res = list(get_max_prediction_score(patient_id))
+        if len(res) > 0:
+            res = res[0]
+            max_score = res["max_score"]
+            max_score_note_id = res["text_id"]
+            max_score_note_date = get_note_date(max_score_note_id)
+    except Exception:
+        logger.info(f"PINES results not available for patient: {patient_id}")
+    
+    patient_results = {
+        'patient_id' : patient_id,
+        'total_notes' : len(notes),
+        'reviewed_notes' : len(reviewed_notes),
+        'total_sentences' : len(sentences),
+        'reviewed_sentences' : len(reviewed_sentences),
+        'sentences' : sentences,
+        'event_date' : event_date,
+        'event_information' : event_information,
+        'first_note_date' : first_note_date,
+        'last_note_date' : last_note_date,
+        'comments' : comments,
+        'reviewer' : reviewer,
+        'max_score_note_id' : max_score_note_id,
+        'max_score_note_date' : max_score_note_date,
+        'max_score' : max_score,
+        'predicted_notes' : all_note_details
+    }
+
+    stored_results = mongo.db["RESULTS"].find_one({"patient_id": patient_id})
+
+    if stored_results is not None:
+        # If the patient already has some results, we will override them
+        logger.info(f"Results for patient #{patient_id} already exist, updating records.")
+        patient_results.pop("patient_id")
+        mongo.db["RESULTS"].update_one({"patient_id": patient_id},
+                                       {"$set": patient_results})
+    else:
+        logger.info(f"Inserting results for patient #{patient_id} into the database.")
+        mongo.db["RESULTS"].insert_one(patient_results)
 
 # Get functions
 def get_user(username):
@@ -1095,6 +1192,9 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
                                     {"$set": {"reviewed": is_reviewed,
                                               "reviewed_by": reviewed_by}})
 
+    logger.info(f"Storing results for patient #{patient_id}")
+    upsert_patient_results(patient_id)
+
 
 def mark_note_reviewed(note_id, reviewed_by: str):
     """
@@ -1140,6 +1240,7 @@ def add_comment(annotation_id, comment):
                                     {"$set":
                                      {"comments": comment}
                                      })
+    upsert_patient_results(patient_id)
 
 
 def set_patient_lock_status(patient_id: str, status):
@@ -1556,74 +1657,19 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
     """
     Download annotations from the database and stream them to MinIO.
     """
+    column_names = ['patient_id', 'total_notes', 'reviewed_notes', 'total_sentences',
+                    'reviewed_sentences', 'sentences', 'event_date', 'event_information',
+                    'first_note_date', 'last_note_date', 'comments', 'reviewer', 'max_score_note_id',
+                    'max_score_note_date', 'max_score', 'predicted_notes']
+    if  get_sentences is False:
+        column_names.remove('sentences')
+
     def data_generator():
         patients = get_all_patients()
         for patient in patients:
             patient_id = patient["patient_id"]
-            notes = get_all_notes(patient_id)
-            reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
-            note_details = []
-            reviewer = get_patient_reviewer(patient_id)
-            for note in notes:
-                note_id = note["text_id"]
-                note_date = str(note["text_date"])[:10]
-                predicted_score = get_note_prediction_from_db(note_id)
-                if predicted_score is not None:
-                    note_details.append(f"{note_id}:{note_date}:{predicted_score}")
-            all_note_details = "\n".join(note_details)
-
-            if get_sentences:
-                reviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                                reviewed=True,
-                                                                key="sentence")
-                unreviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                                  reviewed=False,
-                                                                  key="sentence")
-                sentences_to_show = reviewed_sentences + unreviewed_sentences
-            else:
-                reviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=True)
-                unreviewed_sentences = get_patient_annotation_ids(patient_id, reviewed=False)
-                key_annotation_id = get_event_annotation_id(patient_id)
-                if key_annotation_id is not None:
-                    key_annotation = get_annotation(key_annotation_id)
-                    sentences_to_show = [key_annotation["sentence"]]
-                    note_id = key_annotation["note_id"]
-                    sentences_to_show.append(f"\nNote_id : {note_id}")
-                else:
-                    sentences_to_show = [""]
-
-
-            sentences = reviewed_sentences + unreviewed_sentences
-            total_sentences = len(sentences)
-            event_date = get_event_date(patient_id)
-            first_note_date = get_first_note_date_for_patient(patient_id)
-            last_note_date = get_last_note_date_for_patient(patient_id)
-            max_score = None
-            max_score_note_id = None
-            max_score_note_date = None
-            comments = patient.get("comments", "")
-            try:
-                res = list(get_max_prediction_score(patient_id))
-                if len(res) > 0:
-                    res = res[0]
-                    max_score = res["max_score"]
-                    max_score_note_id = res["text_id"]
-                    max_score_note_date = get_note_date(max_score_note_id)
-
-            except Exception:
-                logger.info(f"PINES results not available for patient: {patient_id}")
-
-
-            yield [patient_id, len(notes), len(reviewed_notes), total_sentences,
-                   len(reviewed_sentences), "\n".join(sentences_to_show), event_date,
-                   first_note_date, last_note_date, max_score_note_id, max_score_note_date,
-                   max_score, comments, all_note_details, reviewer]
-
-    column_names = ["patient_id", "total_notes", "reviewed_notes", "total_sentences",
-                    "reviewed_sentences", "sentences", "event_date", "first_note_date",
-                    "last_note_date", "max_score_note_id",
-                    "max_score_note_date", "max_score", "comments",
-                    "predicted_notes", "reviewer"]
+            yield mongo.db["RESULTS"].find_one({'patient_id' : patient_id},
+                                                        {column : 1 for column in column_names})
 
     try:
         # Create an in-memory buffer for the CSV data

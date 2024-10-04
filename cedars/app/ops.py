@@ -594,9 +594,11 @@ def save_adjudications():
         new_date = request.form['date_entry']
         logger.info(f"Updating {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
+        db.upsert_patient_results(patient_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
+        db.upsert_patient_results(patient_id)
         db.delete_event_date(patient_id)
 
     def _move_to_previous_annotation(shift_value):
