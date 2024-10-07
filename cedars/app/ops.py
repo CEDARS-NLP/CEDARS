@@ -465,21 +465,21 @@ def empty_queue(queue,
     queue.empty()
 
     if empty_started_jobs is True:
-        registry = queue.started_job_registry
-        for job_id in registry.get_job_ids():
-            registry.remove(job_id, delete_job=True)
+        clear_queue_registry(queue.started_job_registry)
 
     if empty_finished_reg is True:
-        registry = queue.finished_job_registry
-        for job_id in registry.get_job_ids():
-            registry.remove(job_id, delete_job=True)
-    
+        clear_queue_registry(queue.finished_job_registry)
+
     if empty_failed_reg is True:
-        registry = queue.failed_job_registry
-        for job_id in registry.get_job_ids():
-            registry.remove(job_id, delete_job=True)
+        clear_queue_registry(queue.failed_job_registry)
     
     logger.info(f"Completely emptying {queue} queue.")
+
+def clear_queue_registry(registry) -> None:
+    '''
+    '''
+    for job_id in registry.get_job_ids():
+        registry.remove(job_id, delete_job=True)
 
 def init_pines_connection(superbio_api_token = None):
     '''
