@@ -1133,8 +1133,10 @@ def empty_annotations():
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
 
-    # also reset the queue
-    flask.current_app.task_queue.empty()
+def empty_tasks():
+    '''
+    Empties all stored tasks in the database
+    '''
     mongo.db["TASK"].delete_many({})
 
 

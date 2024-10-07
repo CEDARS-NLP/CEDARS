@@ -106,7 +106,7 @@ def project_details():
                 if terminate_clause == 'DELETE EVERYTHING':
                     db.terminate_project()
                     # reset all rq queues
-                    flask.current_app.task_queue.empty()
+                    empty_queue(flask.current_app.task_queue)
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
@@ -361,6 +361,10 @@ def upload_query():
         db.empty_annotations()
         db.reset_patient_reviewed()
 
+        empty_queue(flask.current_app.task_queue)
+        empty_queue(flask.current_app.ops_queue)
+        db.empty_tasks()
+
     if "patient_id" in session:
         session.pop("patient_id")
         session.modified = True
@@ -435,6 +439,43 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         close_pines_connection(job.kwargs['superbio_api_token'])
+
+def empty_queue(queue,
+                empty_started_jobs: bool = False,
+                empty_finished_reg: bool = True,
+                empty_failed_reg: bool = True) -> None:
+    '''
+    Empties the queue and the relevant registries that may be
+    in use.
+
+    Args :
+        - queue (RQ Queue) : The queue that needs to be emptied.
+        - empty_started_jobs (bool) : True if we should discard all currently active jobs 
+                                        related to this queue.
+        - empty_finished_reg (bool) : True if we should clear the registery of all the jobs
+                                        that were completed successfully.
+        - empty_failed_reg (bool) : True if we should clear the registery of all the jobs
+                                        that failed before completion.
+
+    Returns :
+        - None
+    '''
+    queue.empty()
+
+    if empty_started_jobs is True:
+        registry = queue.started_job_registry
+        for job_id in registry.get_job_ids():
+            registry.remove(job_id, delete_job=True)
+
+    if empty_finished_reg is True:
+        registry = queue.finished_job_registry
+        for job_id in registry.get_job_ids():
+            registry.remove(job_id, delete_job=True)
+    
+    if empty_failed_reg is True:
+        registry = queue.failed_job_registry
+        for job_id in registry.get_job_ids():
+            registry.remove(job_id, delete_job=True)
 
 def init_pines_connection(superbio_api_token = None):
     '''
