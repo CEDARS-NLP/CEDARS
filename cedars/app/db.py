@@ -1053,6 +1053,7 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
+                                               "locked": False,
                                                "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
@@ -1132,6 +1133,15 @@ def empty_annotations():
     logger.info("Deleting all data in annotations collection.")
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
+
+def empty_pines():
+    """
+    Deletes all annotations from the database
+    """
+
+    logger.info("Deleting all data in PINES collection.")
+    collection = mongo.db["PINES"]
+    collection.delete_many({})
 
 def empty_tasks():
     '''

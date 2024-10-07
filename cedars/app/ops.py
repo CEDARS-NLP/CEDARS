@@ -359,6 +359,7 @@ def upload_query():
     # TODO: add a javascript confirm box to make sure the user wants to update the query
     if new_query_added:
         db.empty_annotations()
+        db.empty_pines()
         db.reset_patient_reviewed()
 
         empty_queue(flask.current_app.task_queue)
