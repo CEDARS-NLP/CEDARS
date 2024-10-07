@@ -472,7 +472,7 @@ def empty_queue(queue,
 
     if empty_failed_reg is True:
         clear_queue_registry(queue.failed_job_registry)
-    
+
     logger.info(f"Completely emptying {queue} queue.")
 
 def clear_queue_registry(registry) -> None:
