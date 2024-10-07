@@ -461,6 +461,7 @@ def empty_queue(queue,
     Returns :
         - None
     '''
+    logger.info(f"Emptying {queue} queue.")
     queue.empty()
 
     if empty_started_jobs is True:
@@ -477,6 +478,8 @@ def empty_queue(queue,
         registry = queue.failed_job_registry
         for job_id in registry.get_job_ids():
             registry.remove(job_id, delete_job=True)
+    
+    logger.info(f"Completely emptying {queue} queue.")
 
 def init_pines_connection(superbio_api_token = None):
     '''
