@@ -1136,7 +1136,7 @@ def empty_annotations():
 
 def empty_pines():
     """
-    Deletes all annotations from the database
+    Deletes all PINES predictions for the current query from the database
     """
 
     logger.info("Deleting all data in PINES collection.")
