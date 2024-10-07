@@ -477,6 +477,13 @@ def empty_queue(queue,
 
 def clear_queue_registry(registry) -> None:
     '''
+    Clears all of the jobs in a registry for a queue.
+
+    Args :
+        - registry (RQ Registry) : The registry to be cleared.
+
+    Returns :
+        - None
     '''
     for job_id in registry.get_job_ids():
         registry.remove(job_id, delete_job=True)
