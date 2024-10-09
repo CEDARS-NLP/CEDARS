@@ -10,7 +10,8 @@ from uuid import uuid4
 
 from typing import Optional
 from faker import Faker
-
+from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError
 import flask
 from flask import g
 import requests
@@ -22,10 +23,12 @@ from .database import mongo, minio
 
 fake = Faker()
 
+logger.enable(__name__)
+
 # Create collections and indexes
 def create_project(project_name,
                    investigator_name,
-                   project_id,
+                   project_id=None,
                    cedars_version="0.1.0"):
     """
     This function creates all the collections in the mongodb database for CEDARS.
@@ -37,10 +40,13 @@ def create_project(project_name,
     Returns:
         None
     """
+    create_db_indices()
     if mongo.db["INFO"].find_one() is not None:
         logger.info("Database already created.")
         return
 
+    if project_id is None:
+        project_id = str(uuid4())
     create_info_col(project_name=project_name,
                     project_id=project_id,
                     investigator_name=investigator_name,
@@ -63,7 +69,9 @@ def create_pines_info(pines_url, is_url_from_api):
 
     return pines_url
 
-def create_info_col(project_name, project_id, investigator_name,
+def create_info_col(project_name,
+                    project_id,
+                    investigator_name,
                     cedars_version):
     """
     This function creates the info collection in the mongodb database.
@@ -191,8 +199,19 @@ def create_db_indices():
     Creates indices for the ANNOTATIONS and PINES cols in the db.
     '''
     logger.info("All tasks completed.")
+
+    logger.info("Creating indexes for NOTES.")
+    mongo.db["NOTES"].create_index([("text_id", 1 )], unique=True)
+    mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
+
+    logger.info("Creating indexes for PATIENTS.")
+    mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
+
     logger.info("Creating indexes for ANNOTATIONS.")
     create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ] )
+
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
@@ -269,46 +288,88 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
     return True
 
 
-def upload_notes(documents):
-    """
-    This function is used to take a dataframe of patient records
-    and save it to the mongodb database.
-
-    Args:
-        documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
-    Returns:
-        None
-    """
+def bulk_insert_notes(notes):
     notes_collection = mongo.db["NOTES"]
-    patient_ids = set()
-    for i in range(len(documents)):
-        note_info = documents.iloc[i].to_dict()
+    try:
+        result = notes_collection.insert_many(notes)
+        return len(result.inserted_ids)
+    except BulkWriteError as bwe:
+        logger.error(f"Bulk write error: {bwe.details}")
+        return bwe.details['nInserted']
 
-        date_format = '%Y-%m-%d'
-        datetime_obj = datetime.strptime(note_info["text_date"], date_format)
-        note_info["text_date"] = datetime_obj
-        note_info["reviewed"] = False
 
-        # text_id should be unique
-        notes_collection.insert_one(note_info)
-        patient_ids.add(note_info["patient_id"])
-        if i+1 % 100 == 0:
-            logger.info(f"Uploaded {i}/{len(documents)} notes")
-
+def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
+    operations = []
     for p_id in patient_ids:
-        patient_info = {"patient_id": p_id,
-                        "reviewed": False,
-                        "locked": False,
-                        "updated": False,
-                        "comments": "",
-                        "reviewed_by" : "",
-                        "event_annotation_id" : None,
-                        "event_date" : None,
-                        "admin_locked": False}
+        p_id = str(p_id).strip()
+        patient_info = {
+            "patient_id": p_id,
+            "reviewed": False,
+            "locked": False,
+            "updated": False,
+            "comments": "",
+            "reviewed_by": "",
+            "event_annotation_id": None,
+            "event_date": None,
+            "admin_locked": False
+        }
+        operations.append(
+            UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_info},
+                upsert=True
+            )
+        )
 
-        if not patients_collection.find_one({"patient_id": p_id}):
-            patients_collection.insert_one(patient_info)
+    try:
+        result = patients_collection.bulk_write(operations, ordered=False)
+        return result.upserted_count
+    except BulkWriteError as bwe:
+        logger.error(f"Bulk write error: {bwe.details}")
+        return bwe.details['nUpserted']
+
+
+# def upload_notes(documents):
+#     """
+#     This function is used to take a dataframe of patient records
+#     and save it to the mongodb database.
+
+#     Args:
+#         documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
+#     Returns:
+#         None
+#     """
+#     notes_collection = mongo.db["NOTES"]
+#     patient_ids = set()
+#     for i in range(len(documents)):
+#         note_info = documents.iloc[i].to_dict()
+
+#         date_format = '%Y-%m-%d'
+#         datetime_obj = datetime.strptime(note_info["text_date"], date_format)
+#         note_info["text_date"] = datetime_obj
+#         note_info["reviewed"] = False
+
+#         # text_id should be unique
+#         notes_collection.insert_one(note_info)
+#         patient_ids.add(note_info["patient_id"])
+#         if i+1 % 100 == 0:
+#             logger.info(f"Uploaded {i}/{len(documents)} notes")
+
+#     patients_collection = mongo.db["PATIENTS"]
+#     for p_id in patient_ids:
+#         patient_info = {"patient_id": p_id,
+#                         "reviewed": False,
+#                         "locked": False,
+#                         "updated": False,
+#                         "comments": "",
+#                         "reviewed_by" : "",
+#                         "event_annotation_id" : None,
+#                         "event_date" : None,
+#                         "admin_locked": False}
+
+#         if not patients_collection.find_one({"patient_id": p_id}):
+#             patients_collection.insert_one(patient_info)
 
 
 def insert_one_annotation(annotation):
@@ -442,7 +503,7 @@ def get_annotation_note(annotation_id: str):
     return note
 
 
-def get_patient_by_id(patient_id):
+def get_patient_by_id(patient_id: str):
     """
     Retrives a single patient from mongodb.
 
@@ -532,12 +593,12 @@ def get_documents_to_annotate(patient_id=None):
     return documents_to_annotate
 
 
-def get_all_annotations_for_patient(patient_id):
+def get_all_annotations_for_patient(patient_id: str):
     """
     Retrives all annotations for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -548,12 +609,12 @@ def get_all_annotations_for_patient(patient_id):
     return annotations
 
 
-def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):
+def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
     """
     Retrives all annotations for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         annotations (list) : A list of all annotations for that patient.
     """
@@ -595,12 +656,12 @@ def get_all_annotations_for_patient_paged(patient_id, page=1, page_size=1):
     return {"total": total, "annotations": annotations}
 
 
-def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
+def get_patient_annotation_ids(p_id: str, reviewed=False, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
 
     Args:
-        p_id (int) : Unique ID for a patient.
+        p_id (str) : Unique ID for a patient.
         reviewed (bool) : True if we want to get reviewed annotations.
     Returns:
         annotations (list) : A list of all annotation IDs linked to that patient.
@@ -624,7 +685,7 @@ def get_patient_annotation_ids(p_id, reviewed=False, key="_id"):
 
     return res
 
-def get_event_date(patient_id):
+def get_event_date(patient_id: str):
     """
     Find the event date for a patient.
     """
@@ -639,7 +700,7 @@ def get_event_date(patient_id):
     return None
 
 
-def get_event_date_sentences(patient_id):
+def get_event_date_sentences(patient_id: str):
     """
     Find the event date from the annotations for a patient.
     """
@@ -672,12 +733,12 @@ def get_note_date(note_id):
     return note["text_date"]
 
 
-def get_first_note_date_for_patient(patient_id):
+def get_first_note_date_for_patient(patient_id: str):
     """
     Retrives the date of the first note for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         note_date (datetime) : The date of the first note for the patient.
     """
@@ -690,12 +751,12 @@ def get_first_note_date_for_patient(patient_id):
     return note["text_date"]
 
 
-def get_last_note_date_for_patient(patient_id):
+def get_last_note_date_for_patient(patient_id: str):
     """
     Retrives the date of the last note for a patient.
 
     Args:
-        patient_id (int) : Unique ID for a patient.
+        patient_id (str) : Unique ID for a patient.
     Returns:
         note_date (datetime) : The date of the last note for the patient.
     """
@@ -798,7 +859,7 @@ def get_patient_ids():
     return res
 
 
-def get_patient_lock_status(patient_id):
+def get_patient_lock_status(patient_id: str):
     """
     Updates the status of the patient to be locked or unlocked.
 
@@ -811,12 +872,11 @@ def get_patient_lock_status(patient_id):
     Raises:
         None
     """
-    patient_id = int(patient_id)
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
 
 
-def get_all_notes(patient_id):
+def get_all_notes(patient_id: str):
     """
     Returns all notes for that patient.
     """
@@ -824,12 +884,12 @@ def get_all_notes(patient_id):
     return list(notes)
 
 
-def get_patient_notes(patient_id, reviewed=False):
+def get_patient_notes(patient_id: str, reviewed=False):
     """
     Returns all notes for that patient.
 
     Args:
-        patient_id (int) : ID for the patient
+        patient_id (str) : ID for the patient
     Returns:
         notes: A list of all notes for that patient
     """
@@ -851,7 +911,7 @@ def get_total_counts(collection_name: str, **kwargs) -> int:
     return mongo.db[collection_name].count_documents({**kwargs})
 
 
-def get_annotated_notes_for_patient(patient_id: int) -> list[str]:
+def get_annotated_notes_for_patient(patient_id: str) -> list[str]:
     """
     For a given patient, list all note_ids which have matching keyword
     annotations
@@ -931,7 +991,7 @@ def mark_annotation_reviewed(annotation_id):
                                        {"$set": {"reviewed": True}})
 
 
-def update_event_date(patient_id, new_date, annotation_id):
+def update_event_date(patient_id: str, new_date, annotation_id):
     """
     Enters a new event date for an patient.
 
@@ -954,7 +1014,7 @@ def update_event_date(patient_id, new_date, annotation_id):
     update_event_annotation_id(patient_id, annotation_id)
 
 
-def delete_event_date(patient_id):
+def delete_event_date(patient_id: str):
     """
     Deletes the event date for a patient.
 
@@ -970,7 +1030,7 @@ def delete_event_date(patient_id):
     delete_event_annotation_id(patient_id)
 
 
-def get_event_annotation_id(patient_id):
+def get_event_annotation_id(patient_id: str):
     """
     Retrives the ID for the annotation where 
             the event date for a patient was found.
@@ -986,7 +1046,7 @@ def get_event_annotation_id(patient_id):
 
     return patient["event_annotation_id"]
 
-def update_event_annotation_id(patient_id, annotation_id):
+def update_event_annotation_id(patient_id: str, annotation_id):
     """
     Updates the ID for the annotation where 
             the event date for a patient was found.
@@ -1003,7 +1063,7 @@ def update_event_annotation_id(patient_id, annotation_id):
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": annotation_id}})
 
-def delete_event_annotation_id(patient_id):
+def delete_event_annotation_id(patient_id: str):
     """
     Deletes the ID for the annotation where 
             the event date for a patient was found.
@@ -1019,7 +1079,7 @@ def delete_event_annotation_id(patient_id):
                                        {"$set": {"event_annotation_id": None}})
 
 
-def mark_patient_reviewed(patient_id, reviewed_by: str, is_reviewed=True):
+def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
     """
     Updates the patient's status to reviewed in the database.
 
@@ -1082,7 +1142,7 @@ def add_comment(annotation_id, comment):
                                      })
 
 
-def set_patient_lock_status(patient_id, status):
+def set_patient_lock_status(patient_id: str, status):
     """
     Updates the status of the patient to be locked or unlocked.
 
@@ -1254,7 +1314,7 @@ def get_prediction(note: str) -> float:
         raise e
 
 
-def get_max_prediction_score(patient_id):
+def get_max_prediction_score(patient_id: str):
     """
     Get the max predicted note score for a patient
     """
@@ -1421,12 +1481,17 @@ def update_db_task_progress(task_id, progress):
     task_db = mongo.db["TASK"]
     task = task_db.find_one({"job_id": task_id})
     completed = False
+    if not task:
+        # this might be the case if we have old messages
+        # in the queue
+        logger.error(f"Task {task_id} not found in database.")
+        return
     if progress >= 100:
         completed = True
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
                                  "complete": completed}})
-    patient_id = int(task_id.split(":")[1])
+    patient_id = (task_id.split(":")[1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
@@ -1440,13 +1505,6 @@ def report_success(job):
     job.meta['progress'] = 100
     job.save_meta()
 
-    # If the TASK queue does not have any jobs :
-    # 1. Start indexing the annotations and notes db
-    queue_length = len(flask.current_app.task_queue)
-    if queue_length == 0:
-        # Index database if all tasks are completed
-        create_db_indices()
-
     update_db_task_progress(job.get_id(), 100)
 
 
@@ -1459,15 +1517,9 @@ def report_failure(job):
     """
     job.meta['progress'] = 0
     job.save_meta()
-    # If the TASK queue does not have any jobs :
-    # 1. Start indexing the annotations and notes db
-    queue_length = len(flask.current_app.task_queue)
-    if queue_length == 0:
-        # Index database if all tasks are completed
-        create_db_indices()
     update_db_task_progress(job.get_id(), 0)
 
-def get_patient_reviewer(patient_id):
+def get_patient_reviewer(patient_id: str):
     """
     Updates the note's status to reviewed in the database.
     """
@@ -1619,9 +1671,7 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
 
-    project_id = os.getenv("PROJECT_ID")
-    if project_id is None:
-        project_id=str(uuid4())
+    project_id = os.getenv("PROJECT_ID", None)
 
     create_project(project_name=fake.slug(),
                    investigator_name=fake.name(),

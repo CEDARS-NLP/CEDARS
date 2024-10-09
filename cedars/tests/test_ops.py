@@ -3,7 +3,6 @@ from flask import request
 from unittest.mock import patch
 from app.ops import (
     allowed_data_file,
-    convert_to_int,
     highlighted_text
 )
 
@@ -17,11 +16,6 @@ def test_allowed_data_file():
     assert allowed_data_file("file.pkl") is True
     assert allowed_data_file("file.xml") is True
     assert allowed_data_file("file.txt") is False
-
-
-def test_convert_to_int():
-    assert convert_to_int("123") == 123
-    assert convert_to_int("abc") == "abc"
 
 
 @pytest.mark.parametrize("project_name, project_id", [
@@ -133,7 +127,7 @@ def test_upload_query_post_valid(client, db):
     assert response.status_code == 200
     # mocked_nlp_processing.assert_called_once()
     assert db.get_total_counts("ANNOTATIONS") == 0
-    assert db.get_total_counts("PATIENTS", reviewed=False) == 3
+    assert db.get_total_counts("PATIENTS", reviewed=False) == 4
 
 
 def test_do_nlp_processing(client):
@@ -242,7 +236,7 @@ def test_get_job_status(client, db):
 
 
 def test_highlighted_text(db):
-    note = db.get_all_notes(1111111111)[0]
+    note = db.get_all_notes("1111111111")[0]
     assert "<br>" in highlighted_text(note)
 
 

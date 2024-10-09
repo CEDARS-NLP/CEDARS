@@ -13,7 +13,7 @@ def test_register(cedars_app, db, client):
     assert client.get("/auth/register").status_code == 200
 
     client.post(
-        "/auth/register", data={"username": "a", "password": "a"}
+        "/auth/register", data={"username": "a", "password": "AAbb19**"}
     )
     db.get_user("a") is not None
 

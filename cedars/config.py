@@ -24,7 +24,8 @@ class Base:  # pylint: disable=too-few-public-methods
         "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
         "task_queue_name": "cedars",
         "ops_queue_name": "ops",
-        "job_timeout": 3600
+        "job_timeout": 3600,
+        "operation_timeout": 7200
     }
 
 
