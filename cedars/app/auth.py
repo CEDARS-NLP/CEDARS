@@ -88,10 +88,10 @@ def register():
 
         password_policy = PasswordPolicy(
             min_length=8,
-            min_uppercase=2,
+            min_uppercase=1,
             min_lowercase=2,
             min_digits=2,
-            min_special=2,
+            min_special=1,
             special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
             allow_spaces=False
         )
@@ -117,6 +117,10 @@ def register():
 
             if is_first_user and not is_admin:
                 is_admin = True
+                project_id = os.getenv("PROJECT_ID", None)
+                db.create_project(investigator_name=username,
+                                  project_name="Default Project",
+                                  project_id=project_id)
                 flash('First user registered is an admin.')
 
             db.add_user(

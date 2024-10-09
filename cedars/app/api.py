@@ -126,8 +126,11 @@ def get_token_status(superbio_api_token):
     }
 
     api_url = os.getenv("SUPERBIO_API_URL")
-    if api_url is None or superbio_api_token is None:
-        logger.error("No server found to connect to.")
+    if api_url is None:
+        return result
+    
+    if superbio_api_token is None:
+        logger.error("No superbio token avalible to access URL.")
         result['token_info'] = 'Invalid API url or token.'
         return result
 
