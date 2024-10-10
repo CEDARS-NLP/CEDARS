@@ -178,7 +178,6 @@ def populate_task():
 
 def populate_results():
     results = mongo.db["RESULTS"]
-    results.create_index("patient_id", unique=True)
     logger.info(f"Created {results.name} collection")
 
 # index functions
@@ -220,6 +219,9 @@ def create_db_indices():
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
+
+    logger.info("Creating indexes for RESULTS.")
+    create_index("RESULTS", [("patient_id", {"unique":True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
@@ -1672,6 +1674,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                                                         {column : 1 for column in column_names})
 
     try:
+        start_time = time.time()
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
         writer = pd.DataFrame(columns=column_names)
@@ -1696,9 +1699,9 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                          content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
-        return False
+    #except Exception as e:
+    #    logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
+    #    return False
 
 
 def terminate_project():
@@ -1716,6 +1719,7 @@ def terminate_project():
     mongo.db.drop_collection("QUERY")
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
+    mongo.db.drop_collection("RESULTS")
 
     project_id = os.getenv("PROJECT_ID", None)
 
