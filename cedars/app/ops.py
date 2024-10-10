@@ -663,7 +663,7 @@ def save_adjudications():
         session.modified = True
 
     def _add_annotation_comment():
-        db.add_comment(current_annotation_id, request.form['comment'])
+        db.add_comment(current_annotation_id, request.form['comment'].strip())
 
 
     actions = {
