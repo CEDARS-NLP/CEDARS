@@ -1674,7 +1674,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                                                         {column : 1 for column in column_names})
 
     try:
-        start_time = time.time()
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
         writer = pd.DataFrame(columns=column_names)
