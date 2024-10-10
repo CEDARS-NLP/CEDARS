@@ -1666,13 +1666,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
     if  get_sentences is False:
         column_names.remove('sentences')
 
-    def data_generator():
-        patients = get_all_patients()
-        for patient in patients:
-            patient_id = patient["patient_id"]
-            yield mongo.db["RESULTS"].find_one({'patient_id' : patient_id},
-                                                        {column : 1 for column in column_names})
-
     try:
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
@@ -1680,7 +1673,9 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         writer.to_csv(csv_buffer, index=False, header=True)
 
         # Write data in chunks and stream to MinIO
-        for chunk in pd.DataFrame(data_generator(), columns=column_names).to_csv(header=False,
+        project_results = mongo.db["RESULTS"].find({},
+                                                    {column : 1 for column in column_names})
+        for chunk in pd.DataFrame(project_results, columns=column_names).to_csv(header=False,
                                                                                  index=False,
                                                                                  chunksize=1000):
             csv_buffer.write(chunk)
