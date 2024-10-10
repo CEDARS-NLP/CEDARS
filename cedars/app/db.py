@@ -1698,9 +1698,9 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                          content_type="application/csv")
         logger.info(f"Uploaded annotations to s3: {filename}")
         return True
-    #except Exception as e:
-    #    logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
-    #    return False
+    except Exception as e:
+        logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
+        return False
 
 
 def terminate_project():
