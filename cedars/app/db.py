@@ -1280,6 +1280,9 @@ def get_curr_stats():
     total_tokens = mongo.db.ANNOTATIONS.count_documents({"isNegated": False})
     stats['lemma_dist'] = {doc['token']: 100 * doc['count']/total_tokens for doc in lemma_dist_results}
 
+    stats['number_of_notes'] = mongo.db.NOTES.count_documents({})
+    stats['number_of_reviewed_notes'] = mongo.db.NOTES.count_documents({'reviewed' : True})
+
     return stats
 
 

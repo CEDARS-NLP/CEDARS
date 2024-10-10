@@ -26,6 +26,8 @@ def stats_route():
     number_of_reviewed = stats["number_of_reviewed"]
     lemma_dist = stats['lemma_dist']
     user_review_stats = stats['user_review_stats']
+    number_of_notes = stats['number_of_notes']
+    number_of_reviewed_notes = stats['number_of_reviewed_notes']
 
     return render_template("stats.html",
                            number_of_patients=number_of_patients,
@@ -33,4 +35,6 @@ def stats_route():
                            number_of_reviewed=number_of_reviewed,
                            lemma_dist=lemma_dist,
                            user_review_stats=user_review_stats,
+                           number_of_notes=number_of_notes,
+                           number_of_reviewed_notes=number_of_reviewed_notes,
                            **db.get_info())
