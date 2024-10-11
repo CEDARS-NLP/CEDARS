@@ -25,7 +25,8 @@ dependencies = [
     "flask-session",
     "faker",
     "tenacity",
-    "passvalidate"
+    "passvalidate",
+    "rq_dashboard"
 ]
 
 [build-system]
