@@ -220,7 +220,7 @@ def token_login():
 def logout():
     """Logout a user"""
     if session.get("patient_id"):
-        db.set_patient_lock_status(int(session.get("patient_id")), False)
+        db.set_patient_lock_status(session.get("patient_id"), False)
 
     logout_user()
     session.clear()
