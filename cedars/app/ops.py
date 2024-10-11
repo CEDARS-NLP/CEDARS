@@ -423,7 +423,6 @@ def upload_query():
             return redirect(url_for("ops.upload_query"))
 
     if use_pines:
-        # 
         is_pines_available = init_pines_connection(superbio_api_token)
         if is_pines_available is False:
             # PINES could not load successfully
@@ -663,7 +662,7 @@ def save_adjudications():
         session.modified = True
 
     def _add_annotation_comment():
-        db.add_comment(current_annotation_id, request.form['comment'])
+        db.add_comment(current_annotation_id, request.form['comment'].strip())
 
 
     actions = {
