@@ -9,10 +9,18 @@ import os
 from flask import Flask, render_template
 from flask_session import Session
 from loguru import logger
+from dotenv import dotenv_values, load_dotenv
 import rq
+import rq_dashboard
 from redis import Redis
+from . import auth
+from . import ops
+from . import stats
 
+load_dotenv()
 
+environment = os.getenv('ENV', 'local')
+config = dotenv_values(".env")
 sess = Session()
 
 
@@ -27,6 +35,14 @@ def rq_init_app(cedars_rq):
                                    default_timeout=cedars_rq.config["RQ"]['operation_timeout'])
 
     cedars_rq.extensions['rq'] = cedars_rq
+
+    # Rq-dashboard support
+    cedars_rq.config.from_object(rq_dashboard.default_settings)
+    cedars_rq.config["RQ_DASHBOARD_REDIS_URL"] = cedars_rq.config["RQ"]['redis_url']
+    rq_dashboard.web.setup_rq_connection(cedars_rq)
+    cedars_rq.register_blueprint(rq_dashboard.blueprint,
+                                    url_prefix=config['RQ_DASHBOARD_URL'])
+
     return cedars_rq
 
 
@@ -44,14 +60,11 @@ def create_app(config_filename=None):
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
 
-    from . import auth
     auth.login_manager.init_app(cedars_app)
     cedars_app.register_blueprint(auth.bp)
 
-    from . import ops
     cedars_app.register_blueprint(ops.bp)
 
-    from . import stats
     cedars_app.register_blueprint(stats.bp)
 
     @cedars_app.route('/', methods=["GET"])
