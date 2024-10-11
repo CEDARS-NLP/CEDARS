@@ -13,6 +13,9 @@ from dotenv import dotenv_values, load_dotenv
 import rq
 import rq_dashboard
 from redis import Redis
+from . import auth
+from . import ops
+from . import stats
 
 load_dotenv()
 
@@ -57,14 +60,11 @@ def create_app(config_filename=None):
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
 
-    from . import auth
     auth.login_manager.init_app(cedars_app)
     cedars_app.register_blueprint(auth.bp)
 
-    from . import ops
     cedars_app.register_blueprint(ops.bp)
 
-    from . import stats
     cedars_app.register_blueprint(stats.bp)
 
     @cedars_app.route('/', methods=["GET"])
