@@ -26,6 +26,7 @@ dependencies = [
     "faker",
     "tenacity",
     "passvalidate"
+    "rq_dashboard"
 ]
 
 [build-system]
