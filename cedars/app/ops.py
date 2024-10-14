@@ -878,32 +878,17 @@ def get_highlighted_sentence(current_annotation, note):
     highlighted_note = []
     text = note["text"]
 
-
     sentence_start = text.lower().index(current_annotation['sentence'])
-    sentence_end = len(current_annotation['sentence'])
+    sentence_end = sentence_start + len(current_annotation['sentence'])
 
-    # Take characters from the start of the sentence, excluding spaces and new lines.
-    text = text[sentence_start:].strip()
-    prev_end_index = 0
+    token_start_index = current_annotation['note_start_index']
+    token_end_index = current_annotation['note_end_index']
 
-    annotations = db.get_all_annotations_for_sentence(note["text_id"],
-                                                      current_annotation["sentence_number"])
-    logger.info(annotations)
-
-    for annotation in annotations:
-        start_index = annotation['start_index']
-        end_index = annotation['end_index']
-        # Make sure the annotations don't overlap
-        if start_index < prev_end_index:
-            continue
-
-        highlighted_note.append(text[prev_end_index:start_index])
-        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
-        prev_end_index = end_index
-
-    highlighted_note.append(text[prev_end_index:sentence_end])
-    logger.info(highlighted_note)
-    return " ".join(highlighted_note).strip().replace("\n", "<br>")
+    sentence = text[sentence_start:token_start_index]
+    sentence += f'<b><mark>{text[token_start_index:token_end_index]}</mark></b>'
+    sentence += text[token_end_index:sentence_end]
+    logger.info(f'Showing sentence : {sentence}')
+    return sentence.strip().replace("\n", "<br>")
 
 def format_annotations(annotations, hide_duplicates):
     """
