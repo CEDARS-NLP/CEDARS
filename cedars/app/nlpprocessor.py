@@ -200,16 +200,12 @@ class NlpProcessor:
                     _, start, end = match
                     token = sentence_annotation[start:end]
                     has_negation = is_negated(token)
-                    start_index = sentence_text.find(token.text, start)
-                    end_index = start_index + len(token.text)
                     token_start = token.start_char
                     token_end = token_start + len(token.text)
                     annotation = {
                                     "sentence": sentence_text,
                                     "token": token.text,
                                     "isNegated": has_negation,
-                                    "start_index": start_index,
-                                    "end_index": end_index,
                                     "note_start_index": token_start,
                                     "note_end_index": token_end,
                                     "sentence_number": sent_no,
