@@ -209,6 +209,7 @@ def create_db_indices():
 
     logger.info("Creating indexes for NOTES.")
     mongo.db["NOTES"].create_index([("text_id", 1 )], unique=True)
+    mongo.db["NOTES"].create_index([("patient_id", 1)])
     mongo.db["NOTES"].create_index([("patient_id", 1), ("text_id", 1)], unique=True)
 
     logger.info("Creating indexes for PATIENTS.")
@@ -222,6 +223,9 @@ def create_db_indices():
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
+
+    logger.info("Creating indexes for USERS.")
+    create_index("USERS", [("user", {"unique": True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
