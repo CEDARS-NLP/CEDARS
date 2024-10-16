@@ -160,8 +160,8 @@ def test_get_project_users(db):
     assert "test1" in db.get_project_users()
 
 
-def test_get_all_patients(db):
-    assert len(db.get_all_patients()) == 5
+def test_get_all_patient_ids(db):
+    assert len(db.get_all_patient_ids()) == 5
 
 
 def test_get_patient_ids(db):

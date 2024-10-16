@@ -1065,6 +1065,18 @@ def create_download_full():
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 
+@bp.route('/update_results_collection', methods=["GET"])
+@auth.admin_required
+def update_results_collection():
+    """
+    Creates and updates the RESULTS collection.
+    """
+
+    job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
+                                                False)
+
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
 def check_job(job_id):
