@@ -180,6 +180,9 @@ def populate_results():
     results = mongo.db["RESULTS"]
     logger.info(f"Created {results.name} collection")
 
+    logger.info("Creating indexes for RESULTS.")
+    create_index("RESULTS", [("patient_id", {"unique":True})])
+
 # index functions
 def create_index(collection, index: list):
     """
@@ -219,9 +222,6 @@ def create_db_indices():
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
-
-    logger.info("Creating indexes for RESULTS.")
-    create_index("RESULTS", [("patient_id", {"unique":True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):
@@ -473,9 +473,7 @@ def upsert_patient_results(patient_id: str):
         'predicted_notes' : all_note_details
     }
 
-    stored_results = mongo.db["RESULTS"].find_one({"patient_id": patient_id})
-
-    if stored_results is not None:
+    if patient_results_exist(patient_id):
         # If the patient already has some results, we will override them
         logger.info(f"Results for patient #{patient_id} already exist, updating records.")
         patient_results.pop("patient_id")
@@ -662,6 +660,22 @@ def get_patients_to_annotate():
 
     return None
 
+def patient_results_exist(patient_id: str):
+    '''
+    Checks if the results for this patient exist in the RESULTS collection.
+
+    Args :
+        - patient_id (str) : ID of the patient.
+
+    Returns :
+        - has_result (bool) : True if this patient has a stored result.
+    '''
+
+    stored_results = mongo.db["RESULTS"].find_one({"patient_id": patient_id})
+
+    if stored_results is None:
+        return False
+    return True
 
 def get_documents_to_annotate(patient_id=None):
     """
@@ -929,18 +943,18 @@ def get_project_users():
     return [user["user"] for user in users]
 
 
-def get_all_patients():
+def get_all_patient_ids():
     """
-    Returns all the patients in this project
+    Returns all the patient IDs in this project
 
     Args:
         None
     Returns:
         patients (list) : List of all patients in this project
     """
-    patients = mongo.db["PATIENTS"].find()
+    patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1})
 
-    return list(patients)
+    return [patient["patient_id"] for patient in patients]
 
 
 def get_patient_ids():
@@ -1697,6 +1711,30 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
         return False
 
+def update_patient_results(update_existing_results = False):
+    '''
+    Creates the results collection if it does not exist and
+    inserts data for patients that do not have any.
+    Optionally updates the data for all patients including
+    patients which already have results stored.
+
+    Args :
+        - update_existing_results (bool) : True if data for patients
+                                            that already have results must
+                                            be updated.
+    
+    Returns :
+        - None
+    '''
+
+    if "RESULTS" not in mongo.db.list_collection_names():
+        # Create results collection
+        populate_results()
+
+    for patient_id in get_all_patient_ids():
+        if update_existing_results or (not patient_results_exist(patient_id)):
+            print("\n\n Updating patient", patient_id, flush=True, end = "\n\n\n")
+            upsert_patient_results(patient_id)
 
 def terminate_project():
     """
