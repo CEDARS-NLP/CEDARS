@@ -593,10 +593,12 @@ def save_adjudications():
         new_date = request.form['date_entry']
         logger.info(f"Updating {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
+        db.upsert_patient_results(patient_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
         db.delete_event_date(patient_id)
+        db.upsert_patient_results(patient_id)
 
     def _move_to_previous_annotation(shift_value):
         def shift_index_backwards():
@@ -1060,6 +1062,18 @@ def create_download_full():
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, "annotations_full.csv", True
     )
+
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
+@bp.route('/update_results_collection', methods=["GET"])
+@auth.admin_required
+def update_results_collection():
+    """
+    Creates and updates the RESULTS collection.
+    """
+
+    job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
+                                                False)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 
