@@ -409,17 +409,8 @@ def upsert_patient_results(patient_id: str):
         - None
     '''
 
-    notes = get_all_notes(patient_id)
     reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
-
-    note_details = []
-    for note in notes:
-        note_id = note["text_id"]
-        note_date = str(note["text_date"])[:10]
-        predicted_score = get_note_prediction_from_db(note_id)
-        if predicted_score is not None:
-            note_details.append(f"{note_id}:{note_date}:{predicted_score}")
-    all_note_details = "\n".join(note_details)
+    all_note_details = get_formatted_patient_predictions(patient_id)
 
     reviewed_sentences = get_patient_annotation_ids(patient_id,
                                                                 reviewed=True,
@@ -460,7 +451,7 @@ def upsert_patient_results(patient_id: str):
 
     patient_results = {
         'patient_id' : patient_id,
-        'total_notes' : len(notes),
+        'total_notes' : get_num_patient_notes(patient_id),
         'reviewed_notes' : len(reviewed_notes),
         'total_sentences' : len(sentences),
         'reviewed_sentences' : len(reviewed_sentences),
@@ -680,6 +671,50 @@ def patient_results_exist(patient_id: str):
     if stored_results is None:
         return False
     return True
+
+def get_formatted_patient_predictions(patient_id: str):
+    '''
+    Checks if the results for this patient exist in the RESULTS collection.
+
+    Args :
+        - patient_id (str) : ID of the patient.
+
+    Returns :
+        - concat_patient_predictions (str) : A string with each predicted note
+                as well as the prediction scores. 
+                Each prediction is in the format {note_id:note_date:prediction_score} .
+                Each prediction is seperated by a newline character.
+    '''
+    match_stage = {'patient_id' : patient_id, "predicted_score":{'$ne':None}}
+
+    group_stage = { 
+                    '_id' : None,
+                    'note_prediction': { '$push': { '$concat': [ "$text_id", ":", 
+                    { "$dateToString": { "format": "%Y-%m-%d", "date": "$text_date" } },
+                    ":", {'$toString': "$predicted_score"}  ] } }
+                    }
+
+    concat_stage = { 
+                    'concat_patient_predictions': {
+                        '$reduce': {
+                            'input': "$note_prediction",
+
+                            'initialValue': "",
+                            'in': {
+                                '$cond': [ { "$eq": [ "$$value", "" ] },
+                                "$$this", { '$concat': [ "$$value", "\n", "$$this" ] } ]
+                            }
+                        }}
+                    } 
+
+    pipeline = []
+    pipeline.append({'$match': match_stage})
+    pipeline.append({ '$group' : group_stage})
+    pipeline.append({ '$project' : concat_stage})
+
+    result = db.PINES.aggregate(pipeline)
+    result = list(result)[0]
+    return result['concat_patient_predictions']
 
 def get_documents_to_annotate(patient_id=None):
     """
@@ -1000,6 +1035,11 @@ def get_all_notes(patient_id: str):
     notes = mongo.db["NOTES"].find({"patient_id": patient_id})
     return list(notes)
 
+def get_num_patient_notes(patient_id: str):
+    """
+    Returns all notes for that patient.
+    """
+    return mongo.db["NOTES"].count_documents({"patient_id": patient_id})
 
 def get_patient_notes(patient_id: str, reviewed=False):
     """
@@ -1552,6 +1592,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
             pines_collection.insert_one({
                 "text_id": note_id,
                 "text": note.get("text"),
+                "text_date" : note.get("text_date"),
                 "patient_id": note.get("patient_id"),
                 "predicted_score": prediction,
                 "report_type": note.get("text_tag_3"),
