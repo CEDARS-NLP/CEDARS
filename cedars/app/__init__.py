@@ -17,8 +17,6 @@ from . import auth
 from . import ops
 from . import stats
 
-load_dotenv()
-
 environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")
 sess = Session()

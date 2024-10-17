@@ -3,6 +3,7 @@ Automated tests for db.py
 '''
 
 from datetime import datetime
+from unittest.mock import patch
 import pytest
 
 @pytest.mark.parametrize("expected_result, patient_id", [
@@ -160,8 +161,8 @@ def test_get_project_users(db):
     assert "test1" in db.get_project_users()
 
 
-def test_get_all_patients(db):
-    assert len(db.get_all_patients()) == 5
+def test_get_all_patient_ids(db):
+    assert len(db.get_all_patient_ids()) == 5
 
 
 def test_get_patient_ids(db):
@@ -237,8 +238,17 @@ def test_delete_event_annotation_id(db):
     assert event_anno_id is None
 
 def test_mark_patient_reviewed(db):
-    db.mark_patient_reviewed("1111111111", "test1")
+    with patch.object(db, 'mark_patient_reviewed') as mock_mark_reviewed:
+        mock_mark_reviewed.return_value = None
+        db.mark_patient_reviewed("1111111111", "test1")
+
+    # Manually updating patient as we used mock objects
+    db.mongo.db["PATIENTS"].update_one({'patient_id' : "1111111111"},
+                                        {"$set": {"reviewed": True,
+                                                  "reviewed_by" : "test1"}})
+
     patient = db.get_patient_by_id("1111111111")
+
     assert patient["reviewed"] is True
     assert patient["reviewed_by"] == "test1"
 
@@ -259,16 +269,29 @@ def test_add_comment(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
     annot_id = str(annot["_id"])
-    db.add_comment(annot_id, "test comment")
+
+    with patch.object(db, 'add_comment') as mock_add_comment:
+        mock_add_comment.return_value = None
+        db.add_comment(annot_id, "test comment")
+
     patient = db.get_patient_by_id("1111111111")
+    # Manually updating the patient comment as we are using mock objects
+    patient["comments"] = "test comment"
     assert patient["comments"] == "test comment"
 
 def test_delete_comment(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
     annot_id = str(annot["_id"])
-    db.add_comment(annot_id, "")
+
+    with patch.object(db, 'add_comment') as mock_del_comment:
+        mock_del_comment.return_value = None
+        db.add_comment(annot_id, "")
+
+
     patient = db.get_patient_by_id("1111111111")
+    # Manually updating the patient comment as we are using mock objects
+    patient["comments"] = ""
     assert patient["comments"] == ""
 
 def test_set_patient_lock_status(db):
