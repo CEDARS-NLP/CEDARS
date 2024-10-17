@@ -1737,7 +1737,6 @@ def update_patient_results(update_existing_results = False):
 
     for patient_id in get_all_patient_ids():
         if update_existing_results or (not patient_results_exist(patient_id)):
-            print("\n\n Updating patient", patient_id, flush=True, end = "\n\n\n")
             upsert_patient_results(patient_id)
 
 def terminate_project():
