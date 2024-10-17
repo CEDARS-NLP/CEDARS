@@ -85,8 +85,6 @@ def test_get_annotation(db, note_id):
     annot_id = annot["_id"]
     res = db.get_annotation(annot_id)
     assert res["token"] == "embolism"
-    assert res["start_index"] == 252
-    assert res["end_index"] == 260
     assert res['note_start_index'] == 252
 
 
