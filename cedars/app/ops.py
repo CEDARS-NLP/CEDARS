@@ -597,8 +597,8 @@ def save_adjudications():
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
-        db.upsert_patient_results(patient_id)
         db.delete_event_date(patient_id)
+        db.upsert_patient_results(patient_id)
 
     def _move_to_previous_annotation(shift_value):
         def shift_index_backwards():
