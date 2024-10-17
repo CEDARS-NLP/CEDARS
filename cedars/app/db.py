@@ -409,7 +409,8 @@ def upsert_patient_results(patient_id: str):
         - None
     '''
 
-    reviewed_notes = [note for note in get_patient_notes(patient_id, reviewed=True)]
+    num_reviewed_notes = mongo.db["NOTES"].count_documents({'patient_id' : patient_id,
+                                                        'reviewed' : True})
     all_note_details = get_formatted_patient_predictions(patient_id)
 
     reviewed_sentences = get_patient_annotation_ids(patient_id,
@@ -452,7 +453,7 @@ def upsert_patient_results(patient_id: str):
     patient_results = {
         'patient_id' : patient_id,
         'total_notes' : get_num_patient_notes(patient_id),
-        'reviewed_notes' : len(reviewed_notes),
+        'reviewed_notes' : num_reviewed_notes,
         'total_sentences' : len(sentences),
         'reviewed_sentences' : len(reviewed_sentences),
         'sentences' : sentences,
@@ -712,9 +713,13 @@ def get_formatted_patient_predictions(patient_id: str):
     pipeline.append({ '$group' : group_stage})
     pipeline.append({ '$project' : concat_stage})
 
-    result = db.PINES.aggregate(pipeline)
-    result = list(result)[0]
-    return result['concat_patient_predictions']
+    result = mongo.db["PINES"].aggregate(pipeline)
+    result = list(result)
+
+    if len(result) > 0:
+        return result[0]['concat_patient_predictions']
+
+    return None
 
 def get_documents_to_annotate(patient_id=None):
     """
