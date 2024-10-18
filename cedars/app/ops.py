@@ -985,6 +985,16 @@ def _format_date(date_obj):
         res = date_obj.date()
     return res
 
+def get_download_filename(is_full_download=False):
+    '''
+    '''
+    project_name = db.get_proj_name()
+    timestamp = datetime.now()
+    timestamp = timestamp.strftime("%Y/%m/%d-%H:%M:%S")
+
+    if is_full_download:
+        return f"{project_name}_{timestamp}_annotations_full.csv"
+    return f"{project_name}_{timestamp}_annotations.csv"
 
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
@@ -1045,8 +1055,9 @@ def create_download():
     Create a download task for annotations
     """
 
+    download_filename = get_download_filename()
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations.csv",
+        db.download_annotations, download_filename,
     )
     return flask.jsonify({'job_id': job.get_id()}), 202
 
@@ -1058,9 +1069,9 @@ def create_download_full():
     Create a download task for annotations
     """
 
-
+    download_filename = get_download_filename(True)
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations_full.csv", True
+        db.download_annotations, download_filename, True
     )
 
     return flask.jsonify({'job_id': job.get_id()}), 202

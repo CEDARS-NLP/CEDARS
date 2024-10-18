@@ -16,6 +16,7 @@ import flask
 from flask import g
 import requests
 import pandas as pd
+import polars as pl
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
@@ -1739,9 +1740,8 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Write data in chunks and stream to MinIO
         project_results = mongo.db["RESULTS"].find({},
                                                     {column : 1 for column in column_names})
-        for chunk in pd.DataFrame(project_results, columns=column_names).to_csv(header=False,
-                                                                                 index=False,
-                                                                                 chunksize=1000):
+        for chunk in pl.DataFrame(project_results, columns=column_names).write_csv(include_header=False,
+                                                                                 batch_size=1000):
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
