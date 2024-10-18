@@ -657,9 +657,10 @@ def save_adjudications():
             # any unreviewed annotations left?
             session["index"] = session["unreviewed_annotations_index"].index(1)
         else:
-            flash("Annotation already reviewed.")
             if session["index"] < session["total_count"] - 1:
                 session["index"] += 1
+            else:
+                session.pop("patient_id")
 
         session.modified = True
 
