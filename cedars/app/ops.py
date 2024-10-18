@@ -663,6 +663,10 @@ def save_adjudications():
             if session["index"] < session["total_count"] - 1:
                 session["index"] += 1
             else:
+                # If the index and reached the end of a patient's notes
+                # and there are no unreviewed annotations left
+                # Then this patient has been fully reviewed and can be popped.
+                db.set_patient_lock_status(session["patient_id"], False)
                 session.pop("patient_id")
 
         session.modified = True
