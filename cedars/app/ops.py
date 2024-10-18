@@ -166,39 +166,6 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         minio.fget_object(g.bucket_name, filepath, local_filename)
         logger.info(f"File downloaded successfully to {local_filename}")
 
-        # file_columns = []
-        # # Read one line of the file to conserve memory and computation
-        # if extension in ['csv', 'xlsx', 'gz']:
-        #     data_frame_line_1 = loaders[extension](obj, nrows = 1)
-        #     file_columns = data_frame_line_1.columns
-        # elif extension == 'json':
-        #     data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
-        #     file_columns = data_frame_line_1.columns
-        # elif extension == 'parquet':
-        #     # For Parquet, we'll check columns using pyarrow
-        #     parquet_file = pq.ParquetFile(obj)
-        #     file_columns = parquet_file.schema.names
-        # else:
-        #     # TODO
-        #     # Add generator to load a single line from other file types
-        #     pass
-        # required_columns = ['patient_id', 'text_id', 'text', 'text_date']
-
-        # if len(file_columns) == 0:
-        #     flash("""Can't verify columns for the uploaded file 
-        #                            (Only csv, csv.gz and xlsx supported)... Reading whole file""")
-        # else:
-        #     missing_columns = []
-        #     for column in required_columns:
-        #         if column not in file_columns:
-        #             missing_columns.append(column)
-        #     if len(missing_columns) > 0:
-        #         missing_columns_error = "\n".join(missing_columns)
-        #         flash(f'Column {missing_columns_error} missing from uploaded file.')
-        #         flash("Failed to save file to database.")
-        #         raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
-
-        # obj = minio.get_object(g.bucket_name, filepath)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(local_filename)
@@ -284,30 +251,6 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         logger.error(f"An error occurred during document migration: {str(e)}")
         flash(f"Failed to upload data: {str(e)}")
         raise
-
-
-# Pylint disabled due to naming convention.
-# def EMR_to_mongodb(filepath, chunk_size=10000):  # pylint: disable=C0103
-#     """
-#     This function is used to open a csv file and load it's contents into the mongodb database.
-
-#     Args:
-#         filename (str) : The path to the file to load data from.
-#         For valid file extensions refer to the allowed_data_file function above.
-#     Returns:
-#         None
-#     """
-#     for i, chunk in enumerate(load_pandas_dataframe(filepath, chunk_size)):
-#         logger.info(f"Processing chunk {i+1}")
-#         logger.debug(f"Columns in chunk:\n {chunk.columns}")
-#         logger.debug(chunk.head())
-#         db.upload_notes(chunk)
-
-#     db.create_index("PATIENTS", [("patient_id", {"unique": True})])
-#     db.create_index("NOTES", ["patient_id",
-#                               ("text_id", {"unique": True})])
-#     logger.info("Completed document migration to mongodb database.")
-
 
 @bp.route("/upload_data", methods=["GET", "POST"])
 @auth.admin_required
