@@ -166,38 +166,6 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         minio.fget_object(g.bucket_name, filepath, local_filename)
         logger.info(f"File downloaded successfully to {local_filename}")
 
-        # file_columns = []
-        # # Read one line of the file to conserve memory and computation
-        # if extension in ['csv', 'xlsx', 'gz']:
-        #     data_frame_line_1 = loaders[extension](obj, nrows = 1)
-        #     file_columns = data_frame_line_1.columns
-        # elif extension == 'json':
-        #     data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
-        #     file_columns = data_frame_line_1.columns
-        # elif extension == 'parquet':
-        #     # For Parquet, we'll check columns using pyarrow
-        #     parquet_file = pq.ParquetFile(obj)
-        #     file_columns = parquet_file.schema.names
-        # else:
-        #     # TODO
-        #     # Add generator to load a single line from other file types
-        #     pass
-        # required_columns = ['patient_id', 'text_id', 'text', 'text_date']
-
-        # if len(file_columns) == 0:
-        #     flash("Can't verify columns for the uploaded file (Only csv, csv.gz and xlsx supported)... Reading whole file")
-        # else:
-        #     missing_columns = []
-        #     for column in required_columns:
-        #         if column not in file_columns:
-        #             missing_columns.append(column)
-        #     if len(missing_columns) > 0:
-        #         missing_columns_error = "\n".join(missing_columns)
-        #         flash(f'Column {missing_columns_error} missing from uploaded file.')
-        #         flash("Failed to save file to database.")
-        #         raise RuntimeError(f"Uploaded file does not contain column '{missing_columns_error}'.")
-
-        # obj = minio.get_object(g.bucket_name, filepath)
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(local_filename)
@@ -283,30 +251,6 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         logger.error(f"An error occurred during document migration: {str(e)}")
         flash(f"Failed to upload data: {str(e)}")
         raise
-
-
-# Pylint disabled due to naming convention.
-# def EMR_to_mongodb(filepath, chunk_size=10000):  # pylint: disable=C0103
-#     """
-#     This function is used to open a csv file and load it's contents into the mongodb database.
-
-#     Args:
-#         filename (str) : The path to the file to load data from.
-#         For valid file extensions refer to the allowed_data_file function above.
-#     Returns:
-#         None
-#     """
-#     for i, chunk in enumerate(load_pandas_dataframe(filepath, chunk_size)):
-#         logger.info(f"Processing chunk {i+1}")
-#         logger.debug(f"Columns in chunk:\n {chunk.columns}")
-#         logger.debug(chunk.head())
-#         db.upload_notes(chunk)
-
-#     db.create_index("PATIENTS", [("patient_id", {"unique": True})])
-#     db.create_index("NOTES", ["patient_id",
-#                               ("text_id", {"unique": True})])
-#     logger.info("Completed document migration to mongodb database.")
-
 
 @bp.route("/upload_data", methods=["GET", "POST"])
 @auth.admin_required
@@ -591,12 +535,13 @@ def save_adjudications():
 
     def _update_event_date():
         new_date = request.form['date_entry']
-        logger.info(f"Updating {patient_id}: {new_date}")
+        logger.info(f"Updating event date for {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
         db.upsert_patient_results(patient_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
+        logger.info(f"Deleting event date for {patient_id}: {new_date}")
         db.delete_event_date(patient_id)
         db.upsert_patient_results(patient_id)
 
@@ -626,6 +571,7 @@ def save_adjudications():
         return shift_index_forwards
 
     def _adjudicate_annotation(updated_date = False):
+        logger.debug(f"Adjudicating annotation # {current_annotation_id}")
         skip_after_event = db.get_search_query(query_key="skip_after_event")
         if session["unreviewed_annotations_index"][session["index"]] == 1:
             db.mark_annotation_reviewed(current_annotation_id)
@@ -657,13 +603,19 @@ def save_adjudications():
             # any unreviewed annotations left?
             session["index"] = session["unreviewed_annotations_index"].index(1)
         else:
-            flash("Annotation already reviewed.")
             if session["index"] < session["total_count"] - 1:
                 session["index"] += 1
+            else:
+                # If the index and reached the end of a patient's notes
+                # and there are no unreviewed annotations left
+                # Then this patient has been fully reviewed and can be popped.
+                db.set_patient_lock_status(session["patient_id"], False)
+                session.pop("patient_id")
 
         session.modified = True
 
     def _add_annotation_comment():
+        logger.info(f"Updating comment for {patient_id}.")
         db.add_comment(current_annotation_id, request.form['comment'].strip())
 
 
