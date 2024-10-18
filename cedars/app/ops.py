@@ -591,12 +591,13 @@ def save_adjudications():
 
     def _update_event_date():
         new_date = request.form['date_entry']
-        logger.info(f"Updating {patient_id}: {new_date}")
+        logger.info(f"Updating event date for {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
         db.upsert_patient_results(patient_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
+        logger.info(f"Deleting event date for {patient_id}: {new_date}")
         db.delete_event_date(patient_id)
         db.upsert_patient_results(patient_id)
 
@@ -626,6 +627,7 @@ def save_adjudications():
         return shift_index_forwards
 
     def _adjudicate_annotation(updated_date = False):
+        logger.debug(f"Adjudicating annotation # {current_annotation_id}")
         skip_after_event = db.get_search_query(query_key="skip_after_event")
         if session["unreviewed_annotations_index"][session["index"]] == 1:
             db.mark_annotation_reviewed(current_annotation_id)
@@ -665,6 +667,7 @@ def save_adjudications():
         session.modified = True
 
     def _add_annotation_comment():
+        logger.info(f"Updating comment for {patient_id}.")
         db.add_comment(current_annotation_id, request.form['comment'].strip())
 
 
