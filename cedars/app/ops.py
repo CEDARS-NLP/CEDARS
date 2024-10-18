@@ -185,7 +185,8 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         # required_columns = ['patient_id', 'text_id', 'text', 'text_date']
 
         # if len(file_columns) == 0:
-        #     flash("Can't verify columns for the uploaded file (Only csv, csv.gz and xlsx supported)... Reading whole file")
+        #     flash("""Can't verify columns for the uploaded file 
+        #                            (Only csv, csv.gz and xlsx supported)... Reading whole file""")
         # else:
         #     missing_columns = []
         #     for column in required_columns:
