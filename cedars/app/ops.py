@@ -990,7 +990,7 @@ def get_download_filename(is_full_download=False):
     '''
     project_name = db.get_proj_name()
     timestamp = datetime.now()
-    timestamp = timestamp.strftime("%Y/%m/%d-%H:%M:%S")
+    timestamp = timestamp.strftime("%Y-%m-%d;%H:%M:%S")
 
     if is_full_download:
         return f"{project_name}_{timestamp}_annotations_full.csv"

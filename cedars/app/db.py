@@ -1740,8 +1740,10 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Write data in chunks and stream to MinIO
         project_results = mongo.db["RESULTS"].find({},
                                                     {column : 1 for column in column_names})
-        for chunk in pl.DataFrame(project_results, columns=column_names).write_csv(include_header=False,
-                                                                                 batch_size=1000):
+
+        for chunk in pl.DataFrame(project_results, orient="row",
+                                                schema=column_names).write_csv(include_header=False,
+                                                                                batch_size=1000):
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
