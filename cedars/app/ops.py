@@ -1085,7 +1085,7 @@ def update_results_collection():
     """
 
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
-                                                False)
+                                                True)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 
