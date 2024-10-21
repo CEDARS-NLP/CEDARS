@@ -457,7 +457,7 @@ def upsert_patient_results(patient_id: str):
         'reviewed_notes' : num_reviewed_notes,
         'total_sentences' : len(sentences),
         'reviewed_sentences' : len(reviewed_sentences),
-        'sentences' : sentences,
+        'sentences' : "\n".join(sentences),
         'event_date' : event_date,
         'event_information' : event_information,
         'first_note_date' : first_note_date,

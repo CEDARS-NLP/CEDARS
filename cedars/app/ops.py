@@ -990,7 +990,7 @@ def get_download_filename(is_full_download=False):
     '''
     project_name = db.get_proj_name()
     timestamp = datetime.now()
-    timestamp = timestamp.strftime("%Y-%m-%d;%H:%M:%S")
+    timestamp = timestamp.strftime("%Y-%m-%d_%H:%M:%S")
 
     if is_full_download:
         return f"{project_name}_{timestamp}_annotations_full.csv"
@@ -1041,6 +1041,7 @@ def download_file(filename='annotations.csv'):
     filename = request.form.get("filename")
     file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
     logger.info(f"Downloaded annotations from s3: {filename}")
+
     return flask.Response(
         file.stream(32*1024),
         mimetype='text/csv',
