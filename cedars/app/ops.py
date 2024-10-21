@@ -987,6 +987,16 @@ def _format_date(date_obj):
 
 def get_download_filename(is_full_download=False):
     '''
+    Returns the filename for a new download task.
+
+    Args :
+        - is_full_download (bool) : True if all of the results 
+                                    (including the key sentences)
+                                    are to be downloaded.
+
+    Returns :
+        - filename (string) : A string in the format
+                              {project_name}_{timestamp}_{downloadtype}.csv
     '''
     project_name = db.get_proj_name()
     timestamp = datetime.now()
