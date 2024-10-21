@@ -689,14 +689,14 @@ def get_formatted_patient_predictions(patient_id: str):
     '''
     match_stage = {'patient_id' : patient_id, "predicted_score":{'$ne':None}}
 
-    group_stage = { 
+    group_stage = {
                     '_id' : None,
                     'note_prediction': { '$push': { '$concat': [ "$text_id", ":", 
                     { "$dateToString": { "format": "%Y-%m-%d", "date": "$text_date" } },
                     ":", {'$toString': "$predicted_score"}  ] } }
                     }
 
-    concat_stage = { 
+    concat_stage = {
                     'concat_patient_predictions': {
                         '$reduce': {
                             'input': "$note_prediction",
