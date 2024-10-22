@@ -44,7 +44,7 @@ jobs:
       - name: Lint with flake8
         run: |
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          python -m flake8 ./ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
+          poetry run flake8 ./ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
 
       - name: Install everything, run the tests, produce the .coverage file
         run: |
@@ -68,7 +68,7 @@ jobs:
           echo "REDIS_URL=localhost" >> .env
           echo "REDIS_PORT=6379" >> .env
 
-          python -m pytest --cov=app
+          poetry run python -m pytest --cov=app
 
       # - name: Coverage comment
       #   id: coverage_comment
