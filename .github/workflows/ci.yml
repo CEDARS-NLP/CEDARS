@@ -56,6 +56,7 @@ jobs:
           echo "SECRET_KEY=cedars" >> .env
           echo "HOST=localhost" >> .env
           echo "PORT=5000" >> .env
+          echo "DB_PARAMS=\"authSource=admin\""
           echo "DB_HOST=localhost" >> .env
           echo "DB_NAME=cedars" >> .env
           echo "DB_PORT=27017" >> .env
