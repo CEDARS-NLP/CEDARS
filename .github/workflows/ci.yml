@@ -43,11 +43,13 @@ jobs:
 
       - name: Lint with flake8
         run: |
+          cd cedars
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
           poetry run flake8 ./ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
 
       - name: Install everything, run the tests, produce the .coverage file
         run: |
+          cd cedars
           touch .env
           echo "PROJECT_NAME=demo" >> .env
           echo "INVESTIGATOR_NAME=demo_user" >> .env
