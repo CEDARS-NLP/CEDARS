@@ -46,6 +46,11 @@ def admin_required(func):
         return func(*args, **kwargs)
     return decorated_function
 
+def rq_admin_check():
+    rq_endpoint = os.getenv("RQ_DASHBOARD_URL")
+    if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
+        flash('You do not have admin access.')
+        return render_template('index.html', **db.get_info())
 
 @login_manager.user_loader
 def load_user(user_id):
