@@ -70,6 +70,10 @@ jobs:
           echo "PINES_API_URL=http://localhost:8036" >> .env
           echo "REDIS_URL=localhost" >> .env
           echo "REDIS_PORT=6379" >> .env
+          echo "PROJECT_ID=660ff9188b4911e22c4197b2" >> .env
+          echo "ENV=dev" >> .env
+          echo "RQ_DASHBOARD_URL=/rq" >> .env
+          echo "PINES_API_URL=http://pines:8036" >> .env
 
           poetry run python -m pytest --cov=app
 
