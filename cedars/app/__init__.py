@@ -37,6 +37,7 @@ def rq_init_app(cedars_rq):
     # Rq-dashboard support
     cedars_rq.config.from_object(rq_dashboard.default_settings)
     cedars_rq.config["RQ_DASHBOARD_REDIS_URL"] = cedars_rq.config["RQ"]['redis_url']
+    rq_dashboard.blueprint.before_request(auth.rq_admin_check)
     rq_dashboard.web.setup_rq_connection(cedars_rq)
     cedars_rq.register_blueprint(rq_dashboard.blueprint,
                                     url_prefix=config['RQ_DASHBOARD_URL'])
