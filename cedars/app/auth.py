@@ -47,7 +47,11 @@ def admin_required(func):
     return decorated_function
 
 def rq_admin_check():
-    rq_endpoint = os.getenv("RQ_DASHBOARD_URL")
+    '''
+    Ensures that the current user is an admin before allowing
+    access to the rq-dashboard. The user is redirected if the
+    permission requirements are not met.
+    '''
     if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
         flash('You do not have admin access.')
         return render_template('index.html', **db.get_info())
