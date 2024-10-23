@@ -40,7 +40,7 @@ def admin_required(func):
     """Admin required decorator"""
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_admin:
+        if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
             flash('You do not have admin access.')
             return render_template('index.html', **db.get_info())
         return func(*args, **kwargs)
