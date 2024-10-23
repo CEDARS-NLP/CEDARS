@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "main"
+      - "github_workflows"
 
 jobs:
   test:
@@ -29,6 +30,7 @@ jobs:
       
       - name: install deps
         run: |
+          cd cedars
           export POETRY_NO_INTERACTION=1 \
             POETRY_VIRTUALENVS_IN_PROJECT=1 \
             POETRY_VIRTUALENVS_CREATE=1 \
@@ -41,8 +43,9 @@ jobs:
 
       - name: Lint with flake8
         run: |
+          cd cedars
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          flake8 cedars/ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
+          poetry run flake8 ./ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
 
       - name: Install everything, run the tests, produce the .coverage file
         run: |
@@ -53,6 +56,7 @@ jobs:
           echo "SECRET_KEY=cedars" >> .env
           echo "HOST=localhost" >> .env
           echo "PORT=5000" >> .env
+          echo "DB_PARAMS=\"authSource=admin\"" >> .env
           echo "DB_HOST=localhost" >> .env
           echo "DB_NAME=cedars" >> .env
           echo "DB_PORT=27017" >> .env
@@ -66,8 +70,12 @@ jobs:
           echo "PINES_API_URL=http://localhost:8036" >> .env
           echo "REDIS_URL=localhost" >> .env
           echo "REDIS_PORT=6379" >> .env
+          echo "PROJECT_ID=660ff9188b4911e22c4197b2" >> .env
+          echo "ENV=dev" >> .env
+          echo "RQ_DASHBOARD_URL=/rq" >> .env
+          echo "PINES_API_URL=http://pines:8036" >> .env
 
-          python -m pytest --cov=app
+          poetry run python -m pytest --cov=app
 
       # - name: Coverage comment
       #   id: coverage_comment
