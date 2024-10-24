@@ -541,7 +541,7 @@ def save_adjudications():
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
-        logger.info(f"Deleting event date for {patient_id}: {new_date}")
+        logger.info(f"Deleting event date for {patient_id}")
         db.delete_event_date(patient_id)
         db.upsert_patient_results(patient_id)
 
