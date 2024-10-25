@@ -1,7 +1,3 @@
-function sleep (time) {
-  return new Promise((resolve) => setTimeout(resolve, time));
-}
-
 window.addEventListener("message", (event) => {
     var origin = event.origin;
   
@@ -32,11 +28,17 @@ window.addEventListener("message", (event) => {
             // Send a login confirmation message to superbio server
             window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
 
-            sleep(5000).then(() => {
-              // Redirect to the main page or update UI as needed
-              window.location.href = '/';
+            window.addEventListener('message', function(final_event) {
+              if (!TRUSTED_ORIGINS.includes(final_event.origin)) {
+                  return;
+              }
+
+              // Check that a message has returned
+              if (final_event.data) {
+                  console.log('Acknowledgment received from parent:', final_event.data);
+                  window.location.href = '/stats';
+              }
             });
-  
             
           } else {
             console.error('Login failed:', data.error);
