@@ -25,10 +25,10 @@ from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
+from .db_backwards_compat import update_db_schema
 from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
-
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")
@@ -1023,8 +1023,11 @@ def update_results_collection():
     Creates and updates the RESULTS collection.
     """
 
+    # Ensure the the db schema is up to date
+    update_db_schema()
+
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
-                                                False)
+                                                True)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 

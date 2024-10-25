@@ -1761,7 +1761,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
         return False
 
-def update_patient_results(update_existing_results = False):
+def update_patient_results(update_existing_results = True):
     '''
     Creates the results collection if it does not exist and
     inserts data for patients that do not have any.
