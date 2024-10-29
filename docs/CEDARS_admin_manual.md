@@ -148,7 +148,6 @@ Make sure all the local requirements [above](#detailed-requirements) are met. Th
 ```shell
 $ cd cedars
 $ poetry install  # do not cd into cedars/app
-$ cd app
 $ poetry run python -m app.wsgi
 ```
 
