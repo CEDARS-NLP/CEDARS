@@ -67,6 +67,7 @@ It is possible to replace an erroneous date by entering a new one in the date en
 ### Entering Comments About a Patient
 
 At any point you can enter or edit comments about a patient in the Comments text-box at the bottom left of the adjudications page. Note that while you can click the "Save Comment" button to save the comment manually, the comment will also automatically be saved if you 
+
     - Edit or delete the event date
     - Adjudicate the annotation
     - Navigate to another note for that patient
