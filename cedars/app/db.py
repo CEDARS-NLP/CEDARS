@@ -16,6 +16,7 @@ import flask
 from flask import g
 import requests
 import pandas as pd
+import polars as pl
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
@@ -456,7 +457,7 @@ def upsert_patient_results(patient_id: str):
         'reviewed_notes' : num_reviewed_notes,
         'total_sentences' : len(sentences),
         'reviewed_sentences' : len(reviewed_sentences),
-        'sentences' : sentences,
+        'sentences' : "\n".join(sentences),
         'event_date' : event_date,
         'event_information' : event_information,
         'first_note_date' : first_note_date,
@@ -688,14 +689,14 @@ def get_formatted_patient_predictions(patient_id: str):
     '''
     match_stage = {'patient_id' : patient_id, "predicted_score":{'$ne':None}}
 
-    group_stage = { 
+    group_stage = {
                     '_id' : None,
                     'note_prediction': { '$push': { '$concat': [ "$text_id", ":", 
                     { "$dateToString": { "format": "%Y-%m-%d", "date": "$text_date" } },
                     ":", {'$toString': "$predicted_score"}  ] } }
                     }
 
-    concat_stage = { 
+    concat_stage = {
                     'concat_patient_predictions': {
                         '$reduce': {
                             'input': "$note_prediction",
@@ -1739,9 +1740,10 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Write data in chunks and stream to MinIO
         project_results = mongo.db["RESULTS"].find({},
                                                     {column : 1 for column in column_names})
-        for chunk in pd.DataFrame(project_results, columns=column_names).to_csv(header=False,
-                                                                                 index=False,
-                                                                                 chunksize=1000):
+
+        for chunk in pl.DataFrame(project_results, orient="row",
+                                                schema=column_names).write_csv(include_header=False,
+                                                                                batch_size=1000):
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
