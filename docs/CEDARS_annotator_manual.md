@@ -42,7 +42,13 @@ In many cases, the sentence you are looking at will be a false positive, i.e. it
 
 ### Move Between Sentences Within a Patient's Record
 
-Often the sentence and note presented to you will hint at a possible event but remain ambiguous, or an event will be obvious but the timing unclear. In such cases, you can move from sentence to sentence by using the "<<< PREVIOUS" and "NEXT >>>" buttons. You will go from sentence to sentence, following the timeline of electronic record notes/reports. Note that using previous/next will not annotate sentences or otherwise enter information in the CEDARS database.
+Often the sentence and note presented to you will hint at a possible event but remain ambiguous, or an event will be obvious but the timing unclear. In such cases, you can move from sentence to sentence by using the navigation buttons. The buttons operate as follows :
+
+    - <, > Move one note back or forwards.
+    - <<, >> Move ten notes back or forwards.
+    - |<, >| Move to the first or last note for this patient.
+
+You will go from sentence to sentence, following the timeline of electronic record notes/reports. Note that using previous/next will not annotate sentences or otherwise enter information in the CEDARS database.
 
 ## Entering Information About a Patient
 
@@ -60,7 +66,11 @@ It is possible to replace an erroneous date by entering a new one in the date en
 
 ### Entering Comments About a Patient
 
-At any point you can enter comments about a patient in the data entry field under "New comments:", however those will be saved only if you 1) adjudicate the sentence or 2) enter an event date.
+At any point you can enter or edit comments about a patient in the Comments text-box at the bottom left of the adjudications page. Note that while you can click the "Save Comment" button to save the comment manually, the comment will also automatically be saved if you 
+
+    - Edit or delete the event date
+    - Adjudicate the annotation
+    - Navigate to another note for that patient
 
 ## Search for a Specific Patient
 
