@@ -936,6 +936,26 @@ def _format_date(date_obj):
         res = date_obj.date()
     return res
 
+def get_download_filename(is_full_download=False):
+    '''
+    Returns the filename for a new download task.
+
+    Args :
+        - is_full_download (bool) : True if all of the results 
+                                    (including the key sentences)
+                                    are to be downloaded.
+
+    Returns :
+        - filename (string) : A string in the format
+                              {project_name}_{timestamp}_{downloadtype}.csv
+    '''
+    project_name = db.get_proj_name()
+    timestamp = datetime.now()
+    timestamp = timestamp.strftime("%Y-%m-%d_%H:%M:%S")
+
+    if is_full_download:
+        return f"{project_name}_{timestamp}_annotations_full.csv"
+    return f"{project_name}_{timestamp}_annotations.csv"
 
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
@@ -982,6 +1002,7 @@ def download_file(filename='annotations.csv'):
     filename = request.form.get("filename")
     file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
     logger.info(f"Downloaded annotations from s3: {filename}")
+
     return flask.Response(
         file.stream(32*1024),
         mimetype='text/csv',
@@ -996,8 +1017,9 @@ def create_download():
     Create a download task for annotations
     """
 
+    download_filename = get_download_filename()
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations.csv",
+        db.download_annotations, download_filename,
     )
     return flask.jsonify({'job_id': job.get_id()}), 202
 
@@ -1009,9 +1031,9 @@ def create_download_full():
     Create a download task for annotations
     """
 
-
+    download_filename = get_download_filename(True)
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations_full.csv", True
+        db.download_annotations, download_filename, True
     )
 
     return flask.jsonify({'job_id': job.get_id()}), 202
@@ -1024,7 +1046,7 @@ def update_results_collection():
     """
 
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
-                                                False)
+                                                True)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 
