@@ -40,12 +40,21 @@ def admin_required(func):
     """Admin required decorator"""
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_admin:
+        if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
             flash('You do not have admin access.')
             return render_template('index.html', **db.get_info())
         return func(*args, **kwargs)
     return decorated_function
 
+def rq_admin_check():
+    '''
+    Ensures that the current user is an admin before allowing
+    access to the rq-dashboard. The user is redirected if the
+    permission requirements are not met.
+    '''
+    if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
+        flash('You do not have admin access.')
+        return render_template('index.html', **db.get_info())
 
 @login_manager.user_loader
 def load_user(user_id):
