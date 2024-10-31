@@ -1038,6 +1038,19 @@ def create_download_full():
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 
+@bp.route('/delete_download_file', methods=["POST"])
+@auth.admin_required
+def delete_download_file():
+    """
+    Deletes a download file from the current minio bucket.
+    """
+
+    filename = request.form.get("filename")
+    minio.remove_object(g.bucket_name, f"annotated_files/{filename}")
+    logger.info(f"Successfully removed {filename} from minio server.")
+
+    return redirect("/ops/download_page")
+
 @bp.route('/update_results_collection', methods=["GET"])
 @auth.admin_required
 def update_results_collection():

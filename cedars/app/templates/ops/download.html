@@ -14,7 +14,8 @@
             <th>File Name</th>
             <th>Size</th>
             <th>Last Modified</th>
-            <th>Action</th>
+            <th>Download</th>
+            <th>Delete</th>
           </tr>
         </thead>
         <tbody>
@@ -43,6 +44,13 @@
               <form action="/ops/download_annotations" method="POST" class="form-inline">
                 <input type="hidden" name="filename" value="{{ obj[0] }}">
                 <button class="btn btn-primary cedars-btn" type="submit">Download</button>
+              </form>
+            </td>
+
+            <td>
+              <form action="/ops/delete_download_file" method="POST" class="form-inline">
+                <input type="hidden" name="filename" value="{{ obj[0] }}">
+                <button class="btn btn-primary cedars-btn" type="submit">Delete File</button>
               </form>
             </td>
           </tr>
@@ -92,9 +100,8 @@
         if (data.status === 'finished') {
           console.log(job_type);
           if (job_type === 'download_job') {
-              document.getElementById('downloadStatus').innerHTML = `
-                <div>Download ready (**Refresh** the page and download)</div>
-              `;
+            // Reload the window to update the files available for download
+            window.location.reload();
           }
           else{
               document.getElementById('downloadStatus').innerHTML = `
