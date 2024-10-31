@@ -152,17 +152,34 @@
     },
     plugins: [ChartDataLabels],
     options: {
+      borderRadius: 10,
       indexAxis: 'y', // Horizontal bar chart
       scales: {
         x: { // Define x axis
           title: {
             display: true,
             text: '% of all matched tokens'
+          },
+          offset: true,
+          grid: {
+            offset: true
           }
         },
         y: {
-          beginAtZero: true
+          beginAtZero: true,
+          offset: true,
+          grid: {
+            offset: true
+          }
         }
+      },
+      layout: {
+          padding: {
+              left: 0,
+              right: 10,
+              top: 0,
+              bottom: 0
+          }
       },
       plugins: {
             datalabels: {
@@ -174,7 +191,7 @@
                     weight: 'bold',
                 },
                 formatter: function (value, context) {
-                    return ' ' + parseFloat(value).toFixed(2);
+                    return ' ' + parseInt(value);
                 }
             }
         }
@@ -199,13 +216,37 @@
     },
     plugins: [ChartDataLabels],
     options: {
+      borderRadius: 10,
       indexAxis: 'y', // Horizontal bar chart
       scales: {
         y: {
-          beginAtZero: true
+          beginAtZero: true,
+          offset: true,
+          grid: {
+            offset: true
+          },
+          title: {
+            display: true,
+            text: 'Reviewer'
+          }
+        },
+        x: { // Define x axis
+          offset: true,
+          grid: {
+            offset: true
+          },
+          title: {
+            display: true,
+            text: 'Number of patients reviewed'
+          }
         }
       },
-
+      padding: {
+          left: 0,
+          right: 10,
+          top: 0,
+          bottom: 0
+      },
       plugins: {
             datalabels: {
                 anchor: 'end', // Position of the labels (start, end, center, etc.)
@@ -216,7 +257,7 @@
                     weight: 'bold',
                 },
                 formatter: function (value, context) {
-                  return ' ' + parseFloat(value).toFixed(2);
+                  return ' ' + parseInt(value);
                 }
             }
         }
