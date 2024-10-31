@@ -7,6 +7,22 @@ from . import db
 
 bp = Blueprint("stats_page", __name__, url_prefix="/stats")
 
+def _elements_to_int(dictionary):
+    """
+    Converts the values in a dictionary to be integers.
+
+    Args :
+        - dictionary (dict) : A python dict where the values are floats.
+    
+    Returns :
+        - dictionary (dict) : The input dictionary with the datatype
+                                updated to int.
+    """
+
+    for key in dictionary:
+        dictionary[key] = int(dictionary[key])
+
+    return dictionary
 
 @bp.route('/')
 @login_required
@@ -26,6 +42,10 @@ def stats_route():
     number_of_reviewed = stats["number_of_reviewed"]
     lemma_dist = stats['lemma_dist']
     user_review_stats = stats['user_review_stats']
+
+    # Convert the bar chat values to integers
+    lemma_dist = _elements_to_int(lemma_dist)
+    user_review_stats = _elements_to_int(user_review_stats)
 
     return render_template("stats.html",
                            number_of_patients=number_of_patients,
