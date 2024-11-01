@@ -32,13 +32,7 @@
               <td>{{ obj[1] }} B</td>
             {% endif %}
             <td>
-              {% if obj[2] > 60*24 %}
-                {{ obj[2] // (60*24) }} days ago
-              {% elif obj[2] > 60 %}
-                {{ obj[2] // 60 }} hours ago
-              {% else %}
-                {{ obj[2] }} minutes ago
-              {% endif %}
+              {{ obj[2] }} 
             </td>
             <td>
               <form action="/ops/download_annotations" method="POST" class="form-inline">
