@@ -20,7 +20,10 @@ def _elements_to_int(dictionary):
     """
 
     for key in dictionary:
-        dictionary[key] = int(dictionary[key])
+        try:
+            dictionary[key] = int(dictionary[key])
+        except:
+            raise Exception(f"Cannot convert values of dictionary to type int for {dictionary[key]}, Key : {key}.")
 
     return dictionary
 
