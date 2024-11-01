@@ -956,7 +956,7 @@ def get_download_filename(is_full_download=False):
     if is_full_download:
         return f"annotations_full_{project_name}_{timestamp}.csv"
     
-    return f"annotations_partial_{project_name}_{timestamp}.csv"
+    return f"annotations_compact_{project_name}_{timestamp}.csv"
 
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
