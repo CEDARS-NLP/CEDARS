@@ -1,8 +1,13 @@
 # Upload File Format
 
-> To upload patient data to CEDARS an admin can upload a file on the Upload File page. Below are the details describing the file requirements.
+> To upload patient data to CEDARS an admin can upload a file on the Upload File page. Below are the details describing the file requirements and upload process.
 
-## 1. File Type
+
+## 1. File Upload Process
+
+To make use of this software, we will first need to upload some medical records to the database. To do this, you can click on the dropdown menu on the top right of the page. From here you can select the "Upload Data" option. This will redirect you to a page where you can select a file with the data from your computer by clicking the "Choose File" button. 
+
+## 2. File Type
 
 CEDARS can accept tabular data stored in one of the the following file formats :
 
@@ -13,7 +18,7 @@ CEDARS can accept tabular data stored in one of the the following file formats :
 - .parquet ([Parquet](https://coralogix.com/blog/parquet-file-format/))
 - .pickle / .pkl ([Pickle](https://docs.python.org/3/library/pickle.html))
 
-## 2. Mandatory Columns
+## 3. Mandatory Columns
 
 These are columns that the uploaded file is required for a CEDARS project. Below is the format in which the columns are listed
     - column_name (data type) : Description of this column
@@ -30,7 +35,7 @@ Columns :
 
 Note that the values in the text_id column must be unique, but all other columns may contain duplicate values.
 
-## 3. Optional Columns
+## 4. Optional Columns
 
 These are optional columns that are not nessesary for CEDARS, but can be included to provide annotators with more context. Below is the format in which the columns are listed
     - column_name (data type) : Description of this column
@@ -49,7 +54,7 @@ Columns :
 
 6. text_tag_4 (string) : The fourth text tag for this note, will be shown on the annotations page while the note is being reviewed.
 
-## 4. Example Table
+## 5. Example Table
 
 Below is a sample table to help illustrate what the file format should look like.
 
