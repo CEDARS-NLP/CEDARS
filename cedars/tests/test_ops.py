@@ -1,10 +1,11 @@
+from unittest.mock import patch
 import pytest
 from flask import request
-from unittest.mock import patch
 from app.ops import (
     allowed_data_file,
     highlighted_text
 )
+from app.stats import _elements_to_int
 
 
 def test_allowed_data_file():
@@ -246,3 +247,16 @@ def test_highlighted_text(db):
 #     response = client.get("/ops/download_annotations")
 #     assert response.status_code == 200
 #     assert response.data == b"test,test\n1,2"
+
+@pytest.mark.parametrize("input_dict, output_dict", [
+    ({'a' : 12.2, 'b' : 192.9057}, {'a' : 12, 'b' : 192}),
+    ({12.4 : 19.0, 'xyz' : 90, 128 : 72.44},
+                        {12.4 : 19, 'xyz' : 90, 128 : 72})
+])
+def test_stat_elements_to_int(input_dict, output_dict):
+    result = _elements_to_int(input_dict)
+
+    for key in output_dict:
+        assert key in result
+        assert result[key] == output_dict[key]
+        isinstance(result[key], int)
