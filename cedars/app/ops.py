@@ -951,11 +951,12 @@ def get_download_filename(is_full_download=False):
     '''
     project_name = db.get_proj_name()
     timestamp = datetime.now()
-    timestamp = timestamp.strftime("%Y-%m-%d_%H:%M:%S")
+    timestamp = timestamp.strftime("%Y-%m-%d_%H_%M_%S")
 
     if is_full_download:
-        return f"{project_name}_{timestamp}_annotations_full.csv"
-    return f"{project_name}_{timestamp}_annotations.csv"
+        return f"annotations_full_{project_name}_{timestamp}.csv"
+    
+    return f"annotations_compact_{project_name}_{timestamp}.csv"
 
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
@@ -967,8 +968,7 @@ def download_page(job_id=None):
     """
     files = [(obj.object_name.rsplit("/", 1)[-1],
               obj.size,
-              (
-                  datetime.now(timezone.utc) - obj.last_modified).seconds//60
+              obj.last_modified.strftime("%Y-%m-%d %H:%M:%S")
               ) for obj in minio.list_objects(
                    g.bucket_name,
                    prefix="annotated_files/")]
@@ -1037,6 +1037,19 @@ def create_download_full():
     )
 
     return flask.jsonify({'job_id': job.get_id()}), 202
+
+@bp.route('/delete_download_file', methods=["POST"])
+@auth.admin_required
+def delete_download_file():
+    """
+    Deletes a download file from the current minio bucket.
+    """
+
+    filename = request.form.get("filename")
+    minio.remove_object(g.bucket_name, f"annotated_files/{filename}")
+    logger.info(f"Successfully removed {filename} from minio server.")
+
+    return redirect("/ops/download_page")
 
 @bp.route('/update_results_collection', methods=["GET"])
 @auth.admin_required
