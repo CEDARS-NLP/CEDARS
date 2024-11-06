@@ -1724,25 +1724,43 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
     """
     Download annotations from the database and stream them to MinIO.
     """
-    column_names = ['patient_id', 'total_notes', 'reviewed_notes', 'total_sentences',
-                    'reviewed_sentences', 'sentences', 'event_date', 'event_information',
-                    'first_note_date', 'last_note_date', 'comments', 'reviewer', 'max_score_note_id',
-                    'max_score_note_date', 'max_score', 'predicted_notes']
+    schema = {
+        'patient_id': pl.Utf8,
+        'total_notes': pl.Int64,
+        'reviewed_notes': pl.Int64,
+        'total_sentences': pl.Int64,
+        'reviewed_sentences': pl.Int64,
+        'sentences': pl.Utf8,
+        'event_date': pl.Datetime,
+        'event_information': pl.Utf8,
+        'first_note_date': pl.Datetime,
+        'last_note_date': pl.Datetime,
+        'comments': pl.Utf8,
+        'reviewer': pl.Utf8,
+        'max_score_note_id': pl.Utf8,
+        'max_score_note_date': pl.Datetime,
+        'max_score': pl.Float64,
+        'predicted_notes': pl.Utf8
+    }
+
     if  get_sentences is False:
-        column_names.remove('sentences')
+        schema.pop('sentences')
 
     try:
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
-        writer = pd.DataFrame(columns=column_names)
+        writer = pd.DataFrame(columns=list(schema.keys()))
         writer.to_csv(csv_buffer, index=False, header=True)
 
         # Write data in chunks and stream to MinIO
+        columns_to_retrive = {'_id': False}
+        columns_to_retrive.update({column : True for column in schema.keys()})
         project_results = mongo.db["RESULTS"].find({},
-                                                    {column : 1 for column in column_names})
+                                                    columns_to_retrive)
 
         for chunk in pl.DataFrame(project_results, orient="row",
-                                                schema=column_names).write_csv(include_header=False,
+                                                schema=schema,
+                                                infer_schema_length=None).write_csv(include_header=False,
                                                                                 batch_size=1000):
             csv_buffer.write(chunk)
 
