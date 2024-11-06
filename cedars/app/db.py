@@ -707,7 +707,7 @@ def get_formatted_patient_predictions(patient_id: str):
                                 "$$this", { '$concat': [ "$$value", "\n", "$$this" ] } ]
                             }
                         }}
-                    } 
+                    }
 
     pipeline = []
     pipeline.append({'$match': match_stage})
