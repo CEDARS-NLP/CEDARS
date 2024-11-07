@@ -112,6 +112,22 @@ def project_details():
     return render_template("ops/project_details.html",
                             **db.get_info())
 
+@bp.route("/internal_processes", methods=["GET"])
+@auth.admin_required
+def internal_processes():
+    """
+    This is a flask function for the backend logic for the internal_processes route.
+    It is used by a technical admin to perform special technical operations the current project.
+    """
+
+    # Get the RQ_DASHBOARD_URL environment variable,
+    # if it does not exist use /rq as a default.
+    rq_dashboard_url = os.getenv("RQ_DASHBOARD_URL", "/rq")
+
+    return render_template("ops/internal_processes.html",
+                            rq_dashboard_url = rq_dashboard_url,
+                            **db.get_info())
+
 def read_gz_csv(filename, *args, **kwargs):
     '''
     Function to read a GZIP compressed csv to a pandas DataFrame.
