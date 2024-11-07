@@ -66,9 +66,6 @@
           <button class="btn btn-primary cedars-btn" type="button" onclick="startNewDownloadFull()">Create New Full Download Task</button>
         </form>
         <br>
-        <form id="updateResultsCol" class="form-inline"></form>
-          <button class="btn btn-primary cedars-btn" type="button" onclick="updateResultsCol()">Update Results Collection</button>
-        </form>
       </div>
       <div id="downloadStatus" class="mt-3">
         <!-- This div will be updated with the download status -->
@@ -138,21 +135,6 @@
             <span class="sr-only">cedars...</span>
           </div>
           <p>Download initiated, please wait...</p>
-        `;
-      });
-  }
-
-  function updateResultsCol() {
-    fetch('/ops/update_results_collection')
-      .then(response => response.json())
-      .then(data => {
-        const jobId = data.job_id;
-        checkJobStatus(jobId, 'collection_update_job');
-        document.getElementById('downloadStatus').innerHTML = `
-          <div class="spinner-border text-primary" role="status">
-            <span class="sr-only">cedars...</span>
-          </div>
-          <p>Aggregating results, please wait...</p>
         `;
       });
   }
