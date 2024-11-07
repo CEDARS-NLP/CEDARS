@@ -438,9 +438,9 @@ def upsert_patient_results(patient_id: str):
     comments = patient.get("comments", "")
     reviewer = get_patient_reviewer(patient_id)
 
-    max_score = ""
+    max_score = None
     max_score_note_id = ""
-    max_score_note_date = ""
+    max_score_note_date = None
     try:
         res = list(get_max_prediction_score(patient_id))
         if len(res) > 0:
