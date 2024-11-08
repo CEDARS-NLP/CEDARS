@@ -553,13 +553,11 @@ def save_adjudications():
         new_date = request.form['date_entry']
         logger.info(f"Updating event date for {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
-        db.upsert_patient_results(patient_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
         logger.info(f"Deleting event date for {patient_id}")
         db.delete_event_date(patient_id)
-        db.upsert_patient_results(patient_id)
 
     def _move_to_previous_annotation(shift_value):
         def shift_index_backwards():
@@ -652,6 +650,7 @@ def save_adjudications():
     if action in actions:
         actions[action]()
     _add_annotation_comment()
+    db.upsert_patient_results(patient_id, datetime.now())
 
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
