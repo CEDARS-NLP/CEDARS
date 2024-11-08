@@ -618,17 +618,17 @@ def save_adjudications():
         elif 1 in session["unreviewed_annotations_index"]:
             # Handles the case of entering a date on a note already marked as
             # adjudicated
-            if db.get_event_date(session["patient_id"]) is not None:
-                if skip_after_event:
-                    session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
+            if updated_date and skip_after_event:
+                session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
+                db.set_patient_lock_status(session["patient_id"], False)
+                session.pop("patient_id")
 
+            if db.get_event_date(session["patient_id"]) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
                                       reviewed_by=current_user.username)
                 db.mark_patient_reviewed(session["patient_id"],
                                          reviewed_by=current_user.username)
-                if skip_after_event:
-                    db.set_patient_lock_status(session["patient_id"], False)
-                    session.pop("patient_id")
+                    
             else:
                 # any unreviewed annotations left?
                 session["index"] = session["unreviewed_annotations_index"].index(1)
