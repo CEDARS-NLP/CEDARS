@@ -137,7 +137,12 @@
 <h3 id="annotating-a-negative-sentence">Annotating a Negative Sentence</h3>
 <p>In many cases, the sentence you are looking at will be a false positive, i.e. it does not represent the kind of event you were tasked to report. In this case, simply click on the button "ADJUDICATE SENTENCE". This will mark the sentence as such and move to the next one in line.</p>
 <h3 id="move-between-sentences-within-a-patients-record">Move Between Sentences Within a Patient's Record</h3>
-<p>Often the sentence and note presented to you will hint at a possible event but remain ambiguous, or an event will be obvious but the timing unclear. In such cases, you can move from sentence to sentence by using the "&lt;&lt;&lt; PREVIOUS" and "NEXT &gt;&gt;&gt;" buttons. You will go from sentence to sentence, following the timeline of electronic record notes/reports. Note that using previous/next will not annotate sentences or otherwise enter information in the CEDARS database.</p>
+<p>Often the sentence and note presented to you will hint at a possible event but remain ambiguous, or an event will be obvious but the timing unclear. In such cases, you can move from sentence to sentence by using the navigation buttons. The buttons operate as follows :</p>
+<pre><code>- &lt;, &gt; Move one note back or forwards.
+- &lt;&lt;, &gt;&gt; Move ten notes back or forwards.
+- |&lt;, &gt;| Move to the first or last note for this patient.
+</code></pre>
+<p>You will go from sentence to sentence, following the timeline of electronic record notes/reports. Note that using previous/next will not annotate sentences or otherwise enter information in the CEDARS database.</p>
 <h2 id="entering-information-about-a-patient">Entering Information About a Patient</h2>
 <h3 id="entering-an-event-date">Entering an Event Date</h3>
 <p>Any known event date will be displayed at the beginning of section titled "Event date:". Most of the time this field will be empty, since generally speaking CEDARS projects aim to determine event dates for a cohort for which no prior information exists. However, CEDARS can also be used to verify known event dates, in which case the interface might display an event date for a patient you have not yet assessed. Your CEDARS system administrator will discuss this aspect with you before starting the project.</p>
@@ -146,7 +151,11 @@
 <h3 id="deleting-an-event-date">Deleting an Event Date</h3>
 <p>It is possible to replace an erroneous date by entering a new one in the date entry field. If there was actually no event, the previously entered date can be deleted by clicking on button "DELETE OLD DATE".</p>
 <h3 id="entering-comments-about-a-patient">Entering Comments About a Patient</h3>
-<p>At any point you can enter comments about a patient in the data entry field under "New comments:", however those will be saved only if you 1) adjudicate the sentence or 2) enter an event date.</p>
+<p>At any point you can enter or edit comments about a patient in the Comments text-box at the bottom left of the adjudications page. Note that while you can click the "Save Comment" button to save the comment manually, the comment will also automatically be saved if you </p>
+<pre><code>- Edit or delete the event date
+- Adjudicate the annotation
+- Navigate to another note for that patient
+</code></pre>
 <h2 id="search-for-a-specific-patient">Search for a Specific Patient</h2>
 <p>If you want to go back to a specific patient later on, take note of the patient ID number. After logon, CEDARS will automatically present you with the next available patient to review, so if you have already annotated all sentences for a given patient, the only way to find that record again is to do a search. In this case, simply enter the patient ID number under in the box under "Search for patient" and click button "SEARCH". If you click "SEARCH" on an empty field, CEDARS will bring up the next available patient for you to review.</p>
 <h2 id="record-locking">Record Locking</h2>

@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <link rel="shortcut icon" href="../img/favicon.ico" />
-    <title>Downloading Results - CEDARS</title>
+    <title>Developer Tools - CEDARS</title>
     <link rel="stylesheet" href="../css/theme.css" />
     <link rel="stylesheet" href="../css/theme_extra.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
@@ -14,8 +14,8 @@
     
       <script>
         // Current page data
-        var mkdocs_page_name = "Downloading Results";
-        var mkdocs_page_input_path = "download_annotations.md";
+        var mkdocs_page_name = "Developer Tools";
+        var mkdocs_page_input_path = "developer_tools.md";
         var mkdocs_page_url = null;
       </script>
     
@@ -76,7 +76,7 @@
         <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
   <ul class="wy-breadcrumbs">
     <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
-      <li class="breadcrumb-item active">Downloading Results</li>
+      <li class="breadcrumb-item active">Developer Tools</li>
     <li class="wy-breadcrumbs-aside">
     </li>
   </ul>
@@ -85,29 +85,22 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
             <div class="section" itemprop="articleBody">
               
-                <h1 id="downloading-results">Downloading Results</h1>
-<p>Once you have reviewed the generated annotations and marked event dates, you can navigate to the dropdown on the top right. </p>
-<p>Then you can create a new download task (regular or full). A spinning animation will play while the data is being prepared. After it is done, the file will be added to the list of "Available Files" with a "Download" button. Clicking this download button will return a file with tabular data in <a href="https://en.wikipedia.org/wiki/Comma-separated_values">.csv</a> format. </p>
-<p>The table for the regular download will have the following columns:</p>
-<pre><code>1. patient_id (The ID of the patient for which that note was written)
-2. total_notes (The total number of notes for this patient)
-3. reviewed_notes (The number of notes that were reviewed for this patient)
-4. total_sentences (The total number of sentences found for this patient)
-5. reviewed_notes (The number of sentences that were reviewed for this patient)
-6. event_date (The date at which the event took place)
-7. event_information (The sentence where the event was found along with the note ID for the note that sentence belonged to)
-8. first_note_date (The earliest note date for that patient)
-9. last_note_date (The most recent note date for that patient)
-10. comments (Any comments for that patient written by annotators)
-11. reviewer (The investigator that reviewed this patient. Will be "PINES" if the patient has been adjudicated by a PINES model or "CEDARS" if that patient has no annotations.)
-12. max_score_note_id (The note ID in which PINES found the highest probability of an event. Will be empty if no PINES model was used.)
-13. max_score_note_id (The note date for which PINES found the highest probability of an event. Will be empty if no PINES model was used.)
-14. max_score (The highest score PINES assigned to any note for this patient. Will be empty if no PINES model was used.)
-15. predicted_notes (The note IDs with the predicted scores for this patient. Will be empty if no PINES model was used.)
+                <h1 id="developer-tools">Developer Tools</h1>
+<blockquote>
+<p>The public CEDARS package includes the following developer tools to make the package easier to work with and use.</p>
+</blockquote>
+<h2 id="1-testing">1. Testing</h2>
+<p>CEDARS is setup with <a href="https://docs.pytest.org/en/stable/">pytest</a> to test the basic functionality of this package. The tests are stored in the "cedars/tests" folder and can be run with the following commands :</p>
+<pre><code class="language-shell">$ cd cedars
+$ poetry run python -m pytest
 </code></pre>
-<p>If a full download task is created an additional column will be added to the output file :</p>
-<pre><code>- sentences (A list of the annotation IDs with their corresponding sentences for that patient.)
+<h2 id="2-code-linting">2. Code Linting</h2>
+<p>CEDARS includes <a href="https://flake8.pycqa.org/en/latest/">flake8</a> as a code linting service. You can run this using the following commands :</p>
+<pre><code class="language-shell">$ cd cedars
+$ poetry run python -m flake8 --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
 </code></pre>
+<h2 id="3-rq-dashboard">3. RQ-Dashboard</h2>
+<p>CEDARS uses <a href="https://python-rq.org/">python-rq</a> queues to handle queue and multithreaded processes such as processing a search query or executing download jobs. <a href="https://github.com/Parallels/rq-dashboard">Rq-dashboard</a> is a tool that provides a GUI to view and interact with these queues easily. To access the rq-dashboard you need to login as an admin, navigate to the dropdown on the top right and select "RQ Dashboard".</p>
               
             </div>
           </div><footer>
