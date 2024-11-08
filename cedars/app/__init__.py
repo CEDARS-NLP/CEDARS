@@ -6,7 +6,7 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
-from flask import Flask, redirect
+from flask import Flask, redirect, render_template
 from flask_session import Session
 from loguru import logger
 from dotenv import dotenv_values, load_dotenv
@@ -69,8 +69,11 @@ def create_app(config_filename=None):
     @cedars_app.route('/', methods=["GET"])
     def homepage():
         if auth.current_user.is_admin:
-            return redirect("/ops/stats")
-        
+            return redirect("/stats")
         return redirect("/ops/adjudicate_records")
+
+    @cedars_app.route('/about', methods=["GET"])
+    def about():
+        return render_template("about.html", **ops.db.get_info())
 
     return cedars_app
