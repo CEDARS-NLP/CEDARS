@@ -397,7 +397,7 @@ def insert_one_annotation(annotation):
 
     annotations_collection.insert_one(annotation)
 
-def upsert_patient_results(patient_id: str):
+def upsert_patient_results(patient_id: str, insert_datetime: datetime = None):
     '''
     Stores the results of a patient who has been reviewed.
     If this patient already has results stored, the code will
@@ -467,7 +467,8 @@ def upsert_patient_results(patient_id: str):
         'max_score_note_id' : max_score_note_id,
         'max_score_note_date' : max_score_note_date,
         'max_score' : max_score,
-        'predicted_notes' : all_note_details
+        'predicted_notes' : all_note_details,
+        'Last Updated' : insert_datetime,
     }
 
     if patient_results_exist(patient_id):
@@ -1259,7 +1260,7 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
                                               "reviewed_by": reviewed_by}})
 
     logger.info(f"Storing results for patient #{patient_id}")
-    upsert_patient_results(patient_id)
+    upsert_patient_results(patient_id, datetime.now())
 
 
 def mark_note_reviewed(note_id, reviewed_by: str):
@@ -1306,7 +1307,6 @@ def add_comment(annotation_id, comment):
                                     {"$set":
                                      {"comments": comment}
                                      })
-    upsert_patient_results(patient_id)
 
 
 def set_patient_lock_status(patient_id: str, status):
