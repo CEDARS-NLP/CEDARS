@@ -68,12 +68,19 @@ def create_app(config_filename=None):
 
     @cedars_app.route('/', methods=["GET"])
     def homepage():
-        if auth.current_user.is_admin:
+        if auth.current_user.is_authenticated and auth.current_user.is_admin:
             return redirect("/stats")
-        return redirect("/ops/adjudicate_records")
+        elif auth.current_user.is_authenticated:
+            return redirect("/ops/adjudicate_records")
+        else:
+            return render_template('index.html', **ops.db.get_info())
 
     @cedars_app.route('/about', methods=["GET"])
     def about():
-        return render_template("about.html", **ops.db.get_info())
+        if auth.current_user.is_authenticated:
+            return render_template("about.html", **ops.db.get_info())
+        else:
+            return render_template('index.html', **ops.db.get_info())
+
 
     return cedars_app
