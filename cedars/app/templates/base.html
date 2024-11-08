@@ -28,7 +28,6 @@
 
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="/">Homepage</a></li>
                         <li><a class="dropdown-item" href="/stats/">Project Statistics</a></li>
 
                         {% if current_user.is_admin == true %}
@@ -40,6 +39,7 @@
                             <li><a class="dropdown-item" href="/ops/download_page">Download Annotations</a></li>
                         {% endif %}
                         <li><a class="dropdown-item" href="/ops/adjudicate_records">Adjudicate Annotations</a></li>
+                        <li><a class="dropdown-item" href="/about">About</a></li>
                         <li>
                             <hr class="dropdown-divider">
                         </li>
