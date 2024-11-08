@@ -22,6 +22,7 @@ The table for the regular download will have the following columns:
     13. max_score_note_id (The note date for which PINES found the highest probability of an event. Will be empty if no PINES model was used.)
     14. max_score (The highest score PINES assigned to any note for this patient. Will be empty if no PINES model was used.)
     15. predicted_notes (The note IDs with the predicted scores for this patient. Will be empty if no PINES model was used.)
+    16. last_updated (A datetime stamp of the last time this patient's RESULTS were updated.)
 
 If a full download task is created an additional column will be added to the output file :
 

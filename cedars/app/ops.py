@@ -650,7 +650,8 @@ def save_adjudications():
     if action in actions:
         actions[action]()
     _add_annotation_comment()
-    db.upsert_patient_results(patient_id, datetime.now())
+    db.upsert_patient_results(patient_id, datetime.now(),
+                              updated_by = current_user.username)
 
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:

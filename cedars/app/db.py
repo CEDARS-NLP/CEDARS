@@ -397,7 +397,7 @@ def insert_one_annotation(annotation):
 
     annotations_collection.insert_one(annotation)
 
-def upsert_patient_results(patient_id: str, insert_datetime: datetime = None):
+def upsert_patient_results(patient_id: str, insert_datetime: datetime = None, updated_by: str = None):
     '''
     Stores the results of a patient who has been reviewed.
     If this patient already has results stored, the code will
@@ -436,7 +436,11 @@ def upsert_patient_results(patient_id: str, insert_datetime: datetime = None):
     last_note_date = get_last_note_date_for_patient(patient_id)
     patient = get_patient_by_id(patient_id)
     comments = patient.get("comments", "")
-    reviewer = get_patient_reviewer(patient_id)
+
+    if updated_by is not None:
+        reviewer = updated_by
+    else:
+        reviewer = get_patient_reviewer(patient_id)
 
     max_score = None
     max_score_note_id = ""
@@ -468,7 +472,7 @@ def upsert_patient_results(patient_id: str, insert_datetime: datetime = None):
         'max_score_note_date' : max_score_note_date,
         'max_score' : max_score,
         'predicted_notes' : all_note_details,
-        'Last Updated' : insert_datetime,
+        'last_updated' : insert_datetime,
     }
 
     if patient_results_exist(patient_id):
@@ -1740,7 +1744,8 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         'max_score_note_id': pl.Utf8,
         'max_score_note_date': pl.Datetime,
         'max_score': pl.Float64,
-        'predicted_notes': pl.Utf8
+        'predicted_notes': pl.Utf8,
+        'last_updated' : pl.Datetime
     }
 
     if  get_sentences is False:
