@@ -3,7 +3,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 import tempfile
 import pandas as pd
 import pyarrow.parquet as pq
