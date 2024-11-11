@@ -592,7 +592,6 @@ def save_adjudications():
 
         current_patient_id = session["patient_id"]
         if updated_date and skip_after_event:
-            session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
             db.set_patient_lock_status(current_patient_id, False)
             session.pop("patient_id")
 
