@@ -538,7 +538,6 @@ def queue_stats():
                           'successful_jobs': successful_jobs
                           })
 
-
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 def save_adjudications():
@@ -620,7 +619,8 @@ def save_adjudications():
                     if "patient_id" in session:
                         session.pop("patient_id")
             else:
-                session["index"] = session["unreviewed_annotations_index"].index(1)
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
         elif 1 in session["unreviewed_annotations_index"]:
             if db.get_event_date(current_patient_id) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
@@ -629,7 +629,8 @@ def save_adjudications():
                                          reviewed_by=current_user.username)
             else:
                 # any unreviewed annotations left?
-                session["index"] = session["unreviewed_annotations_index"].index(1)
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
         else:
             is_last_note = (session["index"] >= session["total_count"] - 1)
             if is_last_note or (updated_date and skip_after_event):
@@ -835,6 +836,34 @@ def unlock_current_patient():
         return jsonify({"message": f"Unlocking patient # {patient_id}."}), 200
 
     return jsonify({"error": "No patient to unlock."}), 200
+
+def get_next_annotation_index(unreviewed_annotations, current_index):
+    '''
+    Given a list of the review status of annotations and the current index
+    find the next unreviewed annotation to review.
+
+    Args :
+        - unreviewed_annotations (list[int]) : For each index, 0 indicates that an annotation is reviewed
+                                                               1 indicates that an annotation has been reviewed
+        - current_index (int) : Index of the annotation that was just reviewed,
+    
+    Returns :
+        - next_index (int) : Index of the next unreviewed annotation after the current one,
+                                will return the same index as the current index if no unreviewed annotations left.
+    
+    '''
+
+    i = current_index + 1
+    while i != current_index:
+        if i == len(unreviewed_annotations):
+            i = 0
+
+        if unreviewed_annotations[i] == 1:
+            break
+
+        i += 1
+
+    return i
 
 def highlighted_text(note):
     """
