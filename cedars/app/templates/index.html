@@ -39,19 +39,9 @@
         <br>
         <br>
         
-        {% if current_user.is_authenticated and current_user.is_admin %}
-            <a href='/ops/project_details'>
-                <button class="btn btn-primary cedarsstyle">Start Project</button>
-            </a>
-        {% elif current_user.is_authenticated %}
-            <a href='/ops/adjudicate_records'>
-                <button class="btn btn-primary cedarsstyle">Adjudicate Records</button>
-            </a>
-        {% else %}
-            <a href='/auth/login'>
-                <button class="btn btn-primary cedarsstyle">Login</button>
-            </a>
-        {% endif %}
+        <a href='/auth/login'>
+            <button class="btn btn-primary cedarsstyle">Login</button>
+        </a>
   </div>
 
 
