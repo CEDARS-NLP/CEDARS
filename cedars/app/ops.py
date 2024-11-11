@@ -93,7 +93,7 @@ def project_details():
                 if len(project_name) > 0:
                     db.update_project_name(project_name)
                     flash(f"Project name updated to {project_name}.")
-            return render_template("index.html", **db.get_info())
+            return redirect("/")
 
         if "terminate" in request.form:
             terminate_clause = request.form.get("terminate_conf")
@@ -105,7 +105,7 @@ def project_details():
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
-                    return render_template("index.html", **db.get_info())
+                    return redirect("/")
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 

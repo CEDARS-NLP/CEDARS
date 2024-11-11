@@ -148,7 +148,7 @@ def register():
                 logger.info("Initialized project.")
                 login_user(User(db.get_user(username)))
 
-            return render_template('index.html', **db.get_info())
+            return redirect("/")
         flash(error)
     return render_template('auth/register.html', **db.get_info())
 
@@ -181,7 +181,7 @@ def login():
         if user and check_password_hash(user['password'], password):
             login_user(User(user))
             flash('Login successful.')
-            return render_template('index.html', **db.get_info())
+            return redirect("/")
 
         flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
