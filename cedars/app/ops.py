@@ -795,7 +795,7 @@ def adjudicate_records():
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
     elif stored_event_date and stored_annotation_id:
-        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked.")
+        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
         logger.info(f"Total annotations for patient {patient_id}: {total_count}")
         session["patient_id"] = patient_id
         session["total_count"] = total_count
