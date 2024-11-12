@@ -3,7 +3,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 import tempfile
 import pandas as pd
 import pyarrow.parquet as pq
@@ -538,7 +538,6 @@ def queue_stats():
                           'successful_jobs': successful_jobs
                           })
 
-
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 def save_adjudications():
@@ -587,10 +586,14 @@ def save_adjudications():
     def _adjudicate_annotation(updated_date = False):
         logger.debug(f"Adjudicating annotation # {current_annotation_id}")
         skip_after_event = db.get_search_query(query_key="skip_after_event")
+
+        current_patient_id = session["patient_id"]
+        if updated_date and skip_after_event:
+            db.set_patient_lock_status(current_patient_id, False)
+            session.pop("patient_id")
+
         if session["unreviewed_annotations_index"][session["index"]] == 1:
             db.mark_annotation_reviewed(current_annotation_id)
-            if updated_date and skip_after_event:
-                session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
 
             session["unreviewed_annotations_index"][session["index"]] = 0
             session.modified = True
@@ -598,33 +601,43 @@ def save_adjudications():
             # as reviewed because we don't need to review the rest
             # this could be based on a parameter though
             # TODO: add logic based on tags if we need to keep reviewing
-            if len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
-                db.mark_patient_reviewed(session["patient_id"],
+            if len(db.get_patient_annotation_ids(current_patient_id)) == 0:
+                db.mark_patient_reviewed(current_patient_id,
                                          reviewed_by=current_user.username)
-                db.set_patient_lock_status(session["patient_id"], False)
-                session.pop("patient_id")
-            elif db.get_event_date(session["patient_id"]) is not None:
+                db.set_patient_lock_status(current_patient_id, False)
+                if "patient_id" in session:
+                    session.pop("patient_id")
+            elif db.get_event_date(current_patient_id) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
                                       reviewed_by=current_user.username)
-                db.mark_patient_reviewed(session["patient_id"],
+                db.mark_patient_reviewed(current_patient_id,
                                          reviewed_by=current_user.username)
                 if db.get_search_query(query_key="skip_after_event"):
-                    db.set_patient_lock_status(session["patient_id"], False)
-                    session.pop("patient_id")
+                    db.set_patient_lock_status(current_patient_id, False)
+                    if "patient_id" in session:
+                        session.pop("patient_id")
             else:
-                session["index"] = session["unreviewed_annotations_index"].index(1)
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
         elif 1 in session["unreviewed_annotations_index"]:
-            # any unreviewed annotations left?
-            session["index"] = session["unreviewed_annotations_index"].index(1)
-        else:
-            if session["index"] < session["total_count"] - 1:
-                session["index"] += 1
+            if db.get_event_date(current_patient_id) is not None:
+                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                      reviewed_by=current_user.username)
+                db.mark_patient_reviewed(current_patient_id,
+                                         reviewed_by=current_user.username)
             else:
+                # any unreviewed annotations left?
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
+        else:
+            is_last_note = (session["index"] >= session["total_count"] - 1)
+            if is_last_note or (updated_date and skip_after_event):
                 # If the index and reached the end of a patient's notes
                 # and there are no unreviewed annotations left
                 # Then this patient has been fully reviewed and can be popped.
-                db.set_patient_lock_status(session["patient_id"], False)
-                session.pop("patient_id")
+                db.set_patient_lock_status(current_patient_id, False)
+            else:
+                session["index"] += 1
 
         session.modified = True
 
@@ -773,12 +786,23 @@ def adjudicate_records():
     total_count = res["total"]
     all_annotation_index = res["all_annotation_index"]
     unreviewed_annotations_index = res["unreviewed_annotations_index"]
+    stored_event_date = db.get_event_date(patient_id)
+    stored_annotation_id = db.get_event_annotation_id(patient_id)
 
     if total_count == 0:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
+    elif stored_event_date and stored_annotation_id:
+        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
+        logger.info(f"Total annotations for patient {patient_id}: {total_count}")
+        session["patient_id"] = patient_id
+        session["total_count"] = total_count
+        session["annotations"] = annotations
+        session["all_annotation_index"] = all_annotation_index
+        session["unreviewed_annotations_index"] = unreviewed_annotations_index
+        session["index"] = all_annotation_index[annotations.index(stored_annotation_id)]
     elif unreviewed_annotations_index.count(1) == 0:
         flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
         session["patient_id"] = patient_id
@@ -813,6 +837,34 @@ def unlock_current_patient():
         return jsonify({"message": f"Unlocking patient # {patient_id}."}), 200
 
     return jsonify({"error": "No patient to unlock."}), 200
+
+def get_next_annotation_index(unreviewed_annotations, current_index):
+    '''
+    Given a list of the review status of annotations and the current index
+    find the next unreviewed annotation to review.
+
+    Args :
+        - unreviewed_annotations (list[int]) : For each index, 0 indicates that an annotation is reviewed
+                                                               1 indicates that an annotation has been reviewed
+        - current_index (int) : Index of the annotation that was just reviewed,
+    
+    Returns :
+        - next_index (int) : Index of the next unreviewed annotation after the current one,
+                                will return the same index as the current index if no unreviewed annotations left.
+    
+    '''
+
+    i = current_index + 1
+    while i != current_index:
+        if i == len(unreviewed_annotations):
+            i = 0
+
+        if unreviewed_annotations[i] == 1:
+            break
+
+        i += 1
+
+    return i
 
 def highlighted_text(note):
     """
