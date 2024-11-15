@@ -28,18 +28,7 @@ window.addEventListener("message", (event) => {
             // Send a login confirmation message to superbio server
             window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
 
-            window.addEventListener('message', function(final_event) {
-              if (!TRUSTED_ORIGINS.includes(final_event.origin)) {
-                  return;
-              }
-
-              // Check that a message has returned
-              if (final_event.data) {
-                  console.log('Acknowledgment received from parent:', final_event.data);
-                  window.location.href = '/stats';
-              }
-            });
-            
+            window.location.href = '/stats';
           } else {
             console.error('Login failed:', data.error);
             // Handle login failure (e.g., show an error message)
@@ -48,6 +37,13 @@ window.addEventListener("message", (event) => {
         .catch((error) => {
           console.error('Error:', error);
         });
+    }
+    else if (data.event_type === "logout") {
+        console.log("Logging out user.");
+        window.location.href = "/auth/logout";
+    }
+    else {
+        console.log("Unknown event_type received :", data.event_type);
     }
     
   });
