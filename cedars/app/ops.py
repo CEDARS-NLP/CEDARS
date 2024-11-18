@@ -28,6 +28,7 @@ from . import auth
 from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
+from .adjudication_handler import AdjudicationHandler
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -686,25 +687,10 @@ def show_annotation():
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
 
-    annotation_data = {
-        "pos_start": index + 1,
-        "total_pos": session["total_count"],
-        "patient_id": session["patient_id"],
-        "name": current_user.username,
-        "note_date": _format_date(annotation.get('text_date')),
-        "event_date": _format_date(db.get_event_date(session["patient_id"])),
-        "note_comment": db.get_patient_by_id(session["patient_id"])["comments"],
-        "highlighted_sentence" : get_highlighted_sentence(annotation, note),
-        "note_id": annotation["note_id"],
-        "full_note": highlighted_text(note),
-        "tags": [note.get("text_tag_1", ""),
-                 note.get("text_tag_2", ""),
-                 note.get("text_tag_3", ""),
-                 note.get("text_tag_4", ""),
-                 note.get("text_tag_5", "")]
-    }
+    annotation_data = session["adjudication_handler"].get_annotation_details()
 
     return render_template("ops/adjudicate_records.html",
+                           name = current_user.username,
                            **annotation_data,
                            **db.get_info())
 
@@ -780,48 +766,31 @@ def adjudicate_records():
 
     raw_annotations = db.get_all_annotations_for_patient(patient_id)
     hide_duplicates = db.get_search_query("hide_duplicates")
-    res = format_annotations(raw_annotations, hide_duplicates)
+    
+    session["adjudication_handler"] = AdjudicationHandler(patient_id,
+                                                          raw_annotations, hide_duplicates)
+    
+    patient_status = session["adjudication_handler"].get_patient_status()
 
-    annotations = res["annotations"]
-    total_count = res["total"]
-    all_annotation_index = res["all_annotation_index"]
-    unreviewed_annotations_index = res["unreviewed_annotations_index"]
-    stored_event_date = db.get_event_date(patient_id)
-    stored_annotation_id = db.get_event_annotation_id(patient_id)
-
-    if total_count == 0:
+    if patient_status == "No Annotations":
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
-    elif stored_event_date and stored_annotation_id:
-        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
-        logger.info(f"Total annotations for patient {patient_id}: {total_count}")
-        session["patient_id"] = patient_id
-        session["total_count"] = total_count
-        session["annotations"] = annotations
-        session["all_annotation_index"] = all_annotation_index
-        session["unreviewed_annotations_index"] = unreviewed_annotations_index
-        session["index"] = all_annotation_index[annotations.index(stored_annotation_id)]
-    elif unreviewed_annotations_index.count(1) == 0:
-        flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
-        session["patient_id"] = patient_id
-        session["total_count"] = total_count
-        session["annotations"] = annotations
-        session["all_annotation_index"] = all_annotation_index
-        session["unreviewed_annotations_index"] = unreviewed_annotations_index
-        # in case of reviewed patient show everything..
-        session["index"] = 0
-    else:
-        logger.info(f"Total annotations for patient {patient_id}: {total_count}")
-        session["patient_id"] = patient_id
-        session["total_count"] = total_count
-        session["annotations"] = annotations
-        session["all_annotation_index"] = all_annotation_index
-        session["unreviewed_annotations_index"] = unreviewed_annotations_index
-        session["index"] = all_annotation_index[unreviewed_annotations_index.index(1)]
 
-    db.set_patient_lock_status(patient_id, True)
+    elif patient_status == "Reviewed, Event Found":
+        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
+        logger.info(f"Showing annotations for patient {patient_id}.")
+        session["patient_id"] = patient_id
+
+    elif patient_status == "Reviewed, No Event":
+        flash(f"Patient {patient_id} has no annotations left to review. Showing all annotations.")
+        session["patient_id"] = patient_id
+
+    else:
+        logger.info(f"Showing annotations for patient {patient_id}.")
+        session["patient_id"] = patient_id
+
     session.modified = True
     return redirect(url_for("ops.show_annotation"))
 
@@ -865,144 +834,6 @@ def get_next_annotation_index(unreviewed_annotations, current_index):
         i += 1
 
     return i
-
-def highlighted_text(note):
-    """
-    Returns highlighted text for a note.
-    """
-    highlighted_note = []
-    prev_end_index = 0
-    text = note["text"]
-
-    annotations = db.get_all_annotations_for_note(note["text_id"])
-    logger.info(annotations)
-
-    for annotation in annotations:
-        start_index = annotation['note_start_index']
-        end_index = annotation['note_end_index']
-        # Make sure the annotations don't overlap
-        if start_index < prev_end_index:
-            continue
-
-        highlighted_note.append(text[prev_end_index:start_index])
-        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
-        prev_end_index = end_index
-
-    highlighted_note.append(text[prev_end_index:])
-    logger.info(highlighted_note)
-    return " ".join(highlighted_note).replace("\n", "<br>")
-
-def get_highlighted_sentence(current_annotation, note):
-    """
-    Returns highlighted text for a sentence in a note.
-    """
-    highlighted_note = []
-    text = note["text"]
-
-    sentence_start = text.lower().index(current_annotation['sentence'])
-    sentence_end = sentence_start + len(current_annotation['sentence'])
-    prev_end_index = sentence_start
-
-    annotations = db.get_all_annotations_for_sentence(note["text_id"],
-                                                      current_annotation["sentence_number"])
-
-    highlighted_note = []
-    for annotation in annotations:
-        token_start_index = annotation['note_start_index']
-        token_end_index = annotation['note_end_index']
-
-        # Make sure the annotations don't overlap unless it is the first index
-        if (token_start_index < prev_end_index) and (token_start_index != 0):
-            continue
-
-        highlighted_note.append(text[prev_end_index:token_start_index])
-        key_token = text[token_start_index:token_end_index]
-        highlighted_note.append(f'<b><mark>{key_token}</mark></b>')
-        prev_end_index = token_end_index
-
-    highlighted_note.append(text[prev_end_index:sentence_end])
-    sentence = "".join(highlighted_note).strip().replace("\n", "<br>")
-    logger.info(f'Showing sentence : {sentence}')
-    return sentence
-
-def format_annotations(annotations, hide_duplicates):
-    """
-    Formats annotations to keep only relevant occurrences as well
-        as some additional data such as their review status.
-
-    Args:
-        annotations (list) : A list of all annotations for a paticular patient.
-        hide_duplicates (bool) : True if we want to discard duplicate sentences
-            from the annotations of this patient.
-    Returns:
-        result (dictionary) : A dictionary of all relevant annotations with some metadata.
-    """
-    if hide_duplicates:
-        # If hide_duplicates sentences that are exact matches for sentences in
-        # the same note are removed.
-
-        # We first note the indices where duplicate sentences occur
-        indices_to_remove = []
-        seen_sentences = set()
-        for i, annotation in enumerate(annotations):
-            sentence = annotation['sentence'].lower().strip()
-            if sentence in seen_sentences:
-                indices_to_remove.append(i)
-                continue
-
-            seen_sentences.add(sentence)
-    else:
-        # If hide_duplicates is false then each sentence will still only be shown once.
-
-        # We first note the indices where duplicate sentences occur
-        indices_to_remove = []
-        prev_note_id = None
-        seen_sentence_indices = set()
-        for i, annotation in enumerate(annotations):
-            # If we are on a new note, then clear the hashset of sentences.
-            # This is done so that we only check for the same sentence
-            # in that note.
-            if annotation['note_id'] != prev_note_id:
-                seen_sentence_indices.clear()
-
-            prev_note_id = annotation['note_id']
-            sentence_index = annotation['sentence_start']
-            if sentence_index in seen_sentence_indices:
-                indices_to_remove.append(i)
-                continue
-
-            seen_sentence_indices.add(sentence_index)
-
-    # Remove the indices in reverse order to avoid a later index changing
-    # after a prior one is removed.
-    indices_to_remove.sort(reverse=True)
-    for index in indices_to_remove:
-        # Mark the annotation as reviewed before poping it
-        # This ensures that an unseen annotation cannot be unreviewed
-        db.mark_annotation_reviewed(annotations[index]["_id"])
-        annotations.pop(index)
-
-    result = {
-        "annotations": [],
-        "all_annotation_index": [],
-        "unreviewed_annotations_index": [],
-        "total": 0
-    }
-
-    if len(annotations) > 0:
-        result["annotations"] = [str(annotation["_id"]) for annotation in annotations]
-        result["all_annotation_index"] = list(range(len(annotations)))
-        # set array to 1 if annotation is unreviewed
-        result["unreviewed_annotations_index"] = [1 if not x["reviewed"] else 0 for x in annotations]
-        result["total"] = len(annotations)
-
-    return result
-
-def _format_date(date_obj):
-    res = None
-    if date_obj:
-        res = date_obj.date()
-    return res
 
 def get_download_filename(is_full_download=False):
     '''
