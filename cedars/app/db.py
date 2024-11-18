@@ -1212,7 +1212,10 @@ def get_event_annotation_id(patient_id: str):
 
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
 
-    return patient["event_annotation_id"]
+    if patient is not None:
+        return patient["event_annotation_id"]
+
+    return None
 
 def update_event_annotation_id(patient_id: str, annotation_id):
     """
