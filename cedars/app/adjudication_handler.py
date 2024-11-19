@@ -1,6 +1,12 @@
+from enum import Enum
 from loguru import logger
 from . import db
 
+
+class ReviewStatus(Enum):
+    REVIEWED = 1
+    UNREVIEWED = 2
+    SKIPPED = 3
 
 class AdjudicationHandler:
     '''
