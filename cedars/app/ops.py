@@ -101,7 +101,7 @@ def project_details():
                 if terminate_clause == 'DELETE EVERYTHING':
                     db.terminate_project()
                     # reset all rq queues
-                    flask.current_app.task_queue.empty()
+                    empty_queue(flask.current_app.task_queue)
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
@@ -403,7 +403,12 @@ def upload_query():
     # TODO: add a javascript confirm box to make sure the user wants to update the query
     if new_query_added:
         db.empty_annotations()
+        db.empty_pines()
         db.reset_patient_reviewed()
+
+        empty_queue(flask.current_app.task_queue)
+        empty_queue(flask.current_app.ops_queue)
+        db.empty_tasks()
 
     if "patient_id" in session:
         session.pop("patient_id")
@@ -467,6 +472,53 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
         # This will occur when all tasks are completed
         if job.kwargs['superbio_api_token'] is not None:
             close_pines_connection(job.kwargs['superbio_api_token'])
+
+def empty_queue(queue,
+                empty_started_jobs: bool = False,
+                empty_finished_reg: bool = True,
+                empty_failed_reg: bool = True) -> None:
+    '''
+    Empties the queue and the relevant registries that may be
+    in use.
+
+    Args :
+        - queue (RQ Queue) : The queue that needs to be emptied.
+        - empty_started_jobs (bool) : True if we should discard all currently active jobs 
+                                        related to this queue.
+        - empty_finished_reg (bool) : True if we should clear the registery of all the jobs
+                                        that were completed successfully.
+        - empty_failed_reg (bool) : True if we should clear the registery of all the jobs
+                                        that failed before completion.
+
+    Returns :
+        - None
+    '''
+    logger.info(f"Emptying {queue} queue.")
+    queue.empty()
+
+    if empty_started_jobs is True:
+        clear_queue_registry(queue.started_job_registry)
+
+    if empty_finished_reg is True:
+        clear_queue_registry(queue.finished_job_registry)
+
+    if empty_failed_reg is True:
+        clear_queue_registry(queue.failed_job_registry)
+
+    logger.info(f"Completely emptying {queue} queue.")
+
+def clear_queue_registry(registry) -> None:
+    '''
+    Clears all of the jobs in a registry for a queue.
+
+    Args :
+        - registry (RQ Registry) : The registry to be cleared.
+
+    Returns :
+        - None
+    '''
+    for job_id in registry.get_job_ids():
+        registry.remove(job_id, delete_job=True)
 
 def init_pines_connection(superbio_api_token = None):
     '''

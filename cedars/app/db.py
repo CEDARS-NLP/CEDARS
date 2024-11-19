@@ -1284,6 +1284,7 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
+                                               "locked": False,
                                                "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
@@ -1364,8 +1365,19 @@ def empty_annotations():
     annotations = mongo.db["ANNOTATIONS"]
     annotations.delete_many({})
 
-    # also reset the queue
-    flask.current_app.task_queue.empty()
+def empty_pines():
+    """
+    Deletes all PINES predictions for the current query from the database
+    """
+
+    logger.info("Deleting all data in PINES collection.")
+    collection = mongo.db["PINES"]
+    collection.delete_many({})
+
+def empty_tasks():
+    '''
+    Empties all stored tasks in the database
+    '''
     mongo.db["TASK"].delete_many({})
 
 
