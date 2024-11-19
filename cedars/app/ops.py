@@ -28,7 +28,7 @@ from . import auth
 from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
-from .adjudication_handler import AdjudicationHandler
+from .adjudication_handler import AdjudicationHandler, PatientStatus
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -686,8 +686,17 @@ def show_annotation():
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
+    
+    adjudication_handler = AdjudicationHandler(session['patient_id'])
+    adjudication_handler.load_from_patient_data(session['patient_data'])
 
-    annotation_data = session["adjudication_handler"].get_annotation_details()
+    annotation_id = adjudication_handler.get_curr_annotation_id()
+    annotation = db.get_annotation(annotation_id)
+    note = db.get_annotation_note(annotation_id)
+    comments = db.get_patient_by_id(session['patient_id'])["comments"]
+
+    annotation_data = adjudication_handler.get_annotation_details(annotation,
+                                                                  note, comments)
 
     return render_template("ops/adjudicate_records.html",
                            name = current_user.username,
@@ -766,30 +775,45 @@ def adjudicate_records():
 
     raw_annotations = db.get_all_annotations_for_patient(patient_id)
     hide_duplicates = db.get_search_query("hide_duplicates")
-    
-    session["adjudication_handler"] = AdjudicationHandler(patient_id,
-                                                          raw_annotations, hide_duplicates)
-    
+    stored_event_date = db.get_event_date(patient_id)
+    stored_annotation_id = db.get_event_annotation_id(patient_id)
+
+    adjudication_handler = AdjudicationHandler(patient_id)
+    patient_data, annotations_with_duplicates = adjudication_handler.init_patient_data(raw_annotations,
+                                           hide_duplicates, stored_event_date,
+                                           stored_annotation_id)
+
+    for annotation_id in annotations_with_duplicates:
+        db.mark_annotation_reviewed(annotation_id)
+
+    if len(patient_data["annotation_ids"]) > 0:
+            # Only lock the patient for annotation if
+            # there are annotations that exist
+            db.set_patient_lock_status(patient_id, True)
+
     patient_status = session["adjudication_handler"].get_patient_status()
 
-    if patient_status == "No Annotations":
+    if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
 
-    elif patient_status == "Reviewed, Event Found":
+    elif patient_status == PatientStatus.REVIEWED_WITH_EVENT:
         flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
+        session['patient_data'] = patient_data
 
-    elif patient_status == "Reviewed, No Event":
+    elif patient_status == PatientStatus.REVIEWED_NO_EVENT:
         flash(f"Patient {patient_id} has no annotations left to review. Showing all annotations.")
         session["patient_id"] = patient_id
+        session['patient_data'] = patient_data
 
     else:
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
+        session['patient_data'] = patient_data
 
     session.modified = True
     return redirect(url_for("ops.show_annotation"))
