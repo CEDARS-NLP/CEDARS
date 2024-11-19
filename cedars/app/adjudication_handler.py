@@ -1,12 +1,38 @@
 from enum import Enum
 from loguru import logger
-from . import db
-
 
 class ReviewStatus(Enum):
+    '''
+    Enum to map to the review status of an annotation.
+    There are three possible review states that an annotation can have :
+
+    1. UNREVIEWED :- This annotation has not been reviewed
+    2. REVIEWED :- This annotation has been reviewed
+    3. SKIPPED :- This annotation has not been reviewed by an annotator,
+                    but the note was taken after the date on which the event
+                    was recorded and so the annotation is skipped.
+    '''
+    UNREVIEWED = 0
     REVIEWED = 1
-    UNREVIEWED = 2
-    SKIPPED = 3
+    SKIPPED = 2
+
+class PatientStatus(Enum):
+    '''
+    Enum to keep track of the review status for a patient.
+
+    The possible patient statuses are :
+    1. NO_ANNOTATIONS :- If no annotations were found in the notes for this patient.
+    2. REVIEWED_WITH_EVENT :- The event for this patient was found and the annotations
+                                before this event date have been reviewed.
+    3. REVIEWED_NO_EVENT :- All annotations for this patient have been reviewed but
+                                no event was found.
+    4. UNDER_REVIEW :- This patient still has some unreviewed annotations left.
+    '''
+    NO_ANNOTATIONS = 0
+    REVIEWED_WITH_EVENT = 1
+    REVIEWED_NO_EVENT = 2
+    UNDER_REVIEW = 3
+
 
 class AdjudicationHandler:
     '''
@@ -14,30 +40,39 @@ class AdjudicationHandler:
     the adjudication workflow in CEDARS for a patient.
     '''
 
-    def __init__(self, patient_id, raw_annotations, hide_duplicates):
+    def __init__(self, patient_id):
+        self.patient_id = patient_id
+        self.patient_data = {
+            'event_date' : None,
+            'event_annotation_id' : None,
+            'annotation_ids' : [],
+            'review_statuses' : [],
+            'current_index' : -1
+        }
+
+    def init_patient_data(self, raw_annotations, hide_duplicates,
+                          stored_event_date = None, stored_annotation_id = None):
         '''
-        Class constructor.
         This function will accept the annotations for that patient and
         select which annotation to show first using the current index.
+        It will also initialize and return a JSON-like object that stores
+        relevant data about that patient.
 
         Args :
-            - patient_id (str)
+            - patient_id (str) : ID for the patient currently being reviewed.
             - annotations (list[dict]) : List of all annotations for that patient.
             - hide_duplicates (bool) : True if we do not show duplicate sentences.
         '''
 
-        stored_event_date = db.get_event_date(patient_id)
-        stored_annotation_id = db.get_event_annotation_id(patient_id)
+        filtered_results, annotations_with_duplicates = self._filter_annotations(raw_annotations,
+                                                                                 hide_duplicates)
 
-        self.patient_id = patient_id
-        annotation_ids, review_statuses = self._filter_annotations(raw_annotations, hide_duplicates)
-        self.annotation_ids = annotation_ids
-        self.review_statuses = review_statuses
-        self.event_date = stored_event_date
-
+        annotation_ids = filtered_results['annotation_ids']
+        review_statuses = filtered_results['review_statuses']
+        index = 0
         try:
             # Find the index of the first unreviewed index
-            self.index = self.review_statuses.index(False)
+            index = review_statuses.index(False)
         except ValueError as e:
             # A ValueError is thrown if the element being searched for
             # does not exist in the list.
@@ -45,27 +80,42 @@ class AdjudicationHandler:
             # to the index of the event date if one exists and if not we select index 0.
 
             if stored_event_date and stored_annotation_id:
-                self.index = annotation_ids.index(stored_annotation_id)
-            else:
-                self.index = 0
+                index = annotation_ids.index(stored_annotation_id)
 
-        if len(self.annotation_ids) > 0:
-            # Only lock the patient for annotation if
-            # there are annotations that exist
-            db.set_patient_lock_status(patient_id, True)
+        self.patient_data = {
+            'event_date' : stored_event_date,
+            'event_annotation_id' : stored_annotation_id,
+            'annotation_ids' : annotation_ids,
+            'review_statuses' : review_statuses,
+            'current_index' : index
+        }
+
+        return self.patient_data, annotations_with_duplicates
     
-    def get_annotation_details(self):
-        annotation_id = self.annotation_ids[self.index]
-        annotation = db.get_annotation(annotation_id)
-        note = db.get_annotation_note(annotation_id)
+    def load_from_patient_data(self, patient_id, patient_data):
+        '''
+        Loads the handler object form data for an ongoing patient's adjudication.
 
+        Args :
+            - patient_id (str) : ID for the patient currently being reviewed.
+            - patient_data (dict) : A JSON-like object of the relevant data for the current patient,
+                                        follows the schema of the data created in the init_patient_data
+                                        function of this class.
+        '''
+        self.patient_id = patient_id
+        self.patient_data = patient_data
+    
+    def get_curr_annotation_id(self):
+        return self.annotation_ids[self.index]
+    
+    def get_annotation_details(self, annotation, note, comments):
         annotation_data = {
             "pos_start": self.index + 1,
             "total_pos": len(self.annotation_ids),
             "patient_id": self.patient_id,
             "note_date": self._format_date(annotation.get('text_date')),
-            "event_date": self._format_date(db.get_event_date(self.patient_id)),
-            "note_comment": db.get_patient_by_id(self.patient_id)["comments"],
+            "event_date": self._format_date(self.patient_data['event_date']),
+            "note_comment": comments,
             "highlighted_sentence" : self._get_highlighted_sentence(annotation, note),
             "note_id": annotation["note_id"],
             "full_note": self._highlighted_text(note),
@@ -87,20 +137,20 @@ class AdjudicationHandler:
             - None
         
         Returns :
-            - status (str) : A string describing the current status for the patient.
+            - status (PatientStatus) : An enum describing the current status for the patient.
         '''
 
         is_reviewed = self.is_patient_reviewed()
 
         if len(self.annotation_ids) == 0:
-            return "No Annotations"
+            return PatientStatus.NO_ANNOTATIONS
 
         elif is_reviewed:
             if self.event_date is None:
-                return "Reviewed, No Event"
-            return "Reviewed, Event Found"
+                return PatientStatus.REVIEWED_NO_EVENT
+            return PatientStatus.REVIEWED_WITH_EVENT
 
-        return "Review Required"
+        return PatientStatus.UNDER_REVIEW
 
     def is_patient_reviewed(self):
         '''
@@ -113,7 +163,7 @@ class AdjudicationHandler:
         # Note that this is not the same as having all the annotatings
         # being reviewed as annotations that are unreviewed but after the event date
         # can be marked None to indicate that they do not need to be annotated.
-        return self.review_statuses.count(False) == 0
+        return self.review_statuses.count(ReviewStatus.UNREVIEWED) == 0
 
     def _highlighted_text(note):
         """
@@ -230,24 +280,19 @@ class AdjudicationHandler:
 
                 seen_sentence_indices.add(sentence_index)
 
+        annotations_with_duplicates = []
         # Remove the indices in reverse order to avoid a later index changing
         # after a prior one is removed.
         indices_to_remove.sort(reverse=True)
         for index in indices_to_remove:
             # Mark the annotation as reviewed before poping it
             # This ensures that an unseen annotation cannot be unreviewed
-            db.mark_annotation_reviewed(annotations[index]["_id"])
+            annotations_with_duplicates.append(annotations[index]["_id"])
             annotations.pop(index)
 
-        annotation_ids = [str(annotation["_id"]) for annotation in annotations]
-        reviewed_statuses = [x["reviewed"] for x in annotations]
+        filtered_results = {
+            'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
+            'reviewed_statuses' : [ReviewStatus(x["reviewed"]) for x in annotations]
+        }
 
-        return annotation_ids, reviewed_statuses
-    
-    def __del__(self):
-        '''
-        Destructor, used to ensure that the patient is
-        unlocked before the object is removed from memory.
-        '''
-
-        db.set_patient_lock_status(self.patient_id, False)
+        return filtered_results, annotations_with_duplicates
