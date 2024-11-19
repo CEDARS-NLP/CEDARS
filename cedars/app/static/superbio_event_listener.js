@@ -28,7 +28,6 @@ window.addEventListener("message", (event) => {
             // Send a login confirmation message to superbio server
             window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
 
-            window.location.href = '/stats';
           } else {
             console.error('Login failed:', data.error);
             // Handle login failure (e.g., show an error message)
@@ -37,6 +36,9 @@ window.addEventListener("message", (event) => {
         .catch((error) => {
           console.error('Error:', error);
         });
+    }
+    else if (data.event_type === 'auth_redirect') {
+      window.location.href = '/stats';
     }
     else if (data.event_type === "logout") {
         console.log("Logging out user.");
