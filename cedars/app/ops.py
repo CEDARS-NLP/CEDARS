@@ -694,9 +694,14 @@ def show_annotation():
     annotation = db.get_annotation(annotation_id)
     note = db.get_annotation_note(annotation_id)
     comments = db.get_patient_by_id(session['patient_id'])["comments"]
+    annotations_for_note = db.get_all_annotations_for_note(note["text_id"])
+    annotations_for_sentence = db.get_all_annotations_for_sentence(note["text_id"],
+                                                                   annotation["sentence_number"])
 
     annotation_data = adjudication_handler.get_annotation_details(annotation,
-                                                                  note, comments)
+                                                                  note, comments,
+                                                                  annotations_for_note,
+                                                                  annotations_for_sentence)
 
     return render_template("ops/adjudicate_records.html",
                            name = current_user.username,

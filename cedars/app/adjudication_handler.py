@@ -108,7 +108,8 @@ class AdjudicationHandler:
     def get_curr_annotation_id(self):
         return self.annotation_ids[self.index]
     
-    def get_annotation_details(self, annotation, note, comments):
+    def get_annotation_details(self, annotation, note, comments,
+                               annotations_for_note, annotations_for_sentence):
         annotation_data = {
             "pos_start": self.index + 1,
             "total_pos": len(self.annotation_ids),
@@ -116,9 +117,9 @@ class AdjudicationHandler:
             "note_date": self._format_date(annotation.get('text_date')),
             "event_date": self._format_date(self.patient_data['event_date']),
             "note_comment": comments,
-            "highlighted_sentence" : self._get_highlighted_sentence(annotation, note),
+            "highlighted_sentence" : self._get_highlighted_sentence(annotation, note, annotations_for_sentence),
             "note_id": annotation["note_id"],
-            "full_note": self._highlighted_text(note),
+            "full_note": self._highlighted_text(note, annotations_for_note),
             "tags": [note.get("text_tag_1", ""),
                     note.get("text_tag_2", ""),
                     note.get("text_tag_3", ""),
@@ -165,7 +166,7 @@ class AdjudicationHandler:
         # can be marked None to indicate that they do not need to be annotated.
         return self.review_statuses.count(ReviewStatus.UNREVIEWED) == 0
 
-    def _highlighted_text(note):
+    def _highlighted_text(note, annotations_for_note):
         """
         Returns highlighted text for a note.
         """
@@ -173,7 +174,7 @@ class AdjudicationHandler:
         prev_end_index = 0
         text = note["text"]
 
-        annotations = db.get_all_annotations_for_note(note["text_id"])
+        annotations = annotations_for_note
         logger.info(annotations)
 
         for annotation in annotations:
@@ -191,7 +192,7 @@ class AdjudicationHandler:
         logger.info(highlighted_note)
         return " ".join(highlighted_note).replace("\n", "<br>")
     
-    def _get_highlighted_sentence(current_annotation, note):
+    def _get_highlighted_sentence(current_annotation, note, annotations_for_sentence):
         """
         Returns highlighted text for a sentence in a note.
         """
@@ -202,8 +203,7 @@ class AdjudicationHandler:
         sentence_end = sentence_start + len(current_annotation['sentence'])
         prev_end_index = sentence_start
 
-        annotations = db.get_all_annotations_for_sentence(note["text_id"],
-                                                        current_annotation["sentence_number"])
+        annotations = annotations_for_sentence
 
         highlighted_note = []
         for annotation in annotations:
