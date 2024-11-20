@@ -33,7 +33,6 @@ class PatientStatus(Enum):
     REVIEWED_NO_EVENT = 2
     UNDER_REVIEW = 3
 
-
 class AdjudicationHandler:
     '''
     This is a class meant to handle the logic of
@@ -106,13 +105,13 @@ class AdjudicationHandler:
         self.patient_data = patient_data
     
     def get_curr_annotation_id(self):
-        return self.annotation_ids[self.index]
+        return self.patient_data['annotation_ids'][self.patient_data['current_index']]
     
     def get_annotation_details(self, annotation, note, comments,
                                annotations_for_note, annotations_for_sentence):
         annotation_data = {
-            "pos_start": self.index + 1,
-            "total_pos": len(self.annotation_ids),
+            "pos_start": self.patient_data['current_index'] + 1,
+            "total_pos": len(self.patient_data['annotation_ids']),
             "patient_id": self.patient_id,
             "note_date": self._format_date(annotation.get('text_date')),
             "event_date": self._format_date(self.patient_data['event_date']),
@@ -143,11 +142,11 @@ class AdjudicationHandler:
 
         is_reviewed = self.is_patient_reviewed()
 
-        if len(self.annotation_ids) == 0:
+        if len(self.patient_data['annotation_ids']) == 0:
             return PatientStatus.NO_ANNOTATIONS
 
         elif is_reviewed:
-            if self.event_date is None:
+            if self.patient_data['event_date'] is None:
                 return PatientStatus.REVIEWED_NO_EVENT
             return PatientStatus.REVIEWED_WITH_EVENT
 
@@ -164,9 +163,24 @@ class AdjudicationHandler:
         # Note that this is not the same as having all the annotatings
         # being reviewed as annotations that are unreviewed but after the event date
         # can be marked None to indicate that they do not need to be annotated.
-        return self.review_statuses.count(ReviewStatus.UNREVIEWED) == 0
+        return self.patient_data['review_statuses'].count(ReviewStatus.UNREVIEWED) == 0
+    
+    def perform_action(self, action):
+        pass
+    
+    def _shift_annotation_index(self, shift_type):
+        pass
 
-    def _highlighted_text(note, annotations_for_note):
+    def _adjudicate_annotation(self):
+        pass
+
+    def _mark_event_date(self, event_date):
+        pass
+
+    def _delete_event_date(self):
+        pass
+
+    def _highlighted_text(self, note, annotations_for_note):
         """
         Returns highlighted text for a note.
         """
@@ -192,7 +206,7 @@ class AdjudicationHandler:
         logger.info(highlighted_note)
         return " ".join(highlighted_note).replace("\n", "<br>")
     
-    def _get_highlighted_sentence(current_annotation, note, annotations_for_sentence):
+    def _get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
         """
         Returns highlighted text for a sentence in a note.
         """
@@ -292,7 +306,7 @@ class AdjudicationHandler:
 
         filtered_results = {
             'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
-            'reviewed_statuses' : [ReviewStatus(x["reviewed"]) for x in annotations]
+            'review_statuses' : [ReviewStatus(x["reviewed"]) for x in annotations]
         }
 
         return filtered_results, annotations_with_duplicates
