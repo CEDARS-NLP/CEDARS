@@ -680,19 +680,17 @@ def show_annotation():
     Formats and displays the current annotation being viewed by the user.
     """
     index = session.get("index", 0)
-    annotation = db.get_annotation(session["annotations"][index])
+    adjudication_handler = AdjudicationHandler(session['patient_id'])
+    adjudication_handler.load_from_patient_data(session['patient_id'],
+                                                session['patient_data'])
+    annotation_id = adjudication_handler.get_curr_annotation_id()
 
-    note = db.get_annotation_note(str(annotation["_id"]))
+    annotation = db.get_annotation(annotation_id)
+    note = db.get_annotation_note(annotation_id)
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
-    
-    adjudication_handler = AdjudicationHandler(session['patient_id'])
-    adjudication_handler.load_from_patient_data(session['patient_data'])
 
-    annotation_id = adjudication_handler.get_curr_annotation_id()
-    annotation = db.get_annotation(annotation_id)
-    note = db.get_annotation_note(annotation_id)
     comments = db.get_patient_by_id(session['patient_id'])["comments"]
     annotations_for_note = db.get_all_annotations_for_note(note["text_id"])
     annotations_for_sentence = db.get_all_annotations_for_sentence(note["text_id"],
@@ -796,7 +794,7 @@ def adjudicate_records():
             # there are annotations that exist
             db.set_patient_lock_status(patient_id, True)
 
-    patient_status = session["adjudication_handler"].get_patient_status()
+    patient_status = adjudication_handler.get_patient_status()
 
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
