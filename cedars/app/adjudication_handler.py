@@ -71,7 +71,7 @@ class AdjudicationHandler:
         index = 0
         try:
             # Find the index of the first unreviewed index
-            index = review_statuses.index(False)
+            index = review_statuses.index(ReviewStatus.UNREVIEWED)
         except ValueError as e:
             # A ValueError is thrown if the element being searched for
             # does not exist in the list.
@@ -90,7 +90,7 @@ class AdjudicationHandler:
         }
 
         return self.patient_data, annotations_with_duplicates
-    
+
     def load_from_patient_data(self, patient_id, patient_data):
         '''
         Loads the handler object form data for an ongoing patient's adjudication.
@@ -104,6 +104,9 @@ class AdjudicationHandler:
         self.patient_id = patient_id
         self.patient_data = patient_data
     
+    def get_patient_data(self):
+        return self.patient_data
+
     def get_curr_annotation_id(self):
         return self.patient_data['annotation_ids'][self.patient_data['current_index']]
     
@@ -165,20 +168,77 @@ class AdjudicationHandler:
         # can be marked None to indicate that they do not need to be annotated.
         return self.patient_data['review_statuses'].count(ReviewStatus.UNREVIEWED) == 0
     
-    def perform_action(self, action):
-        pass
-    
-    def _shift_annotation_index(self, shift_type):
-        pass
+    def perform_shift(self, action):
+        index = self.patient_data['current_index']
+        last_index = len(self.patient_data['annotation_ids']) -1
+
+        if action == 'first_anno':
+            self._shift_annotation_index(0)
+        elif action == 'prev_10':
+            new_index = max(0, new_index - 10)
+            self._shift_annotation_index(new_index)
+        elif action == 'prev_1':
+            new_index = max(0, new_index - 1)
+            self._shift_annotation_index(new_index)
+        elif action == 'next_1':
+            new_index = min(index + 1, last_index)
+            self._shift_annotation_index(new_index)
+        elif action == 'next_10':
+            new_index = min(index + 10, last_index)
+            self._shift_annotation_index(new_index)
+        elif action == 'last_anno':
+            self._shift_annotation_index(last_index)
+
+    def _shift_annotation_index(self, new_index):
+        self.patient_data['current_index'] = new_index
+
 
     def _adjudicate_annotation(self):
-        pass
+        index = self.patient_data['current_index']
+        last_index = len(self.patient_data['annotation_ids']) -1
+        self.patient_data['review_statuses'][index] = ReviewStatus.REVIEWED
+        review_statuses = self.patient_data['review_statuses']
 
-    def _mark_event_date(self, event_date):
-        pass
+        # Find the next unreviewed index after the current one
+        new_index = min(index + 1, last_index)
+        if self.is_patient_reviewed():
+            # If a patient is already reviewed
+            # show the next annotation by default
+            return new_index
 
-    def _delete_event_date(self):
-        pass
+        while True:
+            if review_statuses[new_index] == ReviewStatus.UNREVIEWED:
+                self.patient_data['current_index'] = new_index
+                break
+
+            new_index += 1
+            if new_index == last_index:
+                new_index = 0
+
+
+    def mark_event_date(self, event_date, event_annotation_id, annotations_after_event):
+        self.patient_data['event_date'] = event_date
+        self.patient_data['event_annotation_id'] = event_annotation_id
+        annotations_after_event = set(annotations_after_event)
+
+        for i, anno_id in self.patient_data['annotation_ids']:
+            review_status = self.patient_data['review_statuses'][i]
+            if (anno_id in annotations_after_event) and (review_status == ReviewStatus.UNREVIEWED):
+                self.patient_data['review_statuses'][i] = ReviewStatus.SKIPPED
+
+        self._adjudicate_annotation()
+
+    def delete_event_date(self):
+        self.patient_data['event_date'] = None
+        self.patient_data['event_annotation_id'] = None
+
+        # Re-set all skipped events to UNREVIEWED
+        for i, status in enumerate(self.patient_data['review_statuses']):
+            if status == ReviewStatus.SKIPPED:
+                self.patient_data['review_statuses'][i] = ReviewStatus.UNREVIEWED
+
+        self._adjudicate_annotation()
+
 
     def _highlighted_text(self, note, annotations_for_note):
         """

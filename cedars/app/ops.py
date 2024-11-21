@@ -29,6 +29,7 @@ from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
 from .adjudication_handler import AdjudicationHandler, PatientStatus
+from .adjudication_handler import ReviewStatus
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -546,124 +547,61 @@ def save_adjudications():
     Handle logic for the save_adjudications route.
     Used to edit and review annotations.
     """
+    db.add_comment(current_annotation_id, request.form['comment'].strip())
+
     current_annotation_id = session["annotations"][session["index"]]
     patient_id = session['patient_id']
+    skip_after_event = db.get_search_query(query_key="skip_after_event")
 
-    def _update_event_date():
-        new_date = request.form['date_entry']
-        logger.info(f"Updating event date for {patient_id}: {new_date}")
-        db.update_event_date(patient_id, new_date, current_annotation_id)
-        _adjudicate_annotation(updated_date = True)
-
-    def _delete_event_date():
-        logger.info(f"Deleting event date for {patient_id}")
-        db.delete_event_date(patient_id)
-
-    def _move_to_previous_annotation(shift_value):
-        def shift_index_backwards():
-            new_index = session["index"] - shift_value
-            session["index"] = max(0, new_index)
-            session.modified = True
-
-        return shift_index_backwards
-
-    def _shift_first_index():
-        session["index"] = 0
-        session.modified = True
-
-    def _shift_last_index():
-        session["index"] = session["total_count"] - 1
-        session.modified = True
-
-    def _move_to_next_annotation(shift_value):
-        def shift_index_forwards():
-            new_index = session["index"] + shift_value
-            session_index_max = session["total_count"] - 1
-            session["index"] = min(session_index_max, new_index)
-            session.modified = True
-
-        return shift_index_forwards
-
-    def _adjudicate_annotation(updated_date = False):
-        logger.debug(f"Adjudicating annotation # {current_annotation_id}")
-        skip_after_event = db.get_search_query(query_key="skip_after_event")
-
-        current_patient_id = session["patient_id"]
-        if updated_date and skip_after_event:
-            db.set_patient_lock_status(current_patient_id, False)
-            session.pop("patient_id")
-
-        if session["unreviewed_annotations_index"][session["index"]] == 1:
-            db.mark_annotation_reviewed(current_annotation_id)
-
-            session["unreviewed_annotations_index"][session["index"]] = 0
-            session.modified = True
-            # if one annotation has the event date, mark the patient
-            # as reviewed because we don't need to review the rest
-            # this could be based on a parameter though
-            # TODO: add logic based on tags if we need to keep reviewing
-            if len(db.get_patient_annotation_ids(current_patient_id)) == 0:
-                db.mark_patient_reviewed(current_patient_id,
-                                         reviewed_by=current_user.username)
-                db.set_patient_lock_status(current_patient_id, False)
-                if "patient_id" in session:
-                    session.pop("patient_id")
-            elif db.get_event_date(current_patient_id) is not None:
-                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
-                                      reviewed_by=current_user.username)
-                db.mark_patient_reviewed(current_patient_id,
-                                         reviewed_by=current_user.username)
-                if db.get_search_query(query_key="skip_after_event"):
-                    db.set_patient_lock_status(current_patient_id, False)
-                    if "patient_id" in session:
-                        session.pop("patient_id")
-            else:
-                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
-                                                             session["index"])
-        elif 1 in session["unreviewed_annotations_index"]:
-            if db.get_event_date(current_patient_id) is not None:
-                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
-                                      reviewed_by=current_user.username)
-                db.mark_patient_reviewed(current_patient_id,
-                                         reviewed_by=current_user.username)
-            else:
-                # any unreviewed annotations left?
-                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
-                                                             session["index"])
-        else:
-            is_last_note = (session["index"] >= session["total_count"] - 1)
-            if is_last_note or (updated_date and skip_after_event):
-                # If the index and reached the end of a patient's notes
-                # and there are no unreviewed annotations left
-                # Then this patient has been fully reviewed and can be popped.
-                db.set_patient_lock_status(current_patient_id, False)
-            else:
-                session["index"] += 1
-
-        session.modified = True
-
-    def _add_annotation_comment():
-        logger.info(f"Updating comment for {patient_id}.")
-        db.add_comment(current_annotation_id, request.form['comment'].strip())
-
-
-    actions = {
-        'new_date': _update_event_date,
-        'del_date': _delete_event_date,
-        'comment': _add_annotation_comment,
-        'first_anno': _shift_first_index,
-        'prev_10': _move_to_previous_annotation(10),
-        'prev_1': _move_to_previous_annotation(1),
-        'next_1': _move_to_next_annotation(1),
-        'next_10': _move_to_next_annotation(10),
-        'last_anno': _shift_last_index,
-        'adjudicate': _adjudicate_annotation
-    }
+    adjudication_handler = AdjudicationHandler(session['patient_id'])
+    adjudication_handler.load_from_patient_data(session['patient_id'],
+                                                session['patient_data'])
 
     action = request.form['submit_button']
-    if action in actions:
-        actions[action]()
-    _add_annotation_comment()
+    if action == 'new_date':
+        new_date = request.form['date_entry']
+        annotations_after_event = []
+        if skip_after_event:
+            annotations_after_event = db.get_annotations_post_event(patient_id,
+                                                                    new_date,
+                                                                    ReviewStatus.UNREVIEWED)
+            db.mark_annotations_post_event(patient_id, new_date, ReviewStatus.UNREVIEWED,
+                                                                 ReviewStatus.SKIPPED)
+
+        db.mark_annotation_reviewed(current_annotation_id)
+        db.update_event_date(patient_id, new_date, current_annotation_id)
+
+        adjudication_handler.mark_event_date(new_date, current_annotation_id,
+                                             annotations_after_event)
+
+    elif action == 'del_date':
+        db.delete_event_date(patient_id)
+        db.revert_skipped_annotations(patient_id, ReviewStatus.SKIPPED,
+                                                ReviewStatus.REVIEWED)
+        db.mark_annotation_reviewed(current_annotation_id)
+        adjudication_handler.delete_event_date()
+    elif action == 'adjudicate':
+        db.mark_annotation_reviewed(current_annotation_id)
+        adjudication_handler._adjudicate_annotation()
+    elif action == 'comment':
+        # No additional changes to be made if only
+        # saving a comment
+        pass
+    else:
+        # Must be a shift action
+        adjudication_handler.perform_shift(action)
+
+    session["patient_data"] = adjudication_handler.get_patient_data()
+
+    if adjudication_handler.is_patient_reviewed():
+        db.set_patient_lock_status(patient_id, False)
+        db.mark_patient_reviewed(patient_id,
+                                         reviewed_by=current_user.username)
+        session.pop("patient_id")
+        session.pop("patient_data")
+
+    session.modified = True
+
     db.upsert_patient_results(patient_id, datetime.now(),
                               updated_by = current_user.username)
 
