@@ -568,7 +568,8 @@ def save_adjudications():
             db.mark_annotations_post_event(patient_id, new_date, ReviewStatus.UNREVIEWED,
                                                                  ReviewStatus.SKIPPED)
 
-        db.mark_annotation_reviewed(current_annotation_id)
+        db.mark_annotation_reviewed(current_annotation_id, current_user.username,
+                                    ReviewStatus.REVIEWED, ReviewStatus.UNREVIEWED)
         db.update_event_date(patient_id, new_date, current_annotation_id)
 
         adjudication_handler.mark_event_date(new_date, current_annotation_id,
@@ -578,10 +579,12 @@ def save_adjudications():
         db.delete_event_date(patient_id)
         db.revert_skipped_annotations(patient_id, ReviewStatus.SKIPPED,
                                                 ReviewStatus.REVIEWED)
-        db.mark_annotation_reviewed(current_annotation_id)
+        db.mark_annotation_reviewed(current_annotation_id, current_user.username,
+                                    ReviewStatus.REVIEWED, ReviewStatus.UNREVIEWED)
         adjudication_handler.delete_event_date()
     elif action == 'adjudicate':
-        db.mark_annotation_reviewed(current_annotation_id)
+        db.mark_annotation_reviewed(current_annotation_id, current_user.username,
+                                    ReviewStatus.REVIEWED, ReviewStatus.UNREVIEWED)
         adjudication_handler._adjudicate_annotation()
     elif action == 'comment':
         # No additional changes to be made if only
@@ -725,7 +728,8 @@ def adjudicate_records():
                                            stored_annotation_id)
 
     for annotation_id in annotations_with_duplicates:
-        db.mark_annotation_reviewed(annotation_id)
+        db.mark_annotation_reviewed(annotation_id, current_user.username,
+                                    ReviewStatus.REVIEWED, ReviewStatus.UNREVIEWED)
 
     if len(patient_data["annotation_ids"]) > 0:
             # Only lock the patient for annotation if

@@ -1168,18 +1168,36 @@ def update_pines_api_url(new_url):
 
 
 
-def mark_annotation_reviewed(annotation_id):
+def mark_annotation_reviewed(annotation_id, reviewed_by,
+                             reviewed_token, unreviewed_token):
     """
     Updates the annotation in the database to mark it as reviewed.
+    Also updates the note it belongs to as reviewed if all annotations that
+    belong to it are also reviewed.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
+        - annotation_id (str) : Unique ID for the annotation.
+        - reviewed_by (str) : The name of the user who reviewed this annotation.
+        - reviewed_token (int) : Token that indicates an annotation is reviewed.
+        - unreviewed_token (int) : Token that indicates an annotation is unreviewed.
     Returns:
         None
     """
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
-                                       {"$set": {"reviewed": True}})
+                                       {"$set": {"reviewed": reviewed_token}})
+    
+    annotation_data = get_annotation(annotation_id)
+    note_id = annotation_data['note_id']
+
+    # Get the number of unreviewed annotations for the note this annotation belongs to
+    num_unreviewed_annos = mongo.db["ANNOTATIONS"].count_documents({'note_id' : note_id,
+                                  'reviewed' : unreviewed_token})
+
+    if num_unreviewed_annos == 0:
+        mark_note_reviewed(note_id, reviewed_by)
+    
+    
 
 def mark_annotations_post_event(patient_id: str, event_date: datetime.date,
                                unreviewed_token: int, skipped_token: int):
@@ -1341,6 +1359,10 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
 def mark_note_reviewed(note_id, reviewed_by: str):
     """
     Updates the note's status to reviewed in the database.
+
+     Args:
+        patient_id (int) : Unique ID for a patient.
+        reviewed_by (str) : The name of the user who reviewed the note.
     """
     logger.debug(f"Marking note #{note_id} as reviewed.")
     mongo.db["NOTES"].update_one({"text_id": note_id},
