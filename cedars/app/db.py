@@ -848,6 +848,29 @@ def get_patient_annotation_ids(p_id: str, reviewed=False, key="_id"):
 
     return res
 
+def get_annotations_post_event(patient_id: str, event_date: datetime.date,
+                               unreviewed_token: int):
+    '''
+    Retirves the annotation IDs for unreviewed events on or
+    after the event date for a paticular patient.
+
+    Args:
+        - patient_id (str) : ID for the patient
+        - event_date(Date) : Date on which the event was found
+        - unreviewed_token (int) : Token that indicates an annotation is unreviewed.
+    
+    Returns:
+        - annotation_ids (list) : List of annotation ID for the unreviewed
+                                    annotations on or after that date.
+    '''
+    a_ids = mongo.db["ANNOTATIONS"].find_many({ 'patient_id' : patient_id,
+                                        'text_date': {'$gte': event_date},
+                                        'reviewed': unreviewed_token
+                                        }, 
+                                        {'_id' : 1})
+    
+    return [x for x in a_ids]
+
 def get_event_date(patient_id: str):
     """
     Find the event date for a patient.
@@ -1157,6 +1180,51 @@ def mark_annotation_reviewed(annotation_id):
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"reviewed": True}})
+
+def mark_annotations_post_event(patient_id: str, event_date: datetime.date,
+                               unreviewed_token: int, skipped_token: int):
+    '''
+    Marks the annotation for unreviewed events on or
+    after the event date for a paticular patient as skipped. We
+    mark them as skipped as annotations after an event date may be ignorged
+    and do not need manual review.
+
+    Args:
+        - patient_id (str) : ID for the patient
+        - event_date(Date) : Date on which the event was found
+        - unreviewed_token (int) : Token that indicates an annotation is unreviewed.
+        - skipped_token (int) : Token that indicates an annotation has been
+                                        skipped after an event date.
+    
+    Returns:
+        - None
+    '''
+    mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
+                                          'text_date': {'$gte': event_date},
+                                          'reviewed': unreviewed_token
+                                        }, 
+                                        {"$set": {"reviewed": skipped_token}})
+
+def revert_skipped_annotations(patient_id: str,
+                               skipped_token: int, reviewed_token: int):
+    '''
+    Reverts the skiped annotations for unreviewed events on or
+    after the event date for a paticular patient. This is done in the event of
+    a patient's event date being deleted.
+
+    Args:
+        - patient_id (str) : ID for the patient
+        - skipped_token (int) : Token that indicates an annotation has been
+                                        skipped after an event date.
+        - reviewed_token (int) : Token that indicates an annotation is reviewed.
+    
+    Returns:
+        - None
+    '''
+    mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
+                                          'reviewed': skipped_token
+                                        }, 
+                                        {"$set": {"reviewed": reviewed_token}})
 
 
 def update_event_date(patient_id: str, new_date, annotation_id):
