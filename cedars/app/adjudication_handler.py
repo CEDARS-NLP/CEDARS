@@ -267,7 +267,7 @@ class AdjudicationHandler:
         logger.info(f'Showing sentence : {sentence}')
         return sentence
 
-        
+
     def _format_date(self, date_obj):
         res = None
         if date_obj:
