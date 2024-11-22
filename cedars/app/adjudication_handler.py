@@ -335,7 +335,7 @@ class AdjudicationHandler:
 
         filtered_results = {
             'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
-            'review_statuses' : [ReviewStatus(x["reviewed"]) for x in annotations]
+            'review_statuses' : [ReviewStatus(int(x["reviewed"])) for x in annotations]
         }
 
         return filtered_results, annotations_with_duplicates
