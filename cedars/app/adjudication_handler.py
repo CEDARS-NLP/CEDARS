@@ -274,7 +274,7 @@ class AdjudicationHandler:
             res = date_obj.date()
 
         return res
-    
+
     def _filter_annotations(self, annotations, hide_duplicates):
         """
         Filters annotations to keep only relevant occurrences as well

@@ -5,6 +5,7 @@ import spacy
 from spacy.matcher import Matcher
 from loguru import logger
 from . import db
+from .cedars_enums import ReviewStatus
 
 logger.enable(__name__)
 
@@ -215,7 +216,7 @@ class NlpProcessor:
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
-                    annotation["reviewed"] = False
+                    annotation["reviewed"] = ReviewStatus.UNREVIEWED
                     db.insert_one_annotation(annotation)
                     if not has_negation:
                         if match_count == 0:
