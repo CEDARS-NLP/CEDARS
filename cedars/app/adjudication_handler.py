@@ -32,7 +32,7 @@ class AdjudicationHandler:
             - hide_duplicates (bool) : True if we do not show duplicate sentences.
         '''
 
-        filtered_results, annotations_with_duplicates = self._filter_annotations(raw_annotations,
+        filtered_results,annotations_with_duplicates = AnnotationFilterStrategy.filter_annotations(raw_annotations,
                                                                                  hide_duplicates)
 
         annotation_ids = filtered_results['annotation_ids']
@@ -275,7 +275,70 @@ class AdjudicationHandler:
 
         return res
 
-    def _filter_annotations(self, annotations, hide_duplicates):
+class AnnotationFilterStrategy:
+    def _filter_duplicates_by_patient(self, annotations):
+        '''
+        Finds and returns indices for duplicate sentences across any note
+        for this patient. The first instance of a sentence is kept and all others
+        are marked as duplicates.
+        '''
+        indices_with_duplicates = []
+        seen_sentences = set()
+        for i, annotation in enumerate(annotations):
+            sentence = annotation['sentence'].lower().strip()
+            if sentence in seen_sentences:
+                indices_with_duplicates.append(i)
+                continue
+
+            seen_sentences.add(sentence)
+
+        return indices_with_duplicates
+
+    def _filter_duplicates_by_note(self, annotations):
+        '''
+        Finds and returns indices for duplicate sentences within a  paticular 
+        note. The first instance of a sentence is kept and all others
+        are marked as duplicates.
+        '''
+        indices_with_duplicates = []
+        prev_note_id = None
+        seen_sentence_indices = set()
+        for i, annotation in enumerate(annotations):
+            # If we are on a new note, then clear the hashset of sentences.
+            # This is done so that we only check for the same sentence
+            # in that note.
+            if annotation['note_id'] != prev_note_id:
+                seen_sentence_indices.clear()
+
+            prev_note_id = annotation['note_id']
+            sentence_index = annotation['sentence_start']
+            if sentence_index in seen_sentence_indices:
+                indices_with_duplicates.append(i)
+                continue
+
+            seen_sentence_indices.add(sentence_index)
+
+        return indices_with_duplicates
+    
+    def _pop_and_mark_duplicates(self, annotations, indices_with_duplicates):
+        '''
+        Pops all annotations that have duplicates based on a list of
+        indices dictating where the duplicates are found. The annotation
+        IDs of these indices are also stored and returned in a seperate list.
+        '''
+
+        annotations_with_duplicates = []
+        # Remove the indices in reverse order to avoid a later index changing
+        # after a prior one is removed.
+        indices_with_duplicates.sort(reverse=True)
+        for index in indices_with_duplicates:
+            annotations_with_duplicates.append(annotations[index]["_id"])
+            annotations.pop(index)
+
+        return annotations, annotations_with_duplicates
+
+
+    def filter_annotations(self, annotations, hide_duplicates):
         """
         Filters annotations to keep only relevant occurrences as well
             as some additional data such as their review status.
@@ -288,50 +351,13 @@ class AdjudicationHandler:
             result (dictionary) : A dictionary of all relevant annotations with some metadata.
         """
         if hide_duplicates:
-            # If hide_duplicates sentences that are exact matches for sentences in
-            # the same note are removed.
-
-            # We first note the indices where duplicate sentences occur
-            indices_to_remove = []
-            seen_sentences = set()
-            for i, annotation in enumerate(annotations):
-                sentence = annotation['sentence'].lower().strip()
-                if sentence in seen_sentences:
-                    indices_to_remove.append(i)
-                    continue
-
-                seen_sentences.add(sentence)
+            indices_with_duplicates = self._filter_duplicates_by_patient(annotations)
+            
         else:
-            # If hide_duplicates is false then each sentence will still only be shown once.
+            indices_with_duplicates = self._filter_duplicates_by_note(annotations)
 
-            # We first note the indices where duplicate sentences occur
-            indices_to_remove = []
-            prev_note_id = None
-            seen_sentence_indices = set()
-            for i, annotation in enumerate(annotations):
-                # If we are on a new note, then clear the hashset of sentences.
-                # This is done so that we only check for the same sentence
-                # in that note.
-                if annotation['note_id'] != prev_note_id:
-                    seen_sentence_indices.clear()
-
-                prev_note_id = annotation['note_id']
-                sentence_index = annotation['sentence_start']
-                if sentence_index in seen_sentence_indices:
-                    indices_to_remove.append(i)
-                    continue
-
-                seen_sentence_indices.add(sentence_index)
-
-        annotations_with_duplicates = []
-        # Remove the indices in reverse order to avoid a later index changing
-        # after a prior one is removed.
-        indices_to_remove.sort(reverse=True)
-        for index in indices_to_remove:
-            # Mark the annotation as reviewed before poping it
-            # This ensures that an unseen annotation cannot be unreviewed
-            annotations_with_duplicates.append(annotations[index]["_id"])
-            annotations.pop(index)
+        annotations, annotations_with_duplicates = self._pop_and_mark_duplicates(annotations,
+                                                                                 indices_with_duplicates)
 
         filtered_results = {
             'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],

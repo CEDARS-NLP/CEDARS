@@ -216,7 +216,7 @@ class NlpProcessor:
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
-                    annotation["reviewed"] = ReviewStatus.UNREVIEWED
+                    annotation["reviewed"] = ReviewStatus.UNREVIEWED.value
                     db.insert_one_annotation(annotation)
                     if not has_negation:
                         if match_count == 0:
