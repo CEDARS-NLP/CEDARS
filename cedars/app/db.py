@@ -225,7 +225,6 @@ def create_db_indices():
     create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
     create_index("ANNOTATIONS", ["note_id", "reviewed"])
     create_index("ANNOTATIONS", ["patient_id", "reviewed"])
-    
 
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
