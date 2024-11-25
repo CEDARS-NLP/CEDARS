@@ -866,7 +866,7 @@ def get_annotations_post_event(patient_id: str, event_date: datetime.date):
         - annotation_ids (list) : List of annotation ID for the unreviewed
                                     annotations on or after that date.
     '''
-    a_ids = mongo.db["ANNOTATIONS"].find_many({ 'patient_id' : patient_id,
+    a_ids = mongo.db["ANNOTATIONS"].find({ 'patient_id' : patient_id,
                                         'text_date': {'$gte': event_date},
                                         'reviewed': ReviewStatus.UNREVIEWED.value
                                         }, 
