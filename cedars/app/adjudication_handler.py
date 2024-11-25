@@ -88,9 +88,12 @@ class AdjudicationHandler:
             "note_date": self._format_date(annotation.get('text_date')),
             "event_date": self._format_date(self.patient_data['event_date']),
             "note_comment": comments,
-            "highlighted_sentence" : self._get_highlighted_sentence(annotation, note, annotations_for_sentence),
+            "highlighted_sentence" : SentenceHighlighter.get_highlighted_sentence(annotation,
+                                                                                  note,
+                                                                                  annotations_for_sentence),
             "note_id": annotation["note_id"],
-            "full_note": self._highlighted_text(note, annotations_for_note),
+            "full_note": SentenceHighlighter.get_highlighted_text(note,
+                                                                  annotations_for_note),
             "tags": [note.get("text_tag_1", ""),
                     note.get("text_tag_2", ""),
                     note.get("text_tag_3", ""),
@@ -208,66 +211,6 @@ class AdjudicationHandler:
 
         self._adjudicate_annotation()
 
-
-    def _highlighted_text(self, note, annotations_for_note):
-        """
-        Returns highlighted text for a note.
-        """
-        highlighted_note = []
-        prev_end_index = 0
-        text = note["text"]
-
-        annotations = annotations_for_note
-        logger.info(annotations)
-
-        for annotation in annotations:
-            start_index = annotation['note_start_index']
-            end_index = annotation['note_end_index']
-            # Make sure the annotations don't overlap
-            if start_index < prev_end_index:
-                continue
-
-            highlighted_note.append(text[prev_end_index:start_index])
-            highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
-            prev_end_index = end_index
-
-        highlighted_note.append(text[prev_end_index:])
-        logger.info(highlighted_note)
-        return " ".join(highlighted_note).replace("\n", "<br>")
-    
-    def _get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
-        """
-        Returns highlighted text for a sentence in a note.
-        """
-        highlighted_note = []
-        text = note["text"]
-
-        sentence_start = text.lower().index(current_annotation['sentence'])
-        sentence_end = sentence_start + len(current_annotation['sentence'])
-        prev_end_index = sentence_start
-
-        annotations = annotations_for_sentence
-
-        highlighted_note = []
-        for annotation in annotations:
-            token_start_index = annotation['note_start_index']
-            token_end_index = annotation['note_end_index']
-
-            # Make sure the annotations don't overlap unless it is the first index
-            if (token_start_index < prev_end_index) and (token_start_index != 0):
-                continue
-
-            highlighted_note.append(text[prev_end_index:token_start_index])
-            key_token = text[token_start_index:token_end_index]
-            highlighted_note.append(f'<b><mark>{key_token}</mark></b>')
-            prev_end_index = token_end_index
-
-        highlighted_note.append(text[prev_end_index:sentence_end])
-        sentence = "".join(highlighted_note).strip().replace("\n", "<br>")
-        logger.info(f'Showing sentence : {sentence}')
-        return sentence
-
-
     def _format_date(self, date_obj):
         res = None
         if date_obj:
@@ -365,3 +308,62 @@ class AnnotationFilterStrategy:
         }
 
         return filtered_results, annotations_with_duplicates
+
+class SentenceHighlighter:
+    def get_highlighted_text(self, note, annotations_for_note):
+        """
+        Returns highlighted all of the text in a note.
+        """
+        highlighted_note = []
+        prev_end_index = 0
+        text = note["text"]
+
+        annotations = annotations_for_note
+        logger.info(annotations)
+
+        for annotation in annotations:
+            start_index = annotation['note_start_index']
+            end_index = annotation['note_end_index']
+            # Make sure the annotations don't overlap
+            if start_index < prev_end_index:
+                continue
+
+            highlighted_note.append(text[prev_end_index:start_index])
+            highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
+            prev_end_index = end_index
+
+        highlighted_note.append(text[prev_end_index:])
+        logger.info(highlighted_note)
+        return " ".join(highlighted_note).replace("\n", "<br>")
+    
+    def get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
+        """
+        Returns highlighted text for a specific sentence in a note.
+        """
+        highlighted_note = []
+        text = note["text"]
+
+        sentence_start = text.lower().index(current_annotation['sentence'])
+        sentence_end = sentence_start + len(current_annotation['sentence'])
+        prev_end_index = sentence_start
+
+        annotations = annotations_for_sentence
+
+        highlighted_note = []
+        for annotation in annotations:
+            token_start_index = annotation['note_start_index']
+            token_end_index = annotation['note_end_index']
+
+            # Make sure the annotations don't overlap unless it is the first index
+            if (token_start_index < prev_end_index) and (token_start_index != 0):
+                continue
+
+            highlighted_note.append(text[prev_end_index:token_start_index])
+            key_token = text[token_start_index:token_end_index]
+            highlighted_note.append(f'<b><mark>{key_token}</mark></b>')
+            prev_end_index = token_end_index
+
+        highlighted_note.append(text[prev_end_index:sentence_end])
+        sentence = "".join(highlighted_note).strip().replace("\n", "<br>")
+        logger.info(f'Showing sentence : {sentence}')
+        return sentence
