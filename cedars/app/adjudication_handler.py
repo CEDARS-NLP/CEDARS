@@ -32,7 +32,8 @@ class AdjudicationHandler:
             - hide_duplicates (bool) : True if we do not show duplicate sentences.
         '''
 
-        filtered_results,annotations_with_duplicates = AnnotationFilterStrategy.filter_annotations(raw_annotations,
+        filter_strat = AnnotationFilterStrategy()
+        filtered_results,annotations_with_duplicates = filter_strat.filter_annotations(raw_annotations,
                                                                                  hide_duplicates)
 
         annotation_ids = filtered_results['annotation_ids']
@@ -81,6 +82,7 @@ class AdjudicationHandler:
     
     def get_annotation_details(self, annotation, note, comments,
                                annotations_for_note, annotations_for_sentence):
+        text_highlighter = SentenceHighlighter()
         annotation_data = {
             "pos_start": self.patient_data['current_index'] + 1,
             "total_pos": len(self.patient_data['annotation_ids']),
@@ -88,11 +90,11 @@ class AdjudicationHandler:
             "note_date": self._format_date(annotation.get('text_date')),
             "event_date": self._format_date(self.patient_data['event_date']),
             "note_comment": comments,
-            "highlighted_sentence" : SentenceHighlighter.get_highlighted_sentence(annotation,
+            "highlighted_sentence" : text_highlighter.get_highlighted_sentence(annotation,
                                                                                   note,
                                                                                   annotations_for_sentence),
             "note_id": annotation["note_id"],
-            "full_note": SentenceHighlighter.get_highlighted_text(note,
+            "full_note": text_highlighter.get_highlighted_text(note,
                                                                   annotations_for_note),
             "tags": [note.get("text_tag_1", ""),
                     note.get("text_tag_2", ""),
@@ -193,7 +195,7 @@ class AdjudicationHandler:
         self.patient_data['event_annotation_id'] = event_annotation_id
         annotations_after_event = set(annotations_after_event)
 
-        for i, anno_id in self.patient_data['annotation_ids']:
+        for i, anno_id in enumerate(self.patient_data['annotation_ids']):
             review_status = self.patient_data['review_statuses'][i]
             if (anno_id in annotations_after_event) and (review_status == ReviewStatus.UNREVIEWED):
                 self.patient_data['review_statuses'][i] = ReviewStatus.SKIPPED

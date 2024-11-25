@@ -547,15 +547,15 @@ def save_adjudications():
     Handle logic for the save_adjudications route.
     Used to edit and review annotations.
     """
-    db.add_comment(current_annotation_id, request.form['comment'].strip())
-
-    current_annotation_id = session["annotations"][session["index"]]
-    patient_id = session['patient_id']
-    skip_after_event = db.get_search_query(query_key="skip_after_event")
 
     adjudication_handler = AdjudicationHandler(session['patient_id'])
     adjudication_handler.load_from_patient_data(session['patient_id'],
                                                 session['patient_data'])
+
+    current_annotation_id = adjudication_handler.get_curr_annotation_id()
+    db.add_comment(current_annotation_id, request.form['comment'].strip())
+    patient_id = session['patient_id']
+    skip_after_event = db.get_search_query(query_key="skip_after_event")
 
     action = request.form['submit_button']
     if action == 'new_date':
