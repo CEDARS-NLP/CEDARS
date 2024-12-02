@@ -1,9 +1,9 @@
 from unittest.mock import patch
 import pytest
 from flask import request
+from app.adjudication_handler import SentenceHighlighter
 from app.ops import (
-    allowed_data_file,
-    highlighted_text
+    allowed_data_file
 )
 from app.stats import _elements_to_int
 
@@ -237,8 +237,11 @@ def test_get_job_status(client, db):
 
 
 def test_highlighted_text(db):
+    text_highlighter = SentenceHighlighter()
     note = db.get_all_notes("1111111111")[0]
-    assert "<br>" in highlighted_text(note)
+    annotations_for_note = db.get_all_annotations_for_note(note["text_id"])
+    assert "<br>" in text_highlighter.get_highlighted_text(note,
+                                                           annotations_for_note)
 
 
 # def test_download_annotations(client, db, mocker):
