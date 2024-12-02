@@ -89,7 +89,7 @@ class AdjudicationHandler:
             "total_pos": len(self.patient_data['annotation_ids']),
             "patient_id": self.patient_id,
             "note_date": self._format_date(annotation.get('text_date')),
-            "event_date": self.patient_data['event_date'],
+            "event_date": self._format_date(self.patient_data['event_date']),
             "note_comment": comments,
             "highlighted_sentence" : text_highlighter.get_highlighted_sentence(annotation,
                                                                                   note,
@@ -150,10 +150,10 @@ class AdjudicationHandler:
         if action == 'first_anno':
             self._shift_annotation_index(0)
         elif action == 'prev_10':
-            new_index = max(0, last_index - 10)
+            new_index = max(0, index - 10)
             self._shift_annotation_index(new_index)
         elif action == 'prev_1':
-            new_index = max(0, last_index - 1)
+            new_index = max(0, index - 1)
             self._shift_annotation_index(new_index)
         elif action == 'next_1':
             new_index = min(index + 1, last_index)
