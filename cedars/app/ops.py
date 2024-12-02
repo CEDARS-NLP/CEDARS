@@ -560,6 +560,8 @@ def save_adjudications():
     action = request.form['submit_button']
     if action == 'new_date':
         new_date = request.form['date_entry']
+        date_format = '%Y-%m-%d'
+        new_date = datetime.strptime(new_date, date_format)
         annotations_after_event = []
         if skip_after_event:
             annotations_after_event = db.get_annotations_post_event(patient_id,

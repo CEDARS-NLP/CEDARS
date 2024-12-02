@@ -866,13 +866,13 @@ def get_annotations_post_event(patient_id: str, event_date: datetime.date):
         - annotation_ids (list) : List of annotation ID for the unreviewed
                                     annotations on or after that date.
     '''
+
     a_ids = mongo.db["ANNOTATIONS"].find({ 'patient_id' : patient_id,
                                         'text_date': {'$gte': event_date},
                                         'reviewed': ReviewStatus.UNREVIEWED.value
-                                        }, 
-                                        {'_id' : 1})
-    
-    return [x for x in a_ids]
+                                        })
+
+    return [x["_id"] for x in a_ids]
 
 def get_event_date(patient_id: str):
     """
@@ -1214,6 +1214,7 @@ def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     Returns:
         - None
     '''
+    logger.info(f"Skipping future annotations for patient {patient_id} after {event_date}.")
     mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
                                           'text_date': {'$gte': event_date},
                                           'reviewed': ReviewStatus.UNREVIEWED.value
@@ -1244,7 +1245,7 @@ def update_event_date(patient_id: str, new_date, annotation_id):
 
     Args:
         patient_id (str) : Unique ID for the patient.
-        new_date (str) : The new value to update the event date of the patient with.
+        new_date (Date / Datetime obj) : The new value to update the event date of the patient with.
             Must be in the format YYYY-MM-DD.
         annotation_id (str) : ID for the annotation at which the new_date was marked.
     Returns:
@@ -1252,11 +1253,9 @@ def update_event_date(patient_id: str, new_date, annotation_id):
     """
     # TODO: UTC dates
     logger.debug(f"Updating date on patient #{patient_id} to {new_date}.")
-    date_format = '%Y-%m-%d'
-    datetime_obj = datetime.strptime(new_date, date_format)
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
-                                       {"$set": {"event_date": datetime_obj}})
+                                       {"$set": {"event_date": new_date}})
 
     update_event_annotation_id(patient_id, annotation_id)
 
