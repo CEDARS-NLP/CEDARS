@@ -83,6 +83,9 @@ class AdjudicationHandler:
     
     def get_annotation_details(self, annotation, note, comments,
                                annotations_for_note, annotations_for_sentence):
+        '''
+        Get the details for the current annotation that is to be showed to the annotator.
+        '''
         text_highlighter = SentenceHighlighter()
         annotation_data = {
             "pos_start": self.patient_data['current_index'] + 1,
@@ -144,6 +147,10 @@ class AdjudicationHandler:
         return self.patient_data['review_statuses'].count(ReviewStatus.UNREVIEWED) == 0
     
     def perform_shift(self, action):
+        '''
+        Backend logic to allow an annotation to navigate back and forth
+        between annotations without needing to review them.
+        '''
         index = self.patient_data['current_index']
         last_index = len(self.patient_data['annotation_ids']) -1
 
@@ -169,6 +176,10 @@ class AdjudicationHandler:
 
 
     def _adjudicate_annotation(self):
+        '''
+        Logic to mark the current annotation as reviewed and go to the
+        next unreviewed annotation.
+        '''
         index = self.patient_data['current_index']
         last_index = len(self.patient_data['annotation_ids']) -1
         self.patient_data['review_statuses'][index] = ReviewStatus.REVIEWED
@@ -192,6 +203,10 @@ class AdjudicationHandler:
 
 
     def mark_event_date(self, event_date, event_annotation_id, annotations_after_event):
+        '''
+        Logic to enter an event date into the system and mark unreviewed annotations on or after
+        that date as skipped.
+        '''
         self.patient_data['event_date'] = self._format_date(event_date)
         self.patient_data['event_annotation_id'] = event_annotation_id
         annotations_after_event = set(annotations_after_event)
@@ -205,6 +220,10 @@ class AdjudicationHandler:
         self._adjudicate_annotation()
 
     def delete_event_date(self):
+        '''
+        Deletes the current event date and reverts the SKIPPED marks on any annotations
+        for that patient.
+        '''
         self.patient_data['event_date'] = None
         self.patient_data['event_annotation_id'] = None
 
@@ -216,6 +235,10 @@ class AdjudicationHandler:
         self._adjudicate_annotation()
 
     def _format_date(self, date_obj):
+        '''
+        Formats a datetime object into a date object.
+        Will return None if no date exists.
+        '''
         res = None
         if date_obj:
             res = date_obj.date()
