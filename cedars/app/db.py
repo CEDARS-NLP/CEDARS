@@ -1187,7 +1187,7 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
-    
+
     annotation_data = get_annotation(annotation_id)
     note_id = annotation_data['note_id']
 
@@ -1197,8 +1197,8 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
 
     if num_unreviewed_annos == 0:
         mark_note_reviewed(note_id, reviewed_by)
-    
-    
+
+
 
 def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     '''
@@ -1218,7 +1218,7 @@ def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
                                           'text_date': {'$gte': event_date},
                                           'reviewed': ReviewStatus.UNREVIEWED.value
-                                        }, 
+                                        },
                                         {"$set": {"reviewed": ReviewStatus.SKIPPED.value}})
 
 def revert_skipped_annotations(patient_id: str):
@@ -1235,7 +1235,7 @@ def revert_skipped_annotations(patient_id: str):
     '''
     mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
                                           'reviewed': ReviewStatus.SKIPPED.value
-                                        }, 
+                                        },
                                         {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
 
 
