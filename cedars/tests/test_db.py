@@ -194,7 +194,7 @@ def test_mark_annotation_reviewed(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
     annot_id = str(annot["_id"])
-    db.mark_annotation_reviewed(annot_id, 'ANNOTATOR', 1, 0)
+    db.mark_annotation_reviewed(annot_id, 'ANNOTATOR')
     assert db.get_annotation(annot_id)["reviewed"] == 1
 
 
