@@ -727,9 +727,9 @@ def adjudicate_records():
         db.mark_annotation_reviewed(annotation_id, current_user.username)
 
     if len(patient_data["annotation_ids"]) > 0:
-            # Only lock the patient for annotation if
-            # there are annotations that exist
-            db.set_patient_lock_status(patient_id, True)
+        # Only lock the patient for annotation if
+        # there are annotations that exist
+        db.set_patient_lock_status(patient_id, True)
 
     patient_status = adjudication_handler.get_patient_status()
 
