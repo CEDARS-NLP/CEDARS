@@ -1,3 +1,7 @@
+function sleep (time) {
+  return new Promise((resolve) => setTimeout(resolve, time));
+}
+
 window.addEventListener("message", (event) => {
     var origin = event.origin;
   
@@ -28,6 +32,10 @@ window.addEventListener("message", (event) => {
             // Send a login confirmation message to superbio server
             window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
 
+            sleep(5000).then(() => {
+              // Redirect to the main page or update UI as needed
+              window.location.href = '/';
+            })
           } else {
             console.error('Login failed:', data.error);
             // Handle login failure (e.g., show an error message)
