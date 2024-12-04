@@ -1,3 +1,4 @@
+import datetime
 from loguru import logger
 from bson import ObjectId
 from .cedars_enums import PatientStatus, ReviewStatus
@@ -181,9 +182,9 @@ class AdjudicationHandler:
         next unreviewed annotation.
         '''
         index = self.patient_data['current_index']
-        last_index = len(self.patient_data['annotation_ids']) -1
         self.patient_data['review_statuses'][index] = ReviewStatus.REVIEWED
         review_statuses = self.patient_data['review_statuses']
+        last_index = len(review_statuses) - 1
 
         # Find the next unreviewed index after the current one
         new_index = min(index + 1, last_index)
@@ -198,7 +199,7 @@ class AdjudicationHandler:
                 break
 
             new_index += 1
-            if new_index == last_index:
+            if new_index >= last_index:
                 new_index = 0
 
 
@@ -239,6 +240,9 @@ class AdjudicationHandler:
         Formats a datetime object into a date object.
         Will return None if no date exists.
         '''
+        if isinstance(date_obj, datetime.date):
+            return date_obj
+
         res = None
         if date_obj:
             res = date_obj.date()
