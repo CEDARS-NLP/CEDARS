@@ -47,7 +47,7 @@ class AdjudicationHandler:
         except ValueError as e:
             # A ValueError is thrown if the element being searched for
             # does not exist in the list.
-            # In this case if there are no unreviewed indices, we default 
+            # In this case if there are no unreviewed indices, we default
             # to the index of the event date if one exists and if not we select index 0.
 
             if stored_event_date and stored_annotation_id:
@@ -75,13 +75,13 @@ class AdjudicationHandler:
         '''
         self.patient_id = patient_id
         self.patient_data = patient_data
-    
+
     def get_patient_data(self):
         return self.patient_data
 
     def get_curr_annotation_id(self):
         return self.patient_data['annotation_ids'][self.patient_data['current_index']]
-    
+
     def get_annotation_details(self, annotation, note, comments,
                                annotations_for_note, annotations_for_sentence):
         '''
@@ -146,7 +146,7 @@ class AdjudicationHandler:
         # being reviewed as annotations that are unreviewed but after the event date
         # can be marked None to indicate that they do not need to be annotated.
         return self.patient_data['review_statuses'].count(ReviewStatus.UNREVIEWED) == 0
-    
+
     def perform_shift(self, action):
         '''
         Backend logic to allow an annotation to navigate back and forth
@@ -293,7 +293,7 @@ class AnnotationFilterStrategy:
             seen_sentence_indices.add(sentence_index)
 
         return indices_with_duplicates
-    
+
     def _pop_and_mark_duplicates(self, annotations, indices_with_duplicates):
         '''
         Pops all annotations that have duplicates based on a list of
@@ -326,7 +326,6 @@ class AnnotationFilterStrategy:
         """
         if hide_duplicates:
             indices_with_duplicates = self._filter_duplicates_by_patient(annotations)
-            
         else:
             indices_with_duplicates = self._filter_duplicates_by_note(annotations)
 
@@ -366,7 +365,7 @@ class SentenceHighlighter:
         highlighted_note.append(text[prev_end_index:])
         logger.info(highlighted_note)
         return " ".join(highlighted_note).replace("\n", "<br>")
-    
+
     def get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
         """
         Returns highlighted text for a specific sentence in a note.
