@@ -276,21 +276,21 @@ class AnnotationFilterStrategy:
         '''
         indices_with_duplicates = []
         prev_note_id = None
-        seen_sentence_indices = set()
+        seen_sentences = set()
         for i, annotation in enumerate(annotations):
             # If we are on a new note, then clear the hashset of sentences.
             # This is done so that we only check for the same sentence
             # in that note.
             if annotation['note_id'] != prev_note_id:
-                seen_sentence_indices.clear()
+                seen_sentences.clear()
 
             prev_note_id = annotation['note_id']
-            sentence_index = annotation['sentence_start']
-            if sentence_index in seen_sentence_indices:
+            sentence = annotation['sentence'].lower().strip()
+            if sentence in seen_sentences:
                 indices_with_duplicates.append(i)
                 continue
 
-            seen_sentence_indices.add(sentence_index)
+            seen_sentences.add(sentence)
 
         return indices_with_duplicates
 
