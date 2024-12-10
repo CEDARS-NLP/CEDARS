@@ -21,6 +21,8 @@ from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
 from .database import mongo, minio
+from .cedars_enums import ReviewStatus
+
 
 fake = Faker()
 
@@ -220,6 +222,9 @@ def create_db_indices():
     create_index("ANNOTATIONS", ["patient_id", "note_id"])
     mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
                                         ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ] )
+    create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
+    create_index("ANNOTATIONS", ["note_id", "reviewed"])
+    create_index("ANNOTATIONS", ["patient_id", "reviewed"])
 
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
@@ -415,10 +420,10 @@ def upsert_patient_results(patient_id: str, insert_datetime: datetime = None, up
     all_note_details = get_formatted_patient_predictions(patient_id)
 
     reviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                                reviewed=True,
+                                                                reviewed=ReviewStatus.REVIEWED,
                                                                 key="sentence")
     unreviewed_sentences = get_patient_annotation_ids(patient_id,
-                                                        reviewed=False,
+                                                        reviewed=ReviewStatus.UNREVIEWED,
                                                         key="sentence")
     sentences = reviewed_sentences + unreviewed_sentences
 
@@ -819,18 +824,18 @@ def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
     return {"total": total, "annotations": annotations}
 
 
-def get_patient_annotation_ids(p_id: str, reviewed=False, key="_id"):
+def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
 
     Args:
         p_id (str) : Unique ID for a patient.
-        reviewed (bool) : True if we want to get reviewed annotations.
+        reviewed (ReviewStatus Enum) : The status of the annotation wrt being reviewed.
     Returns:
         annotations (list) : A list of all annotation IDs linked to that patient.
     """
     logger.debug(f"Retriving annotations for patient #{p_id} from database.")
-    query_filter = {"patient_id": p_id, "isNegated": False, "reviewed": reviewed}
+    query_filter = {"patient_id": p_id, "isNegated": False, "reviewed": reviewed.value}
 
     annotation_ids = mongo.db["ANNOTATIONS"].find(
         query_filter).sort([
@@ -847,6 +852,27 @@ def get_patient_annotation_ids(p_id: str, reviewed=False, key="_id"):
         res = [str(_id[key]) for _id in annotation_ids]
 
     return res
+
+def get_annotations_post_event(patient_id: str, event_date: datetime.date):
+    '''
+    Retirves the annotation IDs for unreviewed events on or
+    after the event date for a paticular patient.
+
+    Args:
+        - patient_id (str) : ID for the patient
+        - event_date(Date) : Date on which the event was found
+    
+    Returns:
+        - annotation_ids (list) : List of annotation ID for the unreviewed
+                                    annotations on or after that date.
+    '''
+
+    a_ids = mongo.db["ANNOTATIONS"].find({ 'patient_id' : patient_id,
+                                        'text_date': {'$gte': event_date},
+                                        'reviewed': ReviewStatus.UNREVIEWED.value
+                                        })
+
+    return [x["_id"] for x in a_ids]
 
 def get_event_date(patient_id: str):
     """
@@ -1145,18 +1171,72 @@ def update_pines_api_url(new_url):
 
 
 
-def mark_annotation_reviewed(annotation_id):
+def mark_annotation_reviewed(annotation_id, reviewed_by):
     """
     Updates the annotation in the database to mark it as reviewed.
+    Also updates the note it belongs to as reviewed if all annotations that
+    belong to it are also reviewed.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
+        - annotation_id (str) : Unique ID for the annotation.
+        - reviewed_by (str) : The name of the user who reviewed this annotation.
+
     Returns:
         None
     """
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
-                                       {"$set": {"reviewed": True}})
+                                       {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
+
+    annotation_data = get_annotation(annotation_id)
+    note_id = annotation_data['note_id']
+
+    # Get the number of unreviewed annotations for the note this annotation belongs to
+    num_unreviewed_annos = mongo.db["ANNOTATIONS"].count_documents({'note_id' : note_id,
+                                  'reviewed' : ReviewStatus.UNREVIEWED.value})
+
+    if num_unreviewed_annos == 0:
+        mark_note_reviewed(note_id, reviewed_by)
+
+
+
+def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
+    '''
+    Marks the annotation for unreviewed events on or
+    after the event date for a paticular patient as skipped. We
+    mark them as skipped as annotations after an event date may be ignorged
+    and do not need manual review.
+
+    Args:
+        - patient_id (str) : ID for the patient
+        - event_date(Date) : Date on which the event was found
+
+    Returns:
+        - None
+    '''
+    logger.info(f"Skipping future annotations for patient {patient_id} after {event_date}.")
+    mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
+                                          'text_date': {'$gte': event_date},
+                                          'reviewed': ReviewStatus.UNREVIEWED.value
+                                        },
+                                        {"$set": {"reviewed": ReviewStatus.SKIPPED.value}})
+
+def revert_skipped_annotations(patient_id: str):
+    '''
+    Reverts the skiped annotations for unreviewed events on or
+    after the event date for a paticular patient. This is done in the event of
+    a patient's event date being deleted.
+
+    Args:
+        - patient_id (str) : ID for the patient
+
+    Returns:
+        - None
+    '''
+    mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
+                                          'reviewed': ReviewStatus.SKIPPED.value
+                                        },
+                                        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
 
 
 def update_event_date(patient_id: str, new_date, annotation_id):
@@ -1165,7 +1245,7 @@ def update_event_date(patient_id: str, new_date, annotation_id):
 
     Args:
         patient_id (str) : Unique ID for the patient.
-        new_date (str) : The new value to update the event date of the patient with.
+        new_date (Date / Datetime obj) : The new value to update the event date of the patient with.
             Must be in the format YYYY-MM-DD.
         annotation_id (str) : ID for the annotation at which the new_date was marked.
     Returns:
@@ -1173,11 +1253,9 @@ def update_event_date(patient_id: str, new_date, annotation_id):
     """
     # TODO: UTC dates
     logger.debug(f"Updating date on patient #{patient_id} to {new_date}.")
-    date_format = '%Y-%m-%d'
-    datetime_obj = datetime.strptime(new_date, date_format)
 
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
-                                       {"$set": {"event_date": datetime_obj}})
+                                       {"$set": {"event_date": new_date}})
 
     update_event_annotation_id(patient_id, annotation_id)
 
@@ -1212,7 +1290,10 @@ def get_event_annotation_id(patient_id: str):
 
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
 
-    return patient["event_annotation_id"]
+    if patient is not None:
+        return patient["event_annotation_id"]
+
+    return None
 
 def update_event_annotation_id(patient_id: str, annotation_id):
     """
@@ -1270,6 +1351,10 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
 def mark_note_reviewed(note_id, reviewed_by: str):
     """
     Updates the note's status to reviewed in the database.
+
+     Args:
+        patient_id (int) : Unique ID for a patient.
+        reviewed_by (str) : The name of the user who reviewed the note.
     """
     logger.debug(f"Marking note #{note_id} as reviewed.")
     mongo.db["NOTES"].update_one({"text_id": note_id},
@@ -1350,7 +1435,7 @@ def update_annotation_reviewed(note_id: str) -> int:
     """
     annotations_collection = mongo.db["ANNOTATIONS"]
     result = annotations_collection.update_many({"note_id": note_id},
-                                                {"$set": {"reviewed": True}})
+                                                {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
     return result.modified_count
 
 
