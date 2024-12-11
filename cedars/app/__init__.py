@@ -6,7 +6,7 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
-from flask import Flask, render_template
+from flask import Flask, render_template, session
 from flask_session import Session
 from loguru import logger
 import rq
@@ -47,6 +47,20 @@ def create_app(config_filename=None):
     cedars_app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # Allow cross-site cookies
     cedars_app.config['SESSION_COOKIE_SECURE'] = True  # Required for SameSite=None
     cedars_app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access for security
+
+    @cedars_app.after_request
+    def ensure_cookie_string(response):
+        # Ensure session_id is a string
+        session_id = session.sid
+        if isinstance(session_id, bytes):
+            session_id = session_id.decode('utf-8')
+        response.set_cookie(
+            cedars_app.config["SESSION_COOKIE_NAME"], 
+            session_id, 
+            samesite=cedars_app.config.get('SESSION_COOKIE_SAMESITE', 'None'), 
+            secure=cedars_app.config.get('SESSION_COOKIE_SECURE', True)
+        )
+        return response
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
 
