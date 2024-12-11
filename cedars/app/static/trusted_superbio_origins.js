@@ -1,10 +1,4 @@
-const TRUSTED_ORIGINS = ["http://localhost:3000", "https://dev.app.superbio.ai", "https://msk-superbio.com"];
-
-function isTrustedOrigin(origin) {
-  // Allow all subdomains of msk-superbio.com and specific origins
-  const regex = /^https:\/\/([a-zA-Z0-9.-]+)\.msk-superbio\.com$/;
-  return TRUSTED_ORIGINS.includes(origin) || regex.test(origin);
-}
+const TRUSTED_ORIGINS = ["http://localhost:3000", "https://dev.app.superbio.ai"];
 
 window.addEventListener("message", (event) => {
   if (!isTrustedOrigin(event.origin)) {

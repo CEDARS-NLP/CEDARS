@@ -16,6 +16,7 @@ from redis import Redis
 sess = Session()
 
 
+
 def rq_init_app(cedars_rq):
     """Initialize the rq app"""
     cedars_rq.redis = Redis.from_url(cedars_rq.config["RQ"]['redis_url'])
@@ -41,6 +42,11 @@ def create_app(config_filename=None):
     cedars_app.config["SESSION_TYPE"] = "redis"
     cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
 
+    cedars_app.config['SESSION_PERMANENT'] = False
+    cedars_app.config['SESSION_USE_SIGNER'] = True  # Sign the session ID cookie for security
+    cedars_app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # Allow cross-site cookies
+    cedars_app.config['SESSION_COOKIE_SECURE'] = True  # Required for SameSite=None
+    cedars_app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access for security
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
 
