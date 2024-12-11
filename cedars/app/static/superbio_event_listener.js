@@ -46,7 +46,7 @@ window.addEventListener("message", (event) => {
         });
     }
     else if (data.event_type === 'auth_redirect') {
-      window.location.href = '/stats/';
+      window.location.href = '/stats';
     }
     else if (data.event_type === "logout") {
         console.log("Logging out user.");
