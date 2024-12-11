@@ -3,7 +3,7 @@ function sleep(time) {
 }
 
 // Trusted origins including regex for subdomains of msk-superbio.com
-const TRUSTED_ORIGINS = ["https://dev.app.superbio.ai", "https://msk-superbio.com"];
+const TRUSTED_ORIGINS = ["http://localhost:3000", "https://dev.app.superbio.ai", "https://msk-superbio.com"];
 
 function isTrustedOrigin(origin) {
   // Allow all subdomains of msk-superbio.com
