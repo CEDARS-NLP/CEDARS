@@ -6,12 +6,11 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
-from flask import Flask, render_template
+from flask import Flask, render_template, session
 from flask_session import Session
 from loguru import logger
 import rq
 from redis import Redis
-
 
 sess = Session()
 
@@ -40,6 +39,12 @@ def create_app(config_filename=None):
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
     cedars_app.config["SESSION_TYPE"] = "redis"
     cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
+
+    cedars_app.config['SESSION_PERMANENT'] = False
+    cedars_app.config['SESSION_USE_SIGNER'] = True  # Sign the session ID cookie for security
+    cedars_app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # Allow cross-site cookies
+    cedars_app.config['SESSION_COOKIE_SECURE'] = True  # Required for SameSite=None
+    cedars_app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access for security
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
