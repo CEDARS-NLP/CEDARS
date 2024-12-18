@@ -312,35 +312,109 @@ def bulk_insert_notes(notes):
 
 def bulk_upsert_patients(patient_ids):
     patients_collection = mongo.db["PATIENTS"]
-    operations = []
-    for p_id in patient_ids:
+    results_collection = mongo.db["RESULTS"]
+    patient_operations = []
+    results_operations = []
+    number_of_patients_in_db = patients_collection.count_documents()
+    for index_no, p_id in enumerate(patient_ids):
+        # Update the index in cases where a batch of patients
+        # has been added after the initial batch.
+        index_no += number_of_patients_in_db
         p_id = str(p_id).strip()
-        patient_info = {
-            "patient_id": p_id,
-            "reviewed": False,
-            "locked": False,
-            "updated": False,
-            "comments": "",
-            "reviewed_by": "",
-            "event_annotation_id": None,
-            "event_date": None,
-            "admin_locked": False
-        }
-        operations.append(
-            UpdateOne(
-                {"patient_id": p_id},
-                {"$setOnInsert": patient_info},
-                upsert=True
-            )
-        )
+
+        patient_op = generate_patient_entry(p_id, index_no)
+        patient_operations.append(patient_op)
+
+        results_op = generate_results_entry(p_id, index_no)
+        results_operations.append(results_op)
 
     try:
-        result = patients_collection.bulk_write(operations, ordered=False)
-        return result.upserted_count
+        patients_update = patients_collection.bulk_write(patient_operations,
+                                                        ordered=False)
+        results_update = results_collection.bulk_write(results_operations,
+                                                        ordered=False)
+
+        return patients_update.upserted_count
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nUpserted']
 
+def generate_patient_entry(p_id: str, index_no: int):
+    '''
+    Generates a blank entry for a new patient in the PATIENTS collection.
+
+    Args:
+        - p_id (str) : Unique ID for the patient.
+        - index_no (int) : Order number for this patient.
+                            Follows the ordering in which patients are uploaded.
+
+    Returns:
+        - operation (pymongo.UpdateOne) : Pymongo operation to insert the patient
+                                            into a collection.
+    '''
+
+    patient_info = {
+        "patient_id": p_id,
+        "reviewed": False,
+        "locked": False,
+        "updated": False,
+        "comments": "",
+        "reviewed_by": "",
+        "event_annotation_id": None,
+        "event_date": None,
+        "admin_locked": False,
+        "index_no" : index_no
+    }
+
+    return UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_info},
+                upsert=True
+            )
+
+def generate_results_entry(p_id: str, index_no: int):
+    '''
+    Generates a blank entry for a new patient in the RESULTS collection.
+
+    Args:
+        - p_id (str) : Unique ID for the patient.
+        - index_no (int) : Order number for this patient.
+                            Follows the ordering in which patients are uploaded.
+
+    Returns:
+        - operation (pymongo.UpdateOne) : Pymongo operation to insert the patient
+                                            into a collection.
+    '''
+
+    first_note_date = get_first_note_date_for_patient(p_id)
+    last_note_date = get_last_note_date_for_patient(p_id)
+
+    patient_results = {
+        'patient_id' : p_id,
+        'total_notes' : get_num_patient_notes(p_id),
+        'reviewed_notes' : 0,
+        'total_sentences' : 0,
+        'reviewed_sentences' : 0,
+        'sentences' : '',
+        'event_date' : None,
+        'event_information' : None,
+        'first_note_date' : first_note_date,
+        'last_note_date' : last_note_date,
+        'comments' : '',
+        'reviewer' : None,
+        'max_score_note_id' : None,
+        'max_score_note_date' : None,
+        'max_score' : None,
+        'predicted_notes' : None,
+        'last_updated' : datetime.now(),
+        'index_no' : index_no
+    }
+
+    return UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_results},
+                upsert=True
+            )
 
 # def upload_notes(documents):
 #     """
