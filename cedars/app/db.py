@@ -315,7 +315,7 @@ def bulk_upsert_patients(patient_ids):
     results_collection = mongo.db["RESULTS"]
     patient_operations = []
     results_operations = []
-    number_of_patients_in_db = patients_collection.count_documents()
+    number_of_patients_in_db = patients_collection.count_documents({})
     for index_no, p_id in enumerate(patient_ids):
         # Update the index in cases where a batch of patients
         # has been added after the initial batch.
@@ -696,7 +696,9 @@ def get_patient_by_id(patient_id: str):
 def get_patient():
     """
     Retrives a single patient ID who has not yet been reviewed and is not currently locked.
-    The chosen patient is simply the first one in the database that has not yet been reviewed.
+    The chosen patient is the first one in the database that has not yet been reviewed. The
+    order in which un-reviewed patients are selected is based on the order in which they were
+    uploaded by the user.
 
     Args:
         None
@@ -706,8 +708,12 @@ def get_patient():
 
     # todo: make sure it only get patients who have annotations atleast
     # while adjuticating
-    patient = mongo.db["PATIENTS"].find_one({"reviewed": False,
-                                             "locked": False})
+    patient = mongo.db["PATIENTS"].find({"reviewed": False,
+                                             "locked": False}).sort([("index_no", 1)]).limit(1)
+
+    # Extract the first record as we only retrived one patient due to limit(1)
+    patient = list(patient)[0]
+
 
     if patient is not None and "patient_id" in patient.keys():
         logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
@@ -1069,28 +1075,30 @@ def get_project_users():
 
 def get_all_patient_ids():
     """
-    Returns all the patient IDs in this project
-
+    Returns all the patient IDs in this project.
+    The patients are returned in the order in which they were uploaded.
+ 
     Args:
         None
     Returns:
         patients (list) : List of all patients in this project
     """
-    patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1})
+    patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1}).sort([('index_no', 1)])
 
     return [patient["patient_id"] for patient in patients]
 
 
 def get_patient_ids():
     """
-    Returns all the patient IDs in this project
+    Returns all the patient IDs in this project.
+    The patients are returned in the order in which they were uploaded.
 
     Args:
         None
     Returns:
         patient_ids (list) : List of all patient IDs in this project
     """
-    patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False})
+    patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False}).sort([('index_no', 1)])
     res = [patient["patient_id"] for patient in patients]
     logger.info(f"Retrived {len(res)} patient IDs from the database.")
     return res
@@ -1835,7 +1843,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         columns_to_retrive = {'_id': False}
         columns_to_retrive.update({column : True for column in schema.keys()})
         project_results = mongo.db["RESULTS"].find({},
-                                                    columns_to_retrive)
+                                                    columns_to_retrive).sort([("index_no", 1)])
 
         for chunk in pl.DataFrame(project_results, orient="row",
                                                 schema=schema,
