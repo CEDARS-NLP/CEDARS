@@ -558,6 +558,8 @@ def save_adjudications():
     skip_after_event = db.get_search_query(query_key="skip_after_event")
 
     action = request.form['submit_button']
+    is_shift_performed = False
+    # or action == 'comment':
     if action == 'new_date':
         new_date = request.form['date_entry']
         date_format = '%Y-%m-%d'
@@ -582,17 +584,17 @@ def save_adjudications():
     elif action == 'adjudicate':
         db.mark_annotation_reviewed(current_annotation_id, current_user.username)
         adjudication_handler._adjudicate_annotation()
-    elif action == 'comment':
-        # No additional changes to be made if only
-        # saving a comment
-        pass
     else:
         # Must be a shift action
         adjudication_handler.perform_shift(action)
+        is_shift_performed = True
 
     session["patient_data"] = adjudication_handler.get_patient_data()
 
-    if adjudication_handler.is_patient_reviewed():
+    # We do not skip to the next patient if the current operation was just a shift.
+    # This is done as users may want to view notes for a patient that has already been
+    # reviewed.
+    if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
         db.set_patient_lock_status(patient_id, False)
         db.mark_patient_reviewed(patient_id,
                                          reviewed_by=current_user.username)
