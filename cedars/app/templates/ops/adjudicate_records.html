@@ -57,10 +57,12 @@
           <ul class="list-group">
             <li class="list-group-item">
               <label for="date_entry">Enter Event Date:</label>
-              {% if event_date is none %}
-                <input type="date" class="text-muted" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{note_date}}">
+              {% if event_date %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value='{{ event_date.strftime("%Y-%m-%d")  }}'>
+              {% elif note_date %}
+                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value='{{ note_date.strftime("%Y-%m-%d") }}'>
               {% else %}
-                <input type="date" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}" value="{{event_date}}">
+                <input type="date" class="text-muted" name="date_entry" id="date_entry" required pattern="\d{2}\d{2}-\d{2}">
               {% endif %}
             </li>
             <li class="list-group-item">
