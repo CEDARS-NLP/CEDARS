@@ -1369,6 +1369,8 @@ def reset_patient_reviewed():
     mongo.db["PATIENTS"].update_many({},
                                      {"$set": {"reviewed": False,
                                                "reviewed_by": "",
+                                               "event_annotation_id": None,
+                                               "event_date": None,
                                                "comments": ""}})
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
