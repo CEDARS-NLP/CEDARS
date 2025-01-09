@@ -1236,7 +1236,7 @@ def revert_skipped_annotations(patient_id: str):
     mongo.db["ANNOTATIONS"].update_many({ 'patient_id' : patient_id,
                                           'reviewed': ReviewStatus.SKIPPED.value
                                         },
-                                        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
+                                        {"$set": {"reviewed": ReviewStatus.UNREVIEWED.value}})
 
 
 def update_event_date(patient_id: str, new_date, annotation_id):

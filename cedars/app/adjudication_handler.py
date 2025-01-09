@@ -220,7 +220,7 @@ class AdjudicationHandler:
 
         self._adjudicate_annotation()
 
-    def delete_event_date(self, review_annotation=False):
+    def delete_event_date(self):
         '''
         Deletes the current event date and reverts the SKIPPED marks on any annotations
         for that patient.
@@ -232,12 +232,19 @@ class AdjudicationHandler:
         self.patient_data['event_annotation_id'] = None
 
         # Re-set all skipped events to UNREVIEWED
+        self.reset_all_skipped()
+
+        self._adjudicate_annotation()
+    
+    def reset_all_skipped(self):
+        '''
+        Converts all annotations marked as SKIPPED to be marked as
+        UNREVIEWED.
+        '''
         for i, status in enumerate(self.patient_data['review_statuses']):
             if status == ReviewStatus.SKIPPED:
                 self.patient_data['review_statuses'][i] = ReviewStatus.UNREVIEWED
 
-        if review_annotation:
-            self._adjudicate_annotation()
 
     def _format_date(self, date_obj):
         '''
