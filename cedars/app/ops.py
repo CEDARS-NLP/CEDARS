@@ -559,8 +559,11 @@ def save_adjudications():
 
     action = request.form['submit_button']
     is_shift_performed = False
-    # or action == 'comment':
     if action == 'new_date':
+        # Delete the current event_date (if any) and revert skipped annotations
+        adjudication_handler = delete_event_date_workflow(adjudication_handler,
+                                                          patient_id, review_annotation=False)
+
         new_date = request.form['date_entry']
         date_format = '%Y-%m-%d'
         new_date = datetime.strptime(new_date, date_format)
@@ -577,10 +580,9 @@ def save_adjudications():
                                              annotations_after_event)
 
     elif action == 'del_date':
-        db.delete_event_date(patient_id)
-        db.revert_skipped_annotations(patient_id)
         db.mark_annotation_reviewed(current_annotation_id, current_user.username)
-        adjudication_handler.delete_event_date()
+        adjudication_handler = delete_event_date_workflow(adjudication_handler,
+                                                          patient_id, review_annotation=True)
     elif action == 'adjudicate':
         db.mark_annotation_reviewed(current_annotation_id, current_user.username)
         adjudication_handler._adjudicate_annotation()
@@ -800,6 +802,17 @@ def get_next_annotation_index(unreviewed_annotations, current_index):
         i += 1
 
     return i
+
+def delete_event_date_workflow(adjudication_handler, patient_id, review_annotation=False):
+    '''
+    Worflow to handle the logic and DB updates of deleting the current event_date
+    for a patient.
+    '''
+    db.delete_event_date(patient_id)
+    db.revert_skipped_annotations(patient_id)
+    adjudication_handler.delete_event_date(review_annotation=review_annotation)
+
+    return adjudication_handler
 
 def get_download_filename(is_full_download=False):
     '''
