@@ -311,6 +311,20 @@ def bulk_insert_notes(notes):
 
 
 def bulk_upsert_patients(patient_ids):
+    '''
+    This function will automatically create default enteries in the
+    PATIENTS and RESULTS collection for each patient. The order in which
+    the patients are uploaded will be maintained using an index_no field.
+
+    For compatibility with older versions of CEDARS without the index_no field,
+    mongodb will ignore the sorting step and the program will continue as normal.
+
+    Args :
+        - patient_ids (list[str]) : List of all uploaded patient IDs in order.
+    
+    Returns :
+        - None
+    '''
     patients_collection = mongo.db["PATIENTS"]
     results_collection = mongo.db["RESULTS"]
     patient_operations = []
@@ -329,6 +343,12 @@ def bulk_upsert_patients(patient_ids):
         results_operations.append(results_op)
 
     try:
+        '''
+        While we want to maintain the order in which patients are uploaded,
+        we ensure this order using the index_no field. For this reason we can
+        set ordered=False when performing a bulk write to maintain high speeds
+        while maintaining the correct order when showing patients to the user.
+        '''
         patients_update = patients_collection.bulk_write(patient_operations,
                                                         ordered=False)
         results_update = results_collection.bulk_write(results_operations,
@@ -708,6 +728,11 @@ def get_patient():
 
     # todo: make sure it only get patients who have annotations atleast
     # while adjuticating
+
+    # Sort patients by index_no to maintain order of upload
+    # mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
     patient = mongo.db["PATIENTS"].find({"reviewed": False,
                                              "locked": False}).sort([("index_no", 1)]).limit(1)
 
@@ -1083,6 +1108,12 @@ def get_all_patient_ids():
     Returns:
         patients (list) : List of all patients in this project
     """
+
+    # Sort patients by index_no when presenting to the user to keep them in the
+    # order in which they were uploaded.
+    # Mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
     patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1}).sort([('index_no', 1)])
 
     return [patient["patient_id"] for patient in patients]
@@ -1098,7 +1129,13 @@ def get_patient_ids():
     Returns:
         patient_ids (list) : List of all patient IDs in this project
     """
+
+    # Sorting patients by index_no to maintain upload order
+    # Mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
     patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False}).sort([('index_no', 1)])
+
     res = [patient["patient_id"] for patient in patients]
     logger.info(f"Retrived {len(res)} patient IDs from the database.")
     return res
@@ -1842,6 +1879,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Write data in chunks and stream to MinIO
         columns_to_retrive = {'_id': False}
         columns_to_retrive.update({column : True for column in schema.keys()})
+
+        # Sorting results by index_no to maintain upload order
+        # Mongodb will ignore this command if index_no does not exist.
+        # This is improtant for backwards compatibility, 
+        # as the index_no will not be present in older CEDARS versions.
         project_results = mongo.db["RESULTS"].find({},
                                                     columns_to_retrive).sort([("index_no", 1)])
 
