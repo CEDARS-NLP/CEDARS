@@ -630,7 +630,7 @@ def save_adjudications():
                 session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
                                                              session["index"])
         else:
-            is_last_note =session["index"] >= session["total_count"] - 1
+            is_last_note = session["index"] >= session["total_count"] - 1
             if is_last_note or (updated_date and skip_after_event):
                 # If the index and reached the end of a patient's notes
                 # and there are no unreviewed annotations left
