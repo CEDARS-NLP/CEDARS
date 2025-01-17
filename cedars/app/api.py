@@ -27,7 +27,7 @@ def load_pines_url(project_id, superbio_api_token = None):
         - Custom error for PINES healthcheck
     '''
 
-    env_url = "https://api-pines-production.superbio.ai"
+    env_url = os.getenv("PINES_API_URL")
     api_url = os.getenv("SUPERBIO_API_URL")
     if env_url is not None:
         # Get PINES api from .env
