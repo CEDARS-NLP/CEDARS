@@ -316,36 +316,130 @@ def bulk_insert_notes(notes):
 
 
 def bulk_upsert_patients(patient_ids):
+    '''
+    This function will automatically create default enteries in the
+    PATIENTS and RESULTS collection for each patient. The order in which
+    the patients are uploaded will be maintained using an index_no field.
+
+    For compatibility with older versions of CEDARS without the index_no field,
+    mongodb will ignore the sorting step and the program will continue as normal.
+
+    Args :
+        - patient_ids (list[str]) : List of all uploaded patient IDs in order.
+    
+    Returns :
+        - None
+    '''
     patients_collection = mongo.db["PATIENTS"]
-    operations = []
-    for p_id in patient_ids:
+    results_collection = mongo.db["RESULTS"]
+    patient_operations = []
+    results_operations = []
+    number_of_patients_in_db = patients_collection.count_documents({})
+    for index_no, p_id in enumerate(patient_ids):
+        # Update the index in cases where a batch of patients
+        # has been added after the initial batch.
+        index_no += number_of_patients_in_db
         p_id = str(p_id).strip()
-        patient_info = {
-            "patient_id": p_id,
-            "reviewed": False,
-            "locked": False,
-            "updated": False,
-            "comments": "",
-            "reviewed_by": "",
-            "event_annotation_id": None,
-            "event_date": None,
-            "admin_locked": False
-        }
-        operations.append(
-            UpdateOne(
-                {"patient_id": p_id},
-                {"$setOnInsert": patient_info},
-                upsert=True
-            )
-        )
+
+        patient_op = generate_patient_entry(p_id, index_no)
+        patient_operations.append(patient_op)
+
+        results_op = generate_results_entry(p_id, index_no)
+        results_operations.append(results_op)
 
     try:
-        result = patients_collection.bulk_write(operations, ordered=False)
-        return result.upserted_count
+        '''
+        While we want to maintain the order in which patients are uploaded,
+        we ensure this order using the index_no field. For this reason we can
+        set ordered=False when performing a bulk write to maintain high speeds
+        while maintaining the correct order when showing patients to the user.
+        '''
+        patients_update = patients_collection.bulk_write(patient_operations,
+                                                        ordered=False)
+        results_update = results_collection.bulk_write(results_operations,
+                                                        ordered=False)
+
+        return patients_update.upserted_count
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nUpserted']
 
+def generate_patient_entry(p_id: str, index_no: int):
+    '''
+    Generates a blank entry for a new patient in the PATIENTS collection.
+
+    Args:
+        - p_id (str) : Unique ID for the patient.
+        - index_no (int) : Order number for this patient.
+                            Follows the ordering in which patients are uploaded.
+
+    Returns:
+        - operation (pymongo.UpdateOne) : Pymongo operation to insert the patient
+                                            into a collection.
+    '''
+
+    patient_info = {
+        "patient_id": p_id,
+        "reviewed": False,
+        "locked": False,
+        "updated": False,
+        "comments": "",
+        "reviewed_by": "",
+        "event_annotation_id": None,
+        "event_date": None,
+        "admin_locked": False,
+        "index_no" : index_no
+    }
+
+    return UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_info},
+                upsert=True
+            )
+
+def generate_results_entry(p_id: str, index_no: int):
+    '''
+    Generates a blank entry for a new patient in the RESULTS collection.
+
+    Args:
+        - p_id (str) : Unique ID for the patient.
+        - index_no (int) : Order number for this patient.
+                            Follows the ordering in which patients are uploaded.
+
+    Returns:
+        - operation (pymongo.UpdateOne) : Pymongo operation to insert the patient
+                                            into a collection.
+    '''
+
+    first_note_date = get_first_note_date_for_patient(p_id)
+    last_note_date = get_last_note_date_for_patient(p_id)
+
+    patient_results = {
+        'patient_id' : p_id,
+        'total_notes' : get_num_patient_notes(p_id),
+        'reviewed_notes' : 0,
+        'total_sentences' : 0,
+        'reviewed_sentences' : 0,
+        'sentences' : '',
+        'event_date' : None,
+        'event_information' : None,
+        'first_note_date' : first_note_date,
+        'last_note_date' : last_note_date,
+        'comments' : '',
+        'reviewer' : None,
+        'max_score_note_id' : None,
+        'max_score_note_date' : None,
+        'max_score' : None,
+        'predicted_notes' : None,
+        'last_updated' : datetime.now(),
+        'index_no' : index_no
+    }
+
+    return UpdateOne(
+                {"patient_id": p_id},
+                {"$setOnInsert": patient_results},
+                upsert=True
+            )
 
 # def upload_notes(documents):
 #     """
@@ -627,7 +721,9 @@ def get_patient_by_id(patient_id: str):
 def get_patient():
     """
     Retrives a single patient ID who has not yet been reviewed and is not currently locked.
-    The chosen patient is simply the first one in the database that has not yet been reviewed.
+    The chosen patient is the first one in the database that has not yet been reviewed. The
+    order in which un-reviewed patients are selected is based on the order in which they were
+    uploaded by the user.
 
     Args:
         None
@@ -637,8 +733,17 @@ def get_patient():
 
     # todo: make sure it only get patients who have annotations atleast
     # while adjuticating
-    patient = mongo.db["PATIENTS"].find_one({"reviewed": False,
-                                             "locked": False})
+
+    # Sort patients by index_no to maintain order of upload
+    # mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
+    patient = mongo.db["PATIENTS"].find({"reviewed": False,
+                                             "locked": False}).sort([("index_no", 1)]).limit(1)
+
+    # Extract the first record as we only retrived one patient due to limit(1)
+    patient = list(patient)[0]
+
 
     if patient is not None and "patient_id" in patient.keys():
         logger.debug(f"Retriving patient #{patient['patient_id']} from database.", )
@@ -1021,28 +1126,42 @@ def get_project_users():
 
 def get_all_patient_ids():
     """
-    Returns all the patient IDs in this project
-
+    Returns all the patient IDs in this project.
+    The patients are returned in the order in which they were uploaded.
+ 
     Args:
         None
     Returns:
         patients (list) : List of all patients in this project
     """
-    patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1})
+
+    # Sort patients by index_no when presenting to the user to keep them in the
+    # order in which they were uploaded.
+    # Mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
+    patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1}).sort([('index_no', 1)])
 
     return [patient["patient_id"] for patient in patients]
 
 
 def get_patient_ids():
     """
-    Returns all the patient IDs in this project
+    Returns all the patient IDs in this project.
+    The patients are returned in the order in which they were uploaded.
 
     Args:
         None
     Returns:
         patient_ids (list) : List of all patient IDs in this project
     """
-    patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False})
+
+    # Sorting patients by index_no to maintain upload order
+    # Mongodb will ignore this command if index_no does not exist.
+    # This is improtant for backwards compatibility, 
+    # as the index_no will not be present in older CEDARS versions.
+    patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False}).sort([('index_no', 1)])
+
     res = [patient["patient_id"] for patient in patients]
     logger.info(f"Retrived {len(res)} patient IDs from the database.")
     return res
@@ -1847,8 +1966,13 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Write data in chunks and stream to MinIO
         columns_to_retrive = {'_id': False}
         columns_to_retrive.update({column : True for column in schema.keys()})
+
+        # Sorting results by index_no to maintain upload order
+        # Mongodb will ignore this command if index_no does not exist.
+        # This is improtant for backwards compatibility, 
+        # as the index_no will not be present in older CEDARS versions.
         project_results = mongo.db["RESULTS"].find({},
-                                                    columns_to_retrive)
+                                                    columns_to_retrive).sort([("index_no", 1)])
 
         for chunk in pl.DataFrame(project_results, orient="row",
                                                 schema=schema,
