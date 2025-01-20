@@ -216,7 +216,7 @@ def prepare_note(note_info):
 
 
 def prepare_patients(patient_ids):
-    return {str(p_id).strip() for p_id in patient_ids}
+    return [str(p_id).strip() for p_id in patient_ids]
 
 
 def EMR_to_mongodb(filepath, chunk_size=1000):
@@ -234,7 +234,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
 
     total_rows = 0
     total_chunks = 0
-    all_patient_ids = set()
+    all_patient_ids = []
 
     try:
         for chunk in load_pandas_dataframe(filepath, chunk_size):
@@ -248,9 +248,9 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
             notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
 
             # Collect patient IDs
-            chunk_patient_ids = set(chunk['patient_id'])
+            chunk_patient_ids = list(chunk['patient_id'].unique())
             chunk_patient_ids = prepare_patients(chunk_patient_ids)
-            all_patient_ids.update(chunk_patient_ids)
+            all_patient_ids.extend(chunk_patient_ids)
 
             # Bulk insert notes
             inserted_count = db.bulk_insert_notes(notes_to_insert)
