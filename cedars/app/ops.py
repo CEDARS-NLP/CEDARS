@@ -608,7 +608,7 @@ def save_adjudications():
 
     session.modified = True
 
-    db.upsert_patient_results(patient_id, datetime.now(),
+    db.upsert_patient_records(patient_id, datetime.now(),
                               updated_by = current_user.username)
 
     # the session has been cleared so get the next patient
