@@ -27,7 +27,7 @@ def load_pines_url(project_id, superbio_api_token = None):
         - Custom error for PINES healthcheck
     '''
 
-    env_url = os.getenv("PINES_API_URL")
+    # env_url = os.getenv("PINES_API_URL")
     api_url = os.getenv("SUPERBIO_API_URL")
     # if env_url is not None:
     #     # Get PINES api from .env
@@ -50,8 +50,8 @@ def load_pines_url(project_id, superbio_api_token = None):
     #         logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
     #         return None, False
 
-
-    elif api_url is not None:
+    
+    if api_url is not None:
         # Get PINES api from API
         # Send a POST request to start the SERVER
         endpoint = f"cedars_projects/{project_id}/pines"
@@ -65,7 +65,7 @@ def load_pines_url(project_id, superbio_api_token = None):
         logger.info("Pinging", f'{api_url}/{endpoint}')
         logger.info("With header : ", headers, flush=True)
         response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
-        logger.info("POST responce", response, flush=True)
+        logger.info("POST response", response, flush=True)
 
         if response.status_code != 200:
             raise requests.exceptions.HTTPError
