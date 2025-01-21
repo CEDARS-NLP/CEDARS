@@ -29,26 +29,26 @@ def load_pines_url(project_id, superbio_api_token = None):
 
     env_url = os.getenv("PINES_API_URL")
     api_url = os.getenv("SUPERBIO_API_URL")
-    if env_url is not None:
-        # Get PINES api from .env
-        pines_api_url = env_url
-        is_url_from_api = False
-        logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
+    # if env_url is not None:
+    #     # Get PINES api from .env
+    #     pines_api_url = env_url
+    #     is_url_from_api = False
+    #     logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
 
-        try:
-            health_check = requests.get(f'{pines_api_url}')
-            if health_check.status_code != 200:
-                raise Exception(f'''Issue found while performing healthcheck on the 
-                                PINES server {pines_api_url}, got status : failed.''')
-        except requests.exceptions.HTTPError as e:
-            logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
-            return None, False
-        except requests.exceptions.InvalidURL as e:
-            logger.error(f'Invalid URL for PINES server {pines_api_url}.')
-            return None, False
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
-            return None, False
+    #     try:
+    #         health_check = requests.get(f'{pines_api_url}')
+    #         if health_check.status_code != 200:
+    #             raise Exception(f'''Issue found while performing healthcheck on the 
+    #                             PINES server {pines_api_url}, got status : failed.''')
+    #     except requests.exceptions.HTTPError as e:
+    #         logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
+    #         return None, False
+    #     except requests.exceptions.InvalidURL as e:
+    #         logger.error(f'Invalid URL for PINES server {pines_api_url}.')
+    #         return None, False
+    #     except requests.exceptions.ConnectionError as e:
+    #         logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
+    #         return None, False
 
 
     elif api_url is not None:
