@@ -496,11 +496,9 @@ def insert_one_annotation(annotation):
 
     annotations_collection.insert_one(annotation)
 
-def upsert_patient_results(patient_id: str, insert_datetime: datetime = None, updated_by: str = None):
+def upsert_patient_records(patient_id: str, insert_datetime: datetime = None, updated_by: str = None):
     '''
-    Stores the results of a patient who has been reviewed.
-    If this patient already has results stored, the code will
-    update the results for that patient.
+    Updates records for a patient in the RESULTS collection.
 
     Args :
         - patient_id (str) : ID of the patient who has been reviewed.
@@ -574,15 +572,10 @@ def upsert_patient_results(patient_id: str, insert_datetime: datetime = None, up
         'last_updated' : insert_datetime,
     }
 
-    if patient_results_exist(patient_id):
-        # If the patient already has some results, we will override them
-        logger.info(f"Results for patient #{patient_id} already exist, updating records.")
-        patient_results.pop("patient_id")
-        mongo.db["RESULTS"].update_one({"patient_id": patient_id},
-                                       {"$set": patient_results})
-    else:
-        logger.info(f"Inserting results for patient #{patient_id} into the database.")
-        mongo.db["RESULTS"].insert_one(patient_results)
+    logger.info(f"Updating results for patient #{patient_id}.")
+    patient_results.pop("patient_id")
+    mongo.db["RESULTS"].update_one({"patient_id": patient_id},
+                                    {"$set": patient_results})
 
 # Get functions
 def get_user(username):
@@ -1464,7 +1457,7 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
                                               "reviewed_by": reviewed_by}})
 
     logger.info(f"Storing results for patient #{patient_id}")
-    upsert_patient_results(patient_id, datetime.now())
+    upsert_patient_records(patient_id, datetime.now())
 
 
 def mark_note_reviewed(note_id, reviewed_by: str):
@@ -2019,7 +2012,7 @@ def update_patient_results(update_existing_results = False):
 
     for patient_id in get_all_patient_ids():
         if update_existing_results or (not patient_results_exist(patient_id)):
-            upsert_patient_results(patient_id)
+            upsert_patient_records(patient_id)
 
 def terminate_project():
     """
