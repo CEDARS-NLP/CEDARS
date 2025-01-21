@@ -99,7 +99,10 @@ def load_pines_from_api(api_url, endpoint, headers):
     data = requests.get(f'{api_url}/{endpoint}', headers=headers)
     json_data = data.json()
     logger.info("Got JSON", json_data, flush=True)
-    return json_data['url']
+    url = json_data.get('url')
+    if not url:
+        raise ValueError("URL is empty or missing in the response. Retrying...")
+    return url
 
 def get_token_status(superbio_api_token):
     '''
