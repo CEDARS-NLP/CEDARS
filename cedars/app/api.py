@@ -64,7 +64,7 @@ def load_pines_url(project_id, superbio_api_token = None):
 
         pines_api_url = load_pines_from_api(api_url, endpoint, headers)
 
-        if pines_api_url:
+        if pines_api_url is not None:
             is_url_from_api = True
             return pines_api_url, is_url_from_api
 
@@ -177,7 +177,7 @@ def kill_pines_api(project_id, superbio_api_token):
         logger.info("Killing PINES server.")
         api_url = os.getenv("SUPERBIO_API_URL")
         if api_url is not None:
-            endpoint = f"api/cedars_projects/{project_id}/pines"
+            endpoint = f"cedars_projects/{project_id}/pines"
             headers = {"Authorization": f"Bearer {superbio_api_token}"}
 
             try:
