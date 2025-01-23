@@ -62,7 +62,9 @@ def load_pines_url(project_id, superbio_api_token = None):
             logger.error("No API token found, cannot authenticate with the server.")
             return None, False
 
-        pines_api_url = load_pines_from_api(api_url, endpoint, headers)
+        data = requests.get(f'{api_url}/{endpoint}', headers=headers)
+        json_data = data.json()
+        pines_api_url = json_data.get('url')
 
         if pines_api_url is not None:
             is_url_from_api = True
@@ -106,8 +108,7 @@ def load_pines_from_api(api_url, endpoint, headers):
     json_data = data.json()
     logger.info("Got JSON", json_data, flush=True)
     url = json_data.get('url')
-    status = json_data.get('status')
-    if status and not url:
+    if not url:
         raise ValueError("URL is empty or missing in the response. Retrying...")
     return url
 
