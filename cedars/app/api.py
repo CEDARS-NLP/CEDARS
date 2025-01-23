@@ -106,7 +106,8 @@ def load_pines_from_api(api_url, endpoint, headers):
     json_data = data.json()
     logger.info("Got JSON", json_data, flush=True)
     url = json_data.get('url')
-    if not url:
+    status = json_data.get('status')
+    if status and not url:
         raise ValueError("URL is empty or missing in the response. Retrying...")
     return url
 
