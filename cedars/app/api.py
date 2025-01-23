@@ -62,6 +62,12 @@ def load_pines_url(project_id, superbio_api_token = None):
             logger.error("No API token found, cannot authenticate with the server.")
             return None, False
 
+        pines_api_url = load_pines_from_api(api_url, endpoint, headers)
+
+        if pines_api_url:
+            is_url_from_api = True
+            return pines_api_url, is_url_from_api
+
         logger.info("Pinging", f'{api_url}/{endpoint}')
         logger.info("With header : ", headers, flush=True)
         response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
