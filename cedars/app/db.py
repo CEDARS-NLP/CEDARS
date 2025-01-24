@@ -1311,6 +1311,44 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
         mark_note_reviewed(note_id, reviewed_by)
 
 
+def revert_annotation_reviewed(annotation_id, reviewed_by):
+    '''
+    Reverts a reviewed annotation to be marked unreviewed in the case
+    where the event date for that patient is deleted on the current annotation.
+
+    Args:
+        - annotation_id (str) : Unique ID for the annotation.
+        - reviewed_by (str) : The name of the user who deleted the event_date.
+    
+    Returns:
+        None
+    '''
+    logger.debug(f"Marking annotation #{annotation_id} as un-reviewed.")
+    mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
+                                       {"$set": {"reviewed": ReviewStatus.UNREVIEWED.value}})
+
+    annotation_data = get_annotation(annotation_id)
+    note_id = annotation_data['note_id']
+
+    # Mark the note this annotation belongs to as un-reviewed
+    revert_note_reviewed(note_id, reviewed_by)
+
+def revert_note_reviewed(note_id, reviewed_by: str):
+    """
+    Updates the note's status to un-reviewed in the database.
+    This occurs when an event_date for the patient is deleted and
+    one of the annotations from this note is then marked un-reviewed.
+
+     Args:
+        patient_id (int) : Unique ID for a patient.
+        reviewed_by (str) : The name of the user who deleted the event_date
+                            causing this note to be marked un-reviewed.
+    """
+    logger.debug(f"Marking note #{note_id} as un-reviewed.")
+    mongo.db["NOTES"].update_one({"text_id": note_id},
+                                 {"$set": {"reviewed": False,
+                                           "reviewed_by": reviewed_by}})
+
 
 def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     '''

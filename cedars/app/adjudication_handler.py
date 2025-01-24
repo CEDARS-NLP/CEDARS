@@ -234,7 +234,9 @@ class AdjudicationHandler:
         # Re-set all skipped events to UNREVIEWED
         self.reset_all_skipped()
 
-        self._adjudicate_annotation()
+        # Mark the annotation un-reviewed after the event_date is deleted
+        index = self.patient_data['current_index']
+        self.patient_data['review_statuses'][index] = ReviewStatus.UNREVIEWED
     
     def reset_all_skipped(self):
         '''

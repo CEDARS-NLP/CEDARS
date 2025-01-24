@@ -584,7 +584,7 @@ def save_adjudications():
     elif action == 'del_date':
         db.delete_event_date(patient_id)
         db.revert_skipped_annotations(patient_id)
-        db.mark_annotation_reviewed(current_annotation_id, current_user.username)
+        db.revert_annotation_reviewed(current_annotation_id, current_user.username)
         adjudication_handler.delete_event_date()
     elif action == 'adjudicate':
         db.mark_annotation_reviewed(current_annotation_id, current_user.username)
