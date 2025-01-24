@@ -729,7 +729,7 @@ def get_patient():
 
     # Sort patients by index_no to maintain order of upload
     # mongodb will ignore this command if index_no does not exist.
-    # This is improtant for backwards compatibility, 
+    # This is improtant for backwards compatibility,
     # as the index_no will not be present in older CEDARS versions.
     patient = mongo.db["PATIENTS"].find({"reviewed": False,
                                              "locked": False}).sort([("index_no", 1)]).limit(1)
@@ -1131,7 +1131,7 @@ def get_all_patient_ids():
     # Sort patients by index_no when presenting to the user to keep them in the
     # order in which they were uploaded.
     # Mongodb will ignore this command if index_no does not exist.
-    # This is improtant for backwards compatibility, 
+    # This is improtant for backwards compatibility,
     # as the index_no will not be present in older CEDARS versions.
     patients = mongo.db["PATIENTS"].find({}, {'patient_id' : 1}).sort([('index_no', 1)])
 
@@ -1151,7 +1151,7 @@ def get_patient_ids():
 
     # Sorting patients by index_no to maintain upload order
     # Mongodb will ignore this command if index_no does not exist.
-    # This is improtant for backwards compatibility, 
+    # This is improtant for backwards compatibility,
     # as the index_no will not be present in older CEDARS versions.
     patients = mongo.db["PATIENTS"].find({"reviewed": False, "locked": False}).sort([('index_no', 1)])
 
@@ -2000,7 +2000,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
         # Sorting results by index_no to maintain upload order
         # Mongodb will ignore this command if index_no does not exist.
-        # This is improtant for backwards compatibility, 
+        # This is improtant for backwards compatibility,
         # as the index_no will not be present in older CEDARS versions.
         project_results = mongo.db["RESULTS"].find({},
                                                     columns_to_retrive).sort([("index_no", 1)])
