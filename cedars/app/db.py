@@ -1967,10 +1967,17 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         project_results = mongo.db["RESULTS"].find({},
                                                     columns_to_retrive).sort([("index_no", 1)])
 
-        for chunk in pl.DataFrame(project_results, orient="row",
-                                                schema=schema,
-                                                infer_schema_length=None).write_csv(include_header=False,
-                                                                                batch_size=1000):
+        df = pl.DataFrame(project_results, orient="row",
+                                           schema=schema,
+                                           infer_schema_length=None)
+
+        date_cols = ['first_note_date', 'last_note_date', 'event_date']
+        for col in date_cols:
+            df = df.with_columns(
+                pl.col(col).dt.date().alias(col)
+            )
+
+        for chunk in df.write_csv(include_header=False, batch_size=1000):
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
