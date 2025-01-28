@@ -3,7 +3,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
-from datetime import datetime
+from datetime import datetime, date
 import tempfile
 import pandas as pd
 import pyarrow.parquet as pq
@@ -256,6 +256,10 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
             inserted_count = db.bulk_insert_notes(notes_to_insert)
             logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
 
+        # store NOTES_SUMMARY such as first_note_date, last_note_date, total_notes etc.
+        # to use a cache
+        notes_summary_count = db.update_notes_summary()
+        logger.info(f"Updated {notes_summary_count} notes summary")
         # Bulk upsert patients
         upserted_count = db.bulk_upsert_patients(all_patient_ids)
         logger.info(f"Upserted {upserted_count} patients")
