@@ -26,7 +26,7 @@ class Base:  # pylint: disable=too-few-public-methods
     f'&retryWrites=true'
     f'&socketTimeoutMS=20000'
     f'&serverSelectionTimeoutMS=5000'
-    f'@heartbeatFrequencyMS=20000'
+    f'&heartbeatFrequencyMS=20000'
     f'&readPreference=primaryPreferred'
 )
     RQ = {
