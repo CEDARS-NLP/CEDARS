@@ -15,11 +15,19 @@ class Base:  # pylint: disable=too-few-public-methods
     """
     SECRET_KEY = config['SECRET_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
-    MONGO_URI = (
-        f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
-        f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
-        f'{config["DB_NAME"]}?{config["DB_PARAMS"]}'
-    )
+    MONGO_URI = MONGO_URI = (
+    f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
+    f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
+    f'{config["DB_NAME"]}?'
+    f'{config["DB_PARAMS"]}'
+    f'&maxPoolSize=50'
+    f'&minPoolSize=5'
+    f'&connectTimeoutMS=30000'
+    f'&retryWrites=true'
+    f'&socketTimeoutMS=20000'
+    f'&serverSelectionTimeoutMS=5000'
+    f'&readPreference=primaryPreferred'
+)
     RQ = {
         "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
         "task_queue_name": "cedars",
@@ -39,20 +47,9 @@ class Test(Base):  # pylint: disable=too-few-public-methods
     """Test Config - for running tests"""
     CACHE_TYPE = 'SimpleCache'
     TESTING = True
-    MONGO_URI = (
-    f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
-    f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
-    f'{config["DB_NAME"]}?'
-    f'{config["DB_PARAMS"]}'
-    f'&maxPoolSize=50'
-    f'&minPoolSize=5'
-    f'&authSource=admin'
-    f'&connectTimeoutMS=30000'
-    f'&retryWrites=true'
-    f'&socketTimeoutMS=20000'
-    f'&serverSelectionTimeoutMS=5000'
-    f'&readPreference=primaryPreferred'
-)
+    MONGO_URI = (f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
+                 f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
+                 'test?authSource=admin')
 
 
 class Dev(Base):  # pylint: disable=too-few-public-methods
