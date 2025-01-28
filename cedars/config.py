@@ -39,9 +39,20 @@ class Test(Base):  # pylint: disable=too-few-public-methods
     """Test Config - for running tests"""
     CACHE_TYPE = 'SimpleCache'
     TESTING = True
-    MONGO_URI = (f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
-                 f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
-                 'test?authSource=admin')
+    MONGO_URI = (
+    f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
+    f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
+    f'{config["DB_NAME"]}?'
+    f'{config["DB_PARAMS"]}'
+    f'&maxPoolSize=50'
+    f'&minPoolSize=5'
+    f'&authSource=admin'
+    f'&connectTimeoutMS=30000'
+    f'&retryWrites=true'
+    f'&socketTimeoutMS=20000'
+    f'&serverSelectionTimeoutMS=5000'
+    f'&readPreference=primaryPreferred'
+)
 
 
 class Dev(Base):  # pylint: disable=too-few-public-methods
