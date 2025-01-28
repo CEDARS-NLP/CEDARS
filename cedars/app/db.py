@@ -400,17 +400,24 @@ def bulk_upsert_patients(patient_ids):
     results_operations = []
     number_of_patients_in_db = patients_collection.count_documents({})
 
+    # get cached note summary for all patients where each patient is a key
+    notes_summary_dict = get_notes_summary()
+
 
     for index_no, p_id in enumerate(patient_ids):
         # Update the index in cases where a batch of patients
         # has been added after the initial batch.
+
         index_no += number_of_patients_in_db
         p_id = str(p_id).strip()
 
         patient_op = generate_patient_entry(p_id, index_no)
         patient_operations.append(patient_op)
 
-        results_op = generate_results_entry(p_id, index_no)
+        results_op = generate_results_entry(p_id, index_no, 
+                                            first_note_date=notes_summary_dict.get(p_id, {}).get("first_note_date"),
+                                            last_note_date=notes_summary_dict.get(p_id, {}).get("last_note_date"),
+                                            num_notes=notes_summary_dict.get(p_id, {}).get("num_notes"))
         results_operations.append(results_op)
 
     try:
@@ -463,7 +470,11 @@ def generate_patient_entry(p_id: str, index_no: int):
                 upsert=True
             )
 
-def generate_results_entry(p_id: str, index_no: int):
+def generate_results_entry(p_id: str,
+                           index_no: int,
+                           first_note_date=None,
+                           last_note_date=None,
+                           num_notes=None):
     '''
     Generates a blank entry for a new patient in the RESULTS collection.
 
@@ -477,12 +488,12 @@ def generate_results_entry(p_id: str, index_no: int):
                                             into a collection.
     '''
 
-    first_note_date = get_first_note_date_for_patient(p_id)
-    last_note_date = get_last_note_date_for_patient(p_id)
+    first_note_date = get_first_note_date_for_patient(p_id, first_note_date)
+    last_note_date = get_last_note_date_for_patient(p_id, last_note_date)
 
     patient_results = {
         'patient_id' : p_id,
-        'total_notes' : get_num_patient_notes(p_id),
+        'total_notes' : get_num_patient_notes(p_id, num_notes),
         'reviewed_notes' : 0,
         'total_sentences' : 0,
         'reviewed_sentences' : 0,
@@ -1045,7 +1056,7 @@ def get_note_date(note_id):
     return note["text_date"]
 
 
-def get_first_note_date_for_patient(patient_id: str):
+def get_first_note_date_for_patient(patient_id: str, first_note_date=None):
     """
     Retrives the date of the first note for a patient.
 
@@ -1055,6 +1066,11 @@ def get_first_note_date_for_patient(patient_id: str):
         note_date (datetime) : The date of the first note for the patient.
     """
     logger.debug(f"Retriving first note date for patient #{patient_id}.")
+
+    # pass cached value if available
+    if first_note_date is not None:
+        return first_note_date
+    
     summary = mongo.db["NOTES_SUMMARY"].find_one(
         {"patient_id": patient_id},
         {"_id": 0, "first_note_date": 1}  # Project only the first_note_date field
@@ -1065,7 +1081,21 @@ def get_first_note_date_for_patient(patient_id: str):
     return summary["first_note_date"]
 
 
-def get_last_note_date_for_patient(patient_id: str):
+def get_notes_summary():
+    """
+    Returns a dictionary of note summaries for all patients in the project.
+
+    Args:
+        None
+    Returns:
+        notes_summary (dict) : A dictionary of note summaries for all patients.
+    """
+    notes_summary = mongo.db["NOTES_SUMMARY"].find()
+
+    return {summary["patient_id"]: summary for summary in notes_summary}
+
+
+def get_last_note_date_for_patient(patient_id: str, last_note_date=None):
     """
     Retrives the date of the last note for a patient.
 
@@ -1075,6 +1105,10 @@ def get_last_note_date_for_patient(patient_id: str):
         note_date (datetime) : The date of the last note for the patient.
     """
     logger.debug(f"Retriving first note date for patient #{patient_id}.")
+    # pass cached value if available
+    if last_note_date is not None:
+        return last_note_date
+    
     summary = mongo.db["NOTES_SUMMARY"].find_one(
         {"patient_id": patient_id},
         {"_id": 0, "last_note_date": 1}  # Project only the first_note_date field
@@ -1213,10 +1247,15 @@ def get_all_notes(patient_id: str):
     notes = mongo.db["NOTES"].find({"patient_id": patient_id})
     return list(notes)
 
-def get_num_patient_notes(patient_id: str):
+def get_num_patient_notes(patient_id: str, num_notes=None):
     """
     Returns all notes for that patient.
     """
+    logger.debug(f"Retriving number of notes for patient #{patient_id}.")
+    # pass cached value if available
+    if num_notes is not None:
+        return num_notes
+    
     summary = mongo.db["NOTES_SUMMARY"].find_one(
         {"patient_id": patient_id},
         {"_id": 0, "num_notes": 1}  # Project only the num_notes field
