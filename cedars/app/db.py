@@ -2111,6 +2111,7 @@ def terminate_project():
     mongo.db.drop_collection("PINES")
     mongo.db.drop_collection("TASK")
     mongo.db.drop_collection("RESULTS")
+    mongo.db.drop_collection("NOTES_SUMMARY")
 
     project_id = os.getenv("PROJECT_ID", None)
 
