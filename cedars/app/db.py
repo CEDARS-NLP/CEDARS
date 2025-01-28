@@ -372,8 +372,7 @@ def bulk_insert_notes(notes):
     notes_collection = mongo.db["NOTES"]
     try:
         result = notes_collection.insert_many(notes)
-        summarized_notes = update_notes_summary()
-        logger.info(f"Inserted {len(result.inserted_ids)} notes. Updated {summarized_notes} patient summaries.")
+        logger.info(f"Inserted {len(result.inserted_ids)} notes.")
         return len(result.inserted_ids)
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
