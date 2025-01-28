@@ -1,5 +1,9 @@
-workers = 4
-timeout = 10000
+workers = 9
+threads = 4
+worker_class = 'gevent'
+timeout = 300
 bind = ':5001'
 accesslog = '-'
+keepalive = 5
+preload_app = True
 disable_redirect_access_to_syslog = True
