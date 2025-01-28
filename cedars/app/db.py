@@ -233,6 +233,9 @@ def create_db_indices():
     logger.info("Creating indexes for USERS.")
     create_index("USERS", [("user", {"unique": True})])
 
+    logger.info("Creating indexes for NOTES_SUMMARY.")
+    create_index("NOTES_SUMMARY", [("patient_id")])
+
 # Insert functions
 def add_user(username, password, is_admin=False):
     """
@@ -305,10 +308,72 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
     return True
 
 
+def update_notes_summary():
+    """
+    Aggregates note summaries from the NOTES collection and saves them
+    to the NOTES_SUMMARY collection.
+
+    Returns:
+        int: Number of summaries updated.
+    """
+    notes_collection = mongo.db["NOTES"]
+    notes_summary_collection = mongo.db["NOTES_SUMMARY"]
+
+    # Aggregation pipeline to compute summaries
+    pipeline = [
+        {
+            "$group": {
+                "_id": "$patient_id",  # Group by patient_id
+                "num_notes": {"$sum": 1},
+                "first_note_date": {"$min": "$text_date"},
+                "last_note_date": {"$max": "$text_date"}
+            }
+        },
+        {
+            "$project": {
+                "patient_id": "$_id",
+                "num_notes": 1,
+                "first_note_date": 1,
+                "last_note_date": 1,
+                "_id": 0  # Exclude the internal _id field
+            }
+        }
+    ]
+
+    # Perform aggregation
+    aggregated_results = list(notes_collection.aggregate(pipeline))
+
+    # Insert or update summaries in NOTES_SUMMARY
+    bulk_operations = []
+    for summary in aggregated_results:
+        bulk_operations.append(
+            UpdateOne(
+                {"patient_id": summary["patient_id"]},
+                {
+                    "$set": {
+                        "num_notes": summary["num_notes"],
+                        "first_note_date": summary["first_note_date"],
+                        "last_note_date": summary["last_note_date"],
+                    }
+                },
+                upsert=True
+            )
+        )
+
+    if bulk_operations:
+        # Perform bulk write to update or insert summaries
+        result = notes_summary_collection.bulk_write(bulk_operations)
+        return result.modified_count + result.upserted_count
+    
+    return 0
+
+
 def bulk_insert_notes(notes):
     notes_collection = mongo.db["NOTES"]
     try:
         result = notes_collection.insert_many(notes)
+        summarized_notes = update_notes_summary()
+        logger.info(f"Inserted {len(result.inserted_ids)} notes. Updated {summarized_notes} patient summaries.")
         return len(result.inserted_ids)
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
@@ -335,6 +400,8 @@ def bulk_upsert_patients(patient_ids):
     patient_operations = []
     results_operations = []
     number_of_patients_in_db = patients_collection.count_documents({})
+
+
     for index_no, p_id in enumerate(patient_ids):
         # Update the index in cases where a batch of patients
         # has been added after the initial batch.
@@ -440,47 +507,6 @@ def generate_results_entry(p_id: str, index_no: int):
                 {"$setOnInsert": patient_results},
                 upsert=True
             )
-
-# def upload_notes(documents):
-#     """
-#     This function is used to take a dataframe of patient records
-#     and save it to the mongodb database.
-
-#     Args:
-#         documents (pandas dataframe) : Dataframe with all the records of a paticular patient.
-#     Returns:
-#         None
-#     """
-#     notes_collection = mongo.db["NOTES"]
-#     patient_ids = set()
-#     for i in range(len(documents)):
-#         note_info = documents.iloc[i].to_dict()
-
-#         date_format = '%Y-%m-%d'
-#         datetime_obj = datetime.strptime(note_info["text_date"], date_format)
-#         note_info["text_date"] = datetime_obj
-#         note_info["reviewed"] = False
-
-#         # text_id should be unique
-#         notes_collection.insert_one(note_info)
-#         patient_ids.add(note_info["patient_id"])
-#         if i+1 % 100 == 0:
-#             logger.info(f"Uploaded {i}/{len(documents)} notes")
-
-#     patients_collection = mongo.db["PATIENTS"]
-#     for p_id in patient_ids:
-#         patient_info = {"patient_id": p_id,
-#                         "reviewed": False,
-#                         "locked": False,
-#                         "updated": False,
-#                         "comments": "",
-#                         "reviewed_by" : "",
-#                         "event_annotation_id" : None,
-#                         "event_date" : None,
-#                         "admin_locked": False}
-
-#         if not patients_collection.find_one({"patient_id": p_id}):
-#             patients_collection.insert_one(patient_info)
 
 
 def insert_one_annotation(annotation):
@@ -1030,12 +1056,14 @@ def get_first_note_date_for_patient(patient_id: str):
         note_date (datetime) : The date of the first note for the patient.
     """
     logger.debug(f"Retriving first note date for patient #{patient_id}.")
-    note = mongo.db["NOTES"].find_one({"patient_id": patient_id},
-                                      sort=[("text_date", 1)])
+    summary = mongo.db["NOTES_SUMMARY"].find_one(
+        {"patient_id": patient_id},
+        {"_id": 0, "first_note_date": 1}  # Project only the first_note_date field
+    )
 
-    if not note:
+    if not summary:
         return None
-    return note["text_date"]
+    return summary["first_note_date"]
 
 
 def get_last_note_date_for_patient(patient_id: str):
@@ -1047,13 +1075,15 @@ def get_last_note_date_for_patient(patient_id: str):
     Returns:
         note_date (datetime) : The date of the last note for the patient.
     """
-    logger.debug(f"Retriving last note date for patient #{patient_id}.")
-    note = mongo.db["NOTES"].find_one({"patient_id": patient_id},
-                                      sort=[("text_date", -1)])
+    logger.debug(f"Retriving first note date for patient #{patient_id}.")
+    summary = mongo.db["NOTES_SUMMARY"].find_one(
+        {"patient_id": patient_id},
+        {"_id": 0, "last_note_date": 1}  # Project only the first_note_date field
+    )
 
-    if not note:
+    if not summary:
         return None
-    return note["text_date"]
+    return summary["last_note_date"]
 
 
 def get_all_annotations():
@@ -1188,7 +1218,14 @@ def get_num_patient_notes(patient_id: str):
     """
     Returns all notes for that patient.
     """
-    return mongo.db["NOTES"].count_documents({"patient_id": patient_id})
+    summary = mongo.db["NOTES_SUMMARY"].find_one(
+        {"patient_id": patient_id},
+        {"_id": 0, "num_notes": 1}  # Project only the num_notes field
+    )
+    
+    # Return the num_notes if available, otherwise return 0
+    return summary["num_notes"] if summary else 0
+
 
 def get_patient_notes(patient_id: str, reviewed=False):
     """
