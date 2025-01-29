@@ -392,7 +392,7 @@ def bulk_upsert_patients(patient_ids):
         - patient_ids (list[str]) : List of all uploaded patient IDs in order.
     
     Returns :
-        - None
+        - total patients and results uploaded
     '''
     patients_collection = mongo.db["PATIENTS"]
     results_collection = mongo.db["RESULTS"]
@@ -429,20 +429,23 @@ def bulk_upsert_patients(patient_ids):
         '''
         # bulk write in chunks
         chunk_size = 2000
-        total_uploaded_patients, total_uploaded_results = 0
+        total_uploaded_patients = 0
+        total_uploaded_results = 0
         for i in range(0, len(patient_operations), chunk_size):
             patients_update = patients_collection.bulk_write(patient_operations[i:i+chunk_size],
                                                             ordered=False)
+            total_uploaded_patients += patients_update.upserted_count
+    
+        for i in range(0, len(results_operations), chunk_size):
             results_update = results_collection.bulk_write(results_operations[i:i+chunk_size],
                                                             ordered=False)
-
-            total_uploaded_patients += patients_update.upserted_count
             total_uploaded_results += results_update.upserted_count
+
         logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
         return total_uploaded_patients, total_uploaded_results
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
-        return bwe.details['nUpserted']
+
 
 def generate_patient_entry(p_id: str, index_no: int):
     '''
