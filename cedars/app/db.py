@@ -500,10 +500,11 @@ def generate_results_entry(p_id: str,
 
     first_note_date = get_first_note_date_for_patient(p_id, first_note_date)
     last_note_date = get_last_note_date_for_patient(p_id, last_note_date)
+    num_notes = get_num_patient_notes(p_id, num_notes)
 
     patient_results = {
         'patient_id' : p_id,
-        'total_notes' : get_num_patient_notes(p_id, num_notes),
+        'total_notes' : num_notes,
         'reviewed_notes' : 0,
         'total_sentences' : 0,
         'reviewed_sentences' : 0,
