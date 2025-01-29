@@ -20,7 +20,6 @@ class Base:  # pylint: disable=too-few-public-methods
     f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
     f'{config["DB_NAME"]}?'
     f'{config["DB_PARAMS"]}'
-    f'&maxPoolSize=50'
     f'&minPoolSize=5'
     f'&connectTimeoutMS=30000'
     f'&retryWrites=true'
