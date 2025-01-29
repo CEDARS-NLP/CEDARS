@@ -233,6 +233,9 @@ def create_db_indices():
     logger.info("Creating indexes for USERS.")
     create_index("USERS", [("user", {"unique": True})])
 
+    logger.info("Creating indexes for RESULTS.")
+    create_index("RESULTS", [("patient_id")])
+
     logger.info("Creating indexes for NOTES_SUMMARY.")
     create_index("NOTES_SUMMARY", [("patient_id")])
 
