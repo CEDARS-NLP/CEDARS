@@ -427,12 +427,19 @@ def bulk_upsert_patients(patient_ids):
         set ordered=False when performing a bulk write to maintain high speeds
         while maintaining the correct order when showing patients to the user.
         '''
-        patients_update = patients_collection.bulk_write(patient_operations,
-                                                        ordered=False)
-        results_update = results_collection.bulk_write(results_operations,
-                                                        ordered=False)
+        # bulk write in chunks
+        chunk_size = 2000
+        total_uploaded_patients, total_uploaded_results = 0
+        for i in range(0, len(patient_operations), chunk_size):
+            patients_update = patients_collection.bulk_write(patient_operations[i:i+chunk_size],
+                                                            ordered=False)
+            results_update = results_collection.bulk_write(results_operations[i:i+chunk_size],
+                                                            ordered=False)
 
-        return patients_update.upserted_count
+            total_uploaded_patients += patients_update.upserted_count
+            total_uploaded_results += results_update.upserted_count
+        logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
+        return total_uploaded_patients, total_uploaded_results
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nUpserted']

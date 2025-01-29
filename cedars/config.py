@@ -12,6 +12,10 @@ class Base:  # pylint: disable=too-few-public-methods
     """
     Base Config - all the common (no dependent on env)
     configurations go here
+
+    The socketTimeout might cause timeout for larger inserts
+
+    TODO: make the bulk writes chunked?
     """
     SECRET_KEY = config['SECRET_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
@@ -22,10 +26,10 @@ class Base:  # pylint: disable=too-few-public-methods
     f'{config["DB_PARAMS"]}'
     f'&maxPoolSize=50'
     f'&minPoolSize=5'
-    f'&connectTimeoutMS=60000'
+    f'&connectTimeoutMS=30000'
     f'&retryWrites=true'
-    f'&socketTimeoutMS=58000'
-    f'&serverSelectionTimeoutMS=40000'
+    f'&socketTimeoutMS=20000'
+    f'&serverSelectionTimeoutMS=20000'
     f'&heartbeatFrequencyMS=20000'
     f'&readPreference=primaryPreferred'
 )
