@@ -22,10 +22,10 @@ class Base:  # pylint: disable=too-few-public-methods
     f'{config["DB_PARAMS"]}'
     f'&maxPoolSize=50'
     f'&minPoolSize=5'
-    f'&connectTimeoutMS=30000'
+    f'&connectTimeoutMS=60000'
     f'&retryWrites=true'
-    f'&socketTimeoutMS=29000'
-    f'&serverSelectionTimeoutMS=20000'
+    f'&socketTimeoutMS=58000'
+    f'&serverSelectionTimeoutMS=40000'
     f'&heartbeatFrequencyMS=20000'
     f'&readPreference=primaryPreferred'
 )
