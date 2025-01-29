@@ -261,9 +261,8 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         notes_summary_count = db.update_notes_summary()
         logger.info(f"Updated {notes_summary_count} notes summary")
         # Bulk upsert patients
-        upserted_count = db.bulk_upsert_patients(all_patient_ids)
-        logger.info(f"Upserted {upserted_count} patients")
-
+        upserted_count_patients, _ = db.bulk_upsert_patients(all_patient_ids)
+        logger.info(f"Upserted {upserted_count_patients} patients")
         logger.info(f"Completed document migration to MongoDB database. "
                     f"Total rows processed: {total_rows}, "
                     f"Total chunks processed: {total_chunks}, "
