@@ -125,11 +125,19 @@ services:
     profiles: [gpu]
 
   redis:
-    image: redis:latest
+    build:
+        context: ./redis
+        dockerfile: Dockerfile
+    image: redis:7.2-alpine
+    restart: always
     ports:
-      - "6379:6379"
+        - 6379:6379
+    # Run the init script
+    command: sh -c "./init.sh"
+    # Run as privileged to allow the container to change the vm.overcommit_memory setting
+    privileged: true
     volumes:
-      - redis_data:/data
+        - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -153,6 +161,7 @@ services:
       - .env
     depends_on:
       - web
+      - redis
     profiles:
       - cpu
       - gpu
@@ -177,6 +186,7 @@ services:
       - .env
     depends_on:
       - web
+      - redis
     profiles:
       - cpu
       - gpu

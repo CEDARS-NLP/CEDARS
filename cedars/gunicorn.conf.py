@@ -1,6 +1,6 @@
 workers = 9
 threads = 4
-worker_class = 'gevent'
+worker_class = 'gthread'
 timeout = 300
 bind = ':5001'
 accesslog = '-'
