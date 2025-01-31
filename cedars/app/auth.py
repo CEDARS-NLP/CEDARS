@@ -183,7 +183,12 @@ def login():
             flash('Login successful.')
             return redirect("/")
 
-        flash('Invalid credentials.')
+        if username is None or password is None:
+            flash("Username and password are required.")
+        elif username.strip() == "" or password.strip() == "":
+            flash("Username and password are required.")
+        else:
+            flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
     if len(db.get_project_users()) == 0:
         return redirect(url_for('auth.register'))
