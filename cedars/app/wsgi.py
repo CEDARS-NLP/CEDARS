@@ -14,9 +14,6 @@ environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")
 
 app = create_app(f"config.{environment.title()}")
-with app.app_context():
-    logger.info("Reseting all current patients lock status.")
-    db.remove_all_locked()
 
 if __name__ == '__main__':
     # host should be 0.0.0.0 for docker to work

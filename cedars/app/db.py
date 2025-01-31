@@ -50,16 +50,11 @@ def create_project(project_name,
 
     if project_id is None:
         project_id = str(uuid4())
+
     create_info_col(project_name=project_name,
                     project_id=project_id,
                     investigator_name=investigator_name,
                     cedars_version=cedars_version)
-
-    # populate_annotations()
-    # populate_notes()
-    populate_users()
-    # populate_query()
-    populate_results()
 
     logger.info("Database creation successful!")
 
@@ -99,34 +94,6 @@ def create_info_col(project_name,
     collection.insert_one(info)
     logger.info("Created INFO collection.")
 
-
-def populate_users():
-    """
-    This function creates the users collection in the mongodb database.
-    The users collection is used to store the credentials of users of the CEDARS system.
-    """
-    users = mongo.db["USERS"]
-
-    users.create_index("user", unique=True)
-    logger.info("Created USERS collection.")
-
-
-def populate_task():
-    """
-    This database stores tasks in rq
-    """
-    # Pylint disabled for pointless statement.
-    # This statement is used to create a collection.
-    task = mongo.db["TASK"]
-    # task.create_index("job_id", unique=True)
-    logger.info("Created %s collection.", task.name)
-
-def populate_results():
-    results = mongo.db["RESULTS"]
-    logger.info(f"Created {results.name} collection")
-
-    logger.info("Creating indexes for RESULTS.")
-    create_index("RESULTS", [("patient_id", {"unique":True})])
 
 # index functions
 def create_index(collection, index: list):
@@ -175,11 +142,17 @@ def create_db_indices():
     logger.info("Creating indexes for USERS.")
     create_index("USERS", [("user", {"unique": True})])
 
-    #logger.info("Creating indexes for RESULTS.")
-    #create_index("RESULTS", [("patient_id")])
+    logger.info("Creating indexes for RESULTS.")
+    create_index("RESULTS", [("patient_id", {"unique": True})])
 
     logger.info("Creating indexes for NOTES_SUMMARY.")
     create_index("NOTES_SUMMARY", [("patient_id")])
+
+    logger.info("Creating indexes for USERS.")
+    create_index("USERS", [("user", {"unique": True})])
+
+    logger.info("Creating indexes for TASK.")
+    create_index("TASK", [("job_id", {"unique": True})])
 
 # Insert functions
 def add_user(username, password, is_admin=False):

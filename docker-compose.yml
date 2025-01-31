@@ -137,7 +137,7 @@ services:
     # Run as privileged to allow the container to change the vm.overcommit_memory setting
     privileged: true
     volumes:
-        - redis_data:/data
+        - redis_data:/redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
