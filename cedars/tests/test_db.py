@@ -16,7 +16,6 @@ def test_get_documents_to_annotate(db, expected_result, patient_id):
     # Assert (verify the result)
     assert result == expected_result
 
-
 def test_add_user(db):
     # Arrange (set up the data)
     username = "test1"

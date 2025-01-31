@@ -45,6 +45,7 @@ def db(cedars_app):
     patient_ids = set(test_data['patient_id'])
     db.bulk_upsert_patients(patient_ids)
 
+    notes_summary_count = db.update_notes_summary()
     yield db
 
 
