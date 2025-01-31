@@ -11,7 +11,7 @@ from flask import Flask, redirect, render_template
 from flask_session import Session
 import logging
 from loguru import logger
-from dotenv import dotenv_values, load_dotenv
+from dotenv import dotenv_values
 import rq
 import rq_dashboard
 from redis import Redis
@@ -55,8 +55,6 @@ def create_app(config_filename=None):
         cedars_app.config.from_object(config_filename)
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
-    cedars_app.config["SESSION_TYPE"] = "redis"
-    cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)

@@ -151,11 +151,9 @@ class NlpProcessor:
         """
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
-        query = db.get_search_query()
-
         # load previosly processed documents
         # document_processed = load_progress()
-        spacy_patterns = query_to_patterns(query)
+        spacy_patterns = query_to_patterns(self.query)
         for i, item in enumerate(spacy_patterns):
             self.matcher.add(f"DVT_{i}", [item])
 
