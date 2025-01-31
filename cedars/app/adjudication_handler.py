@@ -362,7 +362,7 @@ class SentenceHighlighter:
         text = note["text"]
 
         annotations = annotations_for_note
-        logger.info(annotations)
+        logger.debug(annotations)
 
         for annotation in annotations:
             start_index = annotation['note_start_index']
@@ -376,7 +376,7 @@ class SentenceHighlighter:
             prev_end_index = end_index
 
         highlighted_note.append(text[prev_end_index:])
-        logger.info(highlighted_note)
+        logger.debug(highlighted_note)
         return " ".join(highlighted_note).replace("\n", "<br>")
 
     def get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
@@ -408,5 +408,5 @@ class SentenceHighlighter:
 
         highlighted_note.append(text[prev_end_index:sentence_end])
         sentence = "".join(highlighted_note).strip().replace("\n", "<br>")
-        logger.info(f'Showing sentence : {sentence}')
+        logger.debug(f'Showing sentence : {sentence}')
         return sentence

@@ -6,8 +6,10 @@ __version__ = "0.1.0"
 __author__ = "Rohan Singh"
 
 import os
+import sys
 from flask import Flask, redirect, render_template
 from flask_session import Session
+import logging
 from loguru import logger
 from dotenv import dotenv_values, load_dotenv
 import rq
@@ -66,6 +68,8 @@ def create_app(config_filename=None):
 
     cedars_app.register_blueprint(stats.bp)
 
+    setup_logging()
+
     @cedars_app.route('/', methods=["GET"])
     def homepage():
         if auth.current_user.is_authenticated and auth.current_user.is_admin:
@@ -84,3 +88,32 @@ def create_app(config_filename=None):
 
 
     return cedars_app
+
+
+def setup_logging():
+    """Setup logging"""
+    """Configure Loguru as the primary logger and disable unwanted logs"""
+
+    # 🔴 Remove default Loguru handler (avoid duplicate logs)
+    logger.remove()
+
+    # ✅ Setup Loguru logging (only INFO and above)
+    logger.add(sys.stdout,
+               format="{time} {level} {message}",
+               level="INFO",
+               colorize=True)
+
+    # 🔴 Suppress Flask's werkzeug logs (disable request logs)
+    logging.getLogger("werkzeug").setLevel(logging.CRITICAL)
+
+    # ✅ Redirect Python's `logging` module logs to Loguru
+    class InterceptHandler(logging.Handler):
+        def emit(self, record):
+            level = logger.level(record.levelname).name if record.levelname in logger._core.levels else "INFO"
+            logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
+
+    logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO)
+
+    # 🔴 Suppress RQ Worker Debug Logs
+    logging.getLogger("rq.worker").setLevel(logging.WARNING)
+    logging.getLogger("rq.queue").setLevel(logging.WARNING)
