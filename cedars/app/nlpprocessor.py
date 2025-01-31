@@ -182,7 +182,7 @@ class NlpProcessor:
         else:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
 
-        # logger.info(f"sample document: {document_text[0][:100]}")
+        logger.debug(f"sample document: {document_text[0][:100]}")
         annotations = self.nlp_model.pipe([document["text"].lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
@@ -310,5 +310,4 @@ class NlpProcessor:
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 
-        # TODO: find a better way to create index - use queue? and add status?
-        logger.info("jobs in progress: %s", len(list(db.get_tasks_in_progress())))
+        logger.info(f"jobs in progress: {len(list(db.get_tasks_in_progress()))}")

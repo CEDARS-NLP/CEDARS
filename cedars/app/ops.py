@@ -355,22 +355,13 @@ def upload_query():
                                **db.get_search_query_details())
 
     search_query = request.form.get("regex_query")
-    # search_query_pattern = (
-    #     r'^\s*('
-    #     r'(\(\s*[a-zA-Z0-9*?]+(\s*AND\s*[a-zA-Z0-9*?]+)*\s*\))|'
-    #     r'[\*a-zA-Z0-9*?]+)'
-    #     r'('
-    #     r'\s*OR\s+'
-    #     r'((\(\s*[a-zA-Z0-9*?]+(\s*AND\s*[a-zA-Z0-9*?]+)*\s*\))|'
-    #     r'[\*a-zA-Z0-9*?]+))*'
-    #     r'\s*$'
-    # )
-    search_query_pattern = r'^\s*([\w*?]+|\([\w*?]+\s+AND\s+[\w*?]+\))(\s+OR\s+([\w*?]+|\([\w*?]+\s+AND\s+[\w*?]+\)))*\s*$'
-
+    logger.info(f"Received search query: {search_query}")
+    search_query_pattern = r'^\s*(\(\s*[a-zsA-Z0-9*?]+(\s+AND\s+[a-zA-Z0-9*?]+)*\s*\)|[a-zA-Z0-9*?]+)(\s*OR\s+(\(\s*[a-zA-Z0-9*?]+(\s+AND\s+[a-zA-Z0-9*?]+)*\s*\)|[a-zA-Z0-9*?]+))*\s*$'
     try:
-        re.match(search_query, search_query_pattern)
-    except re.error:
-        flash("Invalid query.")
+        re.match(search_query_pattern, search_query)
+    except re.error as e:
+        flash(f"Invalid query - {e}")
+        logger.debug(f"Invalid query: {e}")
         return render_template("ops/upload_query.html", **db.get_info())
 
     use_pines = bool(request.form.get("nlp_apply"))
