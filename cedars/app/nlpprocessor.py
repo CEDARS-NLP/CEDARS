@@ -174,17 +174,17 @@ class NlpProcessor:
                 self.process_patient_pines(patient_id)
             return
 
-        document_text = [document["text"] for document in document_list]
         if patient_id is not None:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
         else:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
 
-        logger.debug(f"sample document: {document_text[0][:100]}")
-        annotations = self.nlp_model.pipe([document["text"].lower() for document in document_list],
+        logger.debug(f"document sample: '{document_list[0].get("text", "")[:100]}'")
+        annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
-        logger.info(f"Starting to process document annotations: {len(document_text)}")
+        logger.info(f"Starting to process document annotations: {len(document_list)}")
+
         count = 0
         docs_with_annotations = 0
         for document, doc in zip(document_list, annotations):

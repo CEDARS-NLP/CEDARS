@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "pycedars"
-version = "0.1.0"
-description = ""
-authors = ["SinghR7 <SinghR7@mskcc.org>"]
+name = "cedars"
+version = "2025.1"
+description = "A highly efficient,nlp based data labelling platform"
+authors = ["Rohan Singh <SinghR7@mskcc.org>", "Kayan Irani <iranik@mskcc.org>"]
 license = "GPL"
 readme = "README.md"
 
