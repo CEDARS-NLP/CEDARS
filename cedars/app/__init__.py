@@ -1,18 +1,6 @@
 """
 Entrypoint for the flask application.
 """
-
-from importlib.metadata import version, metadata
-
-
-__version__ = version("cedars")
-
-meta = metadata("cedars")
-    # Some distributions might store author info under different keys.
-    __author__ = meta.get("Author", "unknown")
-except Exception:
-    __author__ = "unknown"
-
 import os
 import sys
 from flask import Flask, redirect, render_template
