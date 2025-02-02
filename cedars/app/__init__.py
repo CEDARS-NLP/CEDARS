@@ -2,8 +2,16 @@
 Entrypoint for the flask application.
 """
 
-__version__ = "0.1.0"
-__author__ = "Rohan Singh"
+from importlib.metadata import version, metadata
+
+
+__version__ = version("cedars")
+
+meta = metadata("cedars")
+    # Some distributions might store author info under different keys.
+    __author__ = meta.get("Author", "unknown")
+except Exception:
+    __author__ = "unknown"
 
 import os
 import sys
