@@ -179,7 +179,7 @@ class NlpProcessor:
         else:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
 
-        logger.debug(f"document sample: '{document_list[0].get("text", "")[:100]}'")
+        logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
         annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
