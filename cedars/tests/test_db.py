@@ -16,7 +16,6 @@ def test_get_documents_to_annotate(db, expected_result, patient_id):
     # Assert (verify the result)
     assert result == expected_result
 
-
 def test_add_user(db):
     # Arrange (set up the data)
     username = "test1"
@@ -194,8 +193,8 @@ def test_mark_annotation_reviewed(db):
     note_id = "UNIQUE0000000001"
     annot = db.get_all_annotations_for_note(note_id)[0]
     annot_id = str(annot["_id"])
-    db.mark_annotation_reviewed(annot_id)
-    assert db.get_annotation(annot_id)["reviewed"] is True
+    db.mark_annotation_reviewed(annot_id, 'ANNOTATOR')
+    assert db.get_annotation(annot_id)["reviewed"] == 1
 
 
 def test_update_event_date(db):
@@ -203,7 +202,7 @@ def test_update_event_date(db):
     annot = db.get_all_annotations_for_note(note_id)[0]
     patient_id = annot["patient_id"]
     anno_id = annot["_id"]
-    db.update_event_date(patient_id, "2020-01-01", anno_id)
+    db.update_event_date(patient_id, datetime(2020, 1, 1), anno_id)
     assert db.get_event_date(patient_id) == datetime(2020, 1, 1)
 
 

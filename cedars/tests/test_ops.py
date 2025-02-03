@@ -2,8 +2,7 @@ from unittest.mock import patch
 import pytest
 from flask import request
 from app.ops import (
-    allowed_data_file,
-    highlighted_text
+    allowed_data_file
 )
 from app.stats import _elements_to_int
 
@@ -234,11 +233,6 @@ def test_get_job_status(client, db):
 #     response = client.post("/ops/adjudicate_records", data=data)
 #     assert response.status_code == 302
 #     assert session["patient_id"] == 1111111111
-
-
-def test_highlighted_text(db):
-    note = db.get_all_notes("1111111111")[0]
-    assert "<br>" in highlighted_text(note)
 
 
 # def test_download_annotations(client, db, mocker):

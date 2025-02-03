@@ -7,7 +7,7 @@ from .nlpprocessor import query_to_patterns
 
 def main():
     parser = argparse.ArgumentParser(description="Test NLP query patterns")
-    parser.add_argument("query", type=str, help="The query to be tested")
+    parser.add_argument("query", type=str, help="The query to be converted to patterns")
     parser.add_argument("text", type=str, help="The text to be matched against")
     args = parser.parse_args()
 
@@ -15,6 +15,9 @@ def main():
     matcher = Matcher(nlp.vocab)
 
     patterns = query_to_patterns(args.query)
+
+    formatted_patterns = "\n".join([str(pattern) for pattern in patterns]) 
+    logger.info(f"Patterns: {formatted_patterns}")
     
     for idx, pattern in enumerate(patterns):
         matcher.add(f"Pattern_{idx}", [pattern])
@@ -22,7 +25,6 @@ def main():
     doc = nlp(args.text)
     matches = matcher(doc)
 
-    print(f"Query: {args.query}")
     print(f"Text: {args.text}")
     print("Matches:")
     for match_id, start, end in matches:
