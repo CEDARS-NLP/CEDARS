@@ -27,32 +27,31 @@ def load_pines_url(project_id, superbio_api_token = None):
         - Custom error for PINES healthcheck
     '''
 
-    env_url = os.getenv("PINES_API_URL")
+    # env_url = os.getenv("PINES_API_URL")
     api_url = os.getenv("SUPERBIO_API_URL")
-    if env_url is not None:
-        # Get PINES api from .env
-        pines_api_url = env_url
-        is_url_from_api = False
-        logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
+    # if env_url is not None:
+    #     # Get PINES api from .env
+    #     pines_api_url = env_url
+    #     is_url_from_api = False
+    #     logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
 
-        try:
-            health_check = requests.get(f'{pines_api_url}/healthcheck')
-            health_check = health_check.json()
-            if health_check['status'] != 'Healthy':
-                raise Exception(f'''Issue found while performing healthcheck on the 
-                                PINES server {pines_api_url}, got status : {health_check["status"]}.''')
-        except requests.exceptions.HTTPError as e:
-            logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
-            return None, False
-        except requests.exceptions.InvalidURL as e:
-            logger.error(f'Invalid URL for PINES server {pines_api_url}.')
-            return None, False
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
-            return None, False
+    #     try:
+    #         health_check = requests.get(f'{pines_api_url}')
+    #         if health_check.status_code != 200:
+    #             raise Exception(f'''Issue found while performing healthcheck on the 
+    #                             PINES server {pines_api_url}, got status : failed.''')
+    #     except requests.exceptions.HTTPError as e:
+    #         logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
+    #         return None, False
+    #     except requests.exceptions.InvalidURL as e:
+    #         logger.error(f'Invalid URL for PINES server {pines_api_url}.')
+    #         return None, False
+    #     except requests.exceptions.ConnectionError as e:
+    #         logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
+    #         return None, False
 
-
-    elif api_url is not None:
+    
+    if api_url is not None:
         # Get PINES api from API
         # Send a POST request to start the SERVER
         endpoint = f"cedars_projects/{project_id}/pines"
@@ -63,10 +62,18 @@ def load_pines_url(project_id, superbio_api_token = None):
             logger.error("No API token found, cannot authenticate with the server.")
             return None, False
 
+        data = requests.get(f'{api_url}/{endpoint}', headers=headers)
+        json_data = data.json()
+        pines_api_url = json_data.get('url')
+
+        if pines_api_url is not None:
+            is_url_from_api = True
+            return pines_api_url, is_url_from_api
+
         logger.info("Pinging", f'{api_url}/{endpoint}')
         logger.info("With header : ", headers, flush=True)
         response = requests.post(f'{api_url}/{endpoint}', headers=headers, data={})
-        logger.info("POST responce", response, flush=True)
+        logger.info("POST response", response, flush=True)
 
         if response.status_code != 200:
             raise requests.exceptions.HTTPError
@@ -100,7 +107,10 @@ def load_pines_from_api(api_url, endpoint, headers):
     data = requests.get(f'{api_url}/{endpoint}', headers=headers)
     json_data = data.json()
     logger.info("Got JSON", json_data, flush=True)
-    return json_data['url']
+    url = json_data.get('url')
+    if not url:
+        raise ValueError("URL is empty or missing in the response. Retrying...")
+    return url
 
 def get_token_status(superbio_api_token):
     '''
@@ -126,8 +136,11 @@ def get_token_status(superbio_api_token):
     }
 
     api_url = os.getenv("SUPERBIO_API_URL")
-    if api_url is None or superbio_api_token is None:
-        logger.error("No server found to connect to.")
+    if api_url is None:
+        return result
+    
+    if superbio_api_token is None:
+        logger.error("No superbio token avalible to access URL.")
         result['token_info'] = 'Invalid API url or token.'
         return result
 
@@ -168,7 +181,7 @@ def kill_pines_api(project_id, superbio_api_token):
         logger.info("Killing PINES server.")
         api_url = os.getenv("SUPERBIO_API_URL")
         if api_url is not None:
-            endpoint = f"api/cedars_projects/{project_id}/pines"
+            endpoint = f"cedars_projects/{project_id}/pines"
             headers = {"Authorization": f"Bearer {superbio_api_token}"}
 
             try:

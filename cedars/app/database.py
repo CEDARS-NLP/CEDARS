@@ -1,4 +1,5 @@
 """Initialize database connection."""
+import os
 import flask_pymongo
 from minio import Minio
 from werkzeug.local import LocalProxy
@@ -19,7 +20,11 @@ def get_mongo():
 def get_minio():
     minio = getattr(g, "minio", None)
     from . import db
-    project_id = db.get_info()["project_id"]
+    project_id = os.getenv("PROJECT_ID", None)
+    project_info = db.get_info()
+    if project_id is None and "project_id" in project_info:
+        project_id = project_info["project_id"]
+        
     g.bucket_name = f"cedars-{project_id}"
     if minio is None:
         minio = g.minio = Minio(

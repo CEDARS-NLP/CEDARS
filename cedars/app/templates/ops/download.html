@@ -14,7 +14,8 @@
             <th>File Name</th>
             <th>Size</th>
             <th>Last Modified</th>
-            <th>Action</th>
+            <th>Download</th>
+            <th>Delete</th>
           </tr>
         </thead>
         <tbody>
@@ -31,18 +32,19 @@
               <td>{{ obj[1] }} B</td>
             {% endif %}
             <td>
-              {% if obj[2] > 60*24 %}
-                {{ obj[2] // (60*24) }} days ago
-              {% elif obj[2] > 60 %}
-                {{ obj[2] // 60 }} hours ago
-              {% else %}
-                {{ obj[2] }} minutes ago
-              {% endif %}
+              {{ obj[2] }} 
             </td>
             <td>
               <form action="/ops/download_annotations" method="POST" class="form-inline">
                 <input type="hidden" name="filename" value="{{ obj[0] }}">
                 <button class="btn btn-primary cedars-btn" type="submit">Download</button>
+              </form>
+            </td>
+
+            <td>
+              <form action="/ops/delete_download_file" method="POST" class="form-inline">
+                <input type="hidden" name="filename" value="{{ obj[0] }}">
+                <button class="btn btn-primary cedars-btn" type="submit">Delete File</button>
               </form>
             </td>
           </tr>
@@ -63,6 +65,7 @@
         <form id="createTaskFormFull" class="form-inline">
           <button class="btn btn-primary cedars-btn" type="button" onclick="startNewDownloadFull()">Create New Full Download Task</button>
         </form>
+        <br>
       </div>
       <div id="downloadStatus" class="mt-3">
         <!-- This div will be updated with the download status -->
@@ -81,20 +84,27 @@
 </style>
 
 <script>
-  function checkJobStatus(jobId) {
+  function checkJobStatus(jobId, job_type) {
     fetch(`/ops/check_job/${jobId}`)
       .then(response => response.json())
       .then(data => {
         if (data.status === 'finished') {
-          document.getElementById('downloadStatus').innerHTML = `
-            <div>Download ready (**Refresh** the page and download)</div>
-          `;
+          console.log(job_type);
+          if (job_type === 'download_job') {
+            // Reload the window to update the files available for download
+            window.location.reload();
+          }
+          else{
+              document.getElementById('downloadStatus').innerHTML = `
+                <div>Results updated! (You can create download tasks now)</div>
+              `;
+          }
         } else if (data.status === 'failed') {
           document.getElementById('downloadStatus').innerHTML = `
             <div>Job failed: ${data.error}</div>
           `;
         } else {
-          setTimeout(() => checkJobStatus(jobId), 2000);
+          setTimeout(() => checkJobStatus(jobId, job_type), 2000);
         }
       });
   }
@@ -104,7 +114,7 @@
       .then(response => response.json())
       .then(data => {
         const jobId = data.job_id;
-        checkJobStatus(jobId);
+        checkJobStatus(jobId, 'download_job');
         document.getElementById('downloadStatus').innerHTML = `
           <div class="spinner-border text-primary" role="status">
             <span class="sr-only">cedars...</span>
@@ -119,7 +129,7 @@
       .then(response => response.json())
       .then(data => {
         const jobId = data.job_id;
-        checkJobStatus(jobId);
+        checkJobStatus(jobId, 'download_job');
         document.getElementById('downloadStatus').innerHTML = `
           <div class="spinner-border text-primary" role="status">
             <span class="sr-only">cedars...</span>
@@ -132,7 +142,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     const jobId = '{{ job_id }}';
     if (jobId != 'None') {
-      checkJobStatus(jobId);
+      checkJobStatus(jobId, '');
     }
   });
 </script>

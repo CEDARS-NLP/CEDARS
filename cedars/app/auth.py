@@ -2,6 +2,7 @@
 This page contatins the functions and the flask blueprint for the login functionality.
 """
 import os
+from uuid import uuid4
 from functools import wraps
 import requests
 from flask import (
@@ -21,7 +22,6 @@ from flask_login import (
     login_user,
     current_user
 )
-
 from dotenv import load_dotenv
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -40,12 +40,21 @@ def admin_required(func):
     """Admin required decorator"""
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_admin:
+        if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
             flash('You do not have admin access.')
             return render_template('index.html', **db.get_info())
         return func(*args, **kwargs)
     return decorated_function
 
+def rq_admin_check():
+    '''
+    Ensures that the current user is an admin before allowing
+    access to the rq-dashboard. The user is redirected if the
+    permission requirements are not met.
+    '''
+    if (not hasattr(current_user, 'is_admin')) or (not current_user.is_admin):
+        flash('You do not have admin access.')
+        return render_template('index.html', **db.get_info())
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -88,10 +97,10 @@ def register():
 
         password_policy = PasswordPolicy(
             min_length=8,
-            min_uppercase=2,
+            min_uppercase=1,
             min_lowercase=2,
             min_digits=2,
-            min_special=2,
+            min_special=1,
             special_chars="!@#$%^&*[]{}()~`,./<>?;:'\"-_+",
             allow_spaces=False
         )
@@ -113,10 +122,14 @@ def register():
         if error is None:
             hashed_password = generate_password_hash(password)
             # Making the first registered user an admin
-            no_admin = not len(db.get_project_users()) > 0
+            is_first_user = not len(db.get_project_users()) > 0
 
-            if no_admin and not is_admin:
+            if is_first_user and not is_admin:
                 is_admin = True
+                project_id = os.getenv("PROJECT_ID", None)
+                db.create_project(investigator_name=username,
+                                  project_name="Default Project",
+                                  project_id=project_id)
                 flash('First user registered is an admin.')
 
             db.add_user(
@@ -125,9 +138,17 @@ def register():
                 is_admin=is_admin)
 
             flash('Registration successful.')
-            if no_admin:
+            if is_first_user:
+                project_id = os.getenv("PROJECT_ID")
+                if project_id is None:
+                    project_id=str(uuid4())
+                db.create_project(project_name=db.fake.slug(),
+                            investigator_name=db.fake.name(),
+                            project_id = project_id)
+                logger.info("Initialized project.")
                 login_user(User(db.get_user(username)))
-            return render_template('index.html', **db.get_info())
+
+            return redirect("/")
         flash(error)
     return render_template('auth/register.html', **db.get_info())
 
@@ -160,9 +181,14 @@ def login():
         if user and check_password_hash(user['password'], password):
             login_user(User(user))
             flash('Login successful.')
-            return render_template('index.html', **db.get_info())
+            return redirect("/")
 
-        flash('Invalid credentials.')
+        if username is None or password is None:
+            flash("Username and password are required.")
+        elif username.strip() == "" or password.strip() == "":
+            flash("Username and password are required.")
+        else:
+            flash('Invalid credentials.')
         return redirect(url_for('auth.login'))
     if len(db.get_project_users()) == 0 and not os.getenv("SUPERBIO_API_URL"):
         return redirect(url_for('auth.register'))

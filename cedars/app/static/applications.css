@@ -43,3 +43,17 @@
     color: red;
     background-color: white;
   }
+
+  input[type="checkbox"]:checked {
+    background-color: #328CC1;
+  }
+
+  a:link {
+    color: #328CC1;
+    background-color: transparent;
+  }
+
+  a {
+    color: #328CC1;
+    background-color: transparent;
+  }

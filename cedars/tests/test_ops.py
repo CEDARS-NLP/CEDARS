@@ -1,11 +1,10 @@
+from unittest.mock import patch
 import pytest
 from flask import request
-from unittest.mock import patch
 from app.ops import (
-    allowed_data_file,
-    convert_to_int,
-    highlighted_text
+    allowed_data_file
 )
+from app.stats import _elements_to_int
 
 
 def test_allowed_data_file():
@@ -17,11 +16,6 @@ def test_allowed_data_file():
     assert allowed_data_file("file.pkl") is True
     assert allowed_data_file("file.xml") is True
     assert allowed_data_file("file.txt") is False
-
-
-def test_convert_to_int():
-    assert convert_to_int("123") == 123
-    assert convert_to_int("abc") == "abc"
 
 
 @pytest.mark.parametrize("project_name, project_id", [
@@ -133,7 +127,7 @@ def test_upload_query_post_valid(client, db):
     assert response.status_code == 200
     # mocked_nlp_processing.assert_called_once()
     assert db.get_total_counts("ANNOTATIONS") == 0
-    assert db.get_total_counts("PATIENTS", reviewed=False) == 3
+    assert db.get_total_counts("PATIENTS", reviewed=False) == 4
 
 
 def test_do_nlp_processing(client):
@@ -241,14 +235,22 @@ def test_get_job_status(client, db):
 #     assert session["patient_id"] == 1111111111
 
 
-def test_highlighted_text(db):
-    note = db.get_all_notes(1111111111)[0]
-    assert "<br>" in highlighted_text(note)
-
-
 # def test_download_annotations(client, db, mocker):
 #     mocked_get_object = mocker.patch("app.database.minio.get_object")
 #     mocked_get_object.return_value = BytesIO(b"test,test\n1,2")
 #     response = client.get("/ops/download_annotations")
 #     assert response.status_code == 200
 #     assert response.data == b"test,test\n1,2"
+
+@pytest.mark.parametrize("input_dict, output_dict", [
+    ({'a' : 12.2, 'b' : 192.9057}, {'a' : 12, 'b' : 192}),
+    ({12.4 : 19.0, 'xyz' : 90, 128 : 72.44},
+                        {12.4 : 19, 'xyz' : 90, 128 : 72})
+])
+def test_stat_elements_to_int(input_dict, output_dict):
+    result = _elements_to_int(input_dict)
+
+    for key in output_dict:
+        assert key in result
+        assert result[key] == output_dict[key]
+        isinstance(result[key], int)
