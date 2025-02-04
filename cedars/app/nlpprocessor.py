@@ -141,7 +141,7 @@ class NlpProcessor:
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
-    def process_notes(self, patient_id, processes=1, batch_size=20):
+    def process_notes(self, patient_id: str, processes=1, batch_size=20):
         """
         ##### Process Query Matching
 
@@ -193,23 +193,19 @@ class NlpProcessor:
             sentence_start = 0
             sentence_end = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
-                sentence_text = sentence_annotation.text
+                sentence_text = sentence_annotation.text.strip()
                 sentence_end = sentence_start + len(sentence_text)
                 matches = self.matcher(sentence_annotation)
                 for match in matches:
                     _, start, end = match
                     token = sentence_annotation[start:end]
                     has_negation = is_negated(token)
-                    start_index = sentence_text.find(token.text, start)
-                    end_index = start_index + len(token.text)
                     token_start = token.start_char
                     token_end = token_start + len(token.text)
                     annotation = {
                                     "sentence": sentence_text,
                                     "token": token.text,
                                     "isNegated": has_negation,
-                                    "start_index": start_index,
-                                    "end_index": end_index,
                                     "note_start_index": token_start,
                                     "note_end_index": token_end,
                                     "sentence_number": sent_no,
@@ -243,7 +239,7 @@ class NlpProcessor:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
 
-    def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
+    def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
         """
         For each patient who are unreviewed,
 

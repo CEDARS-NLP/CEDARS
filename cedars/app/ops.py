@@ -3,9 +3,10 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
-from datetime import datetime, timezone
-
+from datetime import datetime
+import tempfile
 import pandas as pd
+import pyarrow.parquet as pq
 import flask
 from dotenv import dotenv_values
 from flask import (
@@ -28,10 +29,11 @@ from .database import minio
 from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
 
-logger.enable(__name__)
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")
+
+logger.enable(__name__)
 
 
 def allowed_data_file(filename):
@@ -68,13 +70,6 @@ def allowed_image_file(filename):
     return extension in allowed_extensions
 
 
-def convert_to_int(value):
-    """Convert to integer if possible, otherwise return the string."""
-    try:
-        return int(value)
-    except ValueError:
-        return value
-
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
 def project_details():
@@ -87,18 +82,18 @@ def project_details():
         if "update_project_name" in request.form:
             project_name = request.form.get("project_name").strip()
             old_name = db.get_proj_name()
-            project_info = db.get_info()
-            project_id = project_info["project_id"]
             if old_name is None:
-                if len(project_name) > 0:
-                    db.create_project(project_name, current_user.username,
-                                      project_id = project_id)
-                    flash(f"Project **{project_name}** created.")
+                project_id = os.getenv("PROJECT_ID", None)
+                db.create_project(project_name, current_user.username,
+                                    project_id = project_id)
+                flash(f"Project **{project_name}** created.")
             else:
+                project_info = db.get_info()
+                project_id = project_info["project_id"]
                 if len(project_name) > 0:
                     db.update_project_name(project_name)
                     flash(f"Project name updated to {project_name}.")
-            return render_template("index.html", **db.get_info())
+            return redirect("/")
 
         if "terminate" in request.form:
             terminate_clause = request.form.get("terminate_conf")
@@ -110,11 +105,27 @@ def project_details():
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
-                    return render_template("index.html", **db.get_info())
+                    return redirect("/")
             else:
                 flash("Termination failed.. Please enter 'DELETE EVERYTHING' in confirmation")
 
     return render_template("ops/project_details.html",
+                            **db.get_info())
+
+@bp.route("/internal_processes", methods=["GET"])
+@auth.admin_required
+def internal_processes():
+    """
+    This is a flask function for the backend logic for the internal_processes route.
+    It is used by a technical admin to perform special technical operations the current project.
+    """
+
+    # Get the RQ_DASHBOARD_URL environment variable,
+    # if it does not exist use /rq as a default.
+    rq_dashboard_url = os.getenv("RQ_DASHBOARD_URL", "/rq")
+
+    return render_template("ops/internal_processes.html",
+                            rq_dashboard_url = rq_dashboard_url,
                             **db.get_info())
 
 def read_gz_csv(filename, *args, **kwargs):
@@ -124,7 +135,7 @@ def read_gz_csv(filename, *args, **kwargs):
     return pd.read_csv(filename, compression='gzip', *args, **kwargs)
 
 
-def load_pandas_dataframe(filepath):
+def load_pandas_dataframe(filepath, chunk_size=1000):
     """
     Load tabular data from a file into a pandas DataFrame.
 
@@ -165,67 +176,97 @@ def load_pandas_dataframe(filepath):
     try:
         logger.info(filepath)
         obj = minio.get_object(g.bucket_name, filepath)
-
-        # Read one line of the file to conserve memory and computation
-        if extension in ['csv', 'xlsx', 'gz']:
-            data_frame_line_1 = loaders[extension](obj, nrows = 1)
-        elif extension == 'json':
-            data_frame_line_1 = loaders[extension](obj, lines = True, nrows = 1)
-        else:
-            # TODO
-            # Add generator to load a single line from other file types
-            data_frame_line_1 = loaders[extension](obj)
-
-        required_columns = ['patient_id', 'text_id', 'text', 'text_date']
-
-        for column in required_columns:
-            if column not in data_frame_line_1.columns:
-                flash(f"Column {column} missing from uploaded file.")
-                flash("Failed to save file to database.")
-                raise RuntimeError(f"Uploaded file does not contain column '{column}'.")
+        local_directory = tempfile.gettempdir()
+        os.makedirs(local_directory, exist_ok=True)
+        local_filename = os.path.join(local_directory, os.path.basename(filepath))
+        minio.fget_object(g.bucket_name, filepath, local_filename)
+        logger.info(f"File downloaded successfully to {local_filename}")
 
         # Re-initialise object from minio to load it again
-        obj = minio.get_object(g.bucket_name, filepath)
-        data_frame = loaders[extension](obj)
-        return data_frame
+        if extension == 'parquet':
+            parquet_file = pq.ParquetFile(local_filename)
+            for batch in parquet_file.iter_batches(batch_size=chunk_size):
+                yield batch.to_pandas()
+        else:
+            chunks = loaders[extension](local_filename, chunksize=chunk_size)
+            for chunk in chunks:
+                yield chunk
 
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
         raise RuntimeError(f"Failed to load the file '{filepath}' due to: {str(exc)}") from exc
+    finally:
+        obj.close()
+        obj.release_conn()
+        if 'local_filepath' in locals() and os.path.exists(local_filename):
+            os.remove(local_filename)
+            logger.info(f"Removed temporary file: {local_filename}")
 
 
-# Pylint disabled due to naming convention.
-def EMR_to_mongodb(filepath):  # pylint: disable=C0103
+def prepare_note(note_info):
+    date_format = '%Y-%m-%d'
+    note_info["text_date"] = datetime.strptime(note_info["text_date"], date_format)
+    note_info["reviewed"] = False
+    note_info["text_id"] = str(note_info["text_id"]).strip()
+    note_info["patient_id"] = str(note_info["patient_id"]).strip()
+    return note_info
+
+
+def prepare_patients(patient_ids):
+    return {str(p_id).strip() for p_id in patient_ids}
+
+
+def EMR_to_mongodb(filepath, chunk_size=1000):
     """
-    This function is used to open a csv file and load it's contents into the mongodb database.
+    This function is used to open a file and load its contents into the MongoDB database in chunks.
 
     Args:
-        filename (str) : The path to the file to load data from.
-        For valid file extensions refer to the allowed_data_file function above.
+        filepath (str): The path to the file to load data from.
+        chunk_size (int): Number of rows to process per chunk.
+
     Returns:
         None
     """
+    logger.info("Starting document migration to MongoDB database.")
 
-    data_frame = load_pandas_dataframe(filepath)
-    if data_frame is None:
-        return
+    total_rows = 0
+    total_chunks = 0
+    all_patient_ids = set()
 
-    logger.info(f"columns in dataframe:\n {data_frame.columns}")
-    logger.debug(data_frame.head())
-    id_list = data_frame["patient_id"].unique()
-    logger.info("Starting document migration to mongodb database.")
-    for i, p_id in enumerate(id_list):
-        documents = data_frame[data_frame["patient_id"] == p_id]
-        db.upload_notes(documents)
-        if i+1 % 100 == 0:
-            logger.info(f"Documents uploaded for patient #{i+1}")
+    try:
+        for chunk in load_pandas_dataframe(filepath, chunk_size):
+            total_chunks += 1
+            rows_in_chunk = len(chunk)
+            total_rows += rows_in_chunk
 
-    db.create_index("PATIENTS", [("patient_id", {"unique": True})])
-    db.create_index("NOTES", ["patient_id",
-                              ("text_id", {"unique": True})])
-    logger.info("Completed document migration to mongodb database.")
+            logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
 
+            # Prepare notes
+            notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
+
+            # Collect patient IDs
+            chunk_patient_ids = set(chunk['patient_id'])
+            chunk_patient_ids = prepare_patients(chunk_patient_ids)
+            all_patient_ids.update(chunk_patient_ids)
+
+            # Bulk insert notes
+            inserted_count = db.bulk_insert_notes(notes_to_insert)
+            logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
+
+        # Bulk upsert patients
+        upserted_count = db.bulk_upsert_patients(all_patient_ids)
+        logger.info(f"Upserted {upserted_count} patients")
+
+        logger.info(f"Completed document migration to MongoDB database. "
+                    f"Total rows processed: {total_rows}, "
+                    f"Total chunks processed: {total_chunks}, "
+                    f"Total unique patients: {len(all_patient_ids)}")
+
+    except Exception as e:
+        logger.error(f"An error occurred during document migration: {str(e)}")
+        flash(f"Failed to upload data: {str(e)}")
+        raise
 
 @bp.route("/upload_data", methods=["GET", "POST"])
 @auth.admin_required
@@ -262,7 +303,10 @@ def upload_data():
                 minio.put_object(g.bucket_name,
                                  filename,
                                  file,
-                                 size)
+                                 size,
+                                 part_size=10*1024*1024,
+                                 num_parallel_uploads=10
+                                 )
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
             except Exception as e:
@@ -405,17 +449,11 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     '''
     db.report_success(job)
 
-    queue_length = len(flask.current_app.task_queue)
-    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
-    num_running_jobs = len(all_jobs.get_job_ids())
-
-    if queue_length == 0 and num_running_jobs == 1:
-        # We use num_running_jobs == 1 after the queue is empty to
-        # ensure that the job that got over was the last job from the queue.
-
+    if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        close_pines_connection(job.kwargs['superbio_api_token'])
+        if job.kwargs['superbio_api_token'] is not None:
+            close_pines_connection(job.kwargs['superbio_api_token'])
 
 def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
@@ -424,17 +462,11 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
     db.report_failure(job)
 
-    queue_length = len(flask.current_app.task_queue)
-    all_jobs = StartedJobRegistry(queue=flask.current_app.task_queue)
-    num_running_jobs = len(all_jobs.get_job_ids())
-
-    if queue_length == 0 and num_running_jobs == 1:
-        # We use num_running_jobs == 1 after the queue is empty to
-        # ensure that the job that got over was the last job from the queue.
-
+    if len(list(db.get_tasks_in_progress())) == 0:
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
-        close_pines_connection(job.kwargs['superbio_api_token'])
+        if job.kwargs['superbio_api_token'] is not None:
+            close_pines_connection(job.kwargs['superbio_api_token'])
 
 def init_pines_connection(superbio_api_token = None):
     '''
@@ -517,7 +549,6 @@ def queue_stats():
                           'successful_jobs': successful_jobs
                           })
 
-
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 def save_adjudications():
@@ -530,11 +561,12 @@ def save_adjudications():
 
     def _update_event_date():
         new_date = request.form['date_entry']
-        logger.info(f"Updating {patient_id}: {new_date}")
+        logger.info(f"Updating event date for {patient_id}: {new_date}")
         db.update_event_date(patient_id, new_date, current_annotation_id)
         _adjudicate_annotation(updated_date = True)
 
     def _delete_event_date():
+        logger.info(f"Deleting event date for {patient_id}")
         db.delete_event_date(patient_id)
 
     def _move_to_previous_annotation(shift_value):
@@ -563,11 +595,16 @@ def save_adjudications():
         return shift_index_forwards
 
     def _adjudicate_annotation(updated_date = False):
+        logger.debug(f"Adjudicating annotation # {current_annotation_id}")
         skip_after_event = db.get_search_query(query_key="skip_after_event")
+
+        current_patient_id = session["patient_id"]
+        if updated_date and skip_after_event:
+            db.set_patient_lock_status(current_patient_id, False)
+            session.pop("patient_id")
+
         if session["unreviewed_annotations_index"][session["index"]] == 1:
             db.mark_annotation_reviewed(current_annotation_id)
-            if updated_date and skip_after_event:
-                session["unreviewed_annotations_index"] = [0] * len(session["unreviewed_annotations_index"])
 
             session["unreviewed_annotations_index"][session["index"]] = 0
             session.modified = True
@@ -575,33 +612,49 @@ def save_adjudications():
             # as reviewed because we don't need to review the rest
             # this could be based on a parameter though
             # TODO: add logic based on tags if we need to keep reviewing
-            if len(db.get_patient_annotation_ids(session["patient_id"])) == 0:
-                db.mark_patient_reviewed(session["patient_id"],
+            if len(db.get_patient_annotation_ids(current_patient_id)) == 0:
+                db.mark_patient_reviewed(current_patient_id,
                                          reviewed_by=current_user.username)
-                db.set_patient_lock_status(session["patient_id"], False)
-                session.pop("patient_id")
-            elif db.get_event_date(session["patient_id"]) is not None:
+                db.set_patient_lock_status(current_patient_id, False)
+                if "patient_id" in session:
+                    session.pop("patient_id")
+            elif db.get_event_date(current_patient_id) is not None:
                 db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
                                       reviewed_by=current_user.username)
-                db.mark_patient_reviewed(session["patient_id"],
+                db.mark_patient_reviewed(current_patient_id,
                                          reviewed_by=current_user.username)
                 if db.get_search_query(query_key="skip_after_event"):
-                    db.set_patient_lock_status(session["patient_id"], False)
-                    session.pop("patient_id")
+                    db.set_patient_lock_status(current_patient_id, False)
+                    if "patient_id" in session:
+                        session.pop("patient_id")
             else:
-                session["index"] = session["unreviewed_annotations_index"].index(1)
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
         elif 1 in session["unreviewed_annotations_index"]:
-            # any unreviewed annotations left?
-            session["index"] = session["unreviewed_annotations_index"].index(1)
+            if db.get_event_date(current_patient_id) is not None:
+                db.mark_note_reviewed(db.get_annotation(current_annotation_id)["note_id"],
+                                      reviewed_by=current_user.username)
+                db.mark_patient_reviewed(current_patient_id,
+                                         reviewed_by=current_user.username)
+            else:
+                # any unreviewed annotations left?
+                session["index"] = get_next_annotation_index(session["unreviewed_annotations_index"],
+                                                             session["index"])
         else:
-            flash("Annotation already reviewed.")
-            if session["index"] < session["total_count"] - 1:
+            is_last_note = (session["index"] >= session["total_count"] - 1)
+            if is_last_note or (updated_date and skip_after_event):
+                # If the index and reached the end of a patient's notes
+                # and there are no unreviewed annotations left
+                # Then this patient has been fully reviewed and can be popped.
+                db.set_patient_lock_status(current_patient_id, False)
+            else:
                 session["index"] += 1
 
         session.modified = True
 
     def _add_annotation_comment():
-        db.add_comment(current_annotation_id, request.form['comment'])
+        logger.info(f"Updating comment for {patient_id}.")
+        db.add_comment(current_annotation_id, request.form['comment'].strip())
 
 
     actions = {
@@ -621,6 +674,8 @@ def save_adjudications():
     if action in actions:
         actions[action]()
     _add_annotation_comment()
+    db.upsert_patient_results(patient_id, datetime.now(),
+                              updated_by = current_user.username)
 
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
@@ -710,10 +765,9 @@ def adjudicate_records():
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
 
-        search_patient = request.form.get("patient_id")
+        search_patient = str(request.form.get("patient_id")).strip()
         is_patient_locked = False
-        if search_patient and len(search_patient.strip()) > 0:
-            search_patient = convert_to_int(search_patient)
+        if search_patient and len(search_patient) > 0:
             patient = db.get_patient_by_id(search_patient)
             if patient is None:
                 patient_id = None
@@ -743,12 +797,23 @@ def adjudicate_records():
     total_count = res["total"]
     all_annotation_index = res["all_annotation_index"]
     unreviewed_annotations_index = res["unreviewed_annotations_index"]
+    stored_event_date = db.get_event_date(patient_id)
+    stored_annotation_id = db.get_event_annotation_id(patient_id)
 
     if total_count == 0:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
+    elif stored_event_date and stored_annotation_id:
+        flash(f"Patient {patient_id} has been reviewed. Showing annotation where event date was marked. ")
+        logger.info(f"Total annotations for patient {patient_id}: {total_count}")
+        session["patient_id"] = patient_id
+        session["total_count"] = total_count
+        session["annotations"] = annotations
+        session["all_annotation_index"] = all_annotation_index
+        session["unreviewed_annotations_index"] = unreviewed_annotations_index
+        session["index"] = all_annotation_index[annotations.index(stored_annotation_id)]
     elif unreviewed_annotations_index.count(1) == 0:
         flash(f"Patient {patient_id} has no annotations left review. Showing all annotations.")
         session["patient_id"] = patient_id
@@ -784,6 +849,34 @@ def unlock_current_patient():
 
     return jsonify({"error": "No patient to unlock."}), 200
 
+def get_next_annotation_index(unreviewed_annotations, current_index):
+    '''
+    Given a list of the review status of annotations and the current index
+    find the next unreviewed annotation to review.
+
+    Args :
+        - unreviewed_annotations (list[int]) : For each index, 0 indicates that an annotation is reviewed
+                                                               1 indicates that an annotation has been reviewed
+        - current_index (int) : Index of the annotation that was just reviewed,
+    
+    Returns :
+        - next_index (int) : Index of the next unreviewed annotation after the current one,
+                                will return the same index as the current index if no unreviewed annotations left.
+    
+    '''
+
+    i = current_index + 1
+    while i != current_index:
+        if i == len(unreviewed_annotations):
+            i = 0
+
+        if unreviewed_annotations[i] == 1:
+            break
+
+        i += 1
+
+    return i
+
 def highlighted_text(note):
     """
     Returns highlighted text for a note.
@@ -817,32 +910,31 @@ def get_highlighted_sentence(current_annotation, note):
     highlighted_note = []
     text = note["text"]
 
-    sentence_start = current_annotation["sentence_start"]
-    sentence_end = current_annotation["sentence_end"]
-    if sentence_start == 0:
-        prev_end_index = sentence_start
-    else:
-        # Padding to the left to ensure that all characters are caught
-        prev_end_index = sentence_start - 1
+    sentence_start = text.lower().index(current_annotation['sentence'])
+    sentence_end = sentence_start + len(current_annotation['sentence'])
+    prev_end_index = sentence_start
 
     annotations = db.get_all_annotations_for_sentence(note["text_id"],
                                                       current_annotation["sentence_number"])
-    logger.info(annotations)
 
+    highlighted_note = []
     for annotation in annotations:
-        start_index = annotation['note_start_index']
-        end_index = annotation['note_end_index']
-        # Make sure the annotations don't overlap
-        if start_index < prev_end_index:
+        token_start_index = annotation['note_start_index']
+        token_end_index = annotation['note_end_index']
+
+        # Make sure the annotations don't overlap unless it is the first index
+        if (token_start_index < prev_end_index) and (token_start_index != 0):
             continue
 
-        highlighted_note.append(text[prev_end_index:start_index])
-        highlighted_note.append(f'<b><mark>{text[start_index:end_index]}</mark></b>')
-        prev_end_index = end_index
+        highlighted_note.append(text[prev_end_index:token_start_index])
+        key_token = text[token_start_index:token_end_index]
+        highlighted_note.append(f'<b><mark>{key_token}</mark></b>')
+        prev_end_index = token_end_index
 
     highlighted_note.append(text[prev_end_index:sentence_end])
-    logger.info(highlighted_note)
-    return " ".join(highlighted_note).replace("\n", "<br>").strip()
+    sentence = "".join(highlighted_note).strip().replace("\n", "<br>")
+    logger.info(f'Showing sentence : {sentence}')
+    return sentence
 
 def format_annotations(annotations, hide_duplicates):
     """
@@ -923,6 +1015,27 @@ def _format_date(date_obj):
         res = date_obj.date()
     return res
 
+def get_download_filename(is_full_download=False):
+    '''
+    Returns the filename for a new download task.
+
+    Args :
+        - is_full_download (bool) : True if all of the results 
+                                    (including the key sentences)
+                                    are to be downloaded.
+
+    Returns :
+        - filename (string) : A string in the format
+                              {project_name}_{timestamp}_{downloadtype}.csv
+    '''
+    project_name = db.get_proj_name()
+    timestamp = datetime.now()
+    timestamp = timestamp.strftime("%Y-%m-%d_%H_%M_%S")
+
+    if is_full_download:
+        return f"annotations_full_{project_name}_{timestamp}.csv"
+
+    return f"annotations_compact_{project_name}_{timestamp}.csv"
 
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
@@ -934,8 +1047,7 @@ def download_page(job_id=None):
     """
     files = [(obj.object_name.rsplit("/", 1)[-1],
               obj.size,
-              (
-                  datetime.now(timezone.utc) - obj.last_modified).seconds//60
+              obj.last_modified.strftime("%Y-%m-%d %H:%M:%S")
               ) for obj in minio.list_objects(
                    g.bucket_name,
                    prefix="annotated_files/")]
@@ -969,6 +1081,7 @@ def download_file(filename='annotations.csv'):
     filename = request.form.get("filename")
     file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
     logger.info(f"Downloaded annotations from s3: {filename}")
+
     return flask.Response(
         file.stream(32*1024),
         mimetype='text/csv',
@@ -983,8 +1096,9 @@ def create_download():
     Create a download task for annotations
     """
 
+    download_filename = get_download_filename()
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations.csv",
+        db.download_annotations, download_filename,
     )
     return flask.jsonify({'job_id': job.get_id()}), 202
 
@@ -996,10 +1110,35 @@ def create_download_full():
     Create a download task for annotations
     """
 
-
+    download_filename = get_download_filename(True)
     job = flask.current_app.ops_queue.enqueue(
-        db.download_annotations, "annotations_full.csv", True
+        db.download_annotations, download_filename, True
     )
+
+    return flask.jsonify({'job_id': job.get_id()}), 202
+
+@bp.route('/delete_download_file', methods=["POST"])
+@auth.admin_required
+def delete_download_file():
+    """
+    Deletes a download file from the current minio bucket.
+    """
+
+    filename = request.form.get("filename")
+    minio.remove_object(g.bucket_name, f"annotated_files/{filename}")
+    logger.info(f"Successfully removed {filename} from minio server.")
+
+    return redirect("/ops/download_page")
+
+@bp.route('/update_results_collection', methods=["GET"])
+@auth.admin_required
+def update_results_collection():
+    """
+    Creates and updates the RESULTS collection.
+    """
+
+    job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
+                                                True)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
 

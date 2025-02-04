@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="w-75 mx-auto">
+
+      <div class="mb-4">
+        <h2>About</h2>
+
+        <div class="form-group">
+            CEDARS is an open source software designed to aid researchers in quickly finding relevant events and their corresponding dates within large corpuses of medical notes.
+        </div>
+
+        <br>
+        <br>
+        <h3>Background</h3>
+
+        <div class="form-group">
+            Developed out of a practical need for a more efficient way to conduct medical research, CEDARS aims to systematize and accelerate the aggregation of time-to-event data from the electronic health record (EHR). It accomplishes those goals by deploying natural language processing (NLP) as a tool to assist detection and characterization of clinical events by human annotators. The companion package PINES (Progressive Inference Networked Episodic Service) can be used to fit NLP models and deploy them within a CEDARS instance.
+        </div>
+
+        <br>
+        <br>
+        <h3>Documentation and Code</h3>
+
+        <div class="form-group">
+            CEDARS and PINES are available as open-source Python packages. Each CEDARS project instance is deployed in a dedicated Docker container. The code base is maintained on GitHub. The latest stable Docker image can be downloaded here and the most recent development versions can be cloned from the respective repositories of  <a href="https://github.com/CEDARS-NLP/CEDARS">CEDARS</a> and  <a href="https://github.com/CEDARS-NLP/PINES">PINES</a>.
+            <br>
+            <br>
+            The annotator manual is available <a href="https://cedars.io/CEDARS_annotator_manual/">here</a>.
+        </div>
+
+
+        <br>
+        <br>
+
+        <h3>Project Authors</h3>
+        <div class="form-group">
+            This software is under development at <a href="https://www.mskcc.org/">Memorial Sloan Kettering Cancer Center (MSKCC)</a>. Contributing authors include:
+            <ul>
+                <li> <a href="https://www.mskcc.org/cancer-care/doctors/simon-mantha">Simon Mantha, MD, MPH</a>: project lead, clinical hematologist by training </li>
+                <li> <a href="https://www.linkedin.com/in/singhrhn/">Rohan Singh, MS</a>: principal data scientist </li>
+                <li> <a href="https://www.linkedin.com/in/kayan-irani-762938218/">Kayan Irani</a>: collaborator </li>
+            </ul>
+        </div>
+
+        <h3>Inquiries</h3>
+        <div class="form-group">
+            If you wish to inquire about NLP model availability or contribute to the project, please contact us at smantha@cedars.io.
+        </div>
+        
+        
+  </div>
+
+
+{% endblock %}
