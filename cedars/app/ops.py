@@ -192,7 +192,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
                 df = batch.to_pandas()
                 df['text'] = df['text'].str[:SPACY_CHAR_LIM]
-                yield batch.to_pandas()
+                yield df
         else:
             chunks = loaders[extension](local_filename, chunksize=chunk_size)
             for chunk in chunks:
