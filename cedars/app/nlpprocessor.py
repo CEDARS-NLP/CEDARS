@@ -223,6 +223,8 @@ class NlpProcessor:
 
                 sentence_start = sentence_end + 1
 
+            logger.info(f"Finished processing document annotations for {patient_id}")
+
             if match_count == 0:
                 db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
             count += 1

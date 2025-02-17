@@ -184,14 +184,19 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         minio.fget_object(g.bucket_name, filepath, local_filename)
         logger.info(f"File downloaded successfully to {local_filename}")
 
+        SPACY_CHAR_LIM = 1_000_000
+
         # Re-initialise object from minio to load it again
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(local_filename)
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
+                df = batch.to_pandas()
+                df['text'] = df['text'].str[:SPACY_CHAR_LIM]
                 yield batch.to_pandas()
         else:
             chunks = loaders[extension](local_filename, chunksize=chunk_size)
             for chunk in chunks:
+                chunk['text'] = chunk['text'].str[:SPACY_CHAR_LIM]
                 yield chunk
 
     except FileNotFoundError as exc:
