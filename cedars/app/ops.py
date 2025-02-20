@@ -761,18 +761,24 @@ def adjudicate_records():
     session.modified = True
     return redirect(url_for("ops.show_annotation"))
 
-@bp.route("/unlock_patient", methods=["POST"])
+@bp.route("/unlock_patient", methods=["GET", "POST"])
 def unlock_current_patient():
     """
     Sets the locked status of the patient in the session to False.
     """
     patient_id = session["patient_id"]
+    message = "No patient to unlock."
     if patient_id is not None:
         db.set_patient_lock_status(patient_id, False)
         session["patient_id"] = None
-        return jsonify({"message": f"Unlocking patient # {patient_id}."}), 200
+        message = f"Unlocking patient # {patient_id}."
 
-    return jsonify({"error": "No patient to unlock."}), 200
+    if request.method == "GET":
+        message += " Unlock triggered due to inactivity."
+        flash(message)
+        return redirect("/stats/")
+    else:
+        return jsonify({"message": message}), 200
 
 def get_next_annotation_index(unreviewed_annotations, current_index):
     '''
