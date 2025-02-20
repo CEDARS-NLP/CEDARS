@@ -1,5 +1,5 @@
 import multiprocessing as mp
-workers = 2 * mp.cpu_count() + 1
+workers = 4
 threads = 4
 worker_class = 'gthread'
 timeout = 300
