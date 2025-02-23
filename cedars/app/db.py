@@ -938,26 +938,6 @@ def get_event_date(patient_id: str):
 
     return None
 
-
-def get_event_date_sentences(patient_id: str):
-    """
-    Find the event date from the annotations for a patient.
-    """
-    logger.debug(f"Retriving event date for patient #{patient_id}.")
-    event_date = get_event_date(patient_id)
-    if event_date is None:
-        return []
-    annotations = mongo.db["ANNOTATIONS"].find({
-        "patient_id": patient_id}).sort(
-                [("text_date", 1)]
-                )
-    annotations = list(annotations)
-    res = []
-    if len(annotations) > 0:
-        res = [f'{annotation["note_id"]}: {annotation["sentence"]}' for annotation in annotations]
-    return res
-
-
 def get_note_date(note_id):
     """
     Retrives the date of a note.
