@@ -874,54 +874,6 @@ def get_all_annotations_for_patient(patient_id: str):
 
     return annotations
 
-
-def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
-    """
-    Retrives all annotations for a patient.
-
-    Args:
-        patient_id (str) : Unique ID for a patient.
-    Returns:
-        annotations (list) : A list of all annotations for that patient.
-    """
-    annotations = mongo.db["ANNOTATIONS"].aggregate([
-        {
-            "$match": {"patient_id": patient_id}
-        },
-        {
-            "$facet": {
-                "metadata": [{"$count": 'total'}],
-                "data": [
-                    {"$match": {"patient_id": patient_id}},
-                    {"$sort": {"text_date": 1, "note_id": 1, "note_start_index": 1}},
-                    {"$skip": (page - 1) * page_size},
-                    {"$limit": page_size}]
-                }
-        },
-        {
-            "$project": {
-                "total": {"$arrayElemAt": ["$metadata.total", 0]},
-                "annotations": "$data"
-            }
-        }
-    ])
-
-    result = list(annotations)
-
-    if result:
-        # Extract the document
-        data = result[0]
-        total = data.get("total", 0)  # Total number of annotations
-        annotations = data.get("annotations", [])  # Annotations for the current page
-    else:
-        # If no results, set default values
-        total = 0
-        annotations = []
-
-    # Return the total count and the current page of annotations
-    return {"total": total, "annotations": annotations}
-
-
 def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
