@@ -113,9 +113,50 @@ def create_index(collection, index: list):
             mongo.db[collection].create_index(i)
         logger.info(f"Created index {i} in collection {collection}.")
 
+def create_annotation_indices():
+    '''
+    Creates indices for the ANNOTATIONS col in the db.
+    This is maintained as a seperate function as this collection
+    requires many more indices than the others and it is easier
+    to organise all of the commands in one place.
+    '''
+
+    logger.info("Creating indexes for ANNOTATIONS.")
+    create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ])
+    create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
+    create_index("ANNOTATIONS", ["note_id", "reviewed"])
+    create_index("ANNOTATIONS", ["patient_id", "reviewed"])
+
+    # Index for get_all_annotations_for_note
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("setence_number", 1)])
+    
+    # Index for get_all_annotations_for_sentence
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("setence_number", 1),
+                                        ("note_start_index", 1)])
+
+    # Index for get_patient_annotation_ids
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("reviewed", 1), ("setence_number", 1),
+                                        ("note_id", 1), ("text_date", 1)])
+    
+    # Index for get_annotations_post_event
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1),
+                                        ("reviewed", 1), ("text_date", 1)])
+
+    # Index for get_annotated_notes_for_patient
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("note_start_index", 1),
+                                        ("note_id", 1), ("text_date", 1)])
+
+    # Index for mark_annotation_reviewed (note reviewed lookup query)
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("reviewed", 1)])
+
 def create_db_indices():
     '''
-    Creates indices for the ANNOTATIONS and PINES cols in the db.
+    Creates indices for all of the cols in the db.
     '''
     logger.info("All tasks completed.")
 
@@ -127,13 +168,7 @@ def create_db_indices():
     logger.info("Creating indexes for PATIENTS.")
     mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
 
-    logger.info("Creating indexes for ANNOTATIONS.")
-    create_index("ANNOTATIONS", ["patient_id", "note_id"])
-    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
-                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ] )
-    create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
-    create_index("ANNOTATIONS", ["note_id", "reviewed"])
-    create_index("ANNOTATIONS", ["patient_id", "reviewed"])
+    create_annotation_indices()
 
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
