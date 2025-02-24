@@ -309,6 +309,8 @@ class NlpProcessor:
                 except Exception as exc:
                     logger.error(f"Error processing notes for patient {patient_id}: {exc}")
                 finally:
+                    # TODO: make sure the patient is not unlocked if locked by a user.
+                    # when we have the user-lock mapping - we can add the check here.
                     db.set_patient_lock_status(patient_id, False)
             else:
                 logger.info(f"Task {task['job_id']} already completed")
