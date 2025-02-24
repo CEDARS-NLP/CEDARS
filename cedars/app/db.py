@@ -131,16 +131,16 @@ def create_annotation_indices():
 
     # Index for get_all_annotations_for_note
     mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
-                                        ("text_date", 1), ("setence_number", 1)])
+                                        ("text_date", 1), ("sentence_number", 1)])
     
     # Index for get_all_annotations_for_sentence
     mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
-                                        ("text_date", 1), ("setence_number", 1),
+                                        ("text_date", 1), ("sentence_number", 1),
                                         ("note_start_index", 1)])
 
     # Index for get_patient_annotation_ids
     mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
-                                        ("reviewed", 1), ("setence_number", 1),
+                                        ("reviewed", 1), ("sentence_number", 1),
                                         ("note_id", 1), ("text_date", 1)])
     
     # Index for get_annotations_post_event
@@ -640,7 +640,7 @@ def get_all_annotations_for_note(note_id):
     """
     annotations = mongo.db["ANNOTATIONS"].find({"note_id": note_id,
                                                 "isNegated": False}).sort([("text_date", 1),
-                                                                           ("setence_number", 1)])
+                                                                           ("sentence_number", 1)])
     return list(annotations)
 
 def get_all_annotations_for_sentence(note_id, sentence_number):
