@@ -597,8 +597,7 @@ def save_adjudications():
     # reviewed.
     if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
         db.set_patient_lock_status(patient_id, False)
-        db.mark_patient_reviewed(patient_id,
-                                         reviewed_by=current_user.username)
+        db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
         session.pop("patient_id")
         session.pop("patient_data")
 
@@ -691,6 +690,7 @@ def adjudicate_records():
         if session.get("patient_id") is not None:
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
+            session.modified = True
 
         search_patient = str(request.form.get("patient_id")).strip()
         is_patient_locked = False
