@@ -115,13 +115,6 @@ def test_get_all_annotations_for_patient(db):
     result = db.get_all_annotations_for_patient("1111111111")
     assert len(result) == 3
 
-
-def test_get_all_annotations_for_patient_paged(db):
-    result = db.get_all_annotations_for_patient_paged("1111111111", page=1, page_size=1)
-    assert result["total"] == 3
-    assert len(result["annotations"]) == 1
-
-
 def test_get_patient_annotation_ids(db):
     result = db.get_patient_annotation_ids("1111111111")
     assert len(result) == 3

@@ -113,9 +113,50 @@ def create_index(collection, index: list):
             mongo.db[collection].create_index(i)
         logger.info(f"Created index {i} in collection {collection}.")
 
+def create_annotation_indices():
+    '''
+    Creates indices for the ANNOTATIONS col in the db.
+    This is maintained as a seperate function as this collection
+    requires many more indices than the others and it is easier
+    to organise all of the commands in one place.
+    '''
+
+    logger.info("Creating indexes for ANNOTATIONS.")
+    create_index("ANNOTATIONS", ["patient_id", "note_id"])
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ])
+    create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
+    create_index("ANNOTATIONS", ["note_id", "reviewed"])
+    create_index("ANNOTATIONS", ["patient_id", "reviewed"])
+
+    # Index for get_all_annotations_for_note
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("sentence_number", 1)])
+    
+    # Index for get_all_annotations_for_sentence
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("isNegated", 1),
+                                        ("text_date", 1), ("sentence_number", 1),
+                                        ("note_start_index", 1)])
+
+    # Index for get_patient_annotation_ids
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
+                                        ("reviewed", 1), ("sentence_number", 1),
+                                        ("note_id", 1), ("text_date", 1)])
+    
+    # Index for get_annotations_post_event
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1),
+                                        ("reviewed", 1), ("text_date", 1)])
+
+    # Index for get_annotated_notes_for_patient
+    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("note_start_index", 1),
+                                        ("note_id", 1), ("text_date", 1)])
+
+    # Index for mark_annotation_reviewed (note reviewed lookup query)
+    mongo.db["ANNOTATIONS"].create_index([("note_id", 1), ("reviewed", 1)])
+
 def create_db_indices():
     '''
-    Creates indices for the ANNOTATIONS and PINES cols in the db.
+    Creates indices for all of the cols in the db.
     '''
     logger.info("All tasks completed.")
 
@@ -127,13 +168,7 @@ def create_db_indices():
     logger.info("Creating indexes for PATIENTS.")
     mongo.db["PATIENTS"].create_index([("patient_id", 1)], unique=True)
 
-    logger.info("Creating indexes for ANNOTATIONS.")
-    create_index("ANNOTATIONS", ["patient_id", "note_id"])
-    mongo.db["ANNOTATIONS"].create_index([("patient_id", 1), ("isNegated", 1),
-                                        ("text_date", 1), ("note_id", 1), ("note_start_index", 1) ] )
-    create_index("ANNOTATIONS", ["patient_id", "text_date", "reviewed"])
-    create_index("ANNOTATIONS", ["note_id", "reviewed"])
-    create_index("ANNOTATIONS", ["patient_id", "reviewed"])
+    create_annotation_indices()
 
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
@@ -605,7 +640,7 @@ def get_all_annotations_for_note(note_id):
     """
     annotations = mongo.db["ANNOTATIONS"].find({"note_id": note_id,
                                                 "isNegated": False}).sort([("text_date", 1),
-                                                                           ("setence_number", 1)])
+                                                                           ("sentence_number", 1)])
     return list(annotations)
 
 def get_all_annotations_for_sentence(note_id, sentence_number):
@@ -839,54 +874,6 @@ def get_all_annotations_for_patient(patient_id: str):
 
     return annotations
 
-
-def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
-    """
-    Retrives all annotations for a patient.
-
-    Args:
-        patient_id (str) : Unique ID for a patient.
-    Returns:
-        annotations (list) : A list of all annotations for that patient.
-    """
-    annotations = mongo.db["ANNOTATIONS"].aggregate([
-        {
-            "$match": {"patient_id": patient_id}
-        },
-        {
-            "$facet": {
-                "metadata": [{"$count": 'total'}],
-                "data": [
-                    {"$match": {"patient_id": patient_id}},
-                    {"$sort": {"text_date": 1, "note_id": 1, "note_start_index": 1}},
-                    {"$skip": (page - 1) * page_size},
-                    {"$limit": page_size}]
-                }
-        },
-        {
-            "$project": {
-                "total": {"$arrayElemAt": ["$metadata.total", 0]},
-                "annotations": "$data"
-            }
-        }
-    ])
-
-    result = list(annotations)
-
-    if result:
-        # Extract the document
-        data = result[0]
-        total = data.get("total", 0)  # Total number of annotations
-        annotations = data.get("annotations", [])  # Annotations for the current page
-    else:
-        # If no results, set default values
-        total = 0
-        annotations = []
-
-    # Return the total count and the current page of annotations
-    return {"total": total, "annotations": annotations}
-
-
 def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
@@ -950,26 +937,6 @@ def get_event_date(patient_id: str):
         return patient['event_date']
 
     return None
-
-
-def get_event_date_sentences(patient_id: str):
-    """
-    Find the event date from the annotations for a patient.
-    """
-    logger.debug(f"Retriving event date for patient #{patient_id}.")
-    event_date = get_event_date(patient_id)
-    if event_date is None:
-        return []
-    annotations = mongo.db["ANNOTATIONS"].find({
-        "patient_id": patient_id}).sort(
-                [("text_date", 1)]
-                )
-    annotations = list(annotations)
-    res = []
-    if len(annotations) > 0:
-        res = [f'{annotation["note_id"]}: {annotation["sentence"]}' for annotation in annotations]
-    return res
-
 
 def get_note_date(note_id):
     """
