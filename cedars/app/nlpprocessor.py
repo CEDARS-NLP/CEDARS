@@ -304,7 +304,12 @@ class NlpProcessor:
                 if not existing_task:
                     db.add_task(task)
                 db.set_patient_lock_status(patient_id, True)
-                self.process_notes(patient_id)
+                try:
+                    self.process_notes(patient_id)
+                except Exception as exc:
+                    logger.error(f"Error processing notes for patient {patient_id}: {exc}")
+                finally:
+                    db.set_patient_lock_status(patient_id, False)
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 
