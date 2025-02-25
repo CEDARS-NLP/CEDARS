@@ -28,19 +28,19 @@ class Base:  # pylint: disable=too-few-public-methods
     f'{config["DB_PARAMS"]}'
     f'&maxPoolSize=50'
     f'&minPoolSize=5'
-    f'&connectTimeoutMS=30000'
+    f'&connectTimeoutMS=300000'
     f'&retryWrites=true'
-    f'&socketTimeoutMS=20000'
-    f'&serverSelectionTimeoutMS=20000'
-    f'&heartbeatFrequencyMS=20000'
+    f'&socketTimeoutMS=200000'
+    f'&serverSelectionTimeoutMS=200000'
+    f'&heartbeatFrequencyMS=200000'
     f'&readPreference=primaryPreferred'
 )
     RQ = {
         "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
         "task_queue_name": "cedars",
         "ops_queue_name": "ops",
-        "job_timeout": 3600,
-        "operation_timeout": 7200
+        "job_timeout": 360000,
+        "operation_timeout": 720000
     }
 
 class Local(Base):  # pylint: disable=too-few-public-methods
