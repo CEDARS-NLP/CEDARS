@@ -5,6 +5,7 @@ import spacy
 from spacy.matcher import Matcher
 from loguru import logger
 from . import db
+from .cedars_enums import ReviewStatus
 
 logger.enable(__name__)
 
@@ -141,7 +142,7 @@ class NlpProcessor:
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
-    def process_notes(self, patient_id, processes=1, batch_size=20):
+    def process_notes(self, patient_id: str, processes=1, batch_size=20):
         """
         ##### Process Query Matching
 
@@ -150,11 +151,9 @@ class NlpProcessor:
         """
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
-        query = db.get_search_query()
-
         # load previosly processed documents
         # document_processed = load_progress()
-        spacy_patterns = query_to_patterns(query)
+        spacy_patterns = query_to_patterns(self.query)
         for i, item in enumerate(spacy_patterns):
             self.matcher.add(f"DVT_{i}", [item])
 
@@ -175,17 +174,17 @@ class NlpProcessor:
                 self.process_patient_pines(patient_id)
             return
 
-        document_text = [document["text"] for document in document_list]
         if patient_id is not None:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
         else:
             logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
 
-        # logger.info(f"sample document: {document_text[0][:100]}")
-        annotations = self.nlp_model.pipe([document["text"].lower() for document in document_list],
+        logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
+        annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
                                           n_process=processes,
                                           batch_size=batch_size)
-        logger.info(f"Starting to process document annotations: {len(document_text)}")
+        logger.info(f"Starting to process document annotations: {len(document_list)}")
+
         count = 0
         docs_with_annotations = 0
         for document, doc in zip(document_list, annotations):
@@ -193,23 +192,19 @@ class NlpProcessor:
             sentence_start = 0
             sentence_end = 0
             for sent_no, sentence_annotation in enumerate(doc.sents):
-                sentence_text = sentence_annotation.text
+                sentence_text = sentence_annotation.text.strip()
                 sentence_end = sentence_start + len(sentence_text)
                 matches = self.matcher(sentence_annotation)
                 for match in matches:
                     _, start, end = match
                     token = sentence_annotation[start:end]
                     has_negation = is_negated(token)
-                    start_index = sentence_text.find(token.text, start)
-                    end_index = start_index + len(token.text)
                     token_start = token.start_char
                     token_end = token_start + len(token.text)
                     annotation = {
                                     "sentence": sentence_text,
                                     "token": token.text,
                                     "isNegated": has_negation,
-                                    "start_index": start_index,
-                                    "end_index": end_index,
                                     "note_start_index": token_start,
                                     "note_end_index": token_end,
                                     "sentence_number": sent_no,
@@ -219,7 +214,7 @@ class NlpProcessor:
                     annotation['note_id'] = document["text_id"]
                     annotation["text_date"] = document["text_date"]
                     annotation["patient_id"] = document["patient_id"]
-                    annotation["reviewed"] = False
+                    annotation["reviewed"] = ReviewStatus.UNREVIEWED.value
                     db.insert_one_annotation(annotation)
                     if not has_negation:
                         if match_count == 0:
@@ -243,7 +238,7 @@ class NlpProcessor:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
 
-    def process_patient_pines(self, patient_id: int, threshold: float = 0.95) -> None:
+    def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
         """
         For each patient who are unreviewed,
 
@@ -313,5 +308,4 @@ class NlpProcessor:
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 
-        # TODO: find a better way to create index - use queue? and add status?
-        logger.info("jobs in progress: %s", len(list(db.get_tasks_in_progress())))
+        logger.info(f"jobs in progress: {len(list(db.get_tasks_in_progress()))}")

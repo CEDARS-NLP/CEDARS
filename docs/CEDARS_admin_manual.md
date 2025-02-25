@@ -49,6 +49,7 @@ MINIO_ACCESS_KEY=ROOTUSER
 MINIO_SECRET_KEY=CHANGEME123
 ENV=dev
 PINES_API_URL=<>  # if using PINES
+RQ_DASHBOARD_URL=/rq # URL for dashboard to interact with redis queues
 ```
 
 CEDARS is a flask web application and depends on the following software:
@@ -58,6 +59,11 @@ CEDARS is a flask web application and depends on the following software:
     You can install Python from the [official website](https://www.python.org/downloads/).
     
     If you have multiple python versions installed, you can manage the environments using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#installation)
+
+    !!! note "Windows Setup Specification"
+
+        On windows machines for development setups (not using docker) only python 3.9 is supported.
+        If using windows, then installing python via [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) is recommended.
 
 2. Poetry
 
@@ -96,7 +102,11 @@ CEDARS is a flask web application and depends on the following software:
 
 !!! note "TIP"
 
-    This is the easiest way to run CEDARS and encapsulates all dependencies above."
+    This is the easiest way to run CEDARS and encapsulates all dependencies above.
+
+!!! note "TIP"
+
+    If using docker on windows, it is recommended to install docker via [WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
 
 Install [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/).
 
@@ -138,9 +148,23 @@ Make sure all the local requirements [above](#detailed-requirements) are met. Th
 ```shell
 $ cd cedars
 $ poetry install  # do not cd into cedars/app
-$ cd app
 $ poetry run python -m app.wsgi
 ```
+
+#### Setting Up VS Code Debugger for Flask Application (OPTIONAL)
+
+If you are a developer and wish to use a code debugger while working with CEDARS, then you can follow the steps below to setup a VS Code debugger.
+
+    1. Create a python virtual environment (preferably using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#installation)).
+
+    2. Create a profile in launch.json (VS Code) as defined in [this](https://code.visualstudio.com/docs/python/tutorial-flask#_run-the-app-in-the-debugger) article.
+
+    3. Set FLASK_APP variable to “app/wsgi.py” in the new launch.json you created.
+
+    4. Follow these [instructions](https://code.visualstudio.com/docs/python/environments) to load the python virtual environment you created in step 1. into VS Code.
+
+    5. Select you new debugger profile in the debugger tab and run it.
+
 
 #### Docker Deployment
 
