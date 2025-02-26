@@ -3,13 +3,14 @@
 > **CEDARS is provided as-is with no guarantee whatsoever and users agree to be held responsible for compliance with their local government/institutional regulations.** All CEDARS installations should be reviewed with institutional information security authorities.
 
 ## Software Installation
-1. Minimum CPU requirements: **32GB Memory and 8 cores** [t2.2xlarge on AWS]
+1. Minimum CPU requirements: **16GB Memory and 4 cores** [t2.xlarge on AWS]
+
+2. 20 GB memory /var directory for storing docker dependencies and data. Might vary depending on your data needs. 
 
 2. In order to run, you will need two `.env` files
     - The first .env file will be placed under the ROOT DIR
     - The second the `.env` file under the `CEDARS/cedars` directory.
-
-    .sample.env files are available - please modify them with your settings and rename it to .env
+    - There are `.sample.env` files available with best default configurations - just **RENAME** them .env to use defaults.
 
     ```bash
     CEDARS/
@@ -38,18 +39,25 @@
 
 For example:
 ```
-SECRET_KEY = \xcfR\xd9D\xaa\x06\x84S\x19\xc0\xdcA\t\xf7it
-HOST=0.0.0.0 
-DB_HOST=localhost  # change to DB_HOST=db if running docker container
+SECRET_KEY=asecurekey
+HOST=0.0.0.0
+DB_HOST=db
 DB_NAME=cedars
 DB_PORT=27017
-MINIO_HOST=localhost
+DB_HOST_PORT=27018
+DB_USER=admin
+DB_PWD=password
+DB_PARAMS="authSource=admin"
+MINIO_HOST=minio
 MINIO_PORT=9000
-MINIO_ACCESS_KEY=ROOTUSER
-MINIO_SECRET_KEY=CHANGEME123
+MINIO_ACCESS_KEY=rootuser
+MINIO_SECRET_KEY=rootpassword
 ENV=dev
-PINES_API_URL=<>  # if using PINES
-RQ_DASHBOARD_URL=/rq # URL for dashboard to interact with redis queues
+PINES_API_URL=http://pines:8036
+REDIS_URL=redis
+REDIS_PORT=6379
+RQ_DASHBOARD_URL=/rq
+PORT=5001
 ```
 
 CEDARS is a flask web application and depends on the following software:
@@ -114,6 +122,28 @@ Install [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https
 
     Please install docker compose v2 as the spec using `deploy` which is not compatible with v1.
 
+!!! note "GPU:
+
+    `NVIDIA container toolkit` is required for the docker to use GPUs. 
+
+Below are the installation steps for CentOS/RHEL. For other OS please refer this [nvidia link](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
+```bash
+# 1. Download the NVIDIA container toolkit repository file
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+
+# 2. Edit the repository file with the output of (1)
+dzdo vi /etc/yum.repos.d/nvidia-container-toolkit.repo
+
+# 3. Install the NVIDIA container toolkit
+dzdo dnf install -y nvidia-container-toolkit
+
+# 4. Configure NVIDIA container runtime for Docker
+dzdo nvidia-ctk runtime configure --runtime=docker
+
+# 5. Restart the Docker service to apply changes
+dzdo systemctl restart docker
+```
 
 ### System Architecture
 
@@ -239,7 +269,7 @@ The first step after running CEDARS is to set up a new project. This is done by 
 
 4\. Administrator will provide the credentials to the annotators.
 
-### [Electronic Health Record Corpus Upload](upload_data.md)
+### [Electronic Health Record Corpus Upload](upload_file_format.md)
 
 ### Keyword Search Query Design
 
