@@ -716,11 +716,14 @@ def adjudicate_records():
     if patient_id is None:
         return render_template("ops/annotations_complete.html", **db.get_info())
 
+    logger.info(f"Fetching annotations for patient {patient_id}.")
+
     raw_annotations = db.get_all_annotations_for_patient(patient_id)
     hide_duplicates = db.get_search_query("hide_duplicates")
     stored_event_date = db.get_event_date(patient_id)
     stored_annotation_id = db.get_event_annotation_id(patient_id)
 
+    logger.info(f"Creating adjudication handler for patient {patient_id}.")
     adjudication_handler = AdjudicationHandler(patient_id)
     patient_data, annotations_with_duplicates = adjudication_handler.init_patient_data(raw_annotations,
                                            hide_duplicates, stored_event_date,
@@ -728,6 +731,8 @@ def adjudicate_records():
 
     for annotation_id in annotations_with_duplicates:
         db.mark_annotation_reviewed(annotation_id, current_user.username)
+    
+    logger.info(f"Finished loading adjudication handler for patient {patient_id}.")
 
     if len(patient_data["annotation_ids"]) > 0:
         # Only lock the patient for annotation if
