@@ -34,10 +34,12 @@ class AdjudicationHandler:
             - hide_duplicates (bool) : True if we do not show duplicate sentences.
         '''
 
+        logger.info("Starting filter strategy...")
         filter_strat = AnnotationFilterStrategy()
         filtered_results,annotations_with_duplicates = filter_strat.filter_annotations(raw_annotations,
                                                                                  hide_duplicates)
 
+        logger.info("Finished filter strategy.")
         annotation_ids = filtered_results['annotation_ids']
         review_statuses = filtered_results['review_statuses']
         index = 0
@@ -337,11 +339,14 @@ class AnnotationFilterStrategy:
         Returns:
             result (dictionary) : A dictionary of all relevant annotations with some metadata.
         """
+
+        logger.info("Finding duplicates...")
         if hide_duplicates:
             indices_with_duplicates = self._filter_duplicates_by_patient(annotations)
         else:
             indices_with_duplicates = self._filter_duplicates_by_note(annotations)
 
+        logger.info("Removing duplicates...")
         annotations, annotations_with_duplicates = self._pop_and_mark_duplicates(annotations,
                                                                                  indices_with_duplicates)
 
