@@ -755,7 +755,7 @@ def get_patients_to_annotate():
     Returns:
         patient_to_annotate: A single patient that needs to manually reviewed
     """
-    logger.debug("Retriving all un-reviewed patients from database.")
+    logger.info("Retriving all un-reviewed patients from database.")
 
     # check is this patient has any unreviewed annotations
     for patient_id in get_patient_ids():
@@ -884,7 +884,7 @@ def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key=
     Returns:
         annotations (list) : A list of all annotation IDs linked to that patient.
     """
-    logger.debug(f"Retriving annotations for patient #{p_id} from database.")
+    logger.info(f"Retriving annotations for patient #{p_id} from database.")
     query_filter = {"patient_id": p_id, "isNegated": False, "reviewed": reviewed.value}
 
     annotation_ids = mongo.db["ANNOTATIONS"].find(
@@ -1960,6 +1960,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         schema.pop('sentences')
 
     try:
+        logger.info("Starting download task")
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
         writer = pd.DataFrame(columns=list(schema.keys()))
@@ -1973,9 +1974,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Mongodb will ignore this command if index_no does not exist.
         # This is improtant for backwards compatibility,
         # as the index_no will not be present in older CEDARS versions.
+        logger.info("Retriving RESULTS from db")
         project_results = mongo.db["RESULTS"].find({},
                                                     columns_to_retrive).sort([("index_no", 1)])
 
+        logger.info("Creating dataframe for RESULTS")
         df = pl.DataFrame(project_results, orient="row",
                                            schema=schema,
                                            infer_schema_length=None)
@@ -1986,7 +1989,9 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
                 pl.col(col).dt.date().alias(col)
             )
 
+        logger.info("Uploading results to csv buffer")
         for chunk in df.write_csv(include_header=False, batch_size=1000):
+            logger.info("Sending chunk to csv buffer")
             csv_buffer.write(chunk)
 
         # Move the cursor to the beginning of the buffer
@@ -1994,6 +1999,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         data_bytes = csv_buffer.getvalue().encode('utf-8')
         data_stream = BytesIO(data_bytes)
 
+        logger.info("Uploading RESULTS to minio")
         # Upload to MinIO
         minio.put_object(g.bucket_name,
                          f"annotated_files/{filename}",
