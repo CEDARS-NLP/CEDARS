@@ -726,8 +726,8 @@ def adjudicate_records():
                                            hide_duplicates, stored_event_date,
                                            stored_annotation_id)
 
-    for annotation_id in annotations_with_duplicates:
-        db.mark_annotation_reviewed(annotation_id, current_user.username)
+    db.mark_annotation_reviewed_batch(annotations_with_duplicates,
+                                      current_user.username)
 
     if len(patient_data["annotation_ids"]) > 0:
         # Only lock the patient for annotation if
