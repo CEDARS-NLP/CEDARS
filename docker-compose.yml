@@ -96,33 +96,6 @@ services:
       - selfhosted
       - superbio
 
-  pines:
-    build:
-      context: ./PINES
-    deploy:
-      mode: replicated
-      replicas: ${PINES_WORKERS}
-    restart: on-failure:5
-    networks:
-      - cedars
-    profiles: [cpu]
-
-  pines-gpu:
-    build:
-      context: ./PINES
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: ${GPU_SCALE}
-              capabilities: [gpu]
-      mode: replicated
-      replicas: ${PINES_WORKERS}
-    restart: on-failure:5
-    networks:
-      - cedars
-    profiles: [gpu]
 
   redis:
     build:
@@ -154,7 +127,6 @@ services:
   worker-task:
     image: cedars
     command: python -m app.make_rq task
-    scale: ${WORKER_SCALE}
     networks:
       - cedars
     env_file:
@@ -175,11 +147,11 @@ services:
         reservations:
           memory: '1g'
           cpus: '1.0'
+      replicas: ${WORKER_SCALE}
     
   worker-ops:
     image: cedars
     command: python -m app.make_rq ops
-    scale: 1
     networks:
       - cedars
     env_file:
@@ -200,6 +172,7 @@ services:
         reservations:
           memory: '1g'
           cpus: '1.0'
+      replicas: 1
     
 volumes:
   data2-1:

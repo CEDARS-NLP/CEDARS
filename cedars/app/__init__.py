@@ -4,6 +4,7 @@ Entrypoint for the flask application.
 import os
 import sys
 from flask import Flask, redirect, render_template
+from prometheus_flask_exporter.multiprocess import PrometheusMetrics, GunicornInternalPrometheusMetrics
 from flask_session import Session
 import logging
 from loguru import logger
@@ -63,6 +64,9 @@ def create_app(config_filename=None):
     cedars_app.register_blueprint(stats.bp)
 
     setup_logging()
+
+    metrics = GunicornInternalPrometheusMetrics(cedars_app)
+    metrics.info('app_info', 'CEDARS Application', version='1.0.0')
 
     @cedars_app.route('/', methods=["GET"])
     def homepage():
