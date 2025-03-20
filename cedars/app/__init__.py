@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 import rq
 import rq_dashboard
 from redis import Redis
+from prometheus_flask_exporter.multiprocess import GunicornInternalPrometheusMetrics
 from . import auth
 from . import ops
 from . import stats
@@ -51,6 +52,8 @@ def create_app(config_filename=None):
         cedars_app.config.from_object(config_filename)
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
+    metrics = GunicornInternalPrometheusMetrics(cedars_app)
+    metrics.info('app_info', 'CEDARS Application', version='1.0.0')
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
@@ -94,7 +97,7 @@ def setup_logging():
     # ✅ Setup Loguru logging (only INFO and above)
     logger.add(sys.stdout,
                format="{time} {level} {message}",
-               level="INFO",
+               level="DEBUG",
                colorize=True)
 
     # 🔴 Suppress Flask's werkzeug logs (disable request logs)
@@ -103,11 +106,11 @@ def setup_logging():
     # ✅ Redirect Python's `logging` module logs to Loguru
     class InterceptHandler(logging.Handler):
         def emit(self, record):
-            level = logger.level(record.levelname).name if record.levelname in logger._core.levels else "INFO"
+            level = logger.level(record.levelname).name if record.levelname in logger._core.levels else "DEBUG"
             logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
 
-    logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO)
+    logging.basicConfig(handlers=[InterceptHandler()], level=logging.DEBUG)
 
     # 🔴 Suppress RQ Worker Debug Logs
-    logging.getLogger("rq.worker").setLevel(logging.WARNING)
-    logging.getLogger("rq.queue").setLevel(logging.WARNING)
+    logging.getLogger("rq.worker").setLevel(logging.DEBUG)
+    logging.getLogger("rq.queue").setLevel(logging.DEBUG)

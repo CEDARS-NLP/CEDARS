@@ -18,7 +18,11 @@ RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 FROM python:3.9-slim as runtime
 
 ENV VIRTUAL_ENV=/.venv \
-    PATH="/.venv/bin:$PATH"
+    PATH="/.venv/bin:$PATH" \
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+
+# Create the directory for Prometheus multiprocess metrics
+RUN mkdir -p /tmp/prometheus-multiproc
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
@@ -26,4 +30,4 @@ COPY . .
 
 EXPOSE 5001
 
-CMD [ "gunicorn", "app.wsgi:app", "--log-level", "warning" ]
+CMD [ "gunicorn", "app.wsgi:app", "--log-level", "debug" ]
