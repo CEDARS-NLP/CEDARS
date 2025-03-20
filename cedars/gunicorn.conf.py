@@ -11,9 +11,5 @@ preload_app = False
 disable_redirect_access_to_syslog = True
 accesslog = "/dev/null"
 
-def when_ready(server):
-    GunicornInternalPrometheusMetrics.start_http_server_when_ready(5001)
-
-
 def child_exit(server, worker):
     GunicornInternalPrometheusMetrics.mark_process_dead_on_child_exit(worker.pid)

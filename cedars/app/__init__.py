@@ -86,7 +86,6 @@ def create_app(config_filename=None):
 
     return cedars_app
 
-
 def setup_logging():
     """Setup logging"""
     """Configure Loguru as the primary logger and disable unwanted logs"""
@@ -101,7 +100,7 @@ def setup_logging():
                colorize=True)
 
     # 🔴 Suppress Flask's werkzeug logs (disable request logs)
-    logging.getLogger("werkzeug").setLevel(logging.CRITICAL)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
     # ✅ Redirect Python's `logging` module logs to Loguru
     class InterceptHandler(logging.Handler):

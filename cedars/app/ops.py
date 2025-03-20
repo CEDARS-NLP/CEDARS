@@ -23,6 +23,7 @@ from rq import Retry, Callback
 from rq.registry import FailedJobRegistry
 from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
+from .db import log_function_call
 from . import nlpprocessor
 from . import auth
 from .database import minio
@@ -31,13 +32,12 @@ from .api import get_token_status
 from .adjudication_handler import AdjudicationHandler
 from .cedars_enums import PatientStatus
 
-
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")
 
 logger.enable(__name__)
 
-
+@log_function_call
 def allowed_data_file(filename):
     """
     This function is used to check if a file has a valid extension for us to load tabular data from.
@@ -55,7 +55,7 @@ def allowed_data_file(filename):
 
     return False
 
-
+@log_function_call
 def allowed_image_file(filename):
     """
     This function checks if a file is of a valid image filetype.
@@ -74,11 +74,13 @@ def allowed_image_file(filename):
 
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
+@log_function_call
 def project_details():
     """
     This is a flask function for the backend logic for the proj_details route.
     It is used by the admin to view and alter details of the current project.
     """
+    logger.info(f"Fetching project details.")
 
     if request.method == "POST":
         if "update_project_name" in request.form:
@@ -116,6 +118,7 @@ def project_details():
 
 @bp.route("/internal_processes", methods=["GET"])
 @auth.admin_required
+@log_function_call
 def internal_processes():
     """
     This is a flask function for the backend logic for the internal_processes route.
@@ -129,14 +132,14 @@ def internal_processes():
     return render_template("ops/internal_processes.html",
                             rq_dashboard_url = rq_dashboard_url,
                             **db.get_info())
-
+@log_function_call
 def read_gz_csv(filename, *args, **kwargs):
     '''
     Function to read a GZIP compressed csv to a pandas DataFrame.
     '''
     return pd.read_csv(filename, compression='gzip', *args, **kwargs)
 
-
+@log_function_call
 def load_pandas_dataframe(filepath, chunk_size=1000):
     """
     Load tabular data from a file into a pandas DataFrame.
@@ -205,8 +208,9 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
             os.remove(local_filename)
             logger.info(f"Removed temporary file: {local_filename}")
 
-
+@log_function_call
 def prepare_note(note_info):
+    logger.debug(f"Formatting note info for note {note_info['text_id']}.")
     date_format = '%Y-%m-%d'
     note_info["text_date"] = datetime.strptime(note_info["text_date"], date_format)
     note_info["reviewed"] = False
@@ -214,11 +218,12 @@ def prepare_note(note_info):
     note_info["patient_id"] = str(note_info["patient_id"]).strip()
     return note_info
 
-
+@log_function_call
 def prepare_patients(patient_ids):
+    logger.debug(f"Formatting patient ids for {patient_ids}.")
     return [str(p_id).strip() for p_id in patient_ids]
 
-
+@log_function_call
 def EMR_to_mongodb(filepath, chunk_size=1000):
     """
     This function is used to open a file and load its contents into the MongoDB database in chunks.
@@ -275,6 +280,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
 
 @bp.route("/upload_data", methods=["GET", "POST"])
 @auth.admin_required
+@log_function_call
 def upload_data():
     """
     This is a flask function for the backend logic to upload a file to the database.
@@ -340,6 +346,7 @@ def upload_data():
 
 @bp.route("/upload_query", methods=["GET", "POST"])
 @auth.admin_required
+@log_function_call
 def upload_query():
     """
     This is a flask function for the backend logic
@@ -411,6 +418,7 @@ def upload_query():
     return redirect(url_for("stats_page.stats_route"))
 
 @bp.route("/start_process")
+@log_function_call
 def do_nlp_processing():
     """
     Run NLP workers
@@ -439,7 +447,7 @@ def do_nlp_processing():
         )
     return redirect(url_for("ops.get_job_status"))
 
-
+@log_function_call
 def callback_job_success(job, connection, result, *args, **kwargs):
     '''
     A callback function to handle the event where
@@ -453,6 +461,7 @@ def callback_job_success(job, connection, result, *args, **kwargs):
         if job.kwargs['superbio_api_token'] is not None:
             close_pines_connection(job.kwargs['superbio_api_token'])
 
+@log_function_call
 def callback_job_failure(job, connection, result, *args, **kwargs):
     '''
     A callback function to handle the event where
@@ -466,6 +475,7 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
         if job.kwargs['superbio_api_token'] is not None:
             close_pines_connection(job.kwargs['superbio_api_token'])
 
+@log_function_call
 def init_pines_connection(superbio_api_token = None):
     '''
     Initializes the PINES url in the INFO col.
@@ -497,6 +507,7 @@ def init_pines_connection(superbio_api_token = None):
 
     return False
 
+@log_function_call
 def close_pines_connection(superbio_api_token):
     '''
     Closes the PINES server if using a superbio API.
@@ -511,6 +522,7 @@ def close_pines_connection(superbio_api_token):
         # If has_token_expired returns None (invalid token).
         logger.error("Cannot shut down remote PINES server with an API call as this is not a valid token.")
 
+@log_function_call
 @bp.route("/job_status", methods=["GET"])
 def get_job_status():
     """
@@ -519,7 +531,7 @@ def get_job_status():
     return render_template("ops/job_status.html",
                            tasks=db.get_tasks_in_progress(), **db.get_info())
 
-
+@log_function_call
 @bp.route('/queue_stats', methods=['GET'])
 def queue_stats():
     """
@@ -538,6 +550,7 @@ def queue_stats():
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
+@log_function_call
 def save_adjudications():
     """
     Handle logic for the save_adjudications route.
@@ -546,6 +559,7 @@ def save_adjudications():
     if session.get("patient_id") is None:
         return redirect(url_for("ops.adjudicate_records"))
 
+    logger.info(f"Saving adjudications for patient {session['patient_id']}")
     adjudication_handler = AdjudicationHandler(session['patient_id'])
     adjudication_handler.load_from_patient_data(session['patient_id'],
                                                 session['patient_data'])
@@ -558,6 +572,7 @@ def save_adjudications():
     action = request.form['submit_button']
     is_shift_performed = False
     if action == 'new_date':
+        logger.debug(f"Entering a new date for patient {session['patient_id']}")
         # Make sure to remove all skipped markings before a new date is entered
         db.revert_skipped_annotations(patient_id)
         adjudication_handler.reset_all_skipped()
@@ -578,14 +593,17 @@ def save_adjudications():
                                              annotations_after_event)
 
     elif action == 'del_date':
+        logger.debug(f"Deleting saved date for patient {session['patient_id']}")
         db.delete_event_date(patient_id)
         db.revert_skipped_annotations(patient_id)
         db.revert_annotation_reviewed(current_annotation_id, current_user.username)
         adjudication_handler.delete_event_date()
     elif action == 'adjudicate':
+        logger.debug(f"Adjudicating annotation {current_annotation_id} for {session['patient_id']}")
         db.mark_annotation_reviewed(current_annotation_id, current_user.username)
         adjudication_handler._adjudicate_annotation()
     else:
+        logger.debug(f"Shifting between annotations for patient {session['patient_id']}")
         # Must be a shift action
         adjudication_handler.perform_shift(action)
         is_shift_performed = True
@@ -596,6 +614,7 @@ def save_adjudications():
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
     if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
+        logger.info(f"Marking patient {session['patient_id']} as reviiewed")
         db.set_patient_lock_status(patient_id, False)
         db.mark_patient_reviewed(patient_id,
                                          reviewed_by=current_user.username)
@@ -615,10 +634,16 @@ def save_adjudications():
 
 
 @bp.route("/show_annotation", methods=["GET"])
+@login_required
+@log_function_call
 def show_annotation():
     """
     Formats and displays the current annotation being viewed by the user.
     """
+    if session.get("patient_id") is None:
+        return redirect(url_for("ops.adjudicate_records"))
+
+    logger.info(f"Presenting annotation for patient {session['patient_id']}")
     index = session.get("index", 0)
     adjudication_handler = AdjudicationHandler(session['patient_id'])
     adjudication_handler.load_from_patient_data(session['patient_id'],
@@ -649,6 +674,7 @@ def show_annotation():
 
 @bp.route("/adjudicate_records", methods=["GET", "POST"])
 @login_required
+@log_function_call
 def adjudicate_records():
     """
     Adjudication Workflow:
@@ -675,6 +701,7 @@ def adjudicate_records():
     8. All annotations are a mongodb document.
 
     """
+    logger.info("Getting patient to adjudicate.")
 
     patient_id = None
     if request.method == "GET":
@@ -762,6 +789,7 @@ def adjudicate_records():
     return redirect(url_for("ops.show_annotation"))
 
 @bp.route("/unlock_patient", methods=["POST"])
+@log_function_call
 def unlock_current_patient():
     """
     Sets the locked status of the patient in the session to False.
@@ -774,34 +802,7 @@ def unlock_current_patient():
 
     return jsonify({"error": "No patient to unlock."}), 200
 
-def get_next_annotation_index(unreviewed_annotations, current_index):
-    '''
-    Given a list of the review status of annotations and the current index
-    find the next unreviewed annotation to review.
-
-    Args :
-        - unreviewed_annotations (list[int]) : For each index, 0 indicates that an annotation is reviewed
-                                                               1 indicates that an annotation has been reviewed
-        - current_index (int) : Index of the annotation that was just reviewed,
-    
-    Returns :
-        - next_index (int) : Index of the next unreviewed annotation after the current one,
-                                will return the same index as the current index if no unreviewed annotations left.
-    
-    '''
-
-    i = current_index + 1
-    while i != current_index:
-        if i == len(unreviewed_annotations):
-            i = 0
-
-        if unreviewed_annotations[i] == 1:
-            break
-
-        i += 1
-
-    return i
-
+@log_function_call
 def get_download_filename(is_full_download=False):
     '''
     Returns the filename for a new download task.
@@ -827,6 +828,7 @@ def get_download_filename(is_full_download=False):
 @bp.route('/download_page')
 @bp.route('/download_page/<job_id>')
 @auth.admin_required
+@log_function_call
 def download_page(job_id=None):
     """
     Loads the page where an admin can download the results
@@ -847,6 +849,7 @@ def download_page(job_id=None):
 
 @bp.route('/download_annotations', methods=["POST"])
 @auth.admin_required
+@log_function_call
 def download_file(filename='annotations.csv'):
     """
     ##### Download Completed Annotations
@@ -878,10 +881,12 @@ def download_file(filename='annotations.csv'):
 
 @bp.route('/create_download_task', methods=["GET"])
 @auth.admin_required
+@log_function_call
 def create_download():
     """
     Create a download task for annotations
     """
+    logger.debug("Creating download task.")
 
     download_filename = get_download_filename()
     job = flask.current_app.ops_queue.enqueue(
@@ -892,11 +897,12 @@ def create_download():
 
 @bp.route('/create_download_task_full', methods=["GET"])
 @auth.admin_required
+@log_function_call
 def create_download_full():
     """
     Create a download task for annotations
     """
-
+    logger.debug("Creating full download task.")
     download_filename = get_download_filename(True)
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, download_filename, True
@@ -906,6 +912,7 @@ def create_download_full():
 
 @bp.route('/delete_download_file', methods=["POST"])
 @auth.admin_required
+@log_function_call
 def delete_download_file():
     """
     Deletes a download file from the current minio bucket.
@@ -919,11 +926,12 @@ def delete_download_file():
 
 @bp.route('/update_results_collection', methods=["GET"])
 @auth.admin_required
+@log_function_call
 def update_results_collection():
     """
     Creates and updates the RESULTS collection.
     """
-
+    logger.info("Creating job to updae results collection.")
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
                                                 True)
 
@@ -931,6 +939,7 @@ def update_results_collection():
 
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
+@log_function_call
 def check_job(job_id):
     """
     Returns the status of a job to the frontend.

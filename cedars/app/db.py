@@ -7,6 +7,7 @@ from io import BytesIO, StringIO
 import re
 from datetime import datetime
 from uuid import uuid4
+from functools import wraps
 
 from typing import Optional
 from faker import Faker
@@ -27,6 +28,14 @@ from .cedars_enums import ReviewStatus
 fake = Faker()
 
 logger.enable(__name__)
+
+def log_function_call(func):
+    """Decorator to log function calls."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.debug(f"Calling function {func.__name__} with args: {args}, kwargs: {kwargs}")
+        return func(*args, **kwargs)
+    return wrapper
 
 # Create collections and indexes
 def create_project(project_name,
