@@ -2,7 +2,7 @@ import datetime
 from loguru import logger
 from bson import ObjectId
 from .cedars_enums import PatientStatus, ReviewStatus
-
+from .cedars_enums import log_function_call
 
 class AdjudicationHandler:
     '''
@@ -20,6 +20,7 @@ class AdjudicationHandler:
             'current_index' : -1
         }
 
+    @log_function_call
     def init_patient_data(self, raw_annotations, hide_duplicates,
                           stored_event_date = None, stored_annotation_id = None):
         '''
@@ -63,6 +64,7 @@ class AdjudicationHandler:
 
         return self.patient_data, annotations_with_duplicates
 
+    @log_function_call
     def load_from_patient_data(self, patient_id, patient_data):
         '''
         Loads the handler object form data for an ongoing patient's adjudication.
@@ -76,12 +78,15 @@ class AdjudicationHandler:
         self.patient_id = patient_id
         self.patient_data = patient_data
 
+    @log_function_call
     def get_patient_data(self):
         return self.patient_data
 
+    @log_function_call
     def get_curr_annotation_id(self):
         return self.patient_data['annotation_ids'][self.patient_data['current_index']]
 
+    @log_function_call
     def get_annotation_details(self, annotation, note, comments,
                                annotations_for_note, annotations_for_sentence):
         '''
@@ -110,7 +115,7 @@ class AdjudicationHandler:
 
         return annotation_data
 
-
+    @log_function_call
     def get_patient_status(self):
         '''
         Returns the status for the current patient.
@@ -134,6 +139,7 @@ class AdjudicationHandler:
 
         return PatientStatus.UNDER_REVIEW
 
+    @log_function_call
     def is_patient_reviewed(self):
         '''
         Function that returns True if the current patient has been
@@ -147,6 +153,7 @@ class AdjudicationHandler:
         # can be marked None to indicate that they do not need to be annotated.
         return self.patient_data['review_statuses'].count(ReviewStatus.UNREVIEWED) == 0
 
+    @log_function_call
     def perform_shift(self, action):
         '''
         Backend logic to allow an annotation to navigate back and forth
@@ -172,10 +179,11 @@ class AdjudicationHandler:
         elif action == 'last_anno':
             self._shift_annotation_index(last_index)
 
+    @log_function_call
     def _shift_annotation_index(self, new_index):
         self.patient_data['current_index'] = new_index
 
-
+    @log_function_call
     def _adjudicate_annotation(self):
         '''
         Logic to mark the current annotation as reviewed and go to the
@@ -193,7 +201,10 @@ class AdjudicationHandler:
             # show the next annotation by default
             return new_index
 
+        logger.debug("Fetching new index to show")
         while True:
+            logger.debug(f"Checking index {new_index} / {last_index}")
+            logger.debug(f"Index status : {review_statuses[new_index]}")
             if review_statuses[new_index] == ReviewStatus.UNREVIEWED:
                 self.patient_data['current_index'] = new_index
                 break
@@ -202,7 +213,7 @@ class AdjudicationHandler:
             if new_index >= last_index:
                 new_index = 0
 
-
+    @log_function_call
     def mark_event_date(self, event_date, event_annotation_id, annotations_after_event):
         '''
         Logic to enter an event date into the system and mark unreviewed annotations on or after
@@ -220,6 +231,7 @@ class AdjudicationHandler:
 
         self._adjudicate_annotation()
 
+    @log_function_call
     def delete_event_date(self):
         '''
         Deletes the current event date and reverts the SKIPPED marks on any annotations
@@ -238,6 +250,7 @@ class AdjudicationHandler:
         index = self.patient_data['current_index']
         self.patient_data['review_statuses'][index] = ReviewStatus.UNREVIEWED
 
+    @log_function_call
     def reset_all_skipped(self):
         '''
         Converts all annotations marked as SKIPPED to be marked as
@@ -247,7 +260,7 @@ class AdjudicationHandler:
             if status == ReviewStatus.SKIPPED:
                 self.patient_data['review_statuses'][i] = ReviewStatus.UNREVIEWED
 
-
+    @log_function_call
     def _format_date(self, date_obj):
         '''
         Formats a datetime object into a date object.
@@ -263,6 +276,7 @@ class AdjudicationHandler:
         return res
 
 class AnnotationFilterStrategy:
+    @log_function_call
     def _filter_duplicates_by_patient(self, annotations):
         '''
         Finds and returns indices for duplicate sentences across any note
@@ -281,6 +295,7 @@ class AnnotationFilterStrategy:
 
         return indices_with_duplicates
 
+    @log_function_call
     def _filter_duplicates_by_note(self, annotations):
         '''
         Finds and returns indices for duplicate sentences within a  paticular 
@@ -307,6 +322,7 @@ class AnnotationFilterStrategy:
 
         return indices_with_duplicates
 
+    @log_function_call
     def _pop_and_mark_duplicates(self, annotations, indices_with_duplicates):
         '''
         Pops all annotations that have duplicates based on a list of
@@ -324,7 +340,7 @@ class AnnotationFilterStrategy:
 
         return annotations, annotations_with_duplicates
 
-
+    @log_function_call
     def filter_annotations(self, annotations, hide_duplicates):
         """
         Filters annotations to keep only relevant occurrences as well
@@ -353,6 +369,7 @@ class AnnotationFilterStrategy:
         return filtered_results, annotations_with_duplicates
 
 class SentenceHighlighter:
+    @log_function_call
     def get_highlighted_text(self, note, annotations_for_note):
         """
         Returns highlighted all of the text in a note.
@@ -362,7 +379,7 @@ class SentenceHighlighter:
         text = note["text"]
 
         annotations = annotations_for_note
-        logger.debug(annotations)
+        logger.debug(f"Getting highlighted text for : {annotations}")
 
         for annotation in annotations:
             start_index = annotation['note_start_index']
@@ -376,9 +393,10 @@ class SentenceHighlighter:
             prev_end_index = end_index
 
         highlighted_note.append(text[prev_end_index:])
-        logger.debug(highlighted_note)
+        logger.debug(f"Final highlighted note : {highlighted_note}")
         return " ".join(highlighted_note).replace("\n", "<br>")
 
+    @log_function_call
     def get_highlighted_sentence(self, current_annotation, note, annotations_for_sentence):
         """
         Returns highlighted text for a specific sentence in a note.

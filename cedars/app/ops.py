@@ -23,7 +23,6 @@ from rq import Retry, Callback
 from rq.registry import FailedJobRegistry
 from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
-from .db import log_function_call
 from . import nlpprocessor
 from . import auth
 from .database import minio
@@ -31,6 +30,7 @@ from .api import load_pines_url, kill_pines_api
 from .api import get_token_status
 from .adjudication_handler import AdjudicationHandler
 from .cedars_enums import PatientStatus
+from .cedars_enums import log_function_call
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
 config = dotenv_values(".env")

@@ -7,7 +7,6 @@ from io import BytesIO, StringIO
 import re
 from datetime import datetime
 from uuid import uuid4
-from functools import wraps
 
 from typing import Optional
 from faker import Faker
@@ -23,21 +22,14 @@ from bson import ObjectId
 from loguru import logger
 from .database import mongo, minio
 from .cedars_enums import ReviewStatus
-
+from .cedars_enums import log_function_call
 
 fake = Faker()
 
 logger.enable(__name__)
 
-def log_function_call(func):
-    """Decorator to log function calls."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.debug(f"Calling function {func.__name__} with args: {args}, kwargs: {kwargs}")
-        return func(*args, **kwargs)
-    return wrapper
-
 # Create collections and indexes
+@log_function_call
 def create_project(project_name,
                    investigator_name,
                    project_id=None,
@@ -67,6 +59,7 @@ def create_project(project_name,
 
     logger.info("Database creation successful!")
 
+@log_function_call
 def create_pines_info(pines_url, is_url_from_api):
     """
     Retrives the PINES url from the relevant source and
@@ -77,6 +70,7 @@ def create_pines_info(pines_url, is_url_from_api):
 
     return pines_url
 
+@log_function_call
 def create_info_col(project_name,
                     project_id,
                     investigator_name,
@@ -105,6 +99,7 @@ def create_info_col(project_name,
 
 
 # index functions
+@log_function_call
 def create_index(collection, index: list):
     """
     This function is used to create an index in a collection
@@ -122,6 +117,7 @@ def create_index(collection, index: list):
             mongo.db[collection].create_index(i)
         logger.info(f"Created index {i} in collection {collection}.")
 
+@log_function_call
 def create_db_indices():
     '''
     Creates indices for the ANNOTATIONS and PINES cols in the db.
@@ -164,6 +160,7 @@ def create_db_indices():
     create_index("TASK", [("job_id", {"unique": True})])
 
 # Insert functions
+@log_function_call
 def add_user(username, password, is_admin=False):
     """
     This function is used to add a new user to the database.
@@ -184,7 +181,7 @@ def add_user(username, password, is_admin=False):
     mongo.db["USERS"].insert_one(info)
     logger.info(f"Added user {username} to database.")
 
-
+@log_function_call
 def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
                skip_after_event, tag_query, date_min=datetime.now(),
                date_max=datetime.now()):
@@ -234,7 +231,7 @@ def save_query(query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
     logger.info(f"Saved query : {query}.")
     return True
 
-
+@log_function_call
 def update_notes_summary():
     """
     Aggregates note summaries from the NOTES collection and saves them
@@ -294,7 +291,7 @@ def update_notes_summary():
     
     return 0
 
-
+@log_function_call
 def bulk_insert_notes(notes):
     notes_collection = mongo.db["NOTES"]
     try:
@@ -305,7 +302,7 @@ def bulk_insert_notes(notes):
         logger.error(f"Bulk write error: {bwe.details}")
         return bwe.details['nInserted']
 
-
+@log_function_call
 def bulk_upsert_patients(patient_ids):
     '''
     This function will automatically create default enteries in the
@@ -373,7 +370,7 @@ def bulk_upsert_patients(patient_ids):
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
 
-
+@log_function_call
 def generate_patient_entry(p_id: str, index_no: int):
     '''
     Generates a blank entry for a new patient in the PATIENTS collection.
@@ -407,6 +404,7 @@ def generate_patient_entry(p_id: str, index_no: int):
                 upsert=True
             )
 
+@log_function_call
 def generate_results_entry(p_id: str,
                            index_no: int,
                            first_note_date=None,
@@ -456,7 +454,7 @@ def generate_results_entry(p_id: str,
                 upsert=True
             )
 
-
+@log_function_call
 def insert_one_annotation(annotation):
     """
     Adds an annotation to the database.
@@ -470,6 +468,7 @@ def insert_one_annotation(annotation):
 
     annotations_collection.insert_one(annotation)
 
+@log_function_call
 def upsert_patient_records(patient_id: str, insert_datetime: datetime = None, updated_by: str = None):
     '''
     Updates records for a patient in the RESULTS collection.
@@ -552,6 +551,7 @@ def upsert_patient_records(patient_id: str, insert_datetime: datetime = None, up
                                     {"$set": patient_results})
 
 # Get functions
+@log_function_call
 def get_user(username):
     """
     This function is used to get a user from the database.
@@ -564,7 +564,7 @@ def get_user(username):
     user = mongo.db["USERS"].find_one({"user": username})
     return user
 
-
+@log_function_call
 def get_search_query(query_key="query"):
     """
     This function is used to get the current search query from the database.
@@ -577,7 +577,7 @@ def get_search_query(query_key="query"):
 
     return ""
 
-
+@log_function_call
 def get_search_query_details():
     """
     This function is used to get the current search query details
@@ -591,7 +591,7 @@ def get_search_query_details():
 
     return {}
 
-
+@log_function_call
 def get_info():
     """
     This function returns the info collection in the mongodb database.
@@ -603,7 +603,7 @@ def get_info():
 
     return {}
 
-
+@log_function_call
 def get_all_annotations_for_note(note_id):
     """
     This function is used to get all the annotations for a particular note
@@ -617,6 +617,7 @@ def get_all_annotations_for_note(note_id):
                                                                            ("setence_number", 1)])
     return list(annotations)
 
+@log_function_call
 def get_all_annotations_for_sentence(note_id, sentence_number):
     """
     This function is used to get all the annotations for a particular sentence
@@ -631,6 +632,7 @@ def get_all_annotations_for_sentence(note_id, sentence_number):
                                                                            ("note_start_index", 1)])
     return list(annotations)
 
+@log_function_call
 def get_annotation(annotation_id):
     """
     Retrives annotation from mongodb.
@@ -646,7 +648,7 @@ def get_annotation(annotation_id):
 
     return annotation
 
-
+@log_function_call
 def get_annotation_note(annotation_id: str):
     """
     Retrives note linked to a paticular annotation.
@@ -667,7 +669,7 @@ def get_annotation_note(annotation_id: str):
 
     return note
 
-
+@log_function_call
 def get_patient_by_id(patient_id: str):
     """
     Retrives a single patient from mongodb.
@@ -684,7 +686,7 @@ def get_patient_by_id(patient_id: str):
 
     return patient
 
-
+@log_function_call
 def get_patient():
     """
     Retrives a single patient ID who has not yet been reviewed and is not currently locked.
@@ -719,7 +721,7 @@ def get_patient():
     logger.info("Failed to retrive any further un-reviewed patients from the database.")
     return None
 
-
+@log_function_call
 def get_patients_to_annotate():
     """
     Retrieves a patient that have not been reviewed
@@ -739,6 +741,7 @@ def get_patients_to_annotate():
 
     return None
 
+@log_function_call
 def patient_results_exist(patient_id: str):
     '''
     Checks if the results for this patient exist in the RESULTS collection.
@@ -756,6 +759,7 @@ def patient_results_exist(patient_id: str):
         return False
     return True
 
+@log_function_call
 def get_formatted_patient_predictions(patient_id: str):
     '''
     Checks if the results for this patient exist in the RESULTS collection.
@@ -804,6 +808,7 @@ def get_formatted_patient_predictions(patient_id: str):
 
     return None
 
+@log_function_call
 def get_documents_to_annotate(patient_id=None):
     """
     Retrives all documents that have not been annotated.
@@ -832,7 +837,7 @@ def get_documents_to_annotate(patient_id=None):
 
     return documents_to_annotate
 
-
+@log_function_call
 def get_all_annotations_for_patient(patient_id: str):
     """
     Retrives all annotations for a patient.
@@ -848,7 +853,7 @@ def get_all_annotations_for_patient(patient_id: str):
 
     return annotations
 
-
+@log_function_call
 def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
     """
     Retrives all annotations for a patient.
@@ -895,7 +900,7 @@ def get_all_annotations_for_patient_paged(patient_id: str, page=1, page_size=1):
     # Return the total count and the current page of annotations
     return {"total": total, "annotations": annotations}
 
-
+@log_function_call
 def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key="_id"):
     """
     Retrives all annotation IDs for annotations linked to a patient.
@@ -925,6 +930,7 @@ def get_patient_annotation_ids(p_id: str, reviewed=ReviewStatus.UNREVIEWED, key=
 
     return res
 
+@log_function_call
 def get_annotations_post_event(patient_id: str, event_date: datetime.date):
     '''
     Retirves the annotation IDs for unreviewed events on or
@@ -946,6 +952,7 @@ def get_annotations_post_event(patient_id: str, event_date: datetime.date):
 
     return [x["_id"] for x in a_ids]
 
+@log_function_call
 def get_event_date(patient_id: str):
     """
     Find the event date for a patient.
@@ -960,7 +967,7 @@ def get_event_date(patient_id: str):
 
     return None
 
-
+@log_function_call
 def get_event_date_sentences(patient_id: str):
     """
     Find the event date from the annotations for a patient.
@@ -979,7 +986,7 @@ def get_event_date_sentences(patient_id: str):
         res = [f'{annotation["note_id"]}: {annotation["sentence"]}' for annotation in annotations]
     return res
 
-
+@log_function_call
 def get_note_date(note_id):
     """
     Retrives the date of a note.
@@ -993,7 +1000,7 @@ def get_note_date(note_id):
     note = mongo.db["NOTES"].find_one({"text_id": note_id})
     return note["text_date"]
 
-
+@log_function_call
 def get_first_note_date_for_patient(patient_id: str, first_note_date=None):
     """
     Retrives the date of the first note for a patient.
@@ -1018,7 +1025,7 @@ def get_first_note_date_for_patient(patient_id: str, first_note_date=None):
         return None
     return summary["first_note_date"]
 
-
+@log_function_call
 def get_notes_summary():
     """
     Returns a dictionary of note summaries for all patients in the project.
@@ -1032,7 +1039,7 @@ def get_notes_summary():
 
     return {summary["patient_id"]: summary for summary in notes_summary}
 
-
+@log_function_call
 def get_last_note_date_for_patient(patient_id: str, last_note_date=None):
     """
     Retrives the date of the last note for a patient.
@@ -1056,7 +1063,7 @@ def get_last_note_date_for_patient(patient_id: str, last_note_date=None):
         return None
     return summary["last_note_date"]
 
-
+@log_function_call
 def get_all_annotations():
     """
     Returns a list of all annotations from the database.
@@ -1070,7 +1077,7 @@ def get_all_annotations():
 
     return list(annotations)
 
-
+@log_function_call
 def get_proj_name():
     """
     Returns the name of the current project.
@@ -1087,7 +1094,7 @@ def get_proj_name():
     proj_name = proj_info["project"]
     return proj_name
 
-
+@log_function_call
 def get_curr_version():
     """
     Returns the name of the current project.
@@ -1102,7 +1109,7 @@ def get_curr_version():
 
     return proj_info["CEDARS_version"]
 
-
+@log_function_call
 def get_project_users():
     """
     Returns all the usernames for approved users (including the admin) for this project
@@ -1117,7 +1124,7 @@ def get_project_users():
 
     return [user["user"] for user in users]
 
-
+@log_function_call
 def get_all_patient_ids():
     """
     Returns all the patient IDs in this project.
@@ -1138,7 +1145,7 @@ def get_all_patient_ids():
 
     return [patient["patient_id"] for patient in patients]
 
-
+@log_function_call
 def get_patient_ids():
     """
     Returns all the patient IDs in this project.
@@ -1160,7 +1167,7 @@ def get_patient_ids():
     logger.info(f"Retrived {len(res)} patient IDs from the database.")
     return res
 
-
+@log_function_call
 def get_patient_lock_status(patient_id: str):
     """
     Updates the status of the patient to be locked or unlocked.
@@ -1177,7 +1184,7 @@ def get_patient_lock_status(patient_id: str):
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
 
-
+@log_function_call
 def get_all_notes(patient_id: str):
     """
     Returns all notes for that patient.
@@ -1185,6 +1192,7 @@ def get_all_notes(patient_id: str):
     notes = mongo.db["NOTES"].find({"patient_id": patient_id})
     return list(notes)
 
+@log_function_call
 def get_num_patient_notes(patient_id: str, num_notes=None):
     """
     Returns all notes for that patient.
@@ -1202,7 +1210,7 @@ def get_num_patient_notes(patient_id: str, num_notes=None):
     # Return the num_notes if available, otherwise return 0
     return summary["num_notes"] if summary else 0
 
-
+@log_function_call
 def get_patient_notes(patient_id: str, reviewed=False):
     """
     Returns all notes for that patient.
@@ -1216,7 +1224,7 @@ def get_patient_notes(patient_id: str, reviewed=False):
     notes = mongo.db["NOTES"].find(mongodb_search_query)
     return notes
 
-
+@log_function_call
 def get_total_counts(collection_name: str, **kwargs) -> int:
     """
     Returns the total number of documents in a collection.
@@ -1229,7 +1237,7 @@ def get_total_counts(collection_name: str, **kwargs) -> int:
     """
     return mongo.db[collection_name].count_documents({**kwargs})
 
-
+@log_function_call
 def get_annotated_notes_for_patient(patient_id: str) -> list[str]:
     """
     For a given patient, list all note_ids which have matching keyword
@@ -1254,6 +1262,7 @@ def get_annotated_notes_for_patient(patient_id: str) -> list[str]:
 
 
 # update functions
+@log_function_call
 def update_project_name(new_name):
     """
     Updates the project name in the INFO collection of the database.
@@ -1266,6 +1275,7 @@ def update_project_name(new_name):
     logger.info(f"Updating project name to #{new_name}")
     mongo.db["INFO"].update_one({}, {"$set": {"project": new_name}})
 
+@log_function_call
 def update_pines_api_status(new_status):
     """
     Updates the is_pines_server_enabled in the INFO collection of the database
@@ -1280,6 +1290,7 @@ def update_pines_api_status(new_status):
     mongo.db["INFO"].update_one({},
                                 {"$set": {"is_pines_server_enabled": new_status}})
 
+@log_function_call
 def update_pines_api_url(new_url):
     """
     Updates the PINES API url in the INFO collection of the database
@@ -1294,8 +1305,7 @@ def update_pines_api_url(new_url):
     mongo.db["INFO"].update_one({},
                                 {"$set": {"pines_url": new_url}})
 
-
-
+@log_function_call
 def mark_annotation_reviewed(annotation_id, reviewed_by):
     """
     Updates the annotation in the database to mark it as reviewed.
@@ -1323,7 +1333,7 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
     if num_unreviewed_annos == 0:
         mark_note_reviewed(note_id, reviewed_by)
 
-
+@log_function_call
 def revert_annotation_reviewed(annotation_id, reviewed_by):
     '''
     Reverts a reviewed annotation to be marked unreviewed in the case
@@ -1346,6 +1356,7 @@ def revert_annotation_reviewed(annotation_id, reviewed_by):
     # Mark the note this annotation belongs to as un-reviewed
     revert_note_reviewed(note_id, reviewed_by)
 
+@log_function_call
 def revert_note_reviewed(note_id, reviewed_by: str):
     """
     Updates the note's status to un-reviewed in the database.
@@ -1362,7 +1373,7 @@ def revert_note_reviewed(note_id, reviewed_by: str):
                                  {"$set": {"reviewed": False,
                                            "reviewed_by": reviewed_by}})
 
-
+@log_function_call
 def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     '''
     Marks the annotation for unreviewed events on or
@@ -1384,6 +1395,7 @@ def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
                                         },
                                         {"$set": {"reviewed": ReviewStatus.SKIPPED.value}})
 
+@log_function_call
 def revert_skipped_annotations(patient_id: str):
     '''
     Reverts the skiped annotations for unreviewed events on or
@@ -1401,7 +1413,7 @@ def revert_skipped_annotations(patient_id: str):
                                         },
                                         {"$set": {"reviewed": ReviewStatus.UNREVIEWED.value}})
 
-
+@log_function_call
 def update_event_date(patient_id: str, new_date, annotation_id):
     """
     Enters a new event date for an patient.
@@ -1422,7 +1434,7 @@ def update_event_date(patient_id: str, new_date, annotation_id):
 
     update_event_annotation_id(patient_id, annotation_id)
 
-
+@log_function_call
 def delete_event_date(patient_id: str):
     """
     Deletes the event date for a patient.
@@ -1438,7 +1450,7 @@ def delete_event_date(patient_id: str):
                                        {"$set": {"event_date": None}})
     delete_event_annotation_id(patient_id)
 
-
+@log_function_call
 def get_event_annotation_id(patient_id: str):
     """
     Retrives the ID for the annotation where 
@@ -1458,6 +1470,7 @@ def get_event_annotation_id(patient_id: str):
 
     return None
 
+@log_function_call
 def update_event_annotation_id(patient_id: str, annotation_id):
     """
     Updates the ID for the annotation where 
@@ -1475,6 +1488,7 @@ def update_event_annotation_id(patient_id: str, annotation_id):
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": annotation_id}})
 
+@log_function_call
 def delete_event_annotation_id(patient_id: str):
     """
     Deletes the ID for the annotation where 
@@ -1490,7 +1504,7 @@ def delete_event_annotation_id(patient_id: str):
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                        {"$set": {"event_annotation_id": None}})
 
-
+@log_function_call
 def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
     """
     Updates the patient's status to reviewed in the database.
@@ -1510,7 +1524,7 @@ def mark_patient_reviewed(patient_id: str, reviewed_by: str, is_reviewed=True):
     logger.info(f"Storing results for patient #{patient_id}")
     upsert_patient_records(patient_id, datetime.now())
 
-
+@log_function_call
 def mark_note_reviewed(note_id, reviewed_by: str):
     """
     Updates the note's status to reviewed in the database.
@@ -1524,7 +1538,7 @@ def mark_note_reviewed(note_id, reviewed_by: str):
                                  {"$set": {"reviewed": True,
                                            "reviewed_by": reviewed_by}})
 
-
+@log_function_call
 def reset_patient_reviewed():
     """
     Update all patients, notes to be un-reviewed.
@@ -1538,7 +1552,7 @@ def reset_patient_reviewed():
     mongo.db["NOTES"].update_many({}, {"$set": {"reviewed": False,
                                                 "reviewed_by": ""}})
 
-
+@log_function_call
 def add_comment(annotation_id, comment):
     """
     Stores a new comment for a patient.
@@ -1562,7 +1576,7 @@ def add_comment(annotation_id, comment):
                                      {"comments": comment}
                                      })
 
-
+@log_function_call
 def set_patient_lock_status(patient_id: str, status):
     """
     Updates the status of the patient to be locked or unlocked.
@@ -1578,7 +1592,7 @@ def set_patient_lock_status(patient_id: str, status):
     patients_collection.update_one({"patient_id": patient_id},
                                    {"$set": {"locked": status}})
 
-
+@log_function_call
 def remove_all_locked():
     """
     Sets the locked status of all patients to False.
@@ -1588,7 +1602,7 @@ def remove_all_locked():
     patients_collection.update_many({},
                                     {"$set": {"locked": False}})
 
-
+@log_function_call
 def update_annotation_reviewed(note_id: str) -> int:
     """
     Mark all annotations for a note as reviewed.
@@ -1605,6 +1619,7 @@ def update_annotation_reviewed(note_id: str) -> int:
 
 
 # delete functions
+@log_function_call
 def empty_annotations():
     """
     Deletes all annotations from the database
@@ -1618,13 +1633,14 @@ def empty_annotations():
     flask.current_app.task_queue.empty()
     mongo.db["TASK"].delete_many({})
 
-
+@log_function_call
 def drop_database(name):
     """Clean Database"""
     mongo.cx.drop_database(name)
 
 
 # utility functions
+@log_function_call
 def check_password(username, password):
     """
     Checks if the password matches the password of that user from the database.
@@ -1641,7 +1657,7 @@ def check_password(username, password):
 
     return "password" in user and check_password_hash(user["password"], password)
 
-
+@log_function_call
 def is_admin_user(username):
     """check if the user is admin"""
     user = mongo.db["USERS"].find_one({'user': username})
@@ -1653,6 +1669,7 @@ def is_admin_user(username):
 
 
 # stats functions
+@log_function_call
 def get_curr_stats():
     """
     Returns basic statistics for the project
@@ -1705,6 +1722,7 @@ def get_curr_stats():
 
 
 # pines functions
+@log_function_call
 def get_prediction(note: str) -> float:
     """
     ##### PINES predictions
@@ -1734,7 +1752,7 @@ def get_prediction(note: str) -> float:
         logger.error(f"Failed to get prediction for note: {log_notes}")
         raise e
 
-
+@log_function_call
 def get_max_prediction_score(patient_id: str):
     """
     Get the max predicted note score for a patient
@@ -1803,7 +1821,7 @@ def get_max_prediction_score(patient_id: str):
         ]
     )
 
-
+@log_function_call
 def get_note_prediction_from_db(note_id: str,
                                 pines_collection_name: str = "PINES") -> Optional[float]:
     """
@@ -1826,7 +1844,7 @@ def get_note_prediction_from_db(note_id: str,
     logger.debug(f"Prediction not found in db for : {note_id}")
     return None
 
-
+@log_function_call
 def predict_and_save(text_ids: Optional[list[str]] = None,
                      note_collection_name: str = "NOTES",
                      pines_collection_name: str = "PINES",
@@ -1860,7 +1878,7 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                 })
         count += 1
 
-
+@log_function_call
 def add_task(task):
     """
     Launch a task and add it to Mongo if it doesn't already exist.
@@ -1869,7 +1887,7 @@ def add_task(task):
     task_db = mongo.db["TASK"]
     task_db.insert_one(task)
 
-
+@log_function_call
 def get_tasks_in_progress():
     """
     Returns tasks that have not been completed yet.
@@ -1877,7 +1895,7 @@ def get_tasks_in_progress():
     task_db = mongo.db["TASK"]
     return task_db.find({"complete": False})
 
-
+@log_function_call
 def get_task_in_progress(task_id):
     """
     Returns the task with this ID, if it has not been completed.
@@ -1886,7 +1904,7 @@ def get_task_in_progress(task_id):
     return task_db.find_one({"job_id": task_id,
                              "complete": False})
 
-
+@log_function_call
 def get_task(task_id):
     """
     Returns the task with this ID, regardless of it's completion status.
@@ -1894,7 +1912,7 @@ def get_task(task_id):
     task_db = mongo.db["TASK"]
     return task_db.find_one({"job_id": task_id})
 
-
+@log_function_call
 def update_db_task_progress(task_id, progress):
     """
     Updates the progress of a task and checks if it has completed.
@@ -1917,6 +1935,7 @@ def update_db_task_progress(task_id, progress):
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
+@log_function_call
 def report_success(job):
     """
     Saves the data associated with a successful job after completion.
@@ -1929,7 +1948,7 @@ def report_success(job):
 
     update_db_task_progress(job.get_id(), 100)
 
-
+@log_function_call
 def report_failure(job):
     """
     Saves the data associated with a job that failed to complete.
@@ -1941,6 +1960,7 @@ def report_failure(job):
     job.save_meta()
     update_db_task_progress(job.get_id(), 0)
 
+@log_function_call
 def get_patient_reviewer(patient_id: str):
     """
     Updates the note's status to reviewed in the database.
@@ -1952,6 +1972,7 @@ def get_patient_reviewer(patient_id: str):
 
     return reviewed_by
 
+@log_function_call
 def get_pines_url():
     '''
     Retrives PINES url from INFO col.
@@ -1963,6 +1984,7 @@ def get_pines_url():
 
     return None
 
+@log_function_call
 def is_pines_api_running():
     '''
     Returns True if a SuperBIO PINES API server is running.
@@ -1974,6 +1996,7 @@ def is_pines_api_running():
 
     return False
 
+@log_function_call
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
     Download annotations from the database and stream them to MinIO.
@@ -2048,6 +2071,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")
         return False
 
+@log_function_call
 def update_patient_results(update_existing_results = False):
     '''
     Creates the results collection if it does not exist and
@@ -2072,6 +2096,7 @@ def update_patient_results(update_existing_results = False):
         if update_existing_results or (not patient_results_exist(patient_id)):
             upsert_patient_records(patient_id)
 
+@log_function_call
 def terminate_project():
     """
     ##### Terminate the Project
