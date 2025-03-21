@@ -97,6 +97,7 @@ services:
       - superbio
 
   prometheus:
+    user: root
     image: prom/prometheus:latest
     container_name: prometheus
     restart: unless-stopped
