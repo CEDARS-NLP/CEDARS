@@ -22,6 +22,9 @@ ENV VIRTUAL_ENV=/.venv \
     PATH="/.venv/bin:$PATH" \
     PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
 
+# Create the directory for Prometheus multiprocess metrics
+RUN mkdir -p /tmp/prometheus-multiproc
+
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
 COPY . .

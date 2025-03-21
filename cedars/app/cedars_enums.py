@@ -1,4 +1,21 @@
 from enum import Enum
+import time
+from functools import wraps
+from loguru import logger
+
+
+def log_function_call(func):
+    """Decorator to log function calls."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.debug(f"Python function {func.__name__} called with args: {args}, kwargs: {kwargs}")
+        start_time = time.perf_counter()  # More precise than time.time()
+        result = func(*args, **kwargs)
+        end_time = time.perf_counter()
+        execution_time = (end_time - start_time)
+        logger.debug(f"Python function {func.__name__} finished execution in {execution_time:.6f}s")
+        return result
+    return wrapper
 
 class ReviewStatus(Enum):
     '''
