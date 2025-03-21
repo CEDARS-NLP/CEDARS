@@ -27,7 +27,9 @@ dependencies = [
     "tenacity",
     "passvalidate",
     "rq_dashboard",
-    "polars"
+    "polars",
+    "prometheus-client",
+    "prometheus-flask-exporter"
 ]
 
 [build-system]
