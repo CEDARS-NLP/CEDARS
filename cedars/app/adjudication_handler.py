@@ -205,16 +205,23 @@ class AdjudicationHandler:
             return new_index
 
         logger.debug("Fetching new index to show")
-        while True:
-            logger.debug(f"Checking index {new_index} / {last_index}")
+        # Check sentences from after the current annotation
+        # for un-reviewed annotations
+        for new_index in range(index+1, len(review_statuses)):
+            logger.debug(f"Checking index {new_index} / {len(review_statuses)-1}")
             logger.debug(f"Index status : {review_statuses[new_index]}")
             if review_statuses[new_index] == ReviewStatus.UNREVIEWED:
                 self.patient_data['current_index'] = new_index
-                break
-
-            new_index += 1
-            if new_index >= last_index:
-                new_index = 0
+                return
+        
+        # If no un-reviewed annotation is found, check the indices
+        # before the current annotation
+        for new_index in range(0, index):
+            logger.debug(f"Checking index {new_index} / {len(review_statuses)-1}")
+            logger.debug(f"Index status : {review_statuses[new_index]}")
+            if review_statuses[new_index] == ReviewStatus.UNREVIEWED:
+                self.patient_data['current_index'] = new_index
+                return
 
     @log_function_call
     def mark_event_date(self, event_date, event_annotation_id, annotations_after_event):
