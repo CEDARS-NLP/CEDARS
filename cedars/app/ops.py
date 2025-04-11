@@ -943,11 +943,25 @@ def update_results_collection():
     Creates and updates the RESULTS collection.
     """
 
-    logger.info("Creating job to updae results collection.")
+    logger.info("Creating job to update results collection.")
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
                                                 True)
 
     return flask.jsonify({'job_id': job.get_id()}), 202
+
+@bp.route('/unlock_all_patients', methods=["GET"])
+@auth.admin_required
+@log_function_call
+def run_unlock_all_patients():
+    """
+    Unlocks all patients in the database.
+    NOTE : This can break the application if run while users are still annotating patients.
+    """
+
+    logger.info("Creating job to unlock all patients in the PATIENTS collection.")
+    job = flask.current_app.ops_queue.enqueue(db.remove_all_locked)
+
+    return flask.jsonify({'unlock_job_id': job.get_id()}), 202
 
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
