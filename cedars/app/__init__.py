@@ -52,7 +52,7 @@ def create_app(config_filename=None):
         cedars_app.config.from_object(config_filename)
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
-    metrics = GunicornInternalPrometheusMetrics(cedars_app)
+    metrics = GunicornInternalPrometheusMetrics(cedars_app, metrics_decorator=auth.admin_required)
     metrics.info('app_info', 'CEDARS Application', version='1.0.0')
 
     sess.init_app(cedars_app)
