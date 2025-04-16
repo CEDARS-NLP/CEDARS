@@ -11,14 +11,14 @@
     <div class="form-group">
         This is the internal processes page which allows administrators to access and run specific technical processes for their CEDARS project.
         <br>
+        <b> IMPORTANT NOTE :  Do not use these processes unlesss you know exactly what you are doing as these tools have the capacity to break the application if misused or handled without care.</b>
+        <br>
         Additional details on these processes can be found on our <a href="https://cedars.io">documentation page</a>.
     </div>
 
     <br>
     <br>
-    <br>
     <h3>Database Results Update</h3>
-    <br>
 
     <div class="form-group">
         CEDARS stores the results of each project in a mongodb collection named RESULTS.
@@ -40,8 +40,6 @@
 
 
     <h3>RQ Dashboard</h3>
-    <br>
-
     <div class="form-group">
         CEDARS uses a queue-based system to handle computationally expensive tasks, this is implemented using redis and <a href="https://python-rq.org">python-rq</a>.
         <br>
@@ -53,7 +51,47 @@
                 <button type="submit" class="btn btn-primary cedars-btn" type="button">Open RQ-Dashboard</button>
             </form>
         </div>
+        <br>
     </div>
+
+
+
+    <h3>Prometheus Logging</h3>
+    <div class="form-group">
+        Prometheus is a logging software used to track the endpoint calls and utilisation by CEDARS.
+        <br>
+        <br>
+        <div class="mb-3">
+            <form action="/metrics" class="inline" target="_blank">
+                <button type="submit" class="btn btn-primary cedars-btn" type="button">Open Prometheus Logs</button>
+            </form>
+        </div>
+        <br>
+    </div>
+
+
+    <h3>Unlock All Patients</h3>
+    <div class="form-group">
+        The "unlock all patients" tool will automatically unlock patients in the database that can no longer be accessed.
+        <b> IMPORTANT : DO NOT USE THIS IF ANY USERS ARE CURRENTLY ANNOTATING PATIENTS. MAKE SURE ALL COLLABORATORS HAVE STOPPED ADJUDICATING WHEN YOU DO THIS. </b>
+        This is only meant to be used in an emergency for cases where an error or unexpected crash has left some patients locked in the database which you can no longer access. 
+        <br>
+        <br>
+        <div class="mb-3">
+          <form class="form-inline" method="POST">
+              <div class="mb-3">
+                <button class="btn btn-primary cedars-btn" type="button" onclick="unlockAllPatients()">Unlock All Patients</button>
+              </div>
+          </form>
+          <br>
+          <div id="patientUnlockStatus" class="mt-3">
+            <!-- This div will be updated with the download status -->
+        </div>
+        </div>
+
+        
+    </div>
+
 </div>
 
 <style>
@@ -85,6 +123,31 @@
           }
         });
     }
+
+    function checkUnlockJobStatus(unlock_jobId, job_type) {
+      const confirmed = confirm("WARNING: Unlocking all patients should only be done if no users are currently annotating and can break the DB if used otherwise. Are you sure you want to continue?");
+      // End the function logic if confirmation is not received
+      if (!confirmed) {
+        return ;
+      }
+      fetch(`/ops/check_job/${unlock_jobId}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'finished') {
+            console.log(job_type);
+            document.getElementById('patientUnlockStatus').innerHTML = `
+                  <div>Patients unlocked successfully! (You can continue annotating patients.)</div>
+                `;
+            
+          } else if (data.status === 'failed') {
+            document.getElementById('patientUnlockStatus').innerHTML = `
+              <div>Job failed: ${data.error}</div>
+            `;
+          } else {
+            setTimeout(() => checkUnlockJobStatus(unlock_jobId, job_type), 2000);
+          }
+        });
+    }
   
     function updateResultsCol() {
       fetch('/ops/update_results_collection')
@@ -100,11 +163,34 @@
           `;
         });
     }
+
+    function unlockAllPatients() {
+      fetch('/ops/unlock_all_patients')
+        .then(response => response.json())
+        .then(data => {
+          const unlock_jobId = data.unlock_job_id;
+          checkUnlockJobStatus(unlock_jobId, 'patient_unlock_job');
+          document.getElementById('patientUnlockStatus').innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+              <span class="sr-only">cedars...</span>
+            </div>
+            <p>Unlocking Patients, please wait...</p>
+          `;
+        });
+    }
   
     document.addEventListener('DOMContentLoaded', function() {
       const jobId = '{{ job_id }}';
       if (jobId != 'None') {
         checkJobStatus(jobId, '');
+      }
+    });
+
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const unlock_jobId = '{{ unlock_jobId }}';
+      if (unlock_jobId != 'None' && unlock_jobId) {
+        checkUnlockJobStatus(unlock_jobId, '');
       }
     });
   </script>
