@@ -40,6 +40,8 @@ jobs:
           python -m poetry install
           export VIRTUAL_ENV=/.venv
           export PATH="/.venv/bin:$PATH"
+          export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          mkdir -p /tmp/prometheus-multiproc
 
       - name: Lint with flake8
         run: |
@@ -51,6 +53,9 @@ jobs:
         run: |
           cd cedars
           touch .env
+          export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          mkdir -p /tmp/prometheus-multiproc
+          echo "PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc" >> .env
           echo "PROJECT_NAME=demo" >> .env
           echo "INVESTIGATOR_NAME=demo_user" >> .env
           echo "SECRET_KEY=cedars" >> .env

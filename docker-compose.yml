@@ -96,6 +96,26 @@ services:
       - selfhosted
       - superbio
 
+  prometheus:
+    user: root
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - cedars
+    depends_on:
+      - web     
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+      - superbio
+
   pines:
     build:
       context: ./PINES
@@ -206,6 +226,7 @@ volumes:
   data2-2:
   cedars_db:
   redis_data:
+  prometheus_data:
 networks:
   cedars:
     driver: bridge
