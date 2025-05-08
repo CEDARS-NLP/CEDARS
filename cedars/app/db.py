@@ -2,6 +2,7 @@
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
+from math import ceil
 import os
 from io import BytesIO, StringIO
 import re
@@ -2026,9 +2027,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             )
 
         logger.info("Uploading results to csv buffer")
-        for chunk in df.write_csv(include_header=False, batch_size=1000):
-            logger.info("Sending chunk to csv buffer")
-            csv_buffer.write(chunk)
+        chunk_size = 1000
+        for chunk_index in range(0, df.shape[0], chunk_size):
+            chunk = df.slice(chunk_index, chunk_size)
+            logger.info(f"Sending chunk {ceil(chunk_index/chunk_size)+1}/{ceil(df.shape[0]/chunk_size)} to csv buffer")
+            csv_buffer.write(chunk.write_csv(include_header=False))
 
         # Move the cursor to the beginning of the buffer
         csv_buffer.seek(0)
