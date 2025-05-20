@@ -782,6 +782,7 @@ def adjudicate_records():
         if session.get("patient_id") is not None:
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
+            session.pop("patient_data", None)
             session.modified = True
 
         search_patient = str(request.form.get("patient_id")).strip()

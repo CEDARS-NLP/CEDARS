@@ -1345,6 +1345,26 @@ def revert_note_reviewed(note_id, reviewed_by: str):
                                  {"$set": {"reviewed": False,
                                            "reviewed_by": reviewed_by}})
 
+    note_info = mongo.db["NOTES"].find_one({"text_id": note_id})
+    revert_patient_reviewed(note_info['patient_id'], reviewed_by)
+    
+@log_function_call
+def revert_patient_reviewed(patient_id, reviewed_by: str):
+    """
+    Updates the patient's status to un-reviewed in the database.
+    This occurs when an event_date for the patient is deleted and
+    one of the annotations from this patient is then marked un-reviewed.
+
+     Args:
+        patient_id (int) : Unique ID for a patient.
+        reviewed_by (str) : The name of the user who deleted the event_date
+                            causing this note to be marked un-reviewed.
+    """
+    logger.debug(f"Marking patient #{patient_id} as un-reviewed.")
+    mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
+                                 {"$set": {"reviewed": False,
+                                           "reviewed_by": reviewed_by}})
+
 @log_function_call
 def mark_annotations_post_event(patient_id: str, event_date: datetime.date):
     '''
@@ -2001,7 +2021,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
         writer = pd.DataFrame(columns=list(schema.keys()))
-        writer.to_csv(csv_buffer, index=False, header=True)
+        writer.to_csv(csv_buffer, index=False, header=True, encoding="utf-8-sig")
 
         # Write data in chunks and stream to MinIO
         columns_to_retrive = {'_id': False}
@@ -2031,7 +2051,7 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         for chunk_index in range(0, df.shape[0], chunk_size):
             chunk = df.slice(chunk_index, chunk_size)
             logger.info(f"Sending chunk {ceil(chunk_index/chunk_size)+1}/{ceil(df.shape[0]/chunk_size)} to csv buffer")
-            csv_buffer.write(chunk.write_csv(include_header=False))
+            csv_buffer.write(chunk.to_pandas().to_csv(header=False,index=False))
 
         # Move the cursor to the beginning of the buffer
         csv_buffer.seek(0)
