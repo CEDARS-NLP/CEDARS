@@ -3,6 +3,7 @@ This page contatins the functions and the flask blueprint for the /proj_details 
 """
 import os
 import re
+import copy
 from datetime import datetime, date
 import tempfile
 import pandas as pd
@@ -15,6 +16,7 @@ from flask import (
     url_for, flash, g, jsonify
 )
 
+from .cedars_enums import ReviewStatus
 from loguru import logger
 import requests
 from flask_login import current_user, login_required
@@ -31,6 +33,8 @@ from .api import get_token_status
 from .adjudication_handler import AdjudicationHandler
 from .cedars_enums import PatientStatus
 from .cedars_enums import log_function_call
+import json
+from datetime import datetime
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
@@ -549,6 +553,56 @@ def queue_stats():
                           'successful_jobs': successful_jobs
                           })
 
+@log_function_call
+def backup_session_data(patient_id, patient_data):
+    """Backup session data to a file"""
+    try:
+        backup_dir = os.path.join(flask.current_app.instance_path, 'session_backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        backup_file = os.path.join(backup_dir, f'session.json')
+        patient_data['review_statuses'] = [str(x.value) for x in patient_data['review_statuses']]
+        backup_data = {
+            'patient_id': patient_id,
+            'patient_data': patient_data,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        with open(backup_file, 'w') as f:
+            json.dump(backup_data, f)
+            
+        logger.info(f"Backed up session data for patient {patient_id}")
+    except Exception as e:
+        logger.error(f"Failed to backup session data: {str(e)}")
+
+@log_function_call
+def restore_session_data():
+    """Restore session data from backup file"""
+    try:
+        backup_dir = os.path.join(flask.current_app.instance_path, 'session_backups')
+        backup_file = os.path.join(backup_dir, f'session.json')
+        
+        if os.path.exists(backup_file):
+            with open(backup_file, 'r') as f:
+                backup_data = json.load(f)
+            backup_data['patient_data']['review_statuses'] = [ReviewStatus(int(x)) for x in backup_data['patient_data']['review_statuses']]
+                
+            # Only restore if the backup is less than 1 hour old
+            backup_time = datetime.fromisoformat(backup_data['timestamp'])
+            if (datetime.now() - backup_time).total_seconds() < 3600:
+                session['patient_id'] = backup_data['patient_id']
+                session['patient_data'] = backup_data['patient_data']
+                logger.info(f"Restored session data for patient")
+                return True
+            else:
+                logger.warning(f"Backup for patient is too old")
+                os.remove(backup_file)  # Clean up old backup
+        return False
+    except Exception as e:
+        logger.error(f"Failed to restore session data: {str(e)}")
+        return False
+
+
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 @log_function_call
@@ -558,7 +612,11 @@ def save_adjudications():
     Used to edit and review annotations.
     """
     if session.get("patient_id") is None:
-        return redirect(url_for("ops.adjudicate_records"))
+        if restore_session_data():
+            logger.info("Session restored from backup")
+        else:
+            logger.error("No patient_id found in session and no backup found")
+            return redirect(url_for("ops.adjudicate_records"))
 
     logger.info(f"Saving adjudications for patient {session['patient_id']}")
     adjudication_handler = AdjudicationHandler(session['patient_id'])
@@ -610,6 +668,12 @@ def save_adjudications():
         is_shift_performed = True
 
     session["patient_data"] = adjudication_handler.get_patient_data()
+
+    try:
+        patient_data_cloned = copy.deepcopy(session['patient_data'])
+        backup_session_data(session['patient_id'], patient_data_cloned)
+    except Exception as e:
+        logger.error(f"Failed to backup session data: {str(e)}")
 
     # We do not skip to the next patient if the current operation was just a shift.
     # This is done as users may want to view notes for a patient that has already been
@@ -718,6 +782,7 @@ def adjudicate_records():
         if session.get("patient_id") is not None:
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
+            session.pop("patient_data", None)
             session.modified = True
 
         search_patient = str(request.form.get("patient_id")).strip()
