@@ -70,6 +70,8 @@ $(window).on('load', function() {
       console.log('Login successful:', data.message);
       // Redirect to the main page or update UI as needed
       window.location.href = '/';
+      // Send a login confirmation message to superbio server
+      window.parent.postMessage({type: 'auth', data: 'successful'}, '*');
     } else {
       console.error('Login failed:', data.error);
       // Handle login failure (e.g., show an error message)
