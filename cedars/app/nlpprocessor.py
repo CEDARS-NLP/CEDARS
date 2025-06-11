@@ -1,6 +1,7 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
+from datetime import datetime
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
@@ -237,6 +238,9 @@ class NlpProcessor:
         if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
+            db.upsert_patient_records(patient_id, datetime.now(), updated_by="PINES")
+        else:
+            db.upsert_patient_records(patient_id, datetime.now(), updated_by="CEDARS")
 
     def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
         """
