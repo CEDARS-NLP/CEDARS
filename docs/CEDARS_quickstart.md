@@ -6,7 +6,7 @@
 In order to run, you will need two `.env` files
     - The first .env file will be placed under the ROOT DIR
     - The second the `.env` file under the `CEDARS/cedars` directory.
-    - There are `.sample.env` files available with best default configurations - just **RENAME** them .env to use defaults.
+    - There are `.env.sample` files available with best default configurations - just **RENAME** them .env to use defaults.
 
     ```bash
     CEDARS/
@@ -26,36 +26,8 @@ In order to run, you will need two `.env` files
 
 ### Detailed Requirements
 
-#### Env Setup
-
-This is an example setup for the values required in the .env file:
-```
-SECRET_KEY=asecurekey
-HOST=0.0.0.0
-DB_HOST=db
-DB_NAME=cedars
-DB_PORT=27017
-DB_HOST_PORT=27018
-DB_USER=admin
-DB_PWD=password
-DB_PARAMS="authSource=admin"
-MINIO_HOST=minio
-MINIO_PORT=9000
-MINIO_ACCESS_KEY=rootuser
-MINIO_SECRET_KEY=rootpassword
-ENV=dev
-PINES_API_URL=http://pines:8036
-REDIS_URL=redis
-REDIS_PORT=6379
-RQ_DASHBOARD_URL=/rq
-PORT=5001
-```
 
 #### Docker Requirement
-
-!!! note "TIP"
-
-    This is the easiest way to run CEDARS and encapsulates all dependencies above.
 
 !!! note "TIP"
 
@@ -97,7 +69,7 @@ The most straightforward way to complete a CEDARS project is via docker containe
 
 Each component runs as a service encapsulated in a docker container. Those three elements a coordinated within a deployment.
 
-After cloning as described above, create required `.env` files as mentioned [here](#env-setup)
+After cloning as described above, create required `.env` files by renaming the two `.env.sample` files as mentioned [here](#software-installation)
 
 After creating `.env` files, run the following commands:
 ```shell
