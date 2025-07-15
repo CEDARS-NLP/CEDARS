@@ -822,9 +822,8 @@ def adjudicate_records():
                                            hide_duplicates, stored_event_date,
                                            stored_annotation_id)
 
-    for annotation_id in annotations_with_duplicates:
-        db.mark_annotation_reviewed(annotation_id, current_user.username)
-    
+    db.batch_mark_annotation_reviewed(annotations_with_duplicates, current_user.username)
+
     logger.info(f"Finished loading adjudication handler for patient {patient_id}.")
 
     if len(patient_data["annotation_ids"]) > 0:
