@@ -624,9 +624,9 @@ def save_adjudications():
                                                 session['patient_data'])
 
     current_annotation_id = adjudication_handler.get_curr_annotation_id()
-    db.add_comment(current_annotation_id, request.form['comment'].strip())
+    session['patinet_comments'] = request.form['comment'].strip()
     patient_id = session['patient_id']
-    skip_after_event = db.get_search_query(query_key="skip_after_event")
+    skip_after_event = session['skip_after_event']
 
     action = request.form['submit_button']
     is_shift_performed = False
@@ -713,17 +713,16 @@ def show_annotation():
     adjudication_handler.load_from_patient_data(session['patient_id'],
                                                 session['patient_data'])
     annotation_id = adjudication_handler.get_curr_annotation_id()
+    annotation = adjudication_handler.get_curr_annotation()
 
-    annotation = db.get_annotation(annotation_id)
     note = db.get_annotation_note(annotation_id)
     if not note:
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
 
-    comments = db.get_patient_by_id(session['patient_id'])["comments"]
-    annotations_for_note = db.get_all_annotations_for_note(note["text_id"])
-    annotations_for_sentence = db.get_all_annotations_for_sentence(note["text_id"],
-                                                                   annotation["sentence_number"])
+    comments = session['patinet_comments']
+    annotations_for_note = adjudication_handler.get_all_annotations_for_curr_note()
+    annotations_for_sentence = adjudication_handler.get_all_annotations_for_curr_sentence()
 
     annotation_data = adjudication_handler.get_annotation_details(annotation,
                                                                   note, comments,
@@ -733,7 +732,8 @@ def show_annotation():
     return render_template("ops/adjudicate_records.html",
                            name = current_user.username,
                            **annotation_data,
-                           **db.get_info())
+                           project = session['project_name']
+                           )
 
 
 @bp.route("/adjudicate_records", methods=["GET", "POST"])
@@ -815,6 +815,7 @@ def adjudicate_records():
     hide_duplicates = db.get_search_query("hide_duplicates")
     stored_event_date = db.get_event_date(patient_id)
     stored_annotation_id = db.get_event_annotation_id(patient_id)
+    patinet_comments = db.get_patient_by_id(patient_id)["comments"]
 
     logger.info(f"Creating adjudication handler for patient {patient_id}.")
     adjudication_handler = AdjudicationHandler(patient_id)
@@ -824,7 +825,7 @@ def adjudicate_records():
 
     for annotation_id in annotations_with_duplicates:
         db.mark_annotation_reviewed(annotation_id, current_user.username)
-    
+
     logger.info(f"Finished loading adjudication handler for patient {patient_id}.")
 
     if len(patient_data["annotation_ids"]) > 0:
@@ -833,6 +834,7 @@ def adjudicate_records():
         db.set_patient_lock_status(patient_id, True)
 
     patient_status = adjudication_handler.get_patient_status()
+    session['project_name'] = db.get_info()['project']
 
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
@@ -845,16 +847,22 @@ def adjudicate_records():
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['patinet_comments'] = patinet_comments
+        session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     elif patient_status == PatientStatus.REVIEWED_NO_EVENT:
         flash(f"Patient {patient_id} has no annotations left to review. Showing all annotations.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['patinet_comments'] = patinet_comments
+        session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     else:
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['patinet_comments'] = patinet_comments
+        session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     session.modified = True
     return redirect(url_for("ops.show_annotation"))
