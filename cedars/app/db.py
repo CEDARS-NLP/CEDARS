@@ -1277,6 +1277,52 @@ def update_pines_api_url(new_url):
     mongo.db["INFO"].update_one({},
                                 {"$set": {"pines_url": new_url}})
 
+
+@log_function_call
+def batch_mark_annotation_reviewed(annotation_ids, reviewed_by):
+    """
+    Updates the annotation in the database to mark it as reviewed.
+    Also updates the note it belongs to as reviewed if all annotations that
+    belong to it are also reviewed.
+
+    Args:
+        - annotation_ids (List[str]) : A list of unique IDs for the annotations.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+
+    Returns:
+        None
+    """
+    logger.debug(f"Marking annotations {annotation_ids} as reviewed.")
+    annotation_ids = [ObjectId(annotation_id) for annotation_id in annotation_ids]
+    mongo.db["ANNOTATIONS"].update_many({"_id": {"$in": annotation_ids}},
+                                       {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
+
+    annotation_data = mongo.db["ANNOTATIONS"].find({"_id": {"$in": annotation_ids}})
+    note_ids = list(set([i['note_id'] for i in annotation_data]))
+
+    # Get the number of unreviewed annotations for each note that any of the annotations belong to
+    count_unreviewed_annotations_pipeline = [
+        {"$match": {"note_id": {"$in": note_ids}, "reviewed": ReviewStatus.UNREVIEWED.value}},
+        {"$group": {"_id": "$note_id", "count": {"$sum": 1}}}
+    ]
+
+    num_unreviewed_annos = mongo.db["ANNOTATIONS"].aggregate(count_unreviewed_annotations_pipeline)
+    num_unreviewed_in_notes = {_id : 0 for _id in note_ids}
+    for result in num_unreviewed_annos:
+        num_unreviewed_in_notes[result['_id']] = result['count']
+
+    notes_to_be_marked_reviewed = []
+    for note_id in num_unreviewed_in_notes:
+        count = num_unreviewed_in_notes[note_id]
+        logger.debug(f"Note ID {note_id} has {count} unreviewed annotations")
+        # If there are no unreviewed annotations left for any note,
+        # then mark that note as reviewed
+        if count == 0:
+            notes_to_be_marked_reviewed.append(note_id)
+
+    if len(notes_to_be_marked_reviewed) > 0:
+        batch_mark_note_reviewed(notes_to_be_marked_reviewed, reviewed_by)
+
 @log_function_call
 def mark_annotation_reviewed(annotation_id, reviewed_by):
     """
@@ -1522,11 +1568,25 @@ def mark_note_reviewed(note_id, reviewed_by: str):
     Updates the note's status to reviewed in the database.
 
      Args:
-        patient_id (int) : Unique ID for a patient.
+        note_id (str) : Unique ID for the note.
         reviewed_by (str) : The name of the user who reviewed the note.
     """
     logger.debug(f"Marking note #{note_id} as reviewed.")
     mongo.db["NOTES"].update_one({"text_id": note_id},
+                                 {"$set": {"reviewed": True,
+                                           "reviewed_by": reviewed_by}})
+
+@log_function_call
+def batch_mark_note_reviewed(note_ids, reviewed_by: str):
+    """
+    Updates a batch of notes status to reviewed in the database.
+
+     Args:
+        note_ids (List[str]) : A list of Unique ID for the notes.
+        reviewed_by (str) : The name of the user who reviewed the note.
+    """
+    logger.debug(f"Marking notes #{note_ids} as reviewed.")
+    mongo.db["NOTES"].update_many({"text_id": {"$in": note_ids}},
                                  {"$set": {"reviewed": True,
                                            "reviewed_by": reviewed_by}})
 
