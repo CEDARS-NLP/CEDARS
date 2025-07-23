@@ -708,7 +708,6 @@ def show_annotation():
 
     logger.info(f"Presenting annotation for patient {session['patient_id']}")
 
-    index = session.get("index", 0)
     adjudication_handler = AdjudicationHandler(session['patient_id'])
     adjudication_handler.load_from_patient_data(session['patient_id'],
                                                 session['patient_data'])
