@@ -679,12 +679,12 @@ def save_adjudications():
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
     if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
-        for annotation_id in session['reviewed_annotation_ids']:
-            db.mark_annotation_reviewed(annotation_id, current_user.username)
+        db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
+                                       current_user.username)
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
+        db.add_comment(session["patient_id"], session['patinet_comments'].strip())
         db.upsert_patient_records(patient_id, datetime.now(),
                               updated_by = current_user.username)
-        db.add_comment(session["patient_id"], session['patinet_comments'].strip())
         db.set_patient_lock_status(patient_id, False)
 
         session.pop("patient_id")
@@ -783,6 +783,14 @@ def adjudicate_records():
         patient_id = db.get_patients_to_annotate()
     else:
         if session.get("patient_id") is not None:
+            if session.get('patinet_comments') is not None:
+                db.add_comment(session["patient_id"], session['patinet_comments'].strip())
+            if session.get('reviewed_annotation_ids') is not None:
+                db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
+                                                    current_user.username)
+
+            db.upsert_patient_records(session.get("patient_id"), datetime.now(),
+                              updated_by = current_user.username)
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
             session.pop("patient_data", None)
@@ -842,6 +850,8 @@ def adjudicate_records():
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
+        db.upsert_patient_records(patient_id, datetime.now(),
+                              updated_by = current_user.username)
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
 
@@ -882,6 +892,15 @@ def unlock_current_patient():
     patient_id = session["patient_id"]
     message = "No patient to unlock."
     if patient_id is not None:
+        if session.get('patinet_comments') is not None:
+                db.add_comment(patient_id, session['patinet_comments'].strip())
+
+        if session.get('reviewed_annotation_ids') is not None:
+                db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
+                                                    current_user.username)
+
+        db.upsert_patient_records(patient_id, datetime.now(),
+                              updated_by = current_user.username)
         db.set_patient_lock_status(patient_id, False)
         session["patient_id"] = None
         message = f"Unlocking patient # {patient_id}."

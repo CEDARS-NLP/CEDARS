@@ -8,7 +8,7 @@ def log_function_call(func):
     """Decorator to log function calls."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        logger.debug(f"Python function {func.__name__} called with args: {args}, kwargs: {kwargs}")
+        logger.debug(f"Python function {func.__name__} called with args")#: {args}, kwargs: {kwargs}")
         start_time = time.perf_counter()  # More precise than time.time()
         result = func(*args, **kwargs)
         end_time = time.perf_counter()
