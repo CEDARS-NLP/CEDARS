@@ -3,8 +3,7 @@ Entrypoint for the flask application.
 """
 import os
 import sys
-from flask import Flask, redirect
-from flask import render_template, request
+from flask import Flask, redirect, render_template
 from flask_session import Session
 import logging
 from loguru import logger
@@ -12,25 +11,10 @@ from dotenv import dotenv_values
 import rq
 import rq_dashboard
 from redis import Redis
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from prometheus_client import make_wsgi_app
-from prometheus_flask_exporter.multiprocess import GunicornPrometheusMetrics
+from prometheus_flask_exporter.multiprocess import GunicornInternalPrometheusMetrics
 from . import auth
 from . import ops
 from . import stats
-from prometheus_flask_exporter import DEFAULT_REGISTRY
-from prometheus_client import CollectorRegistry
-from prometheus_client import multiprocess
-from prometheus_client import generate_latest
-
-registry = DEFAULT_REGISTRY
-if os.environ.get('prometheus_multiproc_dir'):
-    stats_dir = os.environ.get('prometheus_multiproc_dir')
-    if not os.path.exists(stats_dir):
-        os.makedirs(stats_dir)
-    registry = CollectorRegistry()
-    multiprocess.MultiProcessCollector(registry)
-
 
 environment = os.getenv('ENV', 'local')
 config = dotenv_values(".env")
@@ -59,19 +43,10 @@ def rq_init_app(cedars_rq):
 
     return cedars_rq
 
-def init_prometheus_dashboard(cedars_app):
-    cedars_app.wsgi_app = DispatcherMiddleware(cedars_app.wsgi_app, {
-            '/prometheus_dashboard': make_wsgi_app()
-        })
-
-    return cedars_app
 
 def create_app(config_filename=None):
     """Create flask application"""
     cedars_app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
-    metrics = GunicornPrometheusMetrics(cedars_app,path='/metrics2', registry=registry)
-    metrics.info('cedars_web_app', 'CEDARS Info', version='1.0')
-
     if config_filename:
         logger.info(f"Loading config from {config_filename}")
         cedars_app.config.from_object(config_filename)
@@ -82,7 +57,6 @@ def create_app(config_filename=None):
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)
-    #init_prometheus_dashboard(cedars_app)
 
     auth.login_manager.init_app(cedars_app)
     cedars_app.register_blueprint(auth.bp)
@@ -108,13 +82,6 @@ def create_app(config_filename=None):
             return render_template("about.html", **ops.db.get_info())
         else:
             return render_template('index.html', **ops.db.get_info())
-
-    @cedars_app.route("/metrics")
-    def metrics_page():
-        data = generate_latest(registry)
-        print("\n\n\nMETRICS : ", metrics.generate_metrics(), "\n\n\n", flush=True)
-        print("\n\n\nData : ", data, "\n\n\n", flush=True)
-        return metrics.generate_metrics()
 
     return cedars_app
 
