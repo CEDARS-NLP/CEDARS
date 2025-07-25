@@ -659,7 +659,7 @@ def save_adjudications():
         adjudication_handler.delete_event_date()
     elif action == 'adjudicate':
         logger.debug(f"Adjudicating annotation {current_annotation_id} for {session['patient_id']}")
-        db.mark_annotation_reviewed(current_annotation_id, current_user.username)
+        session['reviewed_annotation_ids'].append(current_annotation_id)
         adjudication_handler._adjudicate_annotation()
     else:
         logger.debug(f"Shifting between annotations for patient {session['patient_id']}")
@@ -679,15 +679,19 @@ def save_adjudications():
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
     if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
-        db.set_patient_lock_status(patient_id, False)
+        for annotation_id in session['reviewed_annotation_ids']:
+            db.mark_annotation_reviewed(annotation_id, current_user.username)
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
+        db.upsert_patient_records(patient_id, datetime.now(),
+                              updated_by = current_user.username)
+        db.add_comment(session["patient_id"], session['patinet_comments'].strip())
+        db.set_patient_lock_status(patient_id, False)
+
         session.pop("patient_id")
         session.pop("patient_data")
+        session.pop("reviewed_annotation_ids")
 
     session.modified = True
-
-    db.upsert_patient_records(patient_id, datetime.now(),
-                              updated_by = current_user.username)
 
     # the session has been cleared so get the next patient
     if session.get("patient_id") is None:
@@ -846,6 +850,7 @@ def adjudicate_records():
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['reviewed_annotation_ids'] = []
         session['patinet_comments'] = patinet_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
@@ -853,6 +858,7 @@ def adjudicate_records():
         flash(f"Patient {patient_id} has no annotations left to review. Showing all annotations.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['reviewed_annotation_ids'] = []
         session['patinet_comments'] = patinet_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
@@ -860,6 +866,7 @@ def adjudicate_records():
         logger.info(f"Showing annotations for patient {patient_id}.")
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
+        session['reviewed_annotation_ids'] = []
         session['patinet_comments'] = patinet_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
