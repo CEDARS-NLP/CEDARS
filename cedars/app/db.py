@@ -1516,24 +1516,17 @@ def reset_patient_reviewed():
                                                 "reviewed_by": ""}})
 
 @log_function_call
-def add_comment(annotation_id, comment):
+def add_comment(patient_id, comment):
     """
     Stores a new comment for a patient.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
+        patient_id (str) : Unique ID for the patient.
         comment (str) : Text of the comment on this annotation.
     Returns:
         None
     """
     comment = comment.strip()
-    if len(comment) == 0:
-        logger.debug(f"Comment deleted on annotation # {annotation_id}.")
-    else:
-        logger.info(f"Adding comment to annotation #{annotation_id}")
-    patient_id = mongo.db["ANNOTATIONS"].find_one(
-        {"_id": ObjectId(annotation_id)})["patient_id"]
-
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                     {"$set":
                                      {"comments": comment}
