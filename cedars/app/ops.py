@@ -554,7 +554,9 @@ def queue_stats():
                           })
 
 @log_function_call
-def backup_session_data(patient_id, patient_data):
+def backup_session_data(patient_id, patient_data,
+                        reviewed_annotation_ids, patient_comments,
+                        skip_after_event):
     """Backup session data to a file"""
     try:
         backup_dir = os.path.join(flask.current_app.instance_path, 'session_backups')
@@ -565,6 +567,9 @@ def backup_session_data(patient_id, patient_data):
         backup_data = {
             'patient_id': patient_id,
             'patient_data': patient_data,
+            'reviewed_annotation_ids' : reviewed_annotation_ids,
+            'patient_comments' : patient_comments,
+            'skip_after_event' : skip_after_event,
             'timestamp': datetime.now().isoformat()
         }
         
@@ -592,6 +597,9 @@ def restore_session_data():
             if (datetime.now() - backup_time).total_seconds() < 3600:
                 session['patient_id'] = backup_data['patient_id']
                 session['patient_data'] = backup_data['patient_data']
+                session['reviewed_annotation_ids'] = backup_data['reviewed_annotation_ids']
+                session['patient_comments'] = backup_data['patient_comments']
+                session['skip_after_event'] = backup_data['skip_after_event']
                 logger.info(f"Restored session data for patient")
                 return True
             else:
@@ -624,7 +632,7 @@ def save_adjudications():
                                                 session['patient_data'])
 
     current_annotation_id = adjudication_handler.get_curr_annotation_id()
-    session['patinet_comments'] = request.form['comment'].strip()
+    session['patient_comments'] = request.form['comment'].strip()
     patient_id = session['patient_id']
     skip_after_event = session['skip_after_event']
 
@@ -671,7 +679,12 @@ def save_adjudications():
 
     try:
         patient_data_cloned = copy.deepcopy(session['patient_data'])
-        backup_session_data(session['patient_id'], patient_data_cloned)
+        review_status_cloned = copy.deepcopy(session['reviewed_annotation_ids'])
+        patient_comments_cloned = copy.deepcopy(session['patient_comments'])
+        skip_after_event_cloned = copy.deepcopy(session['skip_after_event'])
+        backup_session_data(session['patient_id'], patient_data_cloned,
+                        review_status_cloned, patient_comments_cloned,
+                        skip_after_event_cloned)
     except Exception as e:
         logger.error(f"Failed to backup session data: {str(e)}")
 
@@ -682,7 +695,7 @@ def save_adjudications():
         db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                        current_user.username)
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
-        db.add_comment(session["patient_id"], session['patinet_comments'].strip())
+        db.add_comment(session["patient_id"], session['patient_comments'].strip())
         db.upsert_patient_records(patient_id, datetime.now(),
                               updated_by = current_user.username)
         db.set_patient_lock_status(patient_id, False)
@@ -723,7 +736,7 @@ def show_annotation():
         flash("Annotation note not found.")
         return redirect(url_for("ops.adjudicate_records"))
 
-    comments = session['patinet_comments']
+    comments = session['patient_comments']
     annotations_for_note = adjudication_handler.get_all_annotations_for_curr_note()
     annotations_for_sentence = adjudication_handler.get_all_annotations_for_curr_sentence()
 
@@ -783,8 +796,8 @@ def adjudicate_records():
         patient_id = db.get_patients_to_annotate()
     else:
         if session.get("patient_id") is not None:
-            if session.get('patinet_comments') is not None:
-                db.add_comment(session["patient_id"], session['patinet_comments'].strip())
+            if session.get('patient_comments') is not None:
+                db.add_comment(session["patient_id"], session['patient_comments'].strip())
             if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                                     current_user.username)
@@ -826,7 +839,7 @@ def adjudicate_records():
     hide_duplicates = db.get_search_query("hide_duplicates")
     stored_event_date = db.get_event_date(patient_id)
     stored_annotation_id = db.get_event_annotation_id(patient_id)
-    patinet_comments = db.get_patient_by_id(patient_id)["comments"]
+    patient_comments = db.get_patient_by_id(patient_id)["comments"]
 
     logger.info(f"Creating adjudication handler for patient {patient_id}.")
     adjudication_handler = AdjudicationHandler(patient_id)
@@ -861,7 +874,7 @@ def adjudicate_records():
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
         session['reviewed_annotation_ids'] = []
-        session['patinet_comments'] = patinet_comments
+        session['patient_comments'] = patient_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     elif patient_status == PatientStatus.REVIEWED_NO_EVENT:
@@ -869,7 +882,7 @@ def adjudicate_records():
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
         session['reviewed_annotation_ids'] = []
-        session['patinet_comments'] = patinet_comments
+        session['patient_comments'] = patient_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     else:
@@ -877,7 +890,7 @@ def adjudicate_records():
         session["patient_id"] = patient_id
         session['patient_data'] = patient_data
         session['reviewed_annotation_ids'] = []
-        session['patinet_comments'] = patinet_comments
+        session['patient_comments'] = patient_comments
         session['skip_after_event'] = db.get_search_query(query_key="skip_after_event")
 
     session.modified = True
@@ -892,8 +905,8 @@ def unlock_current_patient():
     patient_id = session["patient_id"]
     message = "No patient to unlock."
     if patient_id is not None:
-        if session.get('patinet_comments') is not None:
-                db.add_comment(patient_id, session['patinet_comments'].strip())
+        if session.get('patient_comments') is not None:
+                db.add_comment(patient_id, session['patient_comments'].strip())
 
         if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
