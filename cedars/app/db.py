@@ -1340,7 +1340,51 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
+    update_note_review_status(annotation_id, reviewed_by)
 
+@log_function_call
+def mark_annotation_reviewed_batch(annotation_ids, reviewed_by):
+    """
+    Updates a batch of annotations in the database to mark them as reviewed.
+    Also updates the note it belongs to as reviewed if all annotations that
+    belong to it are also reviewed.
+
+    Args:
+        - annotation_ids (list[str]) : Unique IDs for the annotations that
+                                        have been reviewed.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+
+    Returns:
+        None
+    """
+
+    if not annotation_ids:
+        logger.debug("No annotations to mark as reviewed.")
+        return
+
+    logger.info(f"Marking annotations {annotation_ids} as reviewed.")
+
+    mongo.db["ANNOTATIONS"].update_many(
+        {"_id": {"$in": [ObjectId(aid) for aid in annotation_ids]}},
+        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}}
+    )
+    update_batch_note_review_status(annotation_ids, reviewed_by)
+
+@log_function_call
+def update_note_review_status(annotation_id, reviewed_by):
+    '''
+    Checks and updates the review status of a note. 
+    Updates the note it belongs to as reviewed if
+    all annotations that belong to it are also reviewed.
+
+    Args:
+        - annotation_id (str) : The annotation ID of any
+                                        annotation from that note.
+        - reviewed_by (str) : The name of the user who reviewed this annotation.
+
+    Returns:
+        None
+    '''
     annotation_data = get_annotation(annotation_id)
     note_id = annotation_data['note_id']
 
@@ -1350,6 +1394,56 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
 
     if num_unreviewed_annos == 0:
         mark_note_reviewed(note_id, reviewed_by)
+
+@log_function_call
+def update_batch_note_review_status(annotation_ids, reviewed_by):
+    '''
+    Checks and updates the review status of a batch of notes note. 
+    Updates the note it belongs to as reviewed if
+    all annotations that belong to it are also reviewed.
+
+    Args:
+        - annotation_ids (list[str]) : A list of annotation IDs that have been reviewed.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+
+    Returns:
+        None
+    '''
+    pipeline = [
+        {"$match": {"_id": {"$in": [ObjectId(aid) for aid in annotation_ids]}}},
+        {"$group": {"_id": "$note_id"}},
+        {"$lookup": {
+            "from": "ANNOTATIONS",
+            "localField": "_id",
+            "foreignField": "note_id",
+            "as": "annotations"
+        }},
+        {"$project": {
+            "_id": 1,
+            "unreviewed_count": {
+                "$size": {
+                    "$filter": {
+                        "input": "$annotations",
+                        "as": "annotation",
+                        "cond": {"$eq": ["$$annotation.reviewed", ReviewStatus.UNREVIEWED.value]}
+                    }
+                }
+            }
+        }},
+        {"$match": {"unreviewed_count": 0}},
+        {"$project": {"_id": 1}}
+    ]
+
+    reviewed_notes = [doc["_id"] for doc in mongo.db["ANNOTATIONS"].aggregate(pipeline)]
+
+    if reviewed_notes:
+        logger.debug(f"Marking notes {reviewed_notes} as reviewed.")
+        mongo.db["NOTES"].update_many(
+            {"text_id": {"$in": reviewed_notes}},
+            {"$set": {"reviewed": True,
+                      "reviewed_by": reviewed_by}}
+        )
+
 
 @log_function_call
 def revert_annotation_reviewed(annotation_id, reviewed_by):
@@ -1605,24 +1699,17 @@ def reset_patient_reviewed():
                                                 "reviewed_by": ""}})
 
 @log_function_call
-def add_comment(annotation_id, comment):
+def add_comment(patient_id, comment):
     """
     Stores a new comment for a patient.
 
     Args:
-        annotation_id (str) : Unique ID for the annotation.
+        patient_id (str) : Unique ID for the patient.
         comment (str) : Text of the comment on this annotation.
     Returns:
         None
     """
     comment = comment.strip()
-    if len(comment) == 0:
-        logger.debug(f"Comment deleted on annotation # {annotation_id}.")
-    else:
-        logger.info(f"Adding comment to annotation #{annotation_id}")
-    patient_id = mongo.db["ANNOTATIONS"].find_one(
-        {"_id": ObjectId(annotation_id)})["patient_id"]
-
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                     {"$set":
                                      {"comments": comment}

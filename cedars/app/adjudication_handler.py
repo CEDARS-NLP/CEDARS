@@ -44,6 +44,7 @@ class AdjudicationHandler:
         logger.info("Finished filter strategy.")
         annotation_ids = filtered_results['annotation_ids']
         review_statuses = filtered_results['review_statuses']
+        annotations = filtered_results['annotations']
         index = 0
         try:
             # Find the index of the first unreviewed index
@@ -62,7 +63,8 @@ class AdjudicationHandler:
             'event_annotation_id' : stored_annotation_id,
             'annotation_ids' : annotation_ids,
             'review_statuses' : review_statuses,
-            'current_index' : index
+            'current_index' : index,
+            'annotations' : annotations
         }
 
         return self.patient_data, annotations_with_duplicates
@@ -86,8 +88,65 @@ class AdjudicationHandler:
         return self.patient_data
 
     @log_function_call
+    def get_curr_annotation(self):
+        return self.patient_data['annotations'][self.patient_data['current_index']]
+
+    @log_function_call
     def get_curr_annotation_id(self):
         return self.patient_data['annotation_ids'][self.patient_data['current_index']]
+    
+    @log_function_call
+    def get_all_annotations_for_curr_note(self):
+        """
+        This function is used to get all the annotations from the note which
+        the current annotation belongs to. Negated annotations are removed from the final
+        output.
+        Order of annotations -
+            text_date (ascending)
+            sentence_number (ascending)
+        """
+        note_id = self.get_curr_annotation()['note_id']
+
+        note_annotations = []
+        for annotation in self.patient_data['annotations']:
+            if annotation['note_id'] == note_id and annotation['isNegated'] is False:
+                note_annotations.append(annotation)
+
+        # Sort by text_date, then by sentence_number
+        sorting_function = lambda entry : (entry['text_date'], 
+                                           entry['sentence_number'])
+        sorted_annotations = sorted(note_annotations, key=sorting_function)
+
+        return sorted_annotations
+
+    @log_function_call
+    def get_all_annotations_for_curr_sentence(self):
+        """
+        This function is used to get all the annotations from the sentence which
+        the current annotation belongs to. Negated annotations are removed from the final
+        output.
+        Order of annotations -
+            text_date (ascending)
+            note_start_index (ascending)
+        """
+        curr_anno = self.get_curr_annotation()
+        note_id = curr_anno['note_id']
+        sentence_number = curr_anno['sentence_number']
+
+        note_annotations = []
+        for annotation in self.patient_data['annotations']:
+            correct_note = annotation['note_id'] == note_id
+            correct_sentence = annotation['sentence_number'] == sentence_number
+            is_not_negated = annotation['isNegated'] is False
+            if correct_note and correct_sentence and is_not_negated:
+                note_annotations.append(annotation)
+
+        # Sort by text_date, then by sentence_number
+        sorting_function = lambda entry : (entry['text_date'], 
+                                           entry['note_start_index'])
+        sorted_annotations = sorted(note_annotations, key=sorting_function)
+
+        return sorted_annotations
 
     @log_function_call
     def get_annotation_details(self, annotation, note, comments,
@@ -376,7 +435,8 @@ class AnnotationFilterStrategy:
 
         filtered_results = {
             'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
-            'review_statuses' : [ReviewStatus(int(x["reviewed"])) for x in annotations]
+            'review_statuses' : [ReviewStatus(int(x["reviewed"])) for x in annotations],
+            'annotations' : [dict(annotation) for annotation in annotations]
         }
 
         return filtered_results, annotations_with_duplicates
