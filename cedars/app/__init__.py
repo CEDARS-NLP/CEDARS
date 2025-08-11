@@ -83,7 +83,6 @@ def create_app(config_filename=None):
         else:
             return render_template('index.html', **ops.db.get_info())
 
-
     return cedars_app
 
 
