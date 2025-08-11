@@ -610,6 +610,32 @@ def restore_session_data():
         logger.error(f"Failed to restore session data: {str(e)}")
         return False
 
+@log_function_call
+def update_patient_data(patient_id, comments, reviewed_by,
+                        reviewed_annotation_ids, timestamp):
+    '''
+    Updates the comments, results and list of reviewed annotations for
+    a patient in the database. This function will also automatically unlock
+    the patient after the updates have been made.
+
+    Args:
+        - patient_id (str) : Unique ID for the patient.
+        - comment (str) : Text of the comment on this annotation.
+        - annotation_ids (list[str]) : Unique IDs for the annotations that
+                                        have been reviewed.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+        - timestamp (datetime obj) : The timestamp at which this information was entered.
+    '''
+
+    db.mark_annotation_reviewed_batch(reviewed_annotation_ids,
+                                       reviewed_by)
+    db.add_comment(patient_id, comments.strip())
+
+    db.upsert_patient_records(patient_id,
+                             timestamp,
+                             reviewed_by
+                    )
+    db.set_patient_lock_status(patient_id, False)
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -692,13 +718,13 @@ def save_adjudications():
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
     if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
-        db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
-                                       current_user.username)
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
-        db.add_comment(session["patient_id"], session['patient_comments'].strip())
-        db.upsert_patient_records(patient_id, datetime.now(),
-                              updated_by = current_user.username)
-        db.set_patient_lock_status(patient_id, False)
+        update_task = flask.current_app.ops_queue.enqueue(update_patient_data,
+                                            session['patient_id'],
+                                            session['patient_comments'],
+                                            current_user.username,
+                                            session['reviewed_annotation_ids'],
+                                            datetime.now())
 
         session.pop("patient_id")
         session.pop("patient_data")
@@ -801,9 +827,12 @@ def adjudicate_records():
             if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                                     current_user.username)
-
-            db.upsert_patient_records(session.get("patient_id"), datetime.now(),
-                              updated_by = current_user.username)
+            download_job = flask.current_app.ops_queue.enqueue(
+                    db.upsert_patient_records,
+                    session.get("patient_id"),
+                    datetime.now(),
+                    current_user.username
+                    )
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
             session.pop("patient_data", None)
@@ -863,8 +892,12 @@ def adjudicate_records():
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
-        db.upsert_patient_records(patient_id, datetime.now(),
-                              updated_by = current_user.username)
+        download_job = flask.current_app.ops_queue.enqueue(
+                    db.upsert_patient_records,
+                    patient_id,
+                    datetime.now(),
+                    current_user.username
+                    )
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
 
@@ -911,9 +944,12 @@ def unlock_current_patient():
         if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                                     current_user.username)
-
-        db.upsert_patient_records(patient_id, datetime.now(),
-                              updated_by = current_user.username)
+        download_job = flask.current_app.ops_queue.enqueue(
+                    db.upsert_patient_records,
+                    patient_id,
+                    datetime.now(),
+                    current_user.username
+                    )
         db.set_patient_lock_status(patient_id, False)
         session["patient_id"] = None
         message = f"Unlocking patient # {patient_id}."
