@@ -637,6 +637,63 @@ def update_patient_data(patient_id, comments, reviewed_by,
                     )
     db.set_patient_lock_status(patient_id, False)
 
+@log_function_call
+def enter_patient_date(patient_id, new_date,
+                       current_annotation_id, reviewed_by,
+                       comments, reviewed_annotation_ids,
+                       timestamp):
+    '''
+    Enters the new event date in the database and marks
+    any relevant annotations as skipped or reviewed.
+    This will additionally call the 'update_patient_data'
+    function to unlock the patient and enter any other
+    relevant information into the database.
+
+    Args:
+        - patient_id (str) : Unique ID for the patient.
+        - new_date (datetime obj) : New event date for this patient
+        - current_annotation_id (str) : Annotation ID at which the date was entered.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+        - comment (str) : Text of the comment on this annotation.
+        - reviewed_annotation_ids (list[str]) : Unique IDs for the annotations that
+                                        have been reviewed.
+        - timestamp (datetime obj) : The timestamp at which this information was entered.
+    '''
+    db.mark_annotations_post_event(patient_id, new_date)
+    db.mark_annotation_reviewed(current_annotation_id, current_user.username)
+    db.update_event_date(patient_id, new_date, current_annotation_id)
+
+    update_patient_data(patient_id, comments, reviewed_by,
+                        reviewed_annotation_ids, timestamp)
+
+@log_function_call
+def delete_patient_date(patient_id,
+                       current_annotation_id, reviewed_by,
+                       comments, reviewed_annotation_ids,
+                       timestamp):
+    '''
+    Enters the new event date in the database and marks
+    any relevant annotations as skipped or reviewed.
+    This will additionally call the 'update_patient_data'
+    function to unlock the patient and enter any other
+    relevant information into the database.
+
+    Args:
+        - patient_id (str) : Unique ID for the patient.
+        - current_annotation_id (str) : Annotation ID at which the date was deleted.
+        - reviewed_by (str) : The name of the user who reviewed these annotations.
+        - comment (str) : Text of the comment on this annotation.
+        - reviewed_annotation_ids (list[str]) : Unique IDs for the annotations that
+                                        have been reviewed.
+        - timestamp (datetime obj) : The timestamp at which this information was entered.
+    '''
+    db.delete_event_date(patient_id)
+    db.revert_skipped_annotations(patient_id)
+    db.revert_annotation_reviewed(current_annotation_id, current_user.username)
+
+    update_patient_data(patient_id, comments, reviewed_by,
+                        reviewed_annotation_ids, timestamp)
+
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
 @log_function_call
@@ -663,6 +720,12 @@ def save_adjudications():
     skip_after_event = session['skip_after_event']
 
     action = request.form['submit_button']
+    # The 'db_results_updated' flag is set to True if we enqueue a function that
+    # will automatically update all the patient results in the database.
+    # This will prevent us from enqueuing another update job later
+    # if one is already entered to avoid data conflicts
+    db_results_updated = False
+
     is_shift_performed = False
     if action == 'new_date':
         logger.debug(f"Entering a new date for patient {session['patient_id']}")
@@ -677,19 +740,28 @@ def save_adjudications():
         if skip_after_event:
             annotations_after_event = db.get_annotations_post_event(patient_id,
                                                                     new_date)
-            db.mark_annotations_post_event(patient_id, new_date)
 
-        db.mark_annotation_reviewed(current_annotation_id, current_user.username)
-        db.update_event_date(patient_id, new_date, current_annotation_id)
+        flask.current_app.ops_queue.enqueue(enter_patient_date,
+                                            patient_id, new_date,
+                                            current_annotation_id,
+                                            current_user.username,
+                                            session['patient_comments'],
+                                            session['reviewed_annotation_ids'],
+                                            datetime.now())
 
+        db_results_updated = True
         adjudication_handler.mark_event_date(new_date, current_annotation_id,
                                              annotations_after_event)
-
     elif action == 'del_date':
         logger.debug(f"Deleting saved date for patient {session['patient_id']}")
-        db.delete_event_date(patient_id)
-        db.revert_skipped_annotations(patient_id)
-        db.revert_annotation_reviewed(current_annotation_id, current_user.username)
+        flask.current_app.ops_queue.enqueue(delete_patient_date,
+                                            patient_id,
+                                            current_annotation_id,
+                                            current_user.username,
+                                            session['patient_comments'],
+                                            session['reviewed_annotation_ids'],
+                                            datetime.now())
+        db_results_updated = True
         adjudication_handler.delete_event_date()
     elif action == 'adjudicate':
         logger.debug(f"Adjudicating annotation {current_annotation_id} for {session['patient_id']}")
@@ -717,9 +789,11 @@ def save_adjudications():
     # We do not skip to the next patient if the current operation was just a shift.
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
-    if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
+    is_reviewed = adjudication_handler.is_patient_reviewed()
+    if is_reviewed and not is_shift_performed:
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
-        update_task = flask.current_app.ops_queue.enqueue(update_patient_data,
+        if not db_results_updated:
+            flask.current_app.ops_queue.enqueue(update_patient_data,
                                             session['patient_id'],
                                             session['patient_comments'],
                                             current_user.username,
