@@ -93,6 +93,8 @@ def test_filter_duplicates_by_note(annotations, expected_indices):
                 'annotation_ids': ["1", "3"],
                 'review_statuses': [ReviewStatus.REVIEWED, ReviewStatus.UNREVIEWED],
                 'current_index': 1,  # First unreviewed annotation
+                'annotations': [{'_id': '1', 'note_id': 'N1', 'sentence': 'Test sentence 1', 'reviewed': 1},
+                                {'_id': '3', 'note_id': 'N2', 'sentence': 'Test sentence 2', 'reviewed': 0}],
             },
             ["2"],
         ),
@@ -111,6 +113,8 @@ def test_filter_duplicates_by_note(annotations, expected_indices):
                 'annotation_ids': ["1", "2"],
                 'review_statuses': [ReviewStatus.REVIEWED, ReviewStatus.REVIEWED],
                 'current_index': 1,  # Stored annotation ID index
+                'annotations': [{'_id': '1', 'note_id': 'N1', 'sentence': 'Test sentence 1', 'reviewed': 1},
+                                {'_id': '2', 'note_id': 'N2', 'sentence': 'Test sentence 2', 'reviewed': 1}],
             },
             [],
         ),
@@ -129,6 +133,8 @@ def test_filter_duplicates_by_note(annotations, expected_indices):
                 'annotation_ids': ["1", "2"],
                 'review_statuses': [ReviewStatus.REVIEWED, ReviewStatus.REVIEWED],
                 'current_index': 0,  # Default to index 0
+                'annotations': [{'_id': '1', 'note_id': 'N1', 'sentence': 'Test sentence 1', 'reviewed': 1},
+                                {'_id': '2', 'note_id': 'N2', 'sentence': 'Test sentence 2', 'reviewed': 1}],
             },
             [],
         ),
