@@ -612,7 +612,8 @@ def restore_session_data():
 
 @log_function_call
 def update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp):
+                        reviewed_annotation_ids, timestamp,
+                        is_patient_reviewed=True):
     '''
     Updates the comments, results and list of reviewed annotations for
     a patient in the database. This function will also automatically unlock
@@ -625,6 +626,9 @@ def update_patient_data(patient_id, comments, reviewed_by,
                                         have been reviewed.
         - reviewed_by (str) : The name of the user who reviewed these annotations.
         - timestamp (datetime obj) : The timestamp at which this information was entered.
+        - is_patient_reviewed (bool) : True if the patient review is finished and
+                                        the patient will need to be unlocked after the
+                                        DB updates.
     '''
 
     db.mark_annotation_reviewed_batch(reviewed_annotation_ids,
@@ -635,13 +639,16 @@ def update_patient_data(patient_id, comments, reviewed_by,
                              timestamp,
                              reviewed_by
                     )
-    db.set_patient_lock_status(patient_id, False)
+
+    if is_patient_reviewed:
+        db.set_patient_lock_status(patient_id, False)
 
 @log_function_call
 def enter_patient_date(patient_id, new_date,
                        current_annotation_id, reviewed_by,
                        comments, reviewed_annotation_ids,
-                       timestamp, skip_after_event):
+                       timestamp, skip_after_event,
+                       is_patient_reviewed):
     '''
     Enters the new event date in the database and marks
     any relevant annotations as skipped or reviewed.
@@ -660,22 +667,26 @@ def enter_patient_date(patient_id, new_date,
         - timestamp (datetime obj) : The timestamp at which this information was entered.
         - skip_after_event (bool) : True if we need to skip unreviewed annotations that
                                         occur after the event date.
+        - is_patient_reviewed (bool) : True if the patient review is finished and
+                                        the patient will need to be unlocked after the
+                                        DB updates.
     '''
 
     if skip_after_event:
         db.mark_annotations_post_event(patient_id, new_date)
 
-    db.mark_annotation_reviewed(current_annotation_id, current_user.username)
+    db.mark_annotation_reviewed(current_annotation_id, reviewed_by)
     db.update_event_date(patient_id, new_date, current_annotation_id)
 
     update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp)
+                        reviewed_annotation_ids, timestamp,
+                        is_patient_reviewed)
 
 @log_function_call
 def delete_patient_date(patient_id,
                        current_annotation_id, reviewed_by,
                        comments, reviewed_annotation_ids,
-                       timestamp):
+                       timestamp, is_patient_reviewed):
     '''
     Enters the new event date in the database and marks
     any relevant annotations as skipped or reviewed.
@@ -691,13 +702,17 @@ def delete_patient_date(patient_id,
         - reviewed_annotation_ids (list[str]) : Unique IDs for the annotations that
                                         have been reviewed.
         - timestamp (datetime obj) : The timestamp at which this information was entered.
+        - is_patient_reviewed (bool) : True if the patient review is finished and
+                                        the patient will need to be unlocked after the
+                                        DB updates.
     '''
     db.delete_event_date(patient_id)
     db.revert_skipped_annotations(patient_id)
-    db.revert_annotation_reviewed(current_annotation_id, current_user.username)
+    db.revert_annotation_reviewed(current_annotation_id, reviewed_by)
 
     update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp)
+                        reviewed_annotation_ids, timestamp,
+                        is_patient_reviewed)
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -746,6 +761,9 @@ def save_adjudications():
             annotations_after_event = db.get_annotations_post_event(patient_id,
                                                                     new_date)
 
+        db_results_updated = True
+        adjudication_handler.mark_event_date(new_date, current_annotation_id,
+                                             annotations_after_event)
         flask.current_app.ops_queue.enqueue(enter_patient_date,
                                             patient_id, new_date,
                                             current_annotation_id,
@@ -753,22 +771,21 @@ def save_adjudications():
                                             session['patient_comments'],
                                             session['reviewed_annotation_ids'],
                                             datetime.now(),
-                                            skip_after_event)
+                                            skip_after_event,
+                                            adjudication_handler.is_patient_reviewed())
 
-        db_results_updated = True
-        adjudication_handler.mark_event_date(new_date, current_annotation_id,
-                                             annotations_after_event)
     elif action == 'del_date':
         logger.debug(f"Deleting saved date for patient {session['patient_id']}")
+        db_results_updated = True
+        adjudication_handler.delete_event_date()
         flask.current_app.ops_queue.enqueue(delete_patient_date,
                                             patient_id,
                                             current_annotation_id,
                                             current_user.username,
                                             session['patient_comments'],
                                             session['reviewed_annotation_ids'],
-                                            datetime.now())
-        db_results_updated = True
-        adjudication_handler.delete_event_date()
+                                            datetime.now(),
+                                            adjudication_handler.is_patient_reviewed())
     elif action == 'adjudicate':
         logger.debug(f"Adjudicating annotation {current_annotation_id} for {session['patient_id']}")
         session['reviewed_annotation_ids'].append(current_annotation_id)
