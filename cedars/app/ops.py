@@ -641,7 +641,7 @@ def update_patient_data(patient_id, comments, reviewed_by,
 def enter_patient_date(patient_id, new_date,
                        current_annotation_id, reviewed_by,
                        comments, reviewed_annotation_ids,
-                       timestamp):
+                       timestamp, skip_after_event):
     '''
     Enters the new event date in the database and marks
     any relevant annotations as skipped or reviewed.
@@ -658,8 +658,13 @@ def enter_patient_date(patient_id, new_date,
         - reviewed_annotation_ids (list[str]) : Unique IDs for the annotations that
                                         have been reviewed.
         - timestamp (datetime obj) : The timestamp at which this information was entered.
+        - skip_after_event (bool) : True if we need to skip unreviewed annotations that
+                                        occur after the event date.
     '''
-    db.mark_annotations_post_event(patient_id, new_date)
+
+    if skip_after_event:
+        db.mark_annotations_post_event(patient_id, new_date)
+
     db.mark_annotation_reviewed(current_annotation_id, current_user.username)
     db.update_event_date(patient_id, new_date, current_annotation_id)
 
@@ -747,7 +752,8 @@ def save_adjudications():
                                             current_user.username,
                                             session['patient_comments'],
                                             session['reviewed_annotation_ids'],
-                                            datetime.now())
+                                            datetime.now(),
+                                            skip_after_event)
 
         db_results_updated = True
         adjudication_handler.mark_event_date(new_date, current_annotation_id,
@@ -901,7 +907,7 @@ def adjudicate_records():
             if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                                     current_user.username)
-            download_job = flask.current_app.ops_queue.enqueue(
+            flask.current_app.ops_queue.enqueue(
                     db.upsert_patient_records,
                     session.get("patient_id"),
                     datetime.now(),
@@ -966,7 +972,7 @@ def adjudicate_records():
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
-        download_job = flask.current_app.ops_queue.enqueue(
+        flask.current_app.ops_queue.enqueue(
                     db.upsert_patient_records,
                     patient_id,
                     datetime.now(),
@@ -1018,7 +1024,7 @@ def unlock_current_patient():
         if session.get('reviewed_annotation_ids') is not None:
                 db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
                                                     current_user.username)
-        download_job = flask.current_app.ops_queue.enqueue(
+        flask.current_app.ops_queue.enqueue(
                     db.upsert_patient_records,
                     patient_id,
                     datetime.now(),
