@@ -493,7 +493,16 @@ def init_pines_connection(superbio_api_token = None):
                             False if not valid pines url available.
     '''
     project_info = db.get_info()
-    project_id = project_info["project_id"]
+    project_id = project_info.get("project_id")
+    if project_id is None:
+        project_id = os.getenv("PROJECT_ID", None)
+
+    if project_id is None:
+        logger.error(f"No project ID found. Failed to startup PINES.")
+        flash(f"No project ID found. Failed to startup PINES.")
+        pines_url, is_url_from_api = None, False
+        db.create_pines_info(pines_url, is_url_from_api)
+        return False
 
     try:
         pines_url, is_url_from_api = load_pines_url(project_id,
@@ -517,6 +526,10 @@ def close_pines_connection(superbio_api_token):
     Closes the PINES server if using a superbio API.
     '''
     project_info = db.get_info()
+    if "project_id" not in project_info:
+        logger.error("Cannot shut down remote PINES server as no project ID is found.")
+        return
+
     project_id = project_info["project_id"]
     token_status = get_token_status(superbio_api_token)
 
