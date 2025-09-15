@@ -3,8 +3,13 @@ site_name: CEDARS
 nav:
   - Overview: README.md # This needs to be linked back with ..\, DO transfer this file to the repo
   - About: ABOUT.md
+  - Basic Concepts: basic_concepts.md
+  - Quickstart: getting_started.md
   - Administrator Manual: CEDARS_admin_manual.md
   - Annotator Manual: CEDARS_annotator_manual.md
+  - Input File Format: upload_file_format.md
+  - Search Query Manual: query_database.md
+  - Download Results: download_annotations.md
   - Terms of Use: TERMS_OF_USE.md # This needs to be linked back with ..\, do NOT transfer this file to repo
 
 theme: 
