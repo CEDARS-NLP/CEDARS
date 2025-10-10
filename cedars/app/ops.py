@@ -110,6 +110,7 @@ def project_details():
                     db.terminate_project()
                     # reset all rq queues
                     flask.current_app.task_queue.empty()
+                    flask.current_app.ops_queue.empty()
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
