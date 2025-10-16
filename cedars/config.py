@@ -57,6 +57,7 @@ class Test(Base):  # pylint: disable=too-few-public-methods
     SESSION_PERMANENT = False
     SESSION_SERIALIZATION_FORMAT = "json"
     SESSION_REDIS = Redis.from_url(f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0')
+    PROMETHEUS_MULTIPROC_DIR = "/tmp/prometheus-multiproc-test"
 
 
 class Dev(Base):  # pylint: disable=too-few-public-methods

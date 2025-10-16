@@ -44,7 +44,7 @@ def rq_init_app(cedars_rq):
     return cedars_rq
 
 
-def create_app(config_filename=None):
+def create_app(config_filename=None, is_testing_app=False):
     """Create flask application"""
     cedars_app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
@@ -52,8 +52,9 @@ def create_app(config_filename=None):
         cedars_app.config.from_object(config_filename)
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
-    metrics = GunicornInternalPrometheusMetrics(cedars_app, metrics_decorator=auth.admin_required)
-    metrics.info('app_info', 'CEDARS Application', version='1.0.0')
+    if not is_testing_app:
+        metrics = GunicornInternalPrometheusMetrics(cedars_app, metrics_decorator=auth.admin_required)
+        metrics.info('app_info', 'CEDARS Application', version='1.0.0')
 
     sess.init_app(cedars_app)
     rq_init_app(cedars_app)

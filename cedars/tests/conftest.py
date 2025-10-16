@@ -10,7 +10,7 @@ from redis import Redis
 import fakeredis
 from flask_login import FlaskLoginClient
 from app.auth import User
-from app.ops import prepare_note
+from app.file_upload_utils import prepare_note
 
 
 load_dotenv()
@@ -22,7 +22,7 @@ def cedars_app():
     environment = 'test'
     with patch.object(Redis, 'from_url', fakeredis.FakeStrictRedis.from_url):
         from app import create_app
-        cedars_app = create_app(f"config.{environment.title()}")
+        cedars_app = create_app(f"config.{environment.title()}", is_testing_app=True)
         with cedars_app.test_request_context():
             with patch('flask_pymongo.PyMongo') as mock_pymongo:
                 mock_pymongo.return_value = MongoClient()
