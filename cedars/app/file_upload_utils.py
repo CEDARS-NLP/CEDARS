@@ -2,13 +2,13 @@
 This page contatins utility functions to handle file uploads for CEDARS.
 """
 import os
-from datetime import datetime, date
+from datetime import datetime
 import tempfile
+import pickle
+#import ijson
 import pandas as pd
 from flask import (
-    Blueprint, render_template,
-    redirect, session, request,
-    url_for, flash, g, jsonify
+    flash, g
 )
 import pyarrow.parquet as pq
 from loguru import logger
@@ -22,6 +22,191 @@ def read_gz_csv(filename, *args, **kwargs):
     Function to read a GZIP compressed csv to a pandas DataFrame.
     '''
     return pd.read_csv(filename, compression='gzip', *args, **kwargs)
+
+def simplify_col_dtypes(col_schema):
+    '''
+    Convert complex data-types that pandas uses into a simplified format.
+    Ex. : int32, int64 -> int
+
+    Args :
+        - col_schema (dict) : Dict mapping col_name : data-type
+
+    Returns :
+        - col_schema (dict) : Updated dictionary
+    '''
+
+    for column in col_schema:
+        if col_schema[column][:3] == 'int':
+            col_schema[column] = 'int'
+        elif col_schema[column][:5] == 'float':
+            col_schema[column] = 'float'
+        elif col_schema[column] == 'object':
+            col_schema[column] = 'text'
+        elif col_schema[column][:8] == 'datetime':
+            col_schema[column] = 'datetime'
+
+    return col_schema
+
+def inspect_csv(filepath, **kwargs):
+    """
+    Inspect CSV & GZ files to ensure correct column types and formats.
+    """
+    try:
+        # use chunksize to avoid full load
+        iterator = pd.read_csv(filepath, chunksize=5, **kwargs)
+        df = next(iterator)
+        dtypes = df.dtypes.astype(str).to_dict()
+        return simplify_col_dtypes(dtypes)
+    except Exception as e:
+        return {"error": str(e)}
+
+def inspect_gz(filepath, **kwargs):
+    # gzip is handled transparently by pandas, but we can also open explicitly
+    return inspect_csv(filepath, compression='gzip', **kwargs)
+
+# ------------------------------
+# Excel (inspect only headers from each sheet)
+# ------------------------------
+def inspect_excel(filepath, **kwargs):
+    try:
+        excel_file = pd.ExcelFile(filepath)
+        info = {}
+        for sheet in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet, nrows=5, **kwargs)
+            dtypes = df.dtypes.astype(str).to_dict()
+            info[sheet] = simplify_col_dtypes(dtypes)
+        return {
+            "sheets": info,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# ------------------------------
+# JSON (streaming with ijson)
+# ------------------------------
+def inspect_json(filepath, max_records=5):
+    try:
+        with open(filepath, 'rb') as f:
+            parser = ijson.items(f, 'item')  # for array of objects or JSONL
+            rows = []
+            for i, record in enumerate(parser):
+                if i >= max_records:
+                    break
+                rows.append(record)
+        if not rows:
+            return {"error": "No records found"}
+        df = pd.json_normalize(rows)
+        dtypes = df.dtypes.astype(str).to_dict()
+        return simplify_col_dtypes(dtypes)
+    except Exception as e:
+        return {"error": str(e)}
+
+# ------------------------------
+# Parquet (fast metadata only)
+# ------------------------------
+def inspect_parquet(filepath):
+    try:
+        parquet_file = pq.ParquetFile(filepath)
+        schema = parquet_file.schema
+        dtypes = {name: str(schema.field(i).type) for i, name in enumerate(schema.names)}
+        row_count = parquet_file.metadata.num_rows
+        return simplify_col_dtypes(dtypes)
+    except Exception as e:
+        return {"error": str(e)}
+
+# ------------------------------
+# Pickle (full load required)
+# ------------------------------
+def inspect_pickle(filepath):
+    try:
+        with open(filepath, 'rb') as f:
+            obj = pickle.load(f)
+        if isinstance(obj, pd.DataFrame):
+            dtypes = obj.dtypes.astype(str).to_dict()
+            return simplify_col_dtypes(dtypes)
+        else:
+            return {"object_type": str(type(obj))}
+    except Exception as e:
+        return {"error": str(e)}
+
+# ------------------------------
+# XML (small sample)
+# ------------------------------
+def inspect_xml(filepath):
+    try:
+        df = pd.read_xml(filepath, nrows=5)
+        dtypes = df.dtypes.astype(str).to_dict()
+        return simplify_col_dtypes(dtypes)
+    except Exception as e:
+        return {"error": str(e)}
+
+# ------------------------------
+# Dispatcher
+# ------------------------------
+inspectors = {
+    'csv': inspect_csv,
+    'gz': inspect_gz,
+    'xlsx': inspect_excel,
+    'json': inspect_json,
+    'parquet': inspect_parquet,
+    'pickle': inspect_pickle,
+    'pkl': inspect_pickle,
+    'xml': inspect_xml,
+}
+
+
+def check_schema_validity(schema):
+    '''
+    Raises an error if an invalid schema is passed.
+
+    Args:
+        - schema (dict) : Mapping column_name : column_data_type
+    Returns:
+        - None
+    '''
+
+    mandatory_schema_requirements = {'patient_id' : ['int', 'text', 'float'],
+                           'text_id' : ['int', 'text', 'float'],
+                           'text' : ['text'],
+                           'text_date' : ['text']} # TODO : support native datetime
+
+    optional_schema_requirements = {'text_tag_1' : ['int', 'text'],
+                                    'text_tag_2' : ['int', 'text'],
+                                    'text_tag_3' : ['int', 'text'],
+                                    'text_tag_4' : ['int', 'text'],
+                                    'text_tag_5' : ['int', 'text']}
+    
+    # Make sure that all mandatory columns are pressent
+    for column in mandatory_schema_requirements:
+        if column not in schema:
+            raise ValueError(f"Column {column} is not present in the uploaded file")
+        # Ensure that the column that is present has the appropriate datatype
+        elif schema[column] not in mandatory_schema_requirements[column]:
+            error_msg = f"Column {column} must have one of the following datatypes: "
+            error_msg += mandatory_schema_requirements[column]
+            error_msg += f". {column} in uploaded file is of type {schema[column]}."
+            raise TypeError(error_msg)
+
+    # Make sure that all mandatory columns are pressent
+    for column in optional_schema_requirements:
+        if column in schema:
+            # Ensure that if an optional column is present,
+            # it must has the appropriate datatype
+            if schema[column] not in optional_schema_requirements[column]:
+                error_msg = f"Column {column} must have one of the following datatypes: "
+                error_msg += optional_schema_requirements[column]
+                error_msg += f". {column} in uploaded file is of type {schema[column]}."
+                raise TypeError(error_msg)
+
+
+    # Make sure that the data can only have columns from our pre-set schema
+    for column in schema:
+        if column not in mandatory_schema_requirements and column not in optional_schema_requirements:
+            all_allowed_cols = list(mandatory_schema_requirements.keys())
+            all_allowed_cols.extend(list(optional_schema_requirements.keys()))
+            error_msg = f"Unknown column {column} is present in the uploaded file."
+            error_msg += f" Allowed columns in upload file are: {all_allowed_cols}."
+            raise ValueError(error_msg)
 
 @log_function_call
 def load_pandas_dataframe(filepath, chunk_size=1000):
@@ -77,6 +262,8 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
                 yield batch.to_pandas()
         else:
+            file_schema = inspectors[extension](local_filename)
+            check_schema_validity(file_schema)
             chunks = loaders[extension](local_filename, chunksize=chunk_size)
             for chunk in chunks:
                 yield chunk
@@ -85,6 +272,10 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
         raise FileNotFoundError(f"File '{filepath}' not found.") from exc
     except Exception as exc:
         raise RuntimeError(f"Failed to load the file '{filepath}' due to: {str(exc)}") from exc
+    except ValueError as exc:
+        raise ValueError(f"Failed to upload the file due to schema issues: {exc}")
+    except TypeError as exc:
+        raise TypeError(f"Failed to upload the file due to datatype mismatch: {exc}")
     finally:
         obj.close()
         obj.release_conn()
@@ -100,6 +291,11 @@ def prepare_note(note_info):
     note_info["reviewed"] = False
     note_info["text_id"] = str(note_info["text_id"]).strip()
     note_info["patient_id"] = str(note_info["patient_id"]).strip()
+
+    tag_cols = [f"text_tag_{i}" for i in range(1, 6)]
+    for col in tag_cols:
+        if col in note_info:
+            note_info[col] = str(note_info[col]).strip()
     return note_info
 
 @log_function_call
