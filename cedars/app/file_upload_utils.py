@@ -5,7 +5,6 @@ import os
 from datetime import datetime
 import tempfile
 import pickle
-#import ijson
 import pandas as pd
 from flask import (
     flash, g
@@ -82,26 +81,6 @@ def inspect_excel(filepath, **kwargs):
         return {"error": str(e)}
 
 # ------------------------------
-# JSON (streaming with ijson)
-# ------------------------------
-def inspect_json(filepath, max_records=5):
-    try:
-        with open(filepath, 'rb') as f:
-            parser = ijson.items(f, 'item')  # for array of objects or JSONL
-            rows = []
-            for i, record in enumerate(parser):
-                if i >= max_records:
-                    break
-                rows.append(record)
-        if not rows:
-            return {"error": "No records found"}
-        df = pd.json_normalize(rows)
-        dtypes = df.dtypes.astype(str).to_dict()
-        return simplify_col_dtypes(dtypes)
-    except Exception as e:
-        return {"error": str(e)}
-
-# ------------------------------
 # Parquet (fast metadata only)
 # ------------------------------
 def inspect_parquet(filepath):
@@ -115,43 +94,13 @@ def inspect_parquet(filepath):
         return {"error": str(e)}
 
 # ------------------------------
-# Pickle (full load required)
-# ------------------------------
-def inspect_pickle(filepath):
-    try:
-        with open(filepath, 'rb') as f:
-            obj = pickle.load(f)
-        if isinstance(obj, pd.DataFrame):
-            dtypes = obj.dtypes.astype(str).to_dict()
-            return simplify_col_dtypes(dtypes)
-        else:
-            return {"object_type": str(type(obj))}
-    except Exception as e:
-        return {"error": str(e)}
-
-# ------------------------------
-# XML (small sample)
-# ------------------------------
-def inspect_xml(filepath):
-    try:
-        df = pd.read_xml(filepath, nrows=5)
-        dtypes = df.dtypes.astype(str).to_dict()
-        return simplify_col_dtypes(dtypes)
-    except Exception as e:
-        return {"error": str(e)}
-
-# ------------------------------
 # Dispatcher
 # ------------------------------
 inspectors = {
     'csv': inspect_csv,
     'gz': inspect_gz,
     'xlsx': inspect_excel,
-    'json': inspect_json,
-    'parquet': inspect_parquet,
-    'pickle': inspect_pickle,
-    'pkl': inspect_pickle,
-    'xml': inspect_xml,
+    'parquet': inspect_parquet
 }
 
 
@@ -173,8 +122,7 @@ def check_schema_validity(schema):
     optional_schema_requirements = {'text_tag_1' : ['int', 'text'],
                                     'text_tag_2' : ['int', 'text'],
                                     'text_tag_3' : ['int', 'text'],
-                                    'text_tag_4' : ['int', 'text'],
-                                    'text_tag_5' : ['int', 'text']}
+                                    'text_tag_4' : ['int', 'text']}
     
     # Make sure that all mandatory columns are pressent
     for column in mandatory_schema_requirements:
@@ -233,11 +181,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
     loaders = {
         'csv': pd.read_csv,
         'xlsx': pd.read_excel,
-        'json': pd.read_json,
         'parquet': pd.read_parquet,
-        'pickle': pd.read_pickle,
-        'pkl': pd.read_pickle,
-        'xml': pd.read_xml,
         'gz' : read_gz_csv,
     }
 
@@ -292,7 +236,7 @@ def prepare_note(note_info):
     note_info["text_id"] = str(note_info["text_id"]).strip()
     note_info["patient_id"] = str(note_info["patient_id"]).strip()
 
-    tag_cols = [f"text_tag_{i}" for i in range(1, 6)]
+    tag_cols = [f"text_tag_{i}" for i in range(1, 5)]
     for col in tag_cols:
         if col in note_info:
             note_info[col] = str(note_info[col]).strip()

@@ -14,9 +14,7 @@ CEDARS can accept tabular data stored in one of the the following file formats :
 - .csv ([Comma Seperated Value](https://en.wikipedia.org/wiki/Comma-separated_values))
 - .csv.gz ([GZIP Compressed CSV](https://www.gnu.org/software/gzip/))
 - .xlsx ([Excel](https://en.wikipedia.org/wiki/Microsoft_Excel))
-- .json ([Json](https://www.json.org/json-en.html))
 - .parquet ([Parquet](https://coralogix.com/blog/parquet-file-format/))
-- .pickle / .pkl ([Pickle](https://docs.python.org/3/library/pickle.html))
 
 ## 3. Mandatory Columns
 
@@ -42,17 +40,13 @@ These are optional columns that are not nessesary for CEDARS, but can be include
 
 Columns :
 
-1. text_sequence (int) : A number stating the order in which note were taken. Example : 1 would indicate that the note for this row is the first note taken for this patient.
+1. text_tag_1 (string) : The first text tag for this note, will be shown on the annotations page while the note is being reviewed.
 
-2. doc_id (string) : A unique identifier for document which containts this note.
+2. text_tag_2 (string) : The second text tag for this note, will be shown on the annotations page while the note is being reviewed.
 
-3. text_tag_1 (string) : The first text tag for this note, will be shown on the annotations page while the note is being reviewed.
+3. text_tag_3 (string) : The third text tag for this note, will be shown on the annotations page while the note is being reviewed.
 
-4. text_tag_2 (string) : The second text tag for this note, will be shown on the annotations page while the note is being reviewed.
-
-5. text_tag_3 (string) : The third text tag for this note, will be shown on the annotations page while the note is being reviewed.
-
-6. text_tag_4 (string) : The fourth text tag for this note, will be shown on the annotations page while the note is being reviewed.
+4. text_tag_4 (string) : The fourth text tag for this note, will be shown on the annotations page while the note is being reviewed.
 
 ## 5. Example Table
 
