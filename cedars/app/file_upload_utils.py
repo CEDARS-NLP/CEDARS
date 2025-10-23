@@ -64,7 +64,7 @@ def inspect_gz(filepath, **kwargs):
     return inspect_csv(filepath, compression='gzip', **kwargs)
 
 # ------------------------------
-# Excel (inspect only headers from each sheet)
+# Excel (inspect only headers from the first sheet)
 # ------------------------------
 def inspect_excel(filepath, **kwargs):
     try:
@@ -74,9 +74,9 @@ def inspect_excel(filepath, **kwargs):
             df = pd.read_excel(excel_file, sheet_name=sheet, nrows=5, **kwargs)
             dtypes = df.dtypes.astype(str).to_dict()
             info[sheet] = simplify_col_dtypes(dtypes)
-        return {
-            "sheets": info,
-        }
+
+            # CEDARS only looks for data in the first sheet of the file
+            return simplify_col_dtypes(dtypes)
     except Exception as e:
         return {"error": str(e)}
 
@@ -207,6 +207,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
                 yield batch.to_pandas()
         else:
             file_schema = inspectors[extension](local_filename)
+            print(f"\n\n\n file_schema : {file_schema} \n\n\n", flush=True)
             check_schema_validity(file_schema)
             chunks = loaders[extension](local_filename, chunksize=chunk_size)
             for chunk in chunks:

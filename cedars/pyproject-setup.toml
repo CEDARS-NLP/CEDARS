@@ -28,6 +28,7 @@ dependencies = [
     "passvalidate",
     "rq_dashboard",
     "polars",
+    "openpyxl",
     "prometheus-client",
     "prometheus-flask-exporter"
 ]
