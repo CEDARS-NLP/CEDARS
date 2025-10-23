@@ -232,11 +232,23 @@ class NlpProcessor:
         # Mark the patient as reviewed if no annotations are found.
         if docs_with_annotations == 0:
             db.mark_patient_reviewed(patient_id, "CEDARS")
-
+        self.process_patient_llm(patient_id)
         # check if nlp processing is enabled
         if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
             self.process_patient_pines(patient_id)
+
+    def process_patient_llm(self, patient_id: str) -> None:
+        """
+        For a given patient, process the notes using the LLM.
+        """
+        text_ids = db.get_all_notes_for_patient(patient_id)
+        logger.info(f"Found {len(text_ids)} notes for patient {patient_id}")
+        if len(text_ids) == 0:
+            return
+        model_arn = 'arn:aws:bedrock:us-east-1:180294205688:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0'
+        
+        db.run_llm_on_notes(text_ids, model_arn)
 
     def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
         """

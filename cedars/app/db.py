@@ -1,13 +1,14 @@
 """
 This file contatins an abstract class for CEDARS to interact with mongodb.
 """
-
+import boto3
 from math import ceil
 import os
 from io import BytesIO, StringIO
 import re
 from datetime import datetime
 from uuid import uuid4
+import json
 
 from typing import Optional
 from faker import Faker
@@ -25,7 +26,53 @@ from .database import mongo, minio
 from .cedars_enums import ReviewStatus
 from .cedars_enums import log_function_call
 
+MAX_WORKERS = 2
+aws_access_key_id        = 'example'
+aws_secret_access_key    = 'example'
+aws_session_token        = 'example'
+os.environ['AWS_ACCESS_KEY_ID'] = aws_access_key_id
+os.environ['AWS_SECRET_ACCESS_KEY'] = aws_secret_access_key
+os.environ['AWS_SESSION_TOKEN'] = aws_session_token 
 
+SYSTEM_PROMPT = """
+You are an expert classification system trained to detect vte in patient notes.The possible labels are 0,1.
+
+Task:
+Determine if there is any evidence of lower extremity deep venous thrombosis or pulmonary embolism in the document below.
+
+Abbreviations:
+- PE = pulmonary embolism
+- DVT = deep venous thrombosis
+- LE = lower extremity
+- UE = upper extremity
+
+These abbreviations are all case-insensitive. 
+
+Instructions:
+- Only output '1' if there is evidence of lower extremity deep venous thrombosis or pulmonary embolism.
+- Output '0' in all other cases.
+- Output '0' if the note does not directly indicate any evidence of lower extremity deep venous thrombosis or pulmonary embolism, or if a past occurrence was referenced.
+- Do not output any other explanation.
+- Do not include anything other than the number. 
+
+
+### Examples: 
+
+Note: Patient complains of leg pain and swelling. Ultrasound confirms DVT
+output: 1 
+
+Note: Patient has a history of UE DVT. No current symptoms noted 
+output: 0
+
+Output the label with no additional commentary.
+"""
+ 
+bedrock = boto3.client('bedrock-runtime',
+    aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+    aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+    aws_session_token=os.environ['AWS_SESSION_TOKEN'],
+    region_name='us-east-1')
+    
 fake = Faker()
 
 logger.enable(__name__)
@@ -181,6 +228,10 @@ def create_db_indices():
     logger.info("Creating indexes for PINES.")
     create_index("PINES", [("text_id", {"unique": True})])
     create_index("PINES", [("patient_id")])
+
+    logger.info("Creating indexes for LLM.")
+    create_index("LLM", [("text_id", {"unique": True})])
+    create_index("LLM", [("patient_id")])
 
     logger.info("Creating indexes for USERS.")
     create_index("USERS", [("user", {"unique": True})])
@@ -441,6 +492,36 @@ def generate_patient_entry(p_id: str, index_no: int):
                 {"$setOnInsert": patient_info},
                 upsert=True
             )
+
+@log_function_call
+def run_bedrock(note_text, model_arn=None):
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "system": SYSTEM_PROMPT,
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": note_text}]}
+        ],
+        "max_tokens": 4096,
+        "temperature": 0,
+        "top_p": 0,
+        #"top_k": 2
+    }
+ 
+    try:
+        if model_arn is None:
+            response = bedrock.invoke_model(
+                modelId=MODEL_ID,
+                body=json.dumps(payload)
+            )
+        else:
+            response = bedrock.invoke_model(
+                modelId=model_arn,
+                body=json.dumps(payload)
+            )
+        result = json.loads(response["body"].read())
+        return result["content"][0]["text"].strip()
+    except Exception as e:
+        return f"ERROR: {str(e)}"
 
 @log_function_call
 def generate_results_entry(p_id: str,
@@ -1232,6 +1313,25 @@ def get_annotated_notes_for_patient(patient_id: str) -> list[str]:
 
     return list(dict.fromkeys(notes))
 
+@log_function_call
+def get_all_notes_for_patient(patient_id: str) -> list[str]:
+    """
+    For a given patient, list all note_ids (text_id) for all their notes.
+
+    Args:
+        patient_id (str) : The patient_id for which we want to retrieve all note IDs
+
+    Returns:
+        note_ids (list[str]) : List of all note_ids (text_id) for the patient,
+                               sorted by text_date (ascending)
+    """
+    notes = (mongo.db["NOTES"]
+             .find({"patient_id": patient_id}, {"text_id": 1, "_id": 0})
+             .sort([("text_date", 1)]))
+    
+    note_ids = [note["text_id"] for note in notes]
+    
+    return list(dict.fromkeys(note_ids))
 
 # update functions
 @log_function_call
@@ -1983,6 +2083,42 @@ def get_note_prediction_from_db(note_id: str,
     logger.debug(f"Prediction not found in db for : {note_id}")
     return None
 
+
+def run_llm_on_notes(text_ids: list[str], model_arn: str, note_collection_name: str = "NOTES", llm_collection_name: str = "LLM") -> None:
+
+    llm_collection = mongo.db[llm_collection_name]
+    notes_collection = mongo.db[note_collection_name]
+
+    query = {}
+    if text_ids is not None:
+        query = {"text_id": {"$in": text_ids}}
+    cedars_notes = notes_collection.find(query)
+    
+    for note in cedars_notes:
+        note_text = note.get("text")
+        response = run_bedrock(note_text, model_arn)
+        if response in ["0", "1"]:
+            llm_collection.insert_one({
+                "text_id": note.get("text_id"),
+                "text": note.get("text"),
+                "text_date" : note.get("text_date"),
+                "patient_id": note.get("patient_id"),
+                "predicted_label": str(response),
+                "report_type": note.get("text_tag_3"),
+                "document_type": note.get("text_tag_1")
+                })
+        else:
+            logger.error(f"Failed to get response for note: {note.get('text_id')}")
+            llm_collection.insert_one({
+                "text_id": note.get("text_id"),
+                "text": note.get("text"),
+                "text_date" : note.get("text_date"),
+                "patient_id": note.get("patient_id"),
+                "predicted_label": "ERROR",
+                "report_type": note.get("text_tag_3"),
+                "document_type": note.get("text_tag_1")
+                })
+
 @log_function_call
 def predict_and_save(text_ids: Optional[list[str]] = None,
                      note_collection_name: str = "NOTES",
@@ -2261,6 +2397,7 @@ def terminate_project():
     mongo.db.drop_collection("TASK")
     mongo.db.drop_collection("RESULTS")
     mongo.db.drop_collection("NOTES_SUMMARY")
+    mongo.db.drop_collection("LLM")
 
     project_id = os.getenv("PROJECT_ID", None)
 
