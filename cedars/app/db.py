@@ -581,6 +581,7 @@ def upsert_patient_records(patient_id: str, insert_datetime: datetime = None, up
         'max_score' : max_score,
         'predicted_notes' : all_note_details,
         'last_updated' : insert_datetime,
+        'is_patient_reviewed' : get_patient_reviewed_status(patient_id),
     }
 
     logger.info(f"Updating results for patient #{patient_id}.")
@@ -1142,7 +1143,7 @@ def get_patient_ids():
 @log_function_call
 def get_patient_lock_status(patient_id: str):
     """
-    Updates the status of the patient to be locked or unlocked.
+    Find current lock the status of the patient.
 
     Args:
         patient_id (int) : ID for the patient we are locking / unlocking
@@ -1155,6 +1156,23 @@ def get_patient_lock_status(patient_id: str):
     """
     patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
     return patient["locked"]
+
+@log_function_call
+def get_patient_reviewed_status(patient_id: str):
+    """
+    Get the patient's review status.
+
+    Args:
+        patient_id (int) : ID for the patient we are locking / unlocking
+    Returns:
+        status (bool) : True if the patient is fully reviewed, False otherwise.
+            If no such patient is found, we return None.
+
+    Raises:
+        None
+    """
+    patient = mongo.db["PATIENTS"].find_one({"patient_id": patient_id})
+    return patient["reviewed"]
 
 @log_function_call
 def get_all_notes(patient_id: str):
@@ -2165,10 +2183,6 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
 
     try:
         logger.info("Starting download task")
-        # Create an in-memory buffer for the CSV data
-        csv_buffer = StringIO()
-        writer = pd.DataFrame(columns=list(schema.keys()))
-        writer.to_csv(csv_buffer, index=False, header=True, encoding="utf-8-sig")
 
         # Write data in chunks and stream to MinIO
         columns_to_retrive = {'_id': False}
@@ -2179,6 +2193,12 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # This is improtant for backwards compatibility,
         # as the index_no will not be present in older CEDARS versions.
         logger.info("Retriving RESULTS from db")
+        has_reviewed_column = mongo.db["RESULTS"].find({"is_patient_reviewed" : {"$exists": True}})
+        has_reviewed_column = len(list(has_reviewed_column)) > 0
+        if has_reviewed_column:
+            columns_to_retrive['is_patient_reviewed'] = True
+            schema['is_patient_reviewed'] = pl.Boolean
+
         project_results = mongo.db["RESULTS"].find({},
                                                     columns_to_retrive).sort([("index_no", 1)])
 
@@ -2192,6 +2212,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
             df = df.with_columns(
                 pl.col(col).dt.date().alias(col)
             )
+
+        # Create an in-memory buffer for the CSV data
+        csv_buffer = StringIO()
+        writer = pd.DataFrame(columns=list(schema.keys()))
+        writer.to_csv(csv_buffer, index=False, header=True, encoding="utf-8-sig")
 
         logger.info("Uploading results to csv buffer")
         chunk_size = 1000

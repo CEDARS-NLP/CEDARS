@@ -308,6 +308,7 @@ class NlpProcessor:
                     self.process_notes(patient_id)
                 except Exception as exc:
                     logger.error(f"Error processing notes for patient {patient_id}: {exc}")
+                    raise exc
                 finally:
                     # TODO: make sure the patient is not unlocked if locked by a user.
                     # when we have the user-lock mapping - we can add the check here.
