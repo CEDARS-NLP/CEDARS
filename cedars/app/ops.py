@@ -1135,6 +1135,37 @@ def download_file(filename='annotations.csv'):
         headers={"Content-Disposition": f"attachment;filename=cedars_{filename}"}
     )
 
+@bp.route('/uploaded_data_manager')
+@auth.admin_required
+@log_function_call
+def uploaded_data_manager():
+    """
+    Loads the page where an admin can download the results
+    of annotations made for that project.
+    """
+    files = [(obj.object_name.rsplit("/", 1)[-1],
+              obj.size,
+              obj.last_modified.strftime("%Y-%m-%d %H:%M:%S")
+              ) for obj in minio.list_objects(
+                   g.bucket_name,
+                   prefix="uploaded_files/")]
+
+
+    return render_template('ops/uploaded_data_manager.html', files=files, **db.get_info())
+
+@bp.route('/delete_data_file', methods=["POST"])
+@auth.admin_required
+@log_function_call
+def delete_data_file():
+    """
+    Deletes a download file from the current minio bucket.
+    """
+
+    filename = request.form.get("filename")
+    minio.remove_object(g.bucket_name, f"uploaded_files/{filename}")
+    logger.info(f"Successfully removed uploaded_files/{filename} from minio server.")
+
+    return redirect("/ops/uploaded_data_manager")
 
 @bp.route('/create_download_task', methods=["GET"])
 @auth.admin_required

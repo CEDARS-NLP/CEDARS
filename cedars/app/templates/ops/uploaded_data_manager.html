@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS {% endblock %}
+
+{% block content %}
+<!-- Create row showing available files and a button to download with file creation time-->
+<div class="container-md col-8">
+  <div class="row">
+    <div class="col-md-12" id="downloadFiles">
+      <h2>Available Files</h2>
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Size</th>
+            <th>Last Modified</th>
+            <th>Download</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obj in files %}
+          <tr>
+            <td>{{ obj[0] }}</td>
+            {% if obj[1] > 1e9 %}
+              <td>{{ obj[1] // 1e9 }} GB</td>
+            {% elif obj[1] > 1e6 %}
+              <td>{{ obj[1] // 1e6 }} MB</td>
+            {% elif obj[1] > 1e3 %}
+              <td>{{ obj[1] // 1e3 }} KB</td>
+            {% else %}
+              <td>{{ obj[1] }} B</td>
+            {% endif %}
+            <td>
+              {{ obj[2] }} 
+            </td>
+            <td>
+              <form action="/ops/download_data_file" method="POST" class="form-inline">
+                <input type="hidden" name="filename" value="{{ obj[0] }}">
+                <button class="btn btn-primary cedars-btn" type="submit">Download</button>
+              </form>
+            </td>
+
+            <td>
+              <form action="/ops/delete_data_file" method="POST" class="form-inline">
+                <input type="hidden" name="filename" value="{{ obj[0] }}">
+                <button class="btn btn-primary cedars-btn" type="submit">Delete File</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <!-- Add more list items for each available file -->
+      </table>
+    </div>
+  </div>
+</div>
+
+
+{% endblock %}
