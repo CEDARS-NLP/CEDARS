@@ -1,12 +1,11 @@
-import os
-from dotenv import dotenv_values, load_dotenv
-from . import create_app
-from rq import Worker
 import argparse
 
-load_dotenv()
+from dotenv import load_dotenv
+from rq import Worker
 
-config = dotenv_values(".env")
+from . import create_app
+
+load_dotenv()
 
 
 def create_rq_app():

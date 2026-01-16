@@ -1,23 +1,22 @@
 """
 Entrypoint for the flask application.
 """
+import logging
 import os
 import sys
-from flask import Flask, redirect, render_template
-from flask_session import Session
-import logging
-from loguru import logger
-from dotenv import dotenv_values
+
 import rq
 import rq_dashboard
-from redis import Redis
+from flask import Flask, redirect, render_template
+from flask_session import Session
+from loguru import logger
 from prometheus_flask_exporter.multiprocess import GunicornInternalPrometheusMetrics
-from . import auth
-from . import ops
-from . import stats
+from redis import Redis
+
+from config import config, validate_config
+from . import auth, ops, stats
 
 environment = os.getenv('ENV', 'local')
-config = dotenv_values(".env")
 sess = Session()
 
 
@@ -46,6 +45,9 @@ def rq_init_app(cedars_rq):
 
 def create_app(config_filename=None):
     """Create flask application"""
+    # Validate required config vars are present
+    validate_config()
+
     cedars_app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
     if config_filename:
         logger.info(f"Loading config from {config_filename}")

@@ -1,17 +1,15 @@
 """Create flask application"""
-
 import os
-import sys
-import logging
-from dotenv import dotenv_values, load_dotenv
+
+from dotenv import load_dotenv
 from loguru import logger
+
+from config import config
 from . import create_app
-from . import db
 
 load_dotenv()
 
 environment = os.getenv('ENV', 'local')
-config = dotenv_values(".env")
 
 app = create_app(f"config.{environment.title()}")
 

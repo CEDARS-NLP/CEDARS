@@ -24,7 +24,8 @@ services:
     # (default stop signal from Compose is SIGTERM)
     stop_signal: SIGINT
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - cedars
     env_file:
@@ -34,6 +35,12 @@ services:
       - gpu
       - selfhosted
       - superbio
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -52,9 +59,15 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${DB_PWD}
     volumes:
       - cedars_db:/data/db
-    command: mongod --quiet --logpath /dev/null 
+    command: mongod --quiet --logpath /dev/null
     networks:
       - cedars
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     profiles:
       - selfhosted
       - superbio
@@ -180,12 +193,14 @@ services:
     env_file:
       - .env
     depends_on:
-      - web
-      - redis
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     profiles:
       - cpu
       - gpu
-      - selfhosted   
+      - selfhosted
       - superbio
     deploy:
       resources:
@@ -195,7 +210,7 @@ services:
         reservations:
           memory: '1g'
           cpus: '1.0'
-    
+
   worker-ops:
     image: cedars
     command: python -m app.make_rq ops
@@ -205,8 +220,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - web
-      - redis
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     profiles:
       - cpu
       - gpu

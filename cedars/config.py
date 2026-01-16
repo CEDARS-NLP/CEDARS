@@ -1,12 +1,38 @@
 """
 Basic configurations for the app
+
+This module centralizes all configuration loading. Other modules should import
+`config` from here rather than calling dotenv_values() directly.
 """
 from datetime import timedelta
 
 from dotenv import dotenv_values
 from redis import Redis
 
+# Load config once - other modules should import this
 config = dotenv_values(".env")
+
+# Required configuration variables
+REQUIRED_CONFIG = [
+    'SECRET_KEY',
+    'DB_USER',
+    'DB_PWD',
+    'DB_HOST',
+    'DB_PORT',
+    'DB_NAME',
+    'REDIS_URL',
+    'REDIS_PORT',
+]
+
+
+def validate_config():
+    """Validate that all required configuration variables are present."""
+    missing = [var for var in REQUIRED_CONFIG if not config.get(var)]
+    if missing:
+        raise RuntimeError(
+            f"Missing required configuration variables: {', '.join(missing)}. "
+            f"Check your .env file against .env.sample"
+        )
 
 
 class Base:  # pylint: disable=too-few-public-methods
