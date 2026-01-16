@@ -1,14 +1,13 @@
 """Initialize database connection."""
 import os
+
 import flask_pymongo
-from minio import Minio
-from werkzeug.local import LocalProxy
-from dotenv import dotenv_values
 from flask import current_app, g
 from loguru import logger
+from minio import Minio
+from werkzeug.local import LocalProxy
 
-
-config = dotenv_values(".env")
+from config import config
 
 
 def get_mongo():

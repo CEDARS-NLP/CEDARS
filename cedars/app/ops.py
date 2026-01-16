@@ -1,44 +1,36 @@
 """
 This page contatins the functions and the flask blueprint for the /proj_details route.
 """
+import copy
+import json
 import os
 import re
-import copy
-from datetime import datetime, date
 import tempfile
+from datetime import date, datetime
+
+import flask
 import pandas as pd
 import pyarrow.parquet as pq
-import flask
-from dotenv import dotenv_values
-from flask import (
-    Blueprint, render_template,
-    redirect, session, request,
-    url_for, flash, g, jsonify
-)
-
-from .cedars_enums import ReviewStatus
-from loguru import logger
 import requests
+from flask import (
+    Blueprint, flash, g, jsonify, redirect, render_template, request, session,
+    url_for
+)
 from flask_login import current_user, login_required
+from loguru import logger
+from rq import Callback, Retry
+from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 from werkzeug.utils import secure_filename
-from rq import Retry, Callback
-from rq.registry import FailedJobRegistry
-from rq.registry import FinishedJobRegistry, StartedJobRegistry
-from . import db
-from . import nlpprocessor
-from . import auth
-from .database import minio
-from .api import load_pines_url, kill_pines_api
-from .api import get_token_status
+
+from config import config
+from . import auth, db, nlpprocessor
 from .adjudication_handler import AdjudicationHandler
-from .cedars_enums import PatientStatus
-from .cedars_enums import log_function_call
-import json
-from datetime import datetime
+from .api import get_token_status, kill_pines_api, load_pines_url
+from .cedars_enums import PatientStatus, ReviewStatus, log_function_call
+from .database import minio
 
 
 bp = Blueprint("ops", __name__, url_prefix="/ops")
-config = dotenv_values(".env")
 
 logger.enable(__name__)
 
