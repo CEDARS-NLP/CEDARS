@@ -12,22 +12,35 @@ from redis import Redis
 # Load config once - other modules should import this
 config = dotenv_values(".env")
 
-# Required configuration variables
-REQUIRED_CONFIG = [
+# Required configuration variables (always required)
+REQUIRED_CONFIG_BASE = [
     'SECRET_KEY',
+    'REDIS_URL',
+    'REDIS_PORT',
+]
+
+# Required for MongoDB backend
+REQUIRED_CONFIG_MONGODB = [
     'DB_USER',
     'DB_PWD',
     'DB_HOST',
     'DB_PORT',
     'DB_NAME',
-    'REDIS_URL',
-    'REDIS_PORT',
 ]
+
+# Optional SQLite configuration
+# SQLITE_DB_PATH - path to SQLite database file (default: cedars.db)
 
 
 def validate_config():
     """Validate that all required configuration variables are present."""
-    missing = [var for var in REQUIRED_CONFIG if not config.get(var)]
+    db_type = config.get("DB_TYPE", "mongodb").lower()
+
+    required = REQUIRED_CONFIG_BASE.copy()
+    if db_type == "mongodb":
+        required.extend(REQUIRED_CONFIG_MONGODB)
+
+    missing = [var for var in required if not config.get(var)]
     if missing:
         raise RuntimeError(
             f"Missing required configuration variables: {', '.join(missing)}. "
