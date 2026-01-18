@@ -1278,6 +1278,64 @@ def update_pines_api_url(new_url):
                                 {"$set": {"pines_url": new_url}})
 
 
+# Predictor configuration functions
+@log_function_call
+def update_predictor_config(
+    predictor_type: str,
+    llm_config: Optional[dict] = None,
+    event_definition: Optional[dict] = None,
+    threshold: float = 0.95
+) -> None:
+    """
+    Update the predictor configuration in the INFO collection.
+
+    Args:
+        predictor_type: "pines" or "llm"
+        llm_config: LLM configuration dict (required if predictor_type == "llm")
+        event_definition: Event definition dict (required if predictor_type == "llm")
+        threshold: Score threshold for auto-dismissal (default: 0.95)
+    """
+    update_data = {
+        "predictor_type": predictor_type,
+        "threshold": threshold,
+    }
+
+    if predictor_type == "llm":
+        if llm_config:
+            update_data["llm_config"] = llm_config
+        if event_definition:
+            update_data["event_definition"] = event_definition
+    elif predictor_type == "pines":
+        # Clear LLM-specific fields when switching to PINES
+        update_data["llm_config"] = None
+        update_data["event_definition"] = None
+
+    logger.info(f"Updating predictor config: type={predictor_type}, threshold={threshold}")
+    mongo.db["INFO"].update_one({}, {"$set": update_data})
+
+
+@log_function_call
+def get_predictor_config() -> Optional[dict]:
+    """
+    Get the current predictor configuration from the INFO collection.
+
+    Returns:
+        Dict with predictor_type, llm_config, event_definition, threshold
+        or None if no project configured.
+    """
+    info = mongo.db["INFO"].find_one()
+    if info is None:
+        return None
+
+    return {
+        "predictor_type": info.get("predictor_type"),
+        "llm_config": info.get("llm_config"),
+        "event_definition": info.get("event_definition"),
+        "threshold": info.get("threshold", 0.95),
+        "pines_url": info.get("pines_url"),
+    }
+
+
 @log_function_call
 def batch_mark_annotation_reviewed(annotation_ids, reviewed_by):
     """
@@ -1860,15 +1918,55 @@ def get_curr_stats():
     return stats
 
 
-# pines functions
+# prediction functions
 @log_function_call
 def get_prediction(note: str) -> float:
     """
-    ##### PINES predictions
+    Get prediction for a clinical note using the configured predictor.
 
-    Get prediction from endpoint. Text goes in the POST request.
+    Uses the predictor factory to get either PINES or LLM predictor
+    based on project configuration.
+
+    Args:
+        note: Clinical note text to classify.
+
+    Returns:
+        Prediction score (0-1). Higher score = more likely contains event.
     """
+    from .predictors import get_predictor_from_db, PredictorError
 
+    log_notes = re.sub(r'\d', '*', note[:20]) if note else None
+
+    try:
+        predictor = get_predictor_from_db()
+        result = predictor.predict(note)
+        logger.debug(
+            f"Got prediction for note: {log_notes} with score: {result.score} "
+            f"and label: {result.label} (model: {result.model})"
+        )
+        return result.score
+    except PredictorError as e:
+        logger.error(f"Predictor error for note {log_notes}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get prediction for note: {log_notes}: {e}")
+        raise
+
+
+@log_function_call
+def get_prediction_legacy(note: str) -> float:
+    """
+    Legacy PINES prediction function.
+
+    Directly calls PINES API without using the predictor factory.
+    Kept for backwards compatibility.
+
+    Args:
+        note: Clinical note text.
+
+    Returns:
+        Prediction score (0-1).
+    """
     pines_api_url = get_pines_url()
 
     url = f'{pines_api_url}/predict'

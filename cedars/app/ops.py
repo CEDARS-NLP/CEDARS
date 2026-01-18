@@ -353,8 +353,10 @@ def upload_query():
 
     if request.method == "GET":
         current_query = db.get_search_query()
+        predictor_config = db.get_predictor_config()
         return render_template("ops/upload_query.html",
                                current_query=current_query,
+                               predictor_config=predictor_config,
                                **db.get_info(),
                                **db.get_search_query_details())
 
@@ -368,28 +370,88 @@ def upload_query():
         logger.debug(f"Invalid query: {e}")
         return render_template("ops/upload_query.html", **db.get_info())
 
-    use_pines = bool(request.form.get("nlp_apply"))
-    superbio_api_token = session.get('superbio_api_token')
-    if superbio_api_token is not None and use_pines:
-        # If using a PINES server via superbio,
-        # ensure that the current token works properly
-        token_status = get_token_status(superbio_api_token)
-        if token_status['has_expired'] is True:
-            # If we are using a token, and this token has expired
-            # then we cancell the process and do not add anything to the queue.
-            logger.info('The current token has expired. Logging our user.')
-            redirect(url_for('auth.logout'))
-        elif token_status['is_valid'] is False:
-            logger.error(f'Passed invalid token : {superbio_api_token}')
-            flash("Invalid superbio token.")
-            return redirect(url_for("ops.upload_query"))
+    # Get predictor type from form
+    predictor_type = request.form.get("predictor_type", "none")
+    use_nlp = predictor_type in ("pines", "llm")
 
-    if use_pines:
+    superbio_api_token = session.get('superbio_api_token')
+
+    # Handle PINES configuration
+    if predictor_type == "pines":
+        if superbio_api_token is not None:
+            # If using a PINES server via superbio,
+            # ensure that the current token works properly
+            token_status = get_token_status(superbio_api_token)
+            if token_status['has_expired'] is True:
+                # If we are using a token, and this token has expired
+                # then we cancell the process and do not add anything to the queue.
+                logger.info('The current token has expired. Logging our user.')
+                redirect(url_for('auth.logout'))
+            elif token_status['is_valid'] is False:
+                logger.error(f'Passed invalid token : {superbio_api_token}')
+                flash("Invalid superbio token.")
+                return redirect(url_for("ops.upload_query"))
+
         is_pines_available = init_pines_connection(superbio_api_token)
         if is_pines_available is False:
             # PINES could not load successfully
             flash("Could not load PINES server.")
             return redirect(url_for("ops.upload_query"))
+
+        # Save PINES predictor config
+        db.update_predictor_config(predictor_type="pines")
+
+    # Handle LLM configuration
+    elif predictor_type == "llm":
+        llm_provider = request.form.get("llm_provider", "openai")
+        llm_model = request.form.get("llm_model", "gpt-4o")
+        llm_api_base = request.form.get("llm_api_base") or None
+
+        event_name = request.form.get("event_name", "")
+        event_description = request.form.get("event_description", "")
+        event_include = request.form.get("event_include", "")
+        event_exclude = request.form.get("event_exclude", "")
+
+        # Validate LLM configuration
+        if not event_name:
+            flash("Event name is required for LLM classification.")
+            return redirect(url_for("ops.upload_query"))
+
+        # Determine API key environment variable based on provider
+        api_key_env_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": "GOOGLE_API_KEY",
+            "bedrock": "AWS_ACCESS_KEY_ID",
+            "ollama": None,
+            "lmstudio": None,
+        }
+
+        llm_config = {
+            "provider": llm_provider,
+            "model": llm_model,
+            "api_base": llm_api_base,
+            "api_key_env": api_key_env_map.get(llm_provider),
+        }
+
+        event_definition = {
+            "name": event_name,
+            "description": event_description,
+            "include_criteria": event_include,
+            "exclude_criteria": event_exclude,
+        }
+
+        # Save LLM predictor config
+        db.update_predictor_config(
+            predictor_type="llm",
+            llm_config=llm_config,
+            event_definition=event_definition
+        )
+        logger.info(f"Configured LLM predictor: {llm_provider}/{llm_model}")
+
+    else:
+        # No predictor - clear config
+        db.update_predictor_config(predictor_type=None)
 
     use_negation = False  # bool(request.form.get("view_negations"))
     hide_duplicates = not bool(request.form.get("keep_duplicates"))
@@ -397,7 +459,7 @@ def upload_query():
 
     tag_query = {
         "exact": False,
-        "nlp_apply": use_pines
+        "nlp_apply": use_nlp  # True if using PINES or LLM
     }
     new_query_added = db.save_query(search_query, use_negation,
                                     hide_duplicates, skip_after_event, tag_query)
@@ -430,14 +492,14 @@ def do_nlp_processing():
         flask.current_app.task_queue.enqueue(
             nlp_processor.automatic_nlp_processor,
             args=(patient,),
-            job_id=f'spacy:{patient}',
+            job_id=f'spacy-{patient}',
             description=f"Processing patient {patient} with spacy",
             retry=Retry(max=3),
             on_success=Callback(callback_job_success),
             on_failure=Callback(callback_job_failure),
             kwargs={
                 "user": current_user.username,
-                "job_id": f'spacy:{patient}',
+                "job_id": f'spacy-{patient}',
                 "superbio_api_token" : superbio_api_token,
                 "description": f"Processing patient {patient} with spacy"
             }

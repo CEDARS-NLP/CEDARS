@@ -249,6 +249,9 @@ class NlpProcessor:
                 i. Mark all annotation as reviewed
                 ii. Update the patient reviewed status based on all notes reviewed status
             b. Above threshold: Update the pines database
+
+        Note: Despite the name, this function now supports both PINES and LLM predictors
+        based on project configuration. The name is kept for backwards compatibility.
         """
 
         notes = db.get_annotated_notes_for_patient(patient_id)
@@ -258,6 +261,9 @@ class NlpProcessor:
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
 
+        # Get the predictor type for logging/reviewed_by field
+        predictor_name = self._get_predictor_name()
+
         db.predict_and_save(notes)
         scores = []
         for note_id in notes:
@@ -265,12 +271,32 @@ class NlpProcessor:
             scores.append(score)
             if score < threshold:
                 updated_annots = db.update_annotation_reviewed(note_id)
-                db.mark_note_reviewed(note_id, reviewed_by="PINES")
+                db.mark_note_reviewed(note_id, reviewed_by=predictor_name)
                 logger.info(f"Marked {updated_annots} annotations as reviewed for note {note_id} with score {score}")
 
         if max(scores) < threshold:
-            db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
+            db.mark_patient_reviewed(patient_id, reviewed_by=predictor_name)
             logger.debug(f"Marked patient {patient_id} as reviewed")
+
+    def _get_predictor_name(self) -> str:
+        """Get the name of the configured predictor for logging/audit purposes.
+
+        Returns:
+            Predictor name (e.g., "PINES", "LLM:openai/gpt-4o")
+        """
+        try:
+            from .predictors import get_predictor_from_db
+            predictor = get_predictor_from_db()
+            # Use the model name from a dummy prediction or config
+            if hasattr(predictor, 'config'):
+                # LLM predictor
+                return f"LLM:{predictor.config.provider.value}/{predictor.config.model}"
+            else:
+                # PINES predictor
+                return "PINES"
+        except Exception:
+            # Default to PINES for backwards compatibility
+            return "PINES"
 
     def automatic_nlp_processor(self, patient_id=None, **kwargs):
         """
