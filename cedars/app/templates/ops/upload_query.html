@@ -13,13 +13,89 @@
         <small class="form-text text-muted">Logical Query (all lower keywords)<br/>dvt OR (deep AND vein AND thromb*) OR pe OR (pulmonary AND embolism)</small>
         <br>
         <br>
-        <label class="h4">Additional Parameters</label>
+        <label class="h4">NLP Classification</label>
         <br>
-        {% if tag_query %}
-          <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply" {{ 'checked' if tag_query.nlp_apply else '' }}> Enable PINES
-        {% else %}
-          <input type="checkbox" class="form-check-input" id="nlp_apply" name="nlp_apply"> Enable PINES
-        {% endif %}
+        <div class="form-check">
+          <input type="radio" class="form-check-input" id="predictor_none" name="predictor_type" value="none"
+            {{ 'checked' if not predictor_config or not predictor_config.predictor_type else '' }}
+            onchange="togglePredictorOptions()">
+          <label class="form-check-label" for="predictor_none">None (keyword matching only)</label>
+        </div>
+        <div class="form-check">
+          <input type="radio" class="form-check-input" id="predictor_pines" name="predictor_type" value="pines"
+            {{ 'checked' if predictor_config and predictor_config.predictor_type == 'pines' else '' }}
+            onchange="togglePredictorOptions()">
+          <label class="form-check-label" for="predictor_pines">PINES (requires trained model)</label>
+        </div>
+        <div class="form-check">
+          <input type="radio" class="form-check-input" id="predictor_llm" name="predictor_type" value="llm"
+            {{ 'checked' if predictor_config and predictor_config.predictor_type == 'llm' else '' }}
+            onchange="togglePredictorOptions()">
+          <label class="form-check-label" for="predictor_llm">LLM (OpenAI, Anthropic, Ollama, etc.)</label>
+        </div>
+
+        <!-- LLM Configuration (shown only when LLM is selected) -->
+        <div id="llm_config" class="mt-3 p-3 border rounded" style="display: none;">
+          <label class="h5">LLM Configuration</label>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="form-group">
+                <label for="llm_provider">Provider</label>
+                <select class="form-control" id="llm_provider" name="llm_provider">
+                  <option value="openai" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'openai' else '' }}>OpenAI</option>
+                  <option value="anthropic" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'anthropic' else '' }}>Anthropic (Claude)</option>
+                  <option value="ollama" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'ollama' else '' }}>Ollama (Local)</option>
+                  <option value="lmstudio" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'lmstudio' else '' }}>LM Studio (Local)</option>
+                  <option value="gemini" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'gemini' else '' }}>Google Gemini</option>
+                  <option value="bedrock" {{ 'selected' if predictor_config and predictor_config.llm_config and predictor_config.llm_config.provider == 'bedrock' else '' }}>AWS Bedrock</option>
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-group">
+                <label for="llm_model">Model</label>
+                <input type="text" class="form-control" id="llm_model" name="llm_model"
+                  value="{{ predictor_config.llm_config.model if predictor_config and predictor_config.llm_config else 'gpt-4o' }}"
+                  placeholder="e.g., gpt-4o, claude-sonnet-4-20250514, llama3">
+              </div>
+            </div>
+          </div>
+          <div class="form-group mt-2">
+            <label for="llm_api_base">API Base URL (optional, for Ollama/LMStudio)</label>
+            <input type="text" class="form-control" id="llm_api_base" name="llm_api_base"
+              value="{{ predictor_config.llm_config.api_base if predictor_config and predictor_config.llm_config and predictor_config.llm_config.api_base else '' }}"
+              placeholder="e.g., http://localhost:11434">
+          </div>
+
+          <hr>
+          <label class="h5">Event Definition</label>
+          <small class="form-text text-muted mb-2">Describe the clinical event you want to detect</small>
+          <div class="form-group">
+            <label for="event_name">Event Name</label>
+            <input type="text" class="form-control" id="event_name" name="event_name"
+              value="{{ predictor_config.event_definition.name if predictor_config and predictor_config.event_definition else '' }}"
+              placeholder="e.g., Myocardial Infarction">
+          </div>
+          <div class="form-group mt-2">
+            <label for="event_description">Description</label>
+            <input type="text" class="form-control" id="event_description" name="event_description"
+              value="{{ predictor_config.event_definition.description if predictor_config and predictor_config.event_definition else '' }}"
+              placeholder="e.g., Confirmed heart attack diagnosis">
+          </div>
+          <div class="form-group mt-2">
+            <label for="event_include">Include If</label>
+            <textarea class="form-control" id="event_include" name="event_include" rows="2"
+              placeholder="e.g., Positive troponin, ECG changes, chest pain with confirmation">{{ predictor_config.event_definition.include_criteria if predictor_config and predictor_config.event_definition else '' }}</textarea>
+          </div>
+          <div class="form-group mt-2">
+            <label for="event_exclude">Exclude If</label>
+            <textarea class="form-control" id="event_exclude" name="event_exclude" rows="2"
+              placeholder="e.g., Rule-out, family history, hypothetical, past medical history">{{ predictor_config.event_definition.exclude_criteria if predictor_config and predictor_config.event_definition else '' }}</textarea>
+          </div>
+        </div>
+
+        <br>
+        <label class="h4">Additional Parameters</label>
         <br>
         <input type="checkbox" class="form-check-input" id="skip_after_event" name="skip_after_event" {{ '' if not skip_after_event else 'checked' }}> Skip After Event
         <br>
@@ -29,4 +105,20 @@
       <button type="submit" class="btn btn-primary">Submit</button>
   </form>
 </div>
+
+<script>
+function togglePredictorOptions() {
+  const llmRadio = document.getElementById('predictor_llm');
+  const llmConfig = document.getElementById('llm_config');
+
+  if (llmRadio.checked) {
+    llmConfig.style.display = 'block';
+  } else {
+    llmConfig.style.display = 'none';
+  }
+}
+
+// Run on page load to set initial state
+document.addEventListener('DOMContentLoaded', togglePredictorOptions);
+</script>
 {% endblock %}
