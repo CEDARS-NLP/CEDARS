@@ -1,0 +1,25 @@
+# Core dependencies
+fastapi==0.115.0
+uvicorn[standard]==0.31.0
+pydantic==2.9.2
+python-dotenv==1.0.1
+
+# HTTP client
+httpx==0.27.2
+
+# YAML support
+pyyaml==6.0.2
+
+# Logging
+loguru==0.7.2
+
+# Optional: OpenAI SDK (if using OpenAI backend)
+# openai==1.51.0
+
+# Development dependencies (optional)
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+
+
+

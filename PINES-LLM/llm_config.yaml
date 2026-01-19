@@ -1,0 +1,42 @@
+# LLM-PINES Configuration
+# Configuration for self-hosted Llama models
+
+# Backend Selection
+# Options: vllm, ollama, llamacpp, openai
+backend_type: ollama
+
+# Model Configuration
+# For Ollama: model name as shown in 'ollama list' (e.g., llama3.1:8b, llama3.1:70b)
+# For vLLM: HuggingFace model path (e.g., meta-llama/Llama-3.1-70B-Instruct)
+model_name: llama3.1:8b
+
+# Model Generation Settings
+model_settings:
+  temperature: 0.0      # 0.0 = deterministic, higher = more random
+  max_tokens: 20       # Maximum tokens to generate
+  top_p: 0.95          # Nucleus sampling
+  timeout: 180         # Timeout in seconds
+
+# Backend URLs
+vllm_url: http://localhost:8000
+ollama_url: http://localhost:11434
+llamacpp_url: http://localhost:8080
+openai_url: https://api.openai.com/v1
+
+# API Keys (for OpenAI-compatible backends)
+# openai_api_key: your-api-key-here
+
+# Prompts Configuration
+prompts_dir: ./prompts
+default_task: vte_detection
+
+# Output Parsing
+output_format: json     # json or text
+fallback_parser: true   # Enable fallback parsing strategies
+
+# Performance Settings
+max_retries: 3
+batch_size: 1          # For future batch processing optimization
+
+
+
