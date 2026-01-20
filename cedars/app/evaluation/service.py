@@ -86,14 +86,19 @@ def _sample_notes_with_keywords(
     keyword_matched_ids = []
     non_keyword_ids = []
 
+    # Build base query with project_id filter for data isolation
+    base_query = {}
+    if project_id:
+        base_query["project_id"] = project_id
+
     if keywords:
         # Build case-insensitive regex pattern for keyword matching
         # Match any keyword in the note text
         keyword_pattern = "|".join(re.escape(kw) for kw in keywords)
         keyword_regex = {"$regex": keyword_pattern, "$options": "i"}
 
-        # Find notes containing any keyword
-        keyword_query = {"text": keyword_regex}
+        # Find notes containing any keyword (filtered by project)
+        keyword_query = {**base_query, "text": keyword_regex}
         keyword_cursor = notes_collection.find(
             keyword_query,
             {"text_id": 1, "_id": 0}
@@ -101,8 +106,8 @@ def _sample_notes_with_keywords(
         keyword_matched_ids = [doc["text_id"] for doc in keyword_cursor]
         logger.info(f"Found {len(keyword_matched_ids)} notes matching keywords")
 
-        # Find notes NOT containing keywords
-        non_keyword_query = {"text": {"$not": keyword_regex}}
+        # Find notes NOT containing keywords (filtered by project)
+        non_keyword_query = {**base_query, "text": {"$not": keyword_regex}}
         non_keyword_cursor = notes_collection.find(
             non_keyword_query,
             {"text_id": 1, "_id": 0}
@@ -110,8 +115,8 @@ def _sample_notes_with_keywords(
         non_keyword_ids = [doc["text_id"] for doc in non_keyword_cursor]
         logger.info(f"Found {len(non_keyword_ids)} notes not matching keywords")
     else:
-        # No keywords - get all notes
-        cursor = notes_collection.find({}, {"text_id": 1, "_id": 0})
+        # No keywords - get all notes (filtered by project)
+        cursor = notes_collection.find(base_query, {"text_id": 1, "_id": 0})
         non_keyword_ids = [doc["text_id"] for doc in cursor]
         keyword_sample_size = 0
 
