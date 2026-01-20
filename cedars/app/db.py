@@ -66,8 +66,18 @@ def create_pines_info(pines_url, is_url_from_api):
     """
     Retrives the PINES url from the relevant source and
         updates the INFO col with the information.
+    
+    UPDATED: Now handles hybrid mode where pines_url can be a dict
     """
-    update_pines_api_url(pines_url)
+    # Store the URL(s) in database
+    if isinstance(pines_url, dict):
+        # Hybrid mode: store both URLs
+        logger.info(f"Storing PINES hybrid configuration: {pines_url}")
+        update_pines_api_url(pines_url)
+    else:
+        # Single URL mode
+        update_pines_api_url(pines_url)
+    
     update_pines_api_status(is_url_from_api)
 
     return pines_url
@@ -1862,16 +1872,40 @@ def get_curr_stats():
 
 # pines functions
 @log_function_call
-def get_prediction(note: str) -> float:
+def get_prediction(note: str, use_llm: bool = None) -> float:
     """
     ##### PINES predictions
 
     Get prediction from endpoint. Text goes in the POST request.
+    
+    UPDATED: Now supports routing to different PINES backends
+    
+    Args:
+        note: Clinical note text
+        use_llm: If True, route to PINES-LLM. If False, route to primary PINES.
+                 If None, uses default based on PINES_MODE configuration.
+    
+    Returns:
+        Prediction score (0.0 to 1.0)
     """
 
     pines_api_url = get_pines_url()
-
-    url = f'{pines_api_url}/predict'
+    
+    # Handle hybrid mode - route based on preference
+    if isinstance(pines_api_url, dict) and pines_api_url.get("mode") == "both":
+        # Hybrid mode: route based on use_llm parameter
+        if use_llm is True:
+            url = f'{pines_api_url["llm"]}/predict'
+            logger.debug(f"Routing to PINES-LLM: {url}")
+        else:
+            # Default to primary if use_llm not specified or False
+            url = f'{pines_api_url["primary"]}/predict'
+            logger.debug(f"Routing to Primary PINES: {url}")
+    else:
+        # Single mode: use the configured URL
+        url = f'{pines_api_url}/predict'
+        logger.debug(f"Using PINES at: {url}")
+    
     data = {'text': note}
     log_notes = None
     try:

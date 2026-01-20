@@ -144,6 +144,156 @@ services:
       - cedars
     profiles: [gpu]
 
+  # ==================================================
+  # OLLAMA SERVICE - LLM Inference Engine for PINES-LLM
+  # ==================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cedars-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - cedars
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - cpu
+      - gpu
+      - selfhosted
+      - superbio
+
+  # ==================================================
+  # OLLAMA GPU VERSION
+  # ==================================================
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: cedars-ollama-gpu
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - cedars
+    ports:
+      - "11435:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - gpu
+
+  # ==================================================
+  # PINES-LLM - LLM-based Clinical Event Detection
+  # ==================================================
+  pines-llm:
+    build:
+      context: ./PINES-LLM
+      dockerfile: Dockerfile
+    container_name: cedars-pines-llm
+    restart: unless-stopped
+    networks:
+      - cedars
+    # No external port mapping - internal access only (like original PINES)
+    # To test: docker exec cedars_web_1 curl http://pines-llm:8036/healthcheck
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8036/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: '2g'
+          cpus: '2.0'
+        reservations:
+          memory: '512m'
+          cpus: '0.5'
+    profiles:
+      - cpu
+      - selfhosted
+      - superbio
+
+  # ==================================================
+  # PINES-LLM GPU VERSION
+  # ==================================================
+  pines-llm-gpu:
+    build:
+      context: ./PINES-LLM
+      dockerfile: Dockerfile
+    container_name: cedars-pines-llm-gpu
+    restart: unless-stopped
+    networks:
+      - cedars
+    # No external port mapping - internal access only
+    environment:
+      - OLLAMA_URL=http://ollama-gpu:11434
+    depends_on:
+      ollama-gpu:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8036/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    profiles:
+      - gpu
+
+  # ==================================================
+  # OLLAMA MODEL LOADER - Pulls models on first startup
+  # ==================================================
+  ollama-setup:
+    image: ollama/ollama:latest
+    container_name: cedars-ollama-setup
+    networks:
+      - cedars
+    volumes:
+      - ollama_data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      echo 'Waiting for Ollama to be ready...' &&
+      sleep 10 &&
+      echo 'Pulling llama3.1:8b model...' &&
+      ollama pull llama3.1:8b --host http://ollama:11434 &&
+      echo 'Model pulled successfully!' &&
+      exit 0
+      "
+    profiles:
+      - cpu
+      - selfhosted
+      - superbio
+    restart: "no"
+
   redis:
     build:
         context: ./redis
@@ -227,6 +377,7 @@ volumes:
   cedars_db:
   redis_data:
   prometheus_data:
+  ollama_data:
 networks:
   cedars:
     driver: bridge

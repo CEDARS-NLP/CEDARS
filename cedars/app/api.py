@@ -12,6 +12,11 @@ def load_pines_url(project_id, superbio_api_token = None):
     - Get request gives a PINES URL
     - Call this URL for PINES predictions
 
+    UPDATED: Now supports hybrid mode with both original PINES and PINES-LLM
+    - PINES_MODE: "primary" (URL1), "llm" (URL2), or "both" (returns dict)
+    - PINES_API_URL1: Original PINES (fine-tuned)
+    - PINES_API_URL2: PINES-LLM (LLM-based)
+
     Args :
         - project_id (str) : The ID of the current CEDARS project.
         - superbio_api_token(str / None) : API token if using a superbio server,
@@ -19,7 +24,8 @@ def load_pines_url(project_id, superbio_api_token = None):
 
     Returns :
         (pines_api_url, is_url_from_api)
-        - pines_api_url (str / None) : The url of the PINES server if one is available.
+        - pines_api_url (str or dict) : The url(s) of PINES server(s).
+                                         If PINES_MODE="both", returns {"primary": url1, "llm": url2}
         - is_url_from_api (bool) : True if this url belongs to a superbio server running PINES.
     
     Raises :
@@ -27,28 +33,85 @@ def load_pines_url(project_id, superbio_api_token = None):
         - Custom error for PINES healthcheck
     '''
 
+    # Check for hybrid mode configuration
+    pines_mode = os.getenv("PINES_MODE", "primary")  # Default to primary for backward compatibility
+    
+    # Get URLs for both backends
+    pines_url1 = os.getenv("PINES_API_URL1")  # Original PINES
+    pines_url2 = os.getenv("PINES_API_URL2")  # PINES-LLM
+    
+    # Backward compatibility: check old PINES_API_URL if mode not specified
     env_url = os.getenv("PINES_API_URL")
     api_url = os.getenv("SUPERBIO_API_URL")
-    if env_url is not None:
-        # Get PINES api from .env
+    
+    # Helper function to health check a PINES URL
+    def check_pines_health(url, name="PINES"):
+        try:
+            health_check = requests.get(f'{url}/healthcheck', timeout=10)
+            health_check = health_check.json()
+            if health_check.get('status') != 'Healthy':
+                logger.warning(f'{name} server {url} is not healthy: {health_check.get("status")}')
+                return False
+            logger.info(f'{name} server {url} is healthy.')
+            return True
+        except requests.exceptions.HTTPError as e:
+            logger.error(f'Connection failed when checking {name} server {url} : {e}.')
+            return False
+        except requests.exceptions.InvalidURL as e:
+            logger.error(f'Invalid URL for {name} server {url}.')
+            return False
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f'Could not connect to {name} server {url}.')
+            return False
+        except Exception as e:
+            logger.error(f'Error checking {name} server {url}: {e}')
+            return False
+    
+    # Handle hybrid mode with URL1 and URL2
+    if pines_mode == "both" and pines_url1 and pines_url2:
+        # Return both URLs if both are configured
+        logger.info(f"PINES Hybrid Mode: Using both backends")
+        logger.info(f"  - Primary (BERT): {pines_url1}")
+        logger.info(f"  - LLM: {pines_url2}")
+        
+        # Health check both
+        check_pines_health(pines_url1, "Primary PINES")
+        check_pines_health(pines_url2, "PINES-LLM")
+        
+        pines_api_url = {
+            "primary": pines_url1,
+            "llm": pines_url2,
+            "mode": "both"
+        }
+        return pines_api_url, False
+    
+    elif pines_mode == "llm" and pines_url2:
+        # Use PINES-LLM only
+        logger.info(f"PINES Mode: LLM-based (URL2: {pines_url2})")
+        if check_pines_health(pines_url2, "PINES-LLM"):
+            return pines_url2, False
+        else:
+            logger.error("PINES-LLM health check failed")
+            return None, False
+    
+    elif pines_mode == "primary" and pines_url1:
+        # Use original PINES only
+        logger.info(f"PINES Mode: Primary/Fine-tuned (URL1: {pines_url1})")
+        if check_pines_health(pines_url1, "Primary PINES"):
+            return pines_url1, False
+        else:
+            logger.error("Primary PINES health check failed")
+            return None, False
+    
+    elif env_url is not None:
+        # Backward compatibility: Use PINES_API_URL
         pines_api_url = env_url
         is_url_from_api = False
-        logger.info(f"Received url : {pines_api_url} for pines from ENV variables.")
-
-        try:
-            health_check = requests.get(f'{pines_api_url}/healthcheck')
-            health_check = health_check.json()
-            if health_check['status'] != 'Healthy':
-                raise Exception(f'''Issue found while performing healthcheck on the 
-                                PINES server {pines_api_url}, got status : {health_check["status"]}.''')
-        except requests.exceptions.HTTPError as e:
-            logger.error(f'Connection failed when trying to check status of PINES server {pines_api_url} : {e}.')
-            return None, False
-        except requests.exceptions.InvalidURL as e:
-            logger.error(f'Invalid URL for PINES server {pines_api_url}.')
-            return None, False
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f'Could not connect to server {pines_api_url} to access PINES.')
+        logger.info(f"Using backward compatible PINES_API_URL: {pines_api_url}")
+        
+        if check_pines_health(pines_api_url, "PINES"):
+            return pines_api_url, False
+        else:
             return None, False
 
 

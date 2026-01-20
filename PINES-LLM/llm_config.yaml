@@ -17,10 +17,10 @@ model_settings:
   top_p: 0.95          # Nucleus sampling
   timeout: 180         # Timeout in seconds
 
-# Backend URLs
-vllm_url: http://localhost:8000
-ollama_url: http://localhost:11434
-llamacpp_url: http://localhost:8080
+# Backend URLs (use Docker service names when running in Docker)
+vllm_url: http://vllm:8000
+ollama_url: http://ollama:11434
+llamacpp_url: http://llamacpp:8080
 openai_url: https://api.openai.com/v1
 
 # API Keys (for OpenAI-compatible backends)
