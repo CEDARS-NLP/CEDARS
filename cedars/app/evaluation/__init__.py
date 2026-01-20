@@ -24,7 +24,11 @@ from app.evaluation.service import (
     validate_prompt,
 )
 
+from app.evaluation.routes import evaluation_bp
+
 __all__ = [
+    # Blueprint
+    "evaluation_bp",
     # Models
     "EvaluationJudgment",
     "EvaluationMetrics",
