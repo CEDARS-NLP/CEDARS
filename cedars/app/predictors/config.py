@@ -5,6 +5,9 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
+# Import canonical model from models module to avoid duplication
+from app.models.project import EventDefinitionModel
+
 
 class PredictorType(str, Enum):
     """Type of predictor backend."""
@@ -24,19 +27,9 @@ class LLMProvider(str, Enum):
     BEDROCK = "bedrock"
 
 
-class EventDefinition(BaseModel):
-    """Definition of a clinical event to detect.
-
-    Users provide these fields, and the system generates
-    the full LLM prompt from them.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str  # e.g., "Myocardial Infarction"
-    description: str  # e.g., "Confirmed heart attack diagnosis"
-    include_criteria: str  # e.g., "Positive troponin, ECG changes"
-    exclude_criteria: str  # e.g., "Rule-out, family history, hypothetical"
+# Alias for backwards compatibility - use EventDefinitionModel as the canonical definition
+# The model in app/models/project.py is the source of truth
+EventDefinition = EventDefinitionModel
 
 
 class LLMConfig(BaseModel):

@@ -131,7 +131,7 @@ class TestPinesPredictor:
         result = pines_predictor.predict("No chest pain")
 
         # Score should be inverted when label is 0
-        assert result.score == 0.1  # 1 - 0.9
+        assert result.score == pytest.approx(0.1)  # 1 - 0.9
         assert result.label == 0
 
     @patch("app.predictors.pines.requests.post")
@@ -278,7 +278,7 @@ class TestLLMPredictor:
         result = predictor.predict("Normal checkup")
 
         # Score inverted for negative: 1 - 0.9 = 0.1
-        assert result.score == 0.1
+        assert result.score == pytest.approx(0.1)
         assert result.label == 0
 
     @patch("app.predictors.llm.LITELLM_AVAILABLE", True)
