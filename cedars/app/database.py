@@ -12,8 +12,11 @@ from config import config
 
 def get_mongo():
     # https://pymongo.readthedocs.io/en/stable/faq.html#is-pymongo-fork-safe
-    mongo = flask_pymongo.PyMongo(current_app)
-    return mongo
+    # Cache PyMongo instance in g to avoid re-initialization on each access
+    mongo_instance = getattr(g, "_mongo", None)
+    if mongo_instance is None:
+        mongo_instance = g._mongo = flask_pymongo.PyMongo(current_app._get_current_object())
+    return mongo_instance
 
 
 def get_minio():

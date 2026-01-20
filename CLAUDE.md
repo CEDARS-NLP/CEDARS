@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Research Guidelines
+
+When working with external dependencies or APIs:
+- **Check source documentation first** - Read official docs, changelogs, and migration guides before making changes
+- **Check robots.txt** when fetching web content to respect crawling policies
+- **Verify package compatibility** - Check PyPI for supported Python versions and dependency requirements before upgrading
+
 ## Project Overview
 
 CEDARS (Clinical Event Detection and Recording System) is a Python-based platform for NLP-powered clinical event detection in electronic health records (EHR). It has two main components:
@@ -11,18 +18,20 @@ CEDARS (Clinical Event Detection and Recording System) is a Python-based platfor
 
 ## Build & Development Commands
 
-### CEDARS (Flask App)
+### CEDARS (Flask App) - Uses uv
 ```bash
 cd cedars
-poetry install                                    # Install dependencies
-poetry run python -m gunicorn -c gunicorn.conf.py app.wsgi:create_app()  # Run app
-poetry run pytest                                 # Run all tests
-poetry run pytest tests/test_file.py::test_name -v  # Run single test
-poetry run pytest --cov=app                       # Run with coverage
-poetry run flake8 ./                              # Lint
+uv sync                                           # Install dependencies
+uv run gunicorn -c gunicorn.conf.py app.wsgi:create_app()  # Run app
+uv run pytest                                     # Run all tests
+uv run pytest tests/test_file.py::test_name -v   # Run single test
+uv run pytest --cov=app                          # Run with coverage
+uv run flake8 ./                                 # Lint
+uv sync --group dev                              # Install with dev dependencies
+uv lock                                          # Regenerate lock file after pyproject.toml changes
 ```
 
-### PINES (FastAPI NLP Service)
+### PINES (FastAPI NLP Service) - Uses Poetry
 ```bash
 cd PINES
 poetry install
@@ -37,6 +46,19 @@ docker compose --profile selfhosted up --build   # Full local stack with MongoDB
 docker compose --profile cpu up --build          # Without local MongoDB
 ```
 
+## Key Dependencies & Compatibility
+
+| Package | Version | Notes |
+|---------|---------|-------|
+| Python | 3.10-3.12 | 3.12 recommended; 3.13 blocked by nmslib-metabrainz |
+| Flask | 3.x | |
+| flask-pymongo | 3.0+ | Required for Flask 3.x compatibility |
+| scispacy | 0.6.x | Uses nmslib-metabrainz for Python 3.10+ |
+| rq | 1.16+ | Job IDs cannot contain colons (`:`) |
+| rq-dashboard | 0.8.6+ | Required for rq 1.16+ compatibility |
+| scipy | 1.11+ | Required for Python 3.12 |
+| Pydantic | 2.x | Models use `ConfigDict` syntax |
+
 ## Architecture
 
 ### Service Stack (docker-compose.yml)
@@ -47,13 +69,14 @@ docker compose --profile cpu up --build          # Without local MongoDB
 - **worker-ops**: RQ worker for operational tasks (single instance)
 - **pines/pines-gpu**: PINES NLP inference service
 - **minio**: Object storage for file uploads
-- **prometheus**: Metrics collection
+- **prometheus**: Metrics collection (scrapes web:5001/metrics)
 - **nginx**: Reverse proxy
 
 ### CEDARS App Structure (`cedars/app/`)
 - `__init__.py`: Flask app factory with blueprint registration
 - `ops.py`: Main operations blueprint - project management, annotation UI, file upload
 - `db.py`: MongoDB operations layer (patients, notes, annotations, users)
+- `database.py`: Database connection management (PyMongo, MinIO)
 - `auth.py`: Authentication with flask-login
 - `nlpprocessor.py`: NLP pipeline (spaCy, negation detection)
 - `adjudication_handler.py`: Annotation review logic
@@ -92,7 +115,8 @@ Required env var for tests: `PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc`
 - **Enums**: Class-based pattern in `app/cedars_enums.py`
 - **Docstrings**: Use triple quotes for functions and classes
 - **Error Handling**: Use try/except blocks with specific exceptions
-- **Framework**: Flask 3.x, flask-pymongo, flask-login, RQ for background jobs
+- **Framework**: Flask 3.x, flask-pymongo 3.x, flask-login, RQ for background jobs
+- **RQ Job IDs**: Use `-` as separator, not `:` (e.g., `spacy-{patient_id}`)
 
 ---
 
@@ -121,18 +145,18 @@ Required env var for tests: `PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc`
 | Issue | Location | Impact |
 |-------|----------|--------|
 | Missing `depends_on: db` | docker-compose workers | Workers may start before DB ready |
-| No health checks | web, db, pines services | Cascading failures on startup |
-| Prometheus misconfigured | prometheus.yml | Scrapes nginx instead of web directly |
+| No health checks | db, pines services | Cascading failures on startup |
 
 ---
 
 ## Refactoring Roadmap
 
-### Phase 1: Configuration Cleanup (Low Risk)
-1. Ensure `.env.sample` has all required variables
-2. Centralize config loading - single `dotenv_values()` call in `config.py`, import elsewhere
-3. Add startup validation for required config vars
-4. Standardize PINES connection to single mode (docker service OR remote, not both)
+### Phase 1: Configuration Cleanup (Low Risk) ✅ COMPLETED
+1. ~~Ensure `.env.sample` has all required variables~~
+2. ~~Centralize config loading - single `dotenv_values()` call in `config.py`, import elsewhere~~
+3. ~~Add startup validation for required config vars~~
+4. ~~Standardize PINES connection to single mode (docker service OR remote, not both)~~
+5. ~~Fix Prometheus configuration (now scrapes web:5001 directly)~~
 
 ### Phase 2: Split db.py (Medium Risk)
 Target structure:
@@ -158,8 +182,7 @@ app/
 ### Phase 4: Infrastructure Hardening (Low Risk)
 1. Add health checks to all docker-compose services
 2. Add `depends_on` with `condition: service_healthy` for proper startup order
-3. Fix or remove Prometheus configuration
-4. Make `worker-ops` scale configurable (use Redis locks for race conditions)
+3. Make `worker-ops` scale configurable (use Redis locks for race conditions)
 
 ### Phase 5: Dependency Injection (Higher Risk)
 1. Create application context that holds dependencies
