@@ -18,7 +18,12 @@ build/
 *.egg-info/
 **/*.log
 TODO
-**/models/*
+# ML model weights (not Python model files)
+**/models/*.bin
+**/models/*.pt
+**/models/*.onnx
+**/models/*.safetensors
+!cedars/app/models/*.py
 **/.env
 curl.txt
 curl.zip
