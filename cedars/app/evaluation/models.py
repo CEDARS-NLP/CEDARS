@@ -41,7 +41,7 @@ class EvaluationSession(BaseModel):
     id: Optional[str] = None
     project_id: str
     created_by: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: Optional[datetime] = None
     status: Literal[
         "sampling", "running", "reviewing", "completed"
     ] = "sampling"
@@ -74,7 +74,7 @@ class EvaluationJudgment(BaseModel):
     llm_prediction: LLMPrediction
     judgment: Literal["correct", "wrong", "skipped"] = "skipped"
     judged_by: str
-    judged_at: datetime = Field(default_factory=datetime.utcnow)
+    judged_at: Optional[datetime] = None
 
 
 class ValidatedPrompt(BaseModel):
@@ -91,5 +91,5 @@ class ValidatedPrompt(BaseModel):
     evaluation_metrics: EvaluationMetrics
     evaluation_session_id: str
     validated_by: str
-    validated_at: datetime = Field(default_factory=datetime.utcnow)
+    validated_at: Optional[datetime] = None
     is_active: bool = False
