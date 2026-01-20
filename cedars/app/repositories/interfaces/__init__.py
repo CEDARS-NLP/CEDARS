@@ -6,6 +6,7 @@ from .annotation_repository import AnnotationRepositoryInterface
 from .user_repository import UserRepositoryInterface
 from .project_repository import ProjectRepositoryInterface
 from .task_repository import TaskRepositoryInterface
+from .evaluation_repository import EvaluationRepositoryInterface
 
 __all__ = [
     "PatientRepositoryInterface",
@@ -14,4 +15,5 @@ __all__ = [
     "UserRepositoryInterface",
     "ProjectRepositoryInterface",
     "TaskRepositoryInterface",
+    "EvaluationRepositoryInterface",
 ]
