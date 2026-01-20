@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS - Review{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row mb-4">
+    <div class="col">
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+          <li class="breadcrumb-item">
+            <a href="{{ url_for('evaluation.index', project_id=project_id) }}">Evaluation</a>
+          </li>
+          <li class="breadcrumb-item">
+            <a href="{{ url_for('evaluation.session_detail', project_id=project_id, session_id=session_id) }}">Session</a>
+          </li>
+          <li class="breadcrumb-item active" aria-current="page">Review</li>
+        </ol>
+      </nav>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Main Review Area -->
+    <div class="col-md-8">
+      <!-- Progress Bar -->
+      <div class="card mb-4">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span>Progress: {{ progress.reviewed }} / {{ progress.total }}</span>
+            <span>{{ "%.0f"|format(progress.percent) }}% complete</span>
+          </div>
+          <div class="progress" style="height: 8px;">
+            <div class="progress-bar" role="progressbar"
+                 style="width: {{ progress.percent }}%;"
+                 aria-valuenow="{{ progress.percent }}" aria-valuemin="0" aria-valuemax="100">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Note Text -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Clinical Note</h5>
+          <small class="text-muted">Note ID: {{ judgment.note_id }}</small>
+        </div>
+        <div class="card-body">
+          <div style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 0.9rem; background-color: #f8f9fa; padding: 1rem; border-radius: 4px;">{{ judgment.note_text }}</div>
+        </div>
+      </div>
+
+      <!-- LLM Prediction -->
+      <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">LLM Prediction</h5>
+          {% if judgment.llm_prediction.label == 1 %}
+          <span class="badge bg-success fs-6">Positive ({{ "%.0f"|format(judgment.llm_prediction.score * 100) }}%)</span>
+          {% else %}
+          <span class="badge bg-secondary fs-6">Negative ({{ "%.0f"|format((1 - judgment.llm_prediction.score) * 100) }}%)</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          <h6>Reasoning:</h6>
+          <p class="mb-0" style="white-space: pre-wrap;">{{ judgment.llm_prediction.reasoning or 'No reasoning provided.' }}</p>
+        </div>
+      </div>
+
+      <!-- Judgment Buttons -->
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0">Your Judgment</h5>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-3">Is the LLM prediction correct based on the clinical note?</p>
+          <form action="{{ url_for('evaluation.submit_judgment', project_id=project_id, session_id=session_id) }}"
+                method="POST">
+            <input type="hidden" name="note_id" value="{{ judgment.note_id }}">
+            <div class="d-flex gap-3">
+              <button type="submit" name="judgment" value="correct" class="btn btn-success btn-lg flex-fill">
+                Correct
+              </button>
+              <button type="submit" name="judgment" value="wrong" class="btn btn-danger btn-lg flex-fill">
+                Wrong
+              </button>
+              <button type="submit" name="judgment" value="skipped" class="btn btn-outline-secondary btn-lg flex-fill">
+                Skip
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-md-4">
+      <!-- Event Definition Reference -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h6 class="mb-0">Event: {{ session.event_definition.name }}</h6>
+        </div>
+        <div class="card-body">
+          <p class="small"><strong>Description:</strong><br>{{ session.event_definition.description or 'N/A' }}</p>
+          <p class="small"><strong>Include if:</strong><br>{{ session.event_definition.include_criteria or 'None' }}</p>
+          <p class="small mb-0"><strong>Exclude if:</strong><br>{{ session.event_definition.exclude_criteria or 'None' }}</p>
+        </div>
+      </div>
+
+      <!-- Current Metrics -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h6 class="mb-0">Current Metrics</h6>
+        </div>
+        <div class="card-body">
+          <div class="row text-center">
+            <div class="col-6 mb-2">
+              <div class="h4 mb-0 text-success">{{ metrics.correct }}</div>
+              <small class="text-muted">Correct</small>
+            </div>
+            <div class="col-6 mb-2">
+              <div class="h4 mb-0 text-danger">{{ metrics.wrong }}</div>
+              <small class="text-muted">Wrong</small>
+            </div>
+            <div class="col-6">
+              <div class="h4 mb-0 text-secondary">{{ metrics.skipped }}</div>
+              <small class="text-muted">Skipped</small>
+            </div>
+            <div class="col-6">
+              <div class="h4 mb-0 text-primary">{{ "%.1f"|format(metrics.accuracy * 100) }}%</div>
+              <small class="text-muted">Accuracy</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <div class="card">
+        <div class="card-body">
+          <a href="{{ url_for('evaluation.session_detail', project_id=project_id, session_id=session_id) }}"
+             class="btn btn-outline-secondary w-100 mb-2">
+            Back to Session
+          </a>
+          <a href="{{ url_for('evaluation.dashboard', project_id=project_id, session_id=session_id) }}"
+             class="btn btn-outline-primary w-100">
+            View Dashboard
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Keyboard shortcuts for faster review
+document.addEventListener('keydown', function(e) {
+  // Only trigger if not in an input field
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  const form = document.querySelector('form[action*="submit_judgment"]');
+  if (!form) return;
+
+  // 'c' or '1' for Correct
+  if (e.key === 'c' || e.key === '1') {
+    e.preventDefault();
+    form.querySelector('button[value="correct"]').click();
+  }
+  // 'w' or '2' for Wrong
+  else if (e.key === 'w' || e.key === '2') {
+    e.preventDefault();
+    form.querySelector('button[value="wrong"]').click();
+  }
+  // 's' or '3' for Skip
+  else if (e.key === 's' || e.key === '3') {
+    e.preventDefault();
+    form.querySelector('button[value="skipped"]').click();
+  }
+});
+</script>
+{% endblock %}
