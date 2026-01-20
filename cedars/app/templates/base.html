@@ -37,6 +37,9 @@
                             <li><a class="dropdown-item" href="/ops/upload_data">Upload Data</a></li>
                             <li><a class="dropdown-item" href="/ops/upload_query">Search Query</a></li>
                             <li><a class="dropdown-item" href="/ops/download_page">Download Annotations</a></li>
+                            {% if project_id %}
+                            <li><a class="dropdown-item" href="{{ url_for('evaluation.index', project_id=project_id) }}">LLM Evaluation</a></li>
+                            {% endif %}
                         {% endif %}
                         <li><a class="dropdown-item" href="/ops/adjudicate_records">Adjudicate Annotations</a></li>
                         <li><a class="dropdown-item" href="/about">About</a></li>
