@@ -283,9 +283,9 @@ class MongoEvaluationRepository(EvaluationRepositoryInterface):
                 {"$set": {"is_active": False}},
             )
 
-            # Then, activate the specified prompt
+            # Then, activate the specified prompt (only if it belongs to this project)
             result = self.prompts_collection.update_one(
-                {"_id": ObjectId(prompt_id)},
+                {"_id": ObjectId(prompt_id), "project_id": project_id},
                 {"$set": {"is_active": True}},
             )
             return result.modified_count > 0
