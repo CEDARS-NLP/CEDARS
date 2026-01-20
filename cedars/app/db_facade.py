@@ -15,6 +15,7 @@ Usage:
     patient = patient_repo.get_by_id("P001")
 """
 
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -28,7 +29,8 @@ from app.factory import (
     init_database,
 )
 
-# Lazy-loaded repository instances
+# Thread-safe lazy-loaded repository instances
+_repo_lock = threading.Lock()
 _patient_repo = None
 _note_repo = None
 _annotation_repo = None
@@ -40,42 +42,54 @@ _task_repo = None
 def _get_patient_repo():
     global _patient_repo
     if _patient_repo is None:
-        _patient_repo = get_patient_repository()
+        with _repo_lock:
+            if _patient_repo is None:
+                _patient_repo = get_patient_repository()
     return _patient_repo
 
 
 def _get_note_repo():
     global _note_repo
     if _note_repo is None:
-        _note_repo = get_note_repository()
+        with _repo_lock:
+            if _note_repo is None:
+                _note_repo = get_note_repository()
     return _note_repo
 
 
 def _get_annotation_repo():
     global _annotation_repo
     if _annotation_repo is None:
-        _annotation_repo = get_annotation_repository()
+        with _repo_lock:
+            if _annotation_repo is None:
+                _annotation_repo = get_annotation_repository()
     return _annotation_repo
 
 
 def _get_user_repo():
     global _user_repo
     if _user_repo is None:
-        _user_repo = get_user_repository()
+        with _repo_lock:
+            if _user_repo is None:
+                _user_repo = get_user_repository()
     return _user_repo
 
 
 def _get_project_repo():
     global _project_repo
     if _project_repo is None:
-        _project_repo = get_project_repository()
+        with _repo_lock:
+            if _project_repo is None:
+                _project_repo = get_project_repository()
     return _project_repo
 
 
 def _get_task_repo():
     global _task_repo
     if _task_repo is None:
-        _task_repo = get_task_repository()
+        with _repo_lock:
+            if _task_repo is None:
+                _task_repo = get_task_repository()
     return _task_repo
 
 

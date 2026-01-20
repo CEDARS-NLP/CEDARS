@@ -412,9 +412,38 @@ def upload_query():
         event_include = request.form.get("event_include", "")
         event_exclude = request.form.get("event_exclude", "")
 
-        # Validate LLM configuration
+        # Validate LLM provider
+        valid_providers = ["openai", "anthropic", "ollama", "lmstudio", "gemini", "bedrock"]
+        if llm_provider not in valid_providers:
+            flash(f"Invalid LLM provider. Must be one of: {', '.join(valid_providers)}")
+            return redirect(url_for("ops.upload_query"))
+
+        # Validate LLM model
+        if not llm_model or not llm_model.strip():
+            flash("LLM model name is required.")
+            return redirect(url_for("ops.upload_query"))
+
+        # Validate API base URL format if provided
+        if llm_api_base:
+            if not llm_api_base.startswith(("http://", "https://")):
+                flash("API base URL must start with http:// or https://")
+                return redirect(url_for("ops.upload_query"))
+
+        # Validate event configuration
         if not event_name:
             flash("Event name is required for LLM classification.")
+            return redirect(url_for("ops.upload_query"))
+
+        # Validate field lengths to prevent abuse
+        max_field_length = 5000
+        if len(event_description) > max_field_length:
+            flash(f"Event description exceeds maximum length of {max_field_length} characters.")
+            return redirect(url_for("ops.upload_query"))
+        if len(event_include) > max_field_length:
+            flash(f"Include criteria exceeds maximum length of {max_field_length} characters.")
+            return redirect(url_for("ops.upload_query"))
+        if len(event_exclude) > max_field_length:
+            flash(f"Exclude criteria exceeds maximum length of {max_field_length} characters.")
             return redirect(url_for("ops.upload_query"))
 
         # Determine API key environment variable based on provider

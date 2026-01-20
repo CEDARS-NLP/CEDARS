@@ -58,6 +58,7 @@ docker compose --profile cpu up --build          # Without local MongoDB
 | rq-dashboard | 0.8.6+ | Required for rq 1.16+ compatibility |
 | scipy | 1.11+ | Required for Python 3.12 |
 | Pydantic | 2.x | Models use `ConfigDict` syntax |
+| litellm | 1.40+ | Multi-provider LLM abstraction for predictor system |
 
 ## Architecture
 
@@ -243,3 +244,88 @@ app/
 - [x] SQLite repositories implemented
 - [x] Factory pattern implemented
 - [ ] Full db.py migration (in progress - use db_facade.py for new code)
+
+---
+
+## Predictor System (LLM Integration)
+
+CEDARS supports multiple predictor backends for clinical event classification:
+
+### Supported Predictors
+
+| Predictor | Description | Use Case |
+|-----------|-------------|----------|
+| **PINES** | Longformer-based model | Pre-trained clinical event detection |
+| **LLM** | Multi-provider LLM via LiteLLM | Zero-shot classification with natural language |
+
+### LLM Providers (via LiteLLM)
+
+| Provider | Model Examples | Config |
+|----------|---------------|--------|
+| OpenAI | `gpt-4o`, `gpt-4o-mini` | `OPENAI_API_KEY` |
+| Anthropic | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` |
+| AWS Bedrock | `anthropic.claude-3-haiku-*` | AWS credentials |
+| Ollama | `llama3`, `mistral` | Local, no API key |
+| LMStudio | Any GGUF model | Local, no API key |
+| Google Gemini | `gemini-pro` | `GOOGLE_API_KEY` |
+
+### Architecture
+
+```
+app/predictors/
+├── __init__.py          # Public exports
+├── base.py              # BasePredictor ABC, PredictionResult
+├── config.py            # PredictorConfig, LLMConfig, EventDefinition
+├── factory.py           # get_predictor(), get_predictor_from_db()
+├── pines.py             # PinesPredictor implementation
+└── llm.py               # LLMPredictor implementation
+```
+
+### Usage
+
+```python
+from app.predictors.factory import get_predictor
+from app.predictors.config import (
+    PredictorConfig, PredictorType, LLMConfig, LLMProvider, EventDefinition
+)
+
+# Create LLM predictor config
+config = PredictorConfig(
+    predictor_type=PredictorType.LLM,
+    llm_config=LLMConfig(
+        provider=LLMProvider.OLLAMA,
+        model="llama3",
+        api_base="http://localhost:11434"
+    ),
+    event_definition=EventDefinition(
+        name="Myocardial Infarction",
+        description="Confirmed heart attack",
+        include_criteria="Positive troponin, ECG changes",
+        exclude_criteria="Rule-out, family history"
+    )
+)
+
+# Get predictor and classify
+predictor = get_predictor(config)
+result = predictor.predict(clinical_note_text)
+# result.score, result.label, result.reasoning
+```
+
+### Security Features
+
+- **Prompt injection protection**: XML tag sanitization, suspicious pattern logging
+- **Input validation**: Provider whitelist, URL format validation, length limits
+- **No credential storage**: API keys read from environment variables only
+
+### Integration Tests
+
+```bash
+# Basic tests (no external services)
+python tests/integration_test_predictors.py
+
+# With live providers
+INTEGRATION_TEST_OLLAMA=1 python tests/integration_test_predictors.py
+INTEGRATION_TEST_OPENAI=1 python tests/integration_test_predictors.py
+INTEGRATION_TEST_BEDROCK=1 python tests/integration_test_predictors.py
+INTEGRATION_TEST_PINES=1 PINES_API_URL=http://localhost:8000 python tests/integration_test_predictors.py
+```
