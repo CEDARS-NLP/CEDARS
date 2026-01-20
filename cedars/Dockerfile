@@ -1,34 +1,44 @@
-FROM python:3.9-buster as builder
+FROM python:3.12-slim AS builder
 
-RUN pip install poetry==1.7.1
+# Install build dependencies for packages like gevent, nmslib
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libc-dev \
+    libffi-dev \
+    make \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_INSTALLER_PARALLEL=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    POETRY_REQUESTS_TIMEOUT=10000 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-WORKDIR /
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
-COPY pyproject.toml ./
-RUN touch README.md
+WORKDIR /app
 
-RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
+# Install dependencies (cached layer) - model downloads cached in /root/.cache/uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=.python-version,target=.python-version \
+    uv sync --frozen --no-install-project --no-dev
 
-FROM python:3.9-slim as runtime
+# Copy app and install project (separate layer so deps stay cached)
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-workspace
 
-ENV VIRTUAL_ENV=/.venv \
-    PATH="/.venv/bin:$PATH" \
+FROM python:3.12-slim AS runtime
+
+ENV PATH="/app/.venv/bin:$PATH" \
     PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
 
 # Create the directory for Prometheus multiprocess metrics
 RUN mkdir -p /tmp/prometheus-multiproc
 
-COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-
-COPY . .
+COPY --from=builder /app /app
+WORKDIR /app
 
 EXPOSE 5001
 
-CMD [ "gunicorn", "app.wsgi:app", "--log-level", "debug" ]
+CMD ["gunicorn", "app.wsgi:app", "--log-level", "debug"]

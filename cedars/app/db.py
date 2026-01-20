@@ -2168,7 +2168,7 @@ def update_db_task_progress(task_id, progress):
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
                                  "complete": completed}})
-    patient_id = (task_id.split(":")[1]).strip()
+    patient_id = (task_id.split("-")[1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
