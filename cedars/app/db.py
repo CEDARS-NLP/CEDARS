@@ -2363,6 +2363,10 @@ def terminate_project():
     mongo.db.drop_collection("TASK")
     mongo.db.drop_collection("RESULTS")
     mongo.db.drop_collection("NOTES_SUMMARY")
+    # LLM Evaluation collections
+    mongo.db.drop_collection("EVALUATION_SESSIONS")
+    mongo.db.drop_collection("EVALUATION_JUDGMENTS")
+    mongo.db.drop_collection("VALIDATED_PROMPTS")
 
     project_id = os.getenv("PROJECT_ID", None)
 
