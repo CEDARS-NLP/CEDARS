@@ -64,18 +64,21 @@ def _convert_event_definition(event_def: EventDefinitionModel) -> EventDefinitio
 
 def _sample_notes_with_keywords(
     sample_config: SampleConfig,
-    project_id: Optional[str] = None,
 ) -> list[str]:
     """Sample notes using keyword-based stratification.
 
+    Note: Uses mongo.db which points to the current project's database
+    (configured via DB_NAME). The project_id in INFO is an identifier,
+    not the database name.
+
     Args:
         sample_config: Configuration for sampling (size, keywords, ratio).
-        project_id: Optional project ID to filter notes.
 
     Returns:
         List of sampled note IDs (text_id values).
     """
     notes_collection = mongo.db["NOTES"]
+
     keywords = sample_config.keywords
     total_size = sample_config.size
     keyword_ratio = sample_config.keyword_match_ratio
@@ -86,37 +89,30 @@ def _sample_notes_with_keywords(
     keyword_matched_ids = []
     non_keyword_ids = []
 
-    # Build base query with project_id filter for data isolation
-    base_query = {}
-    if project_id:
-        base_query["project_id"] = project_id
-
     if keywords:
         # Build case-insensitive regex pattern for keyword matching
         # Match any keyword in the note text
         keyword_pattern = "|".join(re.escape(kw) for kw in keywords)
         keyword_regex = {"$regex": keyword_pattern, "$options": "i"}
 
-        # Find notes containing any keyword (filtered by project)
-        keyword_query = {**base_query, "text": keyword_regex}
+        # Find notes containing any keyword
         keyword_cursor = notes_collection.find(
-            keyword_query,
+            {"text": keyword_regex},
             {"text_id": 1, "_id": 0}
         )
         keyword_matched_ids = [doc["text_id"] for doc in keyword_cursor]
         logger.info(f"Found {len(keyword_matched_ids)} notes matching keywords")
 
-        # Find notes NOT containing keywords (filtered by project)
-        non_keyword_query = {**base_query, "text": {"$not": keyword_regex}}
+        # Find notes NOT containing keywords
         non_keyword_cursor = notes_collection.find(
-            non_keyword_query,
+            {"text": {"$not": keyword_regex}},
             {"text_id": 1, "_id": 0}
         )
         non_keyword_ids = [doc["text_id"] for doc in non_keyword_cursor]
         logger.info(f"Found {len(non_keyword_ids)} notes not matching keywords")
     else:
-        # No keywords - get all notes (filtered by project)
-        cursor = notes_collection.find(base_query, {"text_id": 1, "_id": 0})
+        # No keywords - get all notes
+        cursor = notes_collection.find({}, {"text_id": 1, "_id": 0})
         non_keyword_ids = [doc["text_id"] for doc in cursor]
         keyword_sample_size = 0
 
@@ -172,7 +168,7 @@ def create_session(
     repo = _get_repository()
 
     # Sample notes using keyword stratification
-    sampled_note_ids = _sample_notes_with_keywords(sample_config, project_id)
+    sampled_note_ids = _sample_notes_with_keywords(sample_config)
 
     # Create the session
     session = EvaluationSession(
@@ -212,12 +208,14 @@ def run_predictions(session_id: str) -> None:
         ValueError: If the session is not found.
     """
     repo = _get_repository()
-    notes_collection = mongo.db["NOTES"]
 
     # Get the session
     session = repo.get_session(session_id)
     if session is None:
         raise ValueError(f"Evaluation session {session_id} not found")
+
+    # Get notes from the current project database
+    notes_collection = mongo.db["NOTES"]
 
     # Update status to running
     repo.update_session_status(session_id, "running")

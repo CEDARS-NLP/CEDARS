@@ -75,7 +75,6 @@ def index(project_id: str):
 
     return render_template(
         "evaluation/index.html",
-        project_id=project_id,
         sessions=sessions,
         validated_prompts=validated_prompts,
         **project_info,
@@ -208,7 +207,6 @@ def session_detail(project_id: str, session_id: str):
 
     return render_template(
         "evaluation/session_detail.html",
-        project_id=project_id,
         session=session,
         disagreements=disagreements,
         **project_info,
@@ -324,7 +322,6 @@ def review(project_id: str, session_id: str):
 
     return render_template(
         "evaluation/review.html",
-        project_id=project_id,
         session_id=session_id,
         session=session,
         judgment=judgment,
@@ -438,7 +435,6 @@ def dashboard(project_id: str, session_id: str):
 
     return render_template(
         "evaluation/dashboard.html",
-        project_id=project_id,
         session_id=session_id,
         session=session,
         metrics=metrics,

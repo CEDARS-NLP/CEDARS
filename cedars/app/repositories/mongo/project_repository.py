@@ -273,6 +273,10 @@ class MongoProjectRepository(ProjectRepositoryInterface):
             "NOTES_SUMMARY",
             "TASK",
             "QUERY",
+            # LLM Evaluation collections
+            "EVALUATION_SESSIONS",
+            "EVALUATION_JUDGMENTS",
+            "VALIDATED_PROMPTS",
         ]
         for collection in collections:
             mongo.db.drop_collection(collection)
