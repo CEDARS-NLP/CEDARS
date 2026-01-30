@@ -18,7 +18,6 @@ services:
   web:
     build:
       context: ./cedars
-    image: cedars
     ports:
       - 5001:5001
     restart: always
@@ -176,7 +175,6 @@ services:
   worker-task:
     build:
       context: ./cedars
-    image: cedars
     command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
@@ -203,7 +201,6 @@ services:
   worker-ops:
     build:
       context: ./cedars
-    image: cedars
     command: python -m app.make_rq ops
     scale: 1
     networks:
