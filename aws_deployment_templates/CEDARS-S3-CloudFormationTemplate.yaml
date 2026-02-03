@@ -12,12 +12,17 @@ Parameters:
       - t3.xlarge
       - t3.2xlarge
     ConstraintDescription: must be a valid EC2 instance type.
+  BucketTitle:
+    Type: String
+    Default: cedars-minio-bucket
+    Description: Lowercase project identifier (used for S3 bucket names)
+    AllowedPattern: "^[a-z0-9-]+$"
+    ConstraintDescription: must contain only lowercase letters, numbers, and hyphens
 Resources:
   CedarsBucket:
     Type: AWS::S3::Bucket
-    DependsOn: EmptyBucketOnDelete
     Properties:
-      BucketName: !Sub "cedars-${AWS::StackName}"
+      BucketName: !Sub "${BucketTitle}"
       VersioningConfiguration:
         Status: Enabled
 
