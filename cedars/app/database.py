@@ -30,8 +30,8 @@ def get_minio():
         g.bucket_name = os.getenv("S3_BUCKET_NAME")
         if not g.bucket_name:
             raise RuntimeError("S3_BUCKET_NAME not set in environment")
-        if minio_client is None:
-            minio_client = g.minio = Minio(
+        if minio is None:
+            minio = g.minio = Minio(
                 endpoint=f'{os.getenv("MINIO_HOST")}:{os.getenv("MINIO_PORT")}',
                 access_key=os.getenv("MINIO_ACCESS_KEY"),
                 secret_key=os.getenv("MINIO_SECRET_KEY"),
@@ -41,7 +41,7 @@ def get_minio():
             # IMPORTANT:
             # In S3 gateway mode, MinIO does NOT create buckets.
             # The bucket already exists in AWS S3.
-            if not minio_client.bucket_exists(g.bucket_name):
+            if not minio.bucket_exists(g.bucket_name):
                 raise RuntimeError(
                     f"S3 bucket '{g.bucket_name}' does not exist or credentials are invalid"
                 )
