@@ -15,6 +15,7 @@ Parameters:
 Resources:
   CedarsBucket:
     Type: AWS::S3::Bucket
+    DependsOn: EmptyBucketOnDelete
     Properties:
       BucketName: !Sub "cedars-${AWS::StackName}"
       VersioningConfiguration:
@@ -194,6 +195,65 @@ Resources:
         echo "Finished docker build"
         docker compose --profile selfhosted --profile cpu up -d
         echo "Docker is now running"
+  
+  BucketCleanupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Cleanup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub "arn:aws:s3:::${CedarsBucket}"
+                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  BucketCleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.10
+      Handler: index.handler
+      Role: !GetAtt BucketCleanupRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+              s3 = boto3.resource("s3")
+              bucket = s3.Bucket(event["ResourceProperties"]["BucketName"])
+
+              if event["RequestType"] == "Delete":
+                  bucket.object_versions.delete()
+
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+  
+  EmptyBucketOnDelete:
+    Type: Custom::EmptyS3Bucket
+    Properties:
+      ServiceToken: !GetAtt BucketCleanupFunction.Arn
+      BucketName: !Ref CedarsBucket
+
+
 
 Outputs:
   WebsiteURL:
