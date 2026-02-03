@@ -1,4 +1,4 @@
 {
     "cpu_stack_small" : "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https%3A%2F%2Fs3.us-east-1.amazonaws.com%2Fcf-templates-zjnaijfa2c9g-us-east-1%2F2026-01-30T145216.186Zcjg-CEDARS-CPU-CloudFormationTemplate-v4.yaml&stackName=CEDARS-CPU-Stack-Small&param_InstanceType=t3.xlarge",
-    "cpu_stack_small_s3" : "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https%3A%2F%2Fs3.us-east-1.amazonaws.com%2Fcf-templates-1satjhjn58j66-us-east-1%2Ftemplate-1770122131566.yaml&stackName=CEDARS-CPU-Stack&param_BucketTitle=cedars-minio-bucket&param_InstanceType=t3.xlarge"
+    "cpu_stack_small_s3" : "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https%3A%2F%2Fs3.us-east-1.amazonaws.com%2Fcf-templates-zjnaijfa2c9g-us-east-1%2F2026-02-03T125855.947Z9yr-CEDARS-S3-CloudFormationTemplate.yaml&stackName=CEDARS-CPU-Stack&param_BucketTitle=cedars-minio-bucket&param_InstanceType=t3.xlarge"
 }

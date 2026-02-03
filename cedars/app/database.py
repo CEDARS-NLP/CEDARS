@@ -30,13 +30,19 @@ def get_minio():
         g.bucket_name = os.getenv("S3_BUCKET_NAME")
         if not g.bucket_name:
             raise RuntimeError("S3_BUCKET_NAME not set in environment")
+        g.region = os.getenv("AWS_REGION")
+        if not g.region:
+            raise RuntimeError("AWS_REGION not set in environment")
+
         if minio is None:
-            minio = g.minio = Minio(
-                endpoint=f'{os.getenv("MINIO_HOST")}:{os.getenv("MINIO_PORT")}',
-                access_key=os.getenv("MINIO_ACCESS_KEY"),
-                secret_key=os.getenv("MINIO_SECRET_KEY"),
-                secure=False  # true only if you add TLS in front of MinIO
+            minio = Minio(
+                endpoint=f's3.{g.region}.amazonaws.com',  # AWS S3 endpoint
+                access_key=os.getenv("AWS_ACCESS_KEY_ID"),
+                secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+                secure=True,  # Always use HTTPS with AWS S3
+                region=g.region
             )
+
 
             # IMPORTANT:
             # In S3 gateway mode, MinIO does NOT create buckets.
