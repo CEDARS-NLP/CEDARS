@@ -163,8 +163,6 @@ Resources:
           PINES_WORKERS=1
           EOF
 
-          echo "" >> .env
-
           cat > /home/ec2-user/CEDARS/cedars/.env << EOF
           PROJECT_ID=$PROJECT_ID
           SECRET_KEY=$SECRET_KEY

@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: GPU ECS inference stack (ModernBERT-large) with scale-to-zero and full IAM
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.medium
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  OutputBucket:
+    Type: String
+    Default: pines-output-bucket
+
+Resources:
+
+  ################################
+  # Security Group
+  ################################
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web server SG
+      VpcId: !Ref VpcId
+
+  ################################
+  # Web Server IAM Role
+  ################################
+
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WebServerEcsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt ECSTaskExecutionRole.Arn
+                  - !GetAtt ECSTaskRole.Arn
+
+        - PolicyName: WebServerS3Read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${OutputBucket}/*"
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebServerRole
+
+  ################################
+  # Web Server EC2
+  ################################
+
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0fa3fe0fa7920f68e
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref WebServerInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 64
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+
+  ################################
+  # ECS Cluster
+  ################################
+
+  GpuEcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: bert-gpu-cluster
+
+  ################################
+  # CloudWatch Logs
+  ################################
+
+  GpuLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/bert-gpu
+      RetentionInDays: 14
+
+  ################################
+  # ECS Task IAM Roles
+  ################################
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BertS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${OutputBucket}/*"
+
+  ################################
+  # ECS Instance Role
+  ################################
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ECSInstanceRole
+
+  ################################
+  # ECS Task Definition (GPU)
+  ################################
+
+  GpuTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: bert-gpu-task
+      RequiresCompatibilities: [EC2]
+      Cpu: "4096"
+      Memory: "16384"
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: bert
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/pines:latest"
+          Essential: true
+          ResourceRequirements:
+            - Type: GPU
+              Value: "1"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/bert-gpu
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: ecs
+
+  ################################
+  # GPU Capacity (Scale-to-Zero)
+  ################################
+
+  GpuLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType: g4dn.xlarge
+        ImageId: ami-0f3c7d07486cad139
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            echo ECS_CLUSTER=bert-gpu-cluster >> /etc/ecs/ecs.config
+            echo ECS_ENABLE_GPU_SUPPORT=true >> /etc/ecs/ecs.config
+
+  GpuAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: 0
+      MaxSize: 2
+      DesiredCapacity: 0
+      Cooldown: 3600
+      LaunchTemplate:
+        LaunchTemplateId: !Ref GpuLaunchTemplate
+        Version: !GetAtt GpuLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !GetAtt WebServer.SubnetId
+
+  ################################
+  # Scale Down After 60 Minutes Idle
+  ################################
+
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref GpuAutoScalingGroup
+      PolicyType: SimpleScaling
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: -1
+      Cooldown: 3600
+
+  LowCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale down GPU nodes after 60 minutes idle
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 12
+      Threshold: 5
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref ScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref GpuAutoScalingGroup
