@@ -6,6 +6,7 @@ from .annotation_repository import MongoAnnotationRepository
 from .user_repository import MongoUserRepository
 from .project_repository import MongoProjectRepository
 from .task_repository import MongoTaskRepository
+from .evaluation_repository import MongoEvaluationRepository
 
 __all__ = [
     "MongoPatientRepository",
@@ -14,4 +15,5 @@ __all__ = [
     "MongoUserRepository",
     "MongoProjectRepository",
     "MongoTaskRepository",
+    "MongoEvaluationRepository",
 ]

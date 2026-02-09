@@ -25,6 +25,7 @@ from werkzeug.utils import secure_filename
 from config import config
 from . import auth, db, nlpprocessor
 from .adjudication_handler import AdjudicationHandler
+from .evaluation import get_active_validated_prompt
 from .api import get_token_status, kill_pines_api, load_pines_url
 from .cedars_enums import PatientStatus, ReviewStatus, log_function_call
 from .database import minio
@@ -354,6 +355,23 @@ def upload_query():
     if request.method == "GET":
         current_query = db.get_search_query()
         predictor_config = db.get_predictor_config()
+
+        # If no predictor config, check for an active validated prompt
+        predictor_type = predictor_config.get("predictor_type") if predictor_config else None
+        if not predictor_type:
+            project_info = db.get_info()
+            project_id = project_info.get("project_id")
+            if project_id:
+                validated_prompt = get_active_validated_prompt(project_id)
+                if validated_prompt:
+                    # Use validated prompt's config to pre-populate the form
+                    predictor_config = {
+                        'predictor_type': 'llm',
+                        'llm_config': validated_prompt.llm_config,
+                        'event_definition': validated_prompt.event_definition,
+                    }
+                    logger.info(f"Using validated prompt {validated_prompt.version_name} for LLM config")
+
         return render_template("ops/upload_query.html",
                                current_query=current_query,
                                predictor_config=predictor_config,
