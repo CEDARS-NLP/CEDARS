@@ -15,6 +15,7 @@ from redis import Redis
 
 from config import config, validate_config
 from . import auth, ops, stats
+from .evaluation import evaluation_bp
 
 environment = os.getenv('ENV', 'local')
 sess = Session()
@@ -67,6 +68,8 @@ def create_app(config_filename=None):
     cedars_app.register_blueprint(ops.bp)
 
     cedars_app.register_blueprint(stats.bp)
+
+    cedars_app.register_blueprint(evaluation_bp)
 
     setup_logging()
 

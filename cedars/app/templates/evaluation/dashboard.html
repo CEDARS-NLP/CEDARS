@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS - Evaluation Dashboard{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row mb-4">
+    <div class="col">
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+          <li class="breadcrumb-item">
+            <a href="{{ url_for('evaluation.index', project_id=project_id) }}">Evaluation</a>
+          </li>
+          <li class="breadcrumb-item">
+            <a href="{{ url_for('evaluation.session_detail', project_id=project_id, session_id=session_id) }}">Session</a>
+          </li>
+          <li class="breadcrumb-item active" aria-current="page">Dashboard</li>
+        </ol>
+      </nav>
+      <h2>Evaluation Dashboard</h2>
+      <p class="text-muted">Event: {{ session.event_definition.name }} | Model: {{ session.llm_config.model }}</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Summary Statistics -->
+    <div class="col-md-8">
+      <!-- Judgment Counts -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <div class="h2 mb-0">{{ metrics.reviewed + metrics.skipped }}</div>
+              <small class="text-muted">Total Reviewed</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center border-success">
+            <div class="card-body">
+              <div class="h2 mb-0 text-success">{{ metrics.correct }}</div>
+              <small class="text-muted">Correct</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center border-danger">
+            <div class="card-body">
+              <div class="h2 mb-0 text-danger">{{ metrics.wrong }}</div>
+              <small class="text-muted">Wrong</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <div class="h2 mb-0 text-secondary">{{ metrics.skipped }}</div>
+              <small class="text-muted">Skipped</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Metrics -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Performance Metrics</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-3 text-center mb-3">
+              <div class="h3 mb-1">{{ "%.1f"|format(metrics.accuracy * 100) }}%</div>
+              <div class="text-muted">Accuracy</div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar bg-primary" role="progressbar"
+                     style="width: {{ metrics.accuracy * 100 }}%;">
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 text-center mb-3">
+              <div class="h3 mb-1">{{ "%.3f"|format(metrics.precision) }}</div>
+              <div class="text-muted">Precision</div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar bg-info" role="progressbar"
+                     style="width: {{ metrics.precision * 100 }}%;">
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 text-center mb-3">
+              <div class="h3 mb-1">{{ "%.3f"|format(metrics.recall) }}</div>
+              <div class="text-muted">Recall</div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar bg-warning" role="progressbar"
+                     style="width: {{ metrics.recall * 100 }}%;">
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 text-center mb-3">
+              <div class="h3 mb-1">{{ "%.3f"|format(metrics.f1) }}</div>
+              <div class="text-muted">F1 Score</div>
+              <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar bg-success" role="progressbar"
+                     style="width: {{ metrics.f1 * 100 }}%;">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Disagreements Table -->
+      <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Disagreements (Wrong Predictions)</h5>
+          <span class="badge bg-danger">{{ disagreements|length }}</span>
+        </div>
+        <div class="card-body">
+          {% if disagreements %}
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Note ID</th>
+                  <th>LLM Label</th>
+                  <th>Confidence</th>
+                  <th>Note Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for d in disagreements %}
+                <tr data-bs-toggle="collapse" data-bs-target="#detail-{{ loop.index }}" style="cursor: pointer;">
+                  <td><code>{{ d.note_id[:12] }}...</code></td>
+                  <td>
+                    {% if d.llm_prediction.label == 1 %}
+                    <span class="badge bg-success">Positive</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Negative</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ "%.0f"|format(d.llm_prediction.score * 100) }}%</td>
+                  <td>{{ d.note_text[:60] }}...</td>
+                </tr>
+                <tr class="collapse" id="detail-{{ loop.index }}">
+                  <td colspan="4" class="bg-light">
+                    <div class="p-2">
+                      <strong>Reasoning:</strong>
+                      <p class="mb-2">{{ d.llm_prediction.reasoning or 'No reasoning provided.' }}</p>
+                      <strong>Full Note:</strong>
+                      <div style="max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 0.8rem; background-color: #fff; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">{{ d.note_text }}</div>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted mb-0">No disagreements found. All LLM predictions were correct.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-md-4">
+      <!-- Actions -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Actions</h5>
+        </div>
+        <div class="card-body">
+          <a href="{{ url_for('evaluation.review', project_id=project_id, session_id=session_id) }}"
+             class="btn btn-primary w-100 mb-2">
+            Continue Review
+          </a>
+          <a href="{{ url_for('evaluation.export_csv', project_id=project_id, session_id=session_id) }}"
+             class="btn btn-outline-secondary w-100 mb-2">
+            Export Results (CSV)
+          </a>
+          <a href="{{ url_for('evaluation.session_detail', project_id=project_id, session_id=session_id) }}"
+             class="btn btn-outline-secondary w-100">
+            Back to Session
+          </a>
+        </div>
+      </div>
+
+      <!-- Validate Prompt -->
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Validate Prompt</h5>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted">Save this prompt configuration with its evaluation metrics for production use.</p>
+          <form action="{{ url_for('evaluation.validate', project_id=project_id, session_id=session_id) }}"
+                method="POST">
+            <div class="mb-3">
+              <label for="version_name" class="form-label">Version Name</label>
+              <input type="text" class="form-control" id="version_name" name="version_name"
+                     placeholder="e.g., v1.0-gpt4o" required>
+            </div>
+            <div class="mb-3">
+              <label for="notes" class="form-label">Notes (optional)</label>
+              <textarea class="form-control" id="notes" name="notes" rows="2"
+                        placeholder="Notes about this version..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-success w-100">Validate Prompt</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Session Info -->
+      <div class="card">
+        <div class="card-header">
+          <h6 class="mb-0">Session Info</h6>
+        </div>
+        <div class="card-body">
+          <p class="small mb-1"><strong>Session ID:</strong><br><code>{{ session.id }}</code></p>
+          <p class="small mb-1"><strong>Created:</strong><br>{{ session.created_at.strftime('%Y-%m-%d %H:%M') if session.created_at else 'N/A' }}</p>
+          <p class="small mb-1"><strong>Sample Size:</strong><br>{{ session.sampled_note_ids|length }} notes</p>
+          <p class="small mb-0"><strong>Model:</strong><br>{{ session.llm_config.provider }}/{{ session.llm_config.model }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

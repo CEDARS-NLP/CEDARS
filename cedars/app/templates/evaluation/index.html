@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}CEDARS - Evaluation{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row mb-4">
+    <div class="col">
+      <h2>LLM Prompt Evaluation</h2>
+      <p class="text-muted">Create evaluation sessions to test and validate LLM prompts for clinical event detection.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Existing Sessions -->
+    <div class="col-md-6">
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Evaluation Sessions</h5>
+        </div>
+        <div class="card-body">
+          {% if sessions %}
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Status</th>
+                  <th>Sample Size</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for session in sessions %}
+                <tr>
+                  <td>{{ session.created_at.strftime('%Y-%m-%d %H:%M') if session.created_at else 'N/A' }}</td>
+                  <td>
+                    {% if session.status == 'sampling' %}
+                    <span class="badge bg-secondary">Sampling</span>
+                    {% elif session.status == 'running' %}
+                    <span class="badge bg-info">Running</span>
+                    {% elif session.status == 'reviewing' %}
+                    <span class="badge bg-warning text-dark">Reviewing</span>
+                    {% elif session.status == 'completed' %}
+                    <span class="badge bg-success">Completed</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ session.sample_config.size }}</td>
+                  <td>
+                    <a href="{{ url_for('evaluation.session_detail', project_id=project_id, session_id=session.id) }}"
+                       class="btn btn-sm btn-outline-primary">View</a>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted mb-0">No evaluation sessions yet. Create one below.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Validated Prompts -->
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0">Validated Prompts</h5>
+        </div>
+        <div class="card-body">
+          {% if validated_prompts %}
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th>Accuracy</th>
+                  <th>F1</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for prompt in validated_prompts %}
+                <tr>
+                  <td>{{ prompt.version_name }}</td>
+                  <td>{{ "%.1f"|format(prompt.evaluation_metrics.accuracy * 100) }}%</td>
+                  <td>{{ "%.3f"|format(prompt.evaluation_metrics.f1) }}</td>
+                  <td>
+                    {% if prompt.is_active %}
+                    <span class="badge bg-success">Active</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if not prompt.is_active %}
+                    <form action="{{ url_for('evaluation.activate_prompt', project_id=project_id, prompt_id=prompt.id) }}"
+                          method="POST" style="display: inline;">
+                      <button type="submit" class="btn btn-sm btn-outline-success">Activate</button>
+                    </form>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted mb-0">No validated prompts yet. Complete an evaluation to validate a prompt.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Create New Session Form -->
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0">Create New Evaluation Session</h5>
+        </div>
+        <div class="card-body">
+          <form action="{{ url_for('evaluation.create_session', project_id=project_id) }}" method="POST">
+            <!-- Sampling Configuration -->
+            <h6 class="text-muted mb-3">Sampling Configuration</h6>
+
+            <div class="mb-3">
+              <label for="sample_size" class="form-label">Sample Size</label>
+              <input type="number" class="form-control" id="sample_size" name="sample_size"
+                     value="50" min="20" max="200" required>
+              <small class="form-text text-muted">Number of notes to sample (20-200)</small>
+            </div>
+
+            <div class="mb-3">
+              <label for="keywords" class="form-label">Keywords</label>
+              <input type="text" class="form-control" id="keywords" name="keywords"
+                     placeholder="myocardial, infarction, heart attack">
+              <small class="form-text text-muted">Comma-separated keywords for stratified sampling</small>
+            </div>
+
+            <div class="mb-3">
+              <label for="keyword_ratio" class="form-label">Keyword Match Ratio: <span id="ratio_value">0.5</span></label>
+              <input type="range" class="form-range" id="keyword_ratio" name="keyword_ratio"
+                     min="0" max="1" step="0.1" value="0.5"
+                     oninput="document.getElementById('ratio_value').textContent = this.value">
+              <small class="form-text text-muted">Proportion of samples that should contain keywords</small>
+            </div>
+
+            <hr>
+
+            <!-- LLM Configuration -->
+            <h6 class="text-muted mb-3">LLM Configuration</h6>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="llm_provider" class="form-label">Provider</label>
+                <select class="form-select" id="llm_provider" name="llm_provider" required>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="ollama">Ollama (Local)</option>
+                  <option value="lmstudio">LM Studio (Local)</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="bedrock">AWS Bedrock</option>
+                </select>
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="llm_model" class="form-label">Model</label>
+                <input type="text" class="form-control" id="llm_model" name="llm_model"
+                       value="gpt-4o" placeholder="e.g., gpt-4o, claude-sonnet-4-20250514" required>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="llm_api_base" class="form-label">API Base URL (optional)</label>
+              <input type="text" class="form-control" id="llm_api_base" name="llm_api_base"
+                     placeholder="e.g., http://localhost:11434 for Ollama">
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="llm_temperature" class="form-label">Temperature</label>
+                <input type="number" class="form-control" id="llm_temperature" name="llm_temperature"
+                       value="0.0" min="0" max="2" step="0.1">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="llm_timeout" class="form-label">Timeout (seconds)</label>
+                <input type="number" class="form-control" id="llm_timeout" name="llm_timeout"
+                       value="60" min="10" max="300">
+              </div>
+            </div>
+
+            <hr>
+
+            <!-- Event Definition -->
+            <h6 class="text-muted mb-3">Event Definition</h6>
+
+            <div class="mb-3">
+              <label for="event_name" class="form-label">Event Name</label>
+              <input type="text" class="form-control" id="event_name" name="event_name"
+                     placeholder="e.g., Myocardial Infarction" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="event_description" class="form-label">Description</label>
+              <input type="text" class="form-control" id="event_description" name="event_description"
+                     placeholder="e.g., Confirmed heart attack diagnosis">
+            </div>
+
+            <div class="mb-3">
+              <label for="include_criteria" class="form-label">Include Criteria</label>
+              <textarea class="form-control" id="include_criteria" name="include_criteria" rows="2"
+                        placeholder="e.g., Positive troponin, ECG changes, chest pain with confirmation"></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label for="exclude_criteria" class="form-label">Exclude Criteria</label>
+              <textarea class="form-control" id="exclude_criteria" name="exclude_criteria" rows="2"
+                        placeholder="e.g., Rule-out, family history, hypothetical"></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Create Session</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
