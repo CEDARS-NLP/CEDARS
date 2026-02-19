@@ -2090,7 +2090,15 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
     ##### Save PINES predictions
 
     Predict and save the predictions for the given text_ids.
+    Supports both real-time (PINES/LLM) and batch (Bedrock) prediction modes.
     """
+    # Check if using batch mode (Bedrock only)
+    predictor_config = get_predictor_config()
+    use_batch = (
+        predictor_config 
+        and predictor_config.get("llm_config", {}).get("use_batch", False)
+    )
+    
     notes_collection = mongo.db[note_collection_name]
     pines_collection = mongo.db[pines_collection_name]
     query = {}
@@ -2098,22 +2106,334 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
         query = {"text_id": {"$in": text_ids}}
 
     cedars_notes = notes_collection.find(query)
-    count = 0
-    for note in cedars_notes:
-        note_id = note.get("text_id")
-        if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
-            logger.info(f"Predicting for note: {note_id}")
-            prediction = get_prediction(note.get("text"))
-            pines_collection.insert_one({
-                "text_id": note_id,
-                "text": note.get("text"),
-                "text_date" : note.get("text_date"),
-                "patient_id": note.get("patient_id"),
-                "predicted_score": prediction,
-                "report_type": note.get("text_tag_3"),
-                "document_type": note.get("text_tag_1")
+    
+    if use_batch:
+        # Batch mode: Collect notes for batch processing
+        logger.info(f"Batch mode: Collecting notes for batch processing")
+        notes_for_batch = []
+        
+        for note in cedars_notes:
+            note_id = note.get("text_id")
+            if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
+                notes_for_batch.append({
+                    "text_id": note_id,
+                    "text": note.get("text"),
+                    "patient_id": note.get("patient_id")
                 })
-        count += 1
+        
+        if notes_for_batch:
+            # Save to batch pending collection
+            _save_notes_for_batch_processing(notes_for_batch)
+            logger.info(f"Saved {len(notes_for_batch)} notes for batch processing")
+    else:
+        # Real-time mode: Get predictions immediately (existing logic)
+        count = 0
+        for note in cedars_notes:
+            note_id = note.get("text_id")
+            if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
+                logger.info(f"Predicting for note: {note_id}")
+                prediction = get_prediction(note.get("text"))
+                pines_collection.insert_one({
+                    "text_id": note_id,
+                    "text": note.get("text"),
+                    "text_date" : note.get("text_date"),
+                    "patient_id": note.get("patient_id"),
+                    "predicted_score": prediction,
+                    "report_type": note.get("text_tag_3"),
+                    "document_type": note.get("text_tag_1")
+                    })
+            count += 1
+
+def _save_notes_for_batch_processing(notes: list[dict]) -> None:
+    """Save notes to batch pending collection for later batch processing.
+    
+    Args:
+        notes: List of note dicts with text_id, text, patient_id
+    """
+    if "BATCH_PENDING" not in mongo.db.list_collection_names():
+        mongo.db.create_collection("BATCH_PENDING")
+    
+    for note in notes:
+        mongo.db.BATCH_PENDING.update_one(
+            {"text_id": note["text_id"]},
+            {"$set": {
+                "text_id": note["text_id"],
+                "text": note["text"],
+                "patient_id": note["patient_id"],
+                "marked_at": datetime.now(),
+                "processed": False
+            }},
+            upsert=True
+        )
+
+@log_function_call
+def get_batch_pending_notes() -> pd.DataFrame:
+    """Get all notes pending batch processing (after spacy matching).
+    
+    Returns:
+        DataFrame with text_id, text, patient_id columns
+    """
+    if "BATCH_PENDING" not in mongo.db.list_collection_names():
+        return pd.DataFrame(columns=["text_id", "text", "patient_id"])
+    
+    notes = list(mongo.db.BATCH_PENDING.find(
+        {"processed": False},
+        {"_id": 0, "text_id": 1, "text": 1, "patient_id": 1}
+    ))
+    
+    return pd.DataFrame(notes)
+
+@log_function_call
+def submit_batch_job_for_pending_notes() -> dict:
+    """Submit batch job for all pending notes and start monitoring job.
+    
+    Called after all spacy processing is complete.
+    Returns batch job info or None if no notes pending.
+    """
+    from .predictors.batch_bedrock import BedrockBatchProcessor
+    
+    notes_df = get_batch_pending_notes()
+    
+    if notes_df.empty:
+        logger.info("No notes pending batch processing")
+        return None
+    
+    logger.info(f"Submitting batch job for {len(notes_df)} notes")
+    
+    # Get AWS configuration
+    project_info = get_info()
+    project_id = project_info.get("project_id")
+    model_id = os.getenv('BEDROCK_MODEL_ID')
+    role_arn = os.getenv('AWS_BEDROCK_ROLE_ARN')
+    s3_bucket = os.getenv('AWS_BEDROCK_S3_BUCKET')
+    region = os.getenv('AWS_REGION_NAME', 'us-east-1')
+    
+    if not all([model_id, role_arn, s3_bucket]):
+        logger.error("AWS Bedrock batch configuration missing")
+        return None
+    
+    # Get event definition from predictor config
+    predictor_config = get_predictor_config()
+    event_definition = predictor_config.get("event_definition", {})
+    
+    # Initialize batch processor
+    from .database import minio
+    processor = BedrockBatchProcessor(
+        model_id=model_id,
+        role_arn=role_arn,
+        region=region,
+        s3_bucket=s3_bucket,
+        event_definition=event_definition,
+        minio_client=minio
+    )
+    
+    # Submit batch job
+    batch_info = processor.process_batch_end_to_end(
+        notes_df=notes_df,
+        project_id=project_id,
+        wait_for_completion=False
+    )
+    
+    # Mark notes as submitted
+    mongo.db.BATCH_PENDING.update_many(
+        {"processed": False},
+        {"$set": {"processed": True, "processed_at": datetime.now()}}
+    )
+    
+    # Save batch job info
+    if "BATCH_JOBS" not in mongo.db.list_collection_names():
+        mongo.db.create_collection("BATCH_JOBS")
+    
+    batch_record_id = mongo.db.BATCH_JOBS.insert_one({
+        "project_id": project_id,
+        "submitted_at": datetime.now(),
+        "jobs": batch_info["jobs"],
+        "total_notes": batch_info["total_notes"],
+        "status": "submitted",
+        "imported": False
+    }).inserted_id
+    
+    logger.info(f"Batch job submitted: {len(batch_info['jobs'])} jobs for {batch_info['total_notes']} notes")
+    
+    # Enqueue monitoring job to auto-import when complete
+    from flask import current_app
+    current_app.ops_queue.enqueue(
+        monitor_and_import_batch_job,
+        args=(str(batch_record_id),),
+        job_id=f'batch-monitor-{batch_record_id}',
+        description=f"Monitoring batch job for auto-import",
+        job_timeout=86400  # 24 hour timeout
+    )
+    logger.info(f"Enqueued batch monitoring job: batch-monitor-{batch_record_id}")
+    
+    return batch_info
+
+
+@log_function_call
+def monitor_and_import_batch_job(batch_record_id: str):
+    """Background job that monitors batch job and auto-imports results.
+    
+    This runs in the ops_queue worker and polls the batch job status
+    until complete, then automatically imports results to PINES collection.
+    
+    Args:
+        batch_record_id: MongoDB ObjectId of BATCH_JOBS record
+    """
+    from bson import ObjectId
+    from .predictors.batch_bedrock import BedrockBatchProcessor
+    import time
+    
+    # Get batch record
+    batch_record = mongo.db.BATCH_JOBS.find_one({"_id": ObjectId(batch_record_id)})
+    if not batch_record:
+        logger.error(f"Batch record {batch_record_id} not found")
+        return
+    
+    project_id = batch_record["project_id"]
+    jobs = batch_record["jobs"]
+    
+    # Get AWS config
+    model_id = os.getenv('BEDROCK_MODEL_ID')
+    role_arn = os.getenv('AWS_BEDROCK_ROLE_ARN')
+    s3_bucket = os.getenv('AWS_BEDROCK_S3_BUCKET')
+    region = os.getenv('AWS_REGION_NAME', 'us-east-1')
+    
+    # Get event definition from predictor config
+    predictor_config = get_predictor_config()
+    event_definition = predictor_config.get("event_definition", {})
+    
+    processor = BedrockBatchProcessor(
+        model_id=model_id,
+        role_arn=role_arn,
+        region=region,
+        s3_bucket=s3_bucket,
+        event_definition=event_definition
+    )
+    
+    # Poll until all jobs complete (check every 5 minutes)
+    max_checks = 288  # 24 hours / 5 min = 288 checks
+    check_interval = 300  # 5 minutes
+    
+    for check_num in range(max_checks):
+        all_complete = True
+        any_failed = False
+        
+        for job in jobs:
+            try:
+                status = processor.get_job_status(job["job_arn"])
+                job_status = status["status"]
+                
+                if job_status == "Failed":
+                    any_failed = True
+                    logger.error(f"Batch job {job['job_arn']} failed: {status.get('message')}")
+                elif job_status not in ["Completed"]:
+                    all_complete = False
+                    logger.info(f"Job {job['job_arn']} status: {job_status}")
+            except Exception as e:
+                logger.error(f"Failed to check job {job['job_arn']}: {e}")
+                all_complete = False
+        
+        if any_failed:
+            mongo.db.BATCH_JOBS.update_one(
+                {"_id": ObjectId(batch_record_id)},
+                {"$set": {"status": "failed"}}
+            )
+            logger.error("One or more batch jobs failed")
+            return
+        
+        if all_complete:
+            logger.info(f"All batch jobs complete after {check_num + 1} checks")
+            break
+        
+        if check_num < max_checks - 1:
+            logger.info(f"Batch jobs still processing, sleeping {check_interval}s (check {check_num + 1}/{max_checks})")
+            time.sleep(check_interval)
+    
+    if not all_complete:
+        logger.error("Batch jobs did not complete within 24 hours")
+        return
+    
+    # All jobs complete - download and import results
+    logger.info("Downloading and importing batch results to PINES collection")
+    total_imported = 0
+    
+    for job in jobs:
+        try:
+            status = processor.get_job_status(job["job_arn"])
+            output_uri = status.get("output_uri")
+            
+            if not output_uri:
+                logger.warning(f"No output URI for job {job['job_arn']}")
+                continue
+            
+            # Download results
+            local_dir = f"/tmp/batch_results_{project_id}"
+            result_files = processor.download_results(output_uri, local_dir)
+            
+            # Parse and import to PINES collection
+            results_df = processor.parse_results(result_files)
+            imported = import_batch_results_to_pines(results_df)
+            total_imported += imported
+            
+        except Exception as e:
+            logger.error(f"Failed to import job {job['job_arn']}: {e}")
+    
+    # Mark as imported
+    mongo.db.BATCH_JOBS.update_one(
+        {"_id": ObjectId(batch_record_id)},
+        {"$set": {
+            "status": "completed",
+            "imported": True,
+            "imported_at": datetime.now(),
+            "imported_count": total_imported
+        }}
+    )
+    
+    logger.info(f"✅ Batch import complete: {total_imported} predictions saved to PINES collection")
+    return total_imported
+
+@log_function_call
+def import_batch_results_to_pines(results_df: pd.DataFrame, pines_collection_name: str = "PINES") -> int:
+    """Import batch inference results into PINES collection (same format as real-time).
+    
+    Args:
+        results_df: DataFrame with columns: note_id, prediction (0-1 score), text, text_date, patient_id, etc.
+        pines_collection_name: Name of collection to save to (default: PINES)
+        
+    Returns:
+        Number of results imported
+    """
+    pines_collection = mongo.db[pines_collection_name]
+    notes_collection = mongo.db["NOTES"]
+    imported_count = 0
+    
+    for _, row in results_df.iterrows():
+        note_id = row["note_id"]
+        prediction_score = float(row["prediction"])  # 0.0 to 1.0
+        
+        # Get full note details from NOTES collection
+        note = notes_collection.find_one({"text_id": note_id})
+        
+        if not note:
+            logger.warning(f"Note {note_id} not found in NOTES collection, skipping")
+            continue
+        
+        # Save to PINES collection in SAME format as real-time predictions
+        pines_collection.insert_one({
+            "text_id": note_id,
+            "text": note.get("text"),
+            "text_date": note.get("text_date"),
+            "patient_id": note.get("patient_id"),
+            "predicted_score": prediction_score,  # ← Same field as real-time!
+            "report_type": note.get("text_tag_3"),
+            "document_type": note.get("text_tag_1")
+        })
+        
+        imported_count += 1
+        logger.debug(f"Imported batch result for note {note_id}: score={prediction_score}")
+    
+    logger.info(f"Imported {imported_count} batch results to {pines_collection_name} collection")
+    return imported_count
 
 @log_function_call
 def add_task(task):

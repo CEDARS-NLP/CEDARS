@@ -469,16 +469,20 @@ def upload_query():
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "gemini": "GOOGLE_API_KEY",
-            "bedrock": "AWS_ACCESS_KEY_ID",
+            "bedrock": None,  # Let boto3 read AWS credentials from environment
             "ollama": None,
             "lmstudio": None,
         }
 
+        # Check if batch inference is enabled (Bedrock only)
+        #use_batch = request.form.get("use_batch_inference") == "on"
+        use_batch = True
         llm_config = {
             "provider": llm_provider,
             "model": llm_model,
             "api_base": llm_api_base,
             "api_key_env": api_key_env_map.get(llm_provider),
+            "use_batch": use_batch if llm_provider == "bedrock" else False,
         }
 
         event_definition = {
@@ -562,6 +566,25 @@ def callback_job_success(job, connection, result, *args, **kwargs):
     db.report_success(job)
 
     if len(list(db.get_tasks_in_progress())) == 0:
+        # All spacy processing complete
+        logger.info("All patient processing jobs completed")
+        
+        # Check if batch mode is enabled - if so, submit batch job now
+        predictor_config = db.get_predictor_config()
+        use_batch = (
+            predictor_config 
+            and predictor_config.get("llm_config", {}).get("use_batch", False)
+        )
+        
+        if use_batch:
+            logger.info("Batch mode enabled - submitting batch job for pending notes")
+            try:
+                batch_info = db.submit_batch_job_for_pending_notes()
+                if batch_info:
+                    logger.info(f"Batch job submitted successfully: {batch_info}")
+            except Exception as e:
+                logger.error(f"Failed to submit batch job: {e}")
+        
         # Send a spin down request to the PINES Server if we are using superbio
         # This will occur when all tasks are completed
         if job.kwargs['superbio_api_token'] is not None:
@@ -1324,3 +1347,5 @@ def check_job(job_id):
         return flask.jsonify({'status': 'failed', 'error': str(job.exc_info)}), 500
     else:
         return flask.jsonify({'status': 'in_progress'}), 202
+
+
