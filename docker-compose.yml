@@ -30,6 +30,8 @@ services:
       - cedars
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     profiles:
       - cpu
       - gpu
@@ -129,33 +131,35 @@ services:
       - selfhosted
       - superbio
 
-  pines:
-    build:
-      context: ./PINES
-    deploy:
-      mode: replicated
-      replicas: ${PINES_WORKERS}
-    restart: on-failure:5
-    networks:
-      - cedars
-    profiles: [cpu]
+  #pines:
+  #  build:
+  #    context: ./PINES
+  #  deploy:
+  #    mode: replicated
+  #    replicas: ${PINES_WORKERS}
+  #  restart: on-failure:5
+  #  networks:
+  #    - cedars
+  #  profiles: [cpu]
 
-  pines-gpu:
-    build:
-      context: ./PINES
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: ${GPU_SCALE}
-              capabilities: [gpu]
-      mode: replicated
-      replicas: ${PINES_WORKERS}
-    restart: on-failure:5
-    networks:
-      - cedars
-    profiles: [gpu]
+  # Temporarily disabled for docker-compose v1.29.2 compatibility
+  # Uncomment when using docker compose v2 or gpu profile
+  # pines-gpu:
+  #   build:
+  #     context: ./PINES
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: ${GPU_SCALE}
+  #             capabilities: [gpu]
+  #     mode: replicated
+  #     replicas: ${PINES_WORKERS}
+  #   restart: on-failure:5
+  #   networks:
+  #     - cedars
+  #   profiles: [gpu]
 
   redis:
     build:
@@ -192,6 +196,8 @@ services:
       - cedars
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     depends_on:
       web:
         condition: service_healthy
@@ -219,6 +225,8 @@ services:
       - cedars
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     depends_on:
       web:
         condition: service_healthy
