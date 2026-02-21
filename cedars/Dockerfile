@@ -1,7 +1,8 @@
 FROM python:3.12-slim AS builder
 
 # Install build dependencies for packages like gevent, nmslib
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's/http:/https:/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libc-dev \
