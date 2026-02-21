@@ -2216,15 +2216,14 @@ def submit_batch_job_for_pending_notes() -> dict:
     predictor_config = get_predictor_config()
     event_definition = predictor_config.get("event_definition", {})
     
-    # Initialize batch processor
-    from .database import minio
+    # Initialize batch processor (minio_client=None as batch files go to AWS S3)
     processor = BedrockBatchProcessor(
         model_id=model_id,
         role_arn=role_arn,
         region=region,
         s3_bucket=s3_bucket,
         event_definition=event_definition,
-        minio_client=minio
+        minio_client=None
     )
     
     # Submit batch job

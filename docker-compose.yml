@@ -18,6 +18,7 @@ services:
   web:
     build:
       context: ./cedars
+      network: host
     image: cedars
     restart: always
     # flask requires SIGINT to stop gracefully
@@ -30,8 +31,6 @@ services:
       - cedars
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     profiles:
       - cpu
       - gpu
@@ -196,8 +195,6 @@ services:
       - cedars
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     depends_on:
       web:
         condition: service_healthy
@@ -225,8 +222,6 @@ services:
       - cedars
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allows access to EC2 host services like Ollama
     depends_on:
       web:
         condition: service_healthy
