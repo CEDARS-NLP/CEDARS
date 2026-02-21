@@ -59,6 +59,7 @@ class Base:  # pylint: disable=too-few-public-methods
     """
     SECRET_KEY = config['SECRET_KEY']
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
+    SESSION_TYPE = 'redis'
 
     MONGO_URI = MONGO_URI = (
     f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
