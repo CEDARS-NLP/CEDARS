@@ -1,161 +1,48 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: GPU ECS inference stack (ModernBERT-large) with scale-to-zero and full IAM
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fully self-contained GPU ECS worker that clones GitHub and builds locally
 
 Parameters:
-  InstanceType:
-    Type: String
-    Default: t3.medium
-  
   VpcId:
     Type: AWS::EC2::VPC::Id
 
-  OutputBucket:
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  GitHubRepo:
     Type: String
-    Default: pines-output-bucket
+    Description: https://github.com/Kayan1920/PINES-ECS-DEPLOYMENT.git
+
+  InstanceType:
+    Type: String
+    Default: g5.xlarge
+    AllowedValues:
+      - g4dn.xlarge
+      - g5.xlarge
+      - g5.2xlarge
 
 Resources:
 
-  ################################
-  # Security Group
-  ################################
-
-  WebServerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+# -----------------------
+# SQS Queue
+# -----------------------
+  InferenceQueue:
+    Type: AWS::SQS::Queue
     Properties:
-      GroupDescription: Web server SG
-      VpcId: !Ref VpcId
+      VisibilityTimeout: 900
 
-  ################################
-  # Web Server IAM Role
-  ################################
-
-  WebServerRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: WebServerEcsAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecs:RunTask
-                  - ecs:DescribeTasks
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - iam:PassRole
-                Resource:
-                  - !GetAtt ECSTaskExecutionRole.Arn
-                  - !GetAtt ECSTaskRole.Arn
-
-        - PolicyName: WebServerS3Read
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${OutputBucket}/*"
-
-  WebServerInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref WebServerRole
-
-  ################################
-  # Web Server EC2
-  ################################
-
-  WebServer:
-    Type: AWS::EC2::Instance
-    Properties:
-      ImageId: ami-0fa3fe0fa7920f68e
-      InstanceType: !Ref InstanceType
-      IamInstanceProfile: !Ref WebServerInstanceProfile
-      BlockDeviceMappings:
-        - DeviceName: /dev/xvda
-          Ebs:
-            VolumeSize: 64
-            VolumeType: gp3
-            DeleteOnTermination: true
-      SecurityGroupIds:
-        - !Ref WebServerSecurityGroup
-
-  ################################
-  # ECS Cluster
-  ################################
-
-  GpuEcsCluster:
+# -----------------------
+# ECS Cluster
+# -----------------------
+  ECSCluster:
     Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: bert-gpu-cluster
 
-  ################################
-  # CloudWatch Logs
-  ################################
-
-  GpuLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/bert-gpu
-      RetentionInDays: 14
-
-  ################################
-  # ECS Task IAM Roles
-  ################################
-
-  ECSTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-  ECSTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: BertS3Access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource:
-                  - !Sub "arn:aws:s3:::${OutputBucket}/*"
-
-  ################################
-  # ECS Instance Role
-  ################################
-
+# -----------------------
+# IAM Roles
+# -----------------------
   ECSInstanceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -163,6 +50,8 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
 
   ECSInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -170,90 +59,101 @@ Resources:
       Roles:
         - !Ref ECSInstanceRole
 
-  ################################
-  # ECS Task Definition (GPU)
-  ################################
-
-  GpuTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: bert-gpu-task
-      RequiresCompatibilities: [EC2]
-      Cpu: "4096"
-      Memory: "16384"
-      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskRole.Arn
-      ContainerDefinitions:
-        - Name: bert
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/pines:latest"
-          Essential: true
-          ResourceRequirements:
-            - Type: GPU
-              Value: "1"
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: /ecs/bert-gpu
-              awslogs-region: us-east-1
-              awslogs-stream-prefix: ecs
-
-  ################################
-  # GPU Capacity (Scale-to-Zero)
-  ################################
-
-  GpuLaunchTemplate:
+# -----------------------
+# Launch Template
+# -----------------------
+  LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
-        InstanceType: g4dn.xlarge
-        ImageId: ami-0f3c7d07486cad139
+        InstanceType: !Ref InstanceType
+        ImageId: ami-0c02fb55956c7d316  # Replace with latest ECS GPU Optimized AMI
         IamInstanceProfile:
-          Arn: !GetAtt ECSInstanceProfile.Arn
+          Name: !Ref ECSInstanceProfile
         UserData:
-          Fn::Base64: |
+          Fn::Base64: !Sub |
             #!/bin/bash
-            echo ECS_CLUSTER=bert-gpu-cluster >> /etc/ecs/ecs.config
-            echo ECS_ENABLE_GPU_SUPPORT=true >> /etc/ecs/ecs.config
+            set -xe
 
-  GpuAutoScalingGroup:
+            # Join ECS Cluster
+            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+
+            # Install git
+            yum install -y git
+
+            # Clone repo
+            cd /home/ec2-user
+            git clone https://github.com/Kayan1920/PINES-ECS-DEPLOYMENT.git app
+            cd app
+
+            # Build Docker image
+            docker build -t bert-worker .
+
+# -----------------------
+# Auto Scaling Group
+# -----------------------
+  AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       MinSize: 0
-      MaxSize: 2
+      MaxSize: 1
       DesiredCapacity: 0
-      Cooldown: 3600
+      VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
-        LaunchTemplateId: !Ref GpuLaunchTemplate
-        Version: !GetAtt GpuLaunchTemplate.LatestVersionNumber
-      VPCZoneIdentifier:
-        - !GetAtt WebServer.SubnetId
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
 
-  ################################
-  # Scale Down After 60 Minutes Idle
-  ################################
+# -----------------------
+# Scale Policies
+# -----------------------
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: 1
+      Cooldown: 60
+
+  QueueDepthHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt InferenceQueue.QueueName
+      AlarmActions:
+        - !Ref ScaleUpPolicy
 
   ScaleDownPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AutoScalingGroupName: !Ref GpuAutoScalingGroup
-      PolicyType: SimpleScaling
+      AutoScalingGroupName: !Ref AutoScalingGroup
       AdjustmentType: ChangeInCapacity
       ScalingAdjustment: -1
-      Cooldown: 3600
+      Cooldown: 1800
 
-  LowCpuAlarm:
+  QueueDepthLow:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: Scale down GPU nodes after 60 minutes idle
-      Namespace: AWS/EC2
-      MetricName: CPUUtilization
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 12
-      Threshold: 5
-      ComparisonOperator: LessThanThreshold
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 30
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt InferenceQueue.QueueName
       AlarmActions:
         - !Ref ScaleDownPolicy
-      Dimensions:
-        - Name: AutoScalingGroupName
-          Value: !Ref GpuAutoScalingGroup
+
+Outputs:
+  QueueURL:
+    Value: !Ref InferenceQueue
