@@ -246,8 +246,8 @@ Resources:
           ENV=prod
           REDIS_PORT=6379
           WORKER_SCALE=2
-          GPU_SCALE=0
-          PINES_WORKERS=0
+          GPU_SCALE=1
+          PINES_WORKERS=1
           BERT_INFERENCE_TYPE=SQS_Inference
           INFERENCE_QUEUE_URL=${InferenceQueue}
           RESPONSE_QUEUE_URL=${ResponseQueue}
