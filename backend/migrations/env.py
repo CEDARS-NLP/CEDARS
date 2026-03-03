@@ -18,6 +18,9 @@ if config.config_file_name is not None:
 # Import SQLModel so that all model metadata is registered
 from sqlmodel import SQLModel  # noqa: E402
 
+# Import all models so their tables are registered in SQLModel.metadata
+from app.auth.models import User  # noqa: E402, F401
+
 target_metadata = SQLModel.metadata
 
 
