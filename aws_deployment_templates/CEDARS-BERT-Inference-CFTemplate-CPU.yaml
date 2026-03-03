@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Fully self-contained CPU ECS worker that clones GitHub and builds locally
+Description: Fully self-contained CEDARS with AutoScaling for CPU BERT Model via SQS
 
 Parameters:
   VpcId:
