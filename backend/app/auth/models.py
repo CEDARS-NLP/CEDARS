@@ -4,6 +4,7 @@ import enum
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -25,4 +26,7 @@ class User(SQLModel, table=True):
     password_hash: str
     role: UserRole = Field(default=UserRole.USER)
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
