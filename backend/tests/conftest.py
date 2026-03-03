@@ -3,6 +3,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
 from app.common.database import get_session
 from app.main import create_app
 
