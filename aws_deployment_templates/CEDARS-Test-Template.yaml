@@ -1,0 +1,244 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fully self-contained CPU ECS worker that clones GitHub and builds locally
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  
+  WebServerInstanceType:
+    Description: CEDARS CPU EC2 instance type
+    Type: String
+    Default: t3.xlarge
+    AllowedValues:
+      - t3.xlarge
+      - t3.2xlarge
+  
+  ModelS3Path:
+    Type: String
+    Default: s3://pines-models-storage/models/bert-tiny/
+    Description: Path to BERT model stored on S3
+    AllowedValues:
+      - s3://pines-models-storage/models/bert-tiny/
+
+Resources:
+
+# -----------------------
+# Web Server Security Rules
+# -----------------------
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group For CEDARS EC2 connections
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5001
+          ToPort: 5001
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+# -----------------------
+# Web Server IAM Role
+# -----------------------
+  SenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSSenderPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt InferenceQueue.Arn
+
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ResponseQueue.Arn
+
+  SenderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref SenderRole
+
+# -----------------------
+# Web Server EC2
+# -----------------------
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0fa3fe0fa7920f68e
+      InstanceType: !Ref WebServerInstanceType
+      IamInstanceProfile: !Ref SenderInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 64
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # rm ~/.aws/credentials
+          # rm ~/.aws/config
+
+          # Update system
+          dnf update -y
+
+          # Install dnf plugin
+          dnf -y install dnf-plugins-core
+
+          # Install Docker, Docker Compose and Git
+          dnf install -y python
+          python -m ensurepip
+          python -m pip install boto3
+
+
+# -----------------------
+# SQS Queue
+# -----------------------
+  InferenceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: bert-inference
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 86400
+
+  ResponseQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: bert-response
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 86400
+
+# -----------------------
+# IAM Roles
+# -----------------------
+  BERTInferenceInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  BERTInferenceInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BERTInferenceInstanceRole
+
+# -----------------------
+# Test Server EC2
+# -----------------------
+  TestServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0fa3fe0fa7920f68e
+      InstanceType: !Ref WebServerInstanceType
+      IamInstanceProfile: !Ref BERTInferenceInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 64
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Update system
+          dnf update -y
+
+          # Install dnf plugin
+          dnf -y install dnf-plugins-core
+          # Add CentOS repository
+          dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+          # Adjust release server version in the path as it will not match with Amazon Linux 2023
+          sed -i 's/$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+          # Install as usual
+          dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # Enable the docker service
+          systemctl enable --now docker
+
+          # Install Git
+          dnf install -y git
+
+          usermod -aG docker ec2-user
+
+          # Clone repo
+          cd /home/ec2-user
+          git clone https://github.com/Kayan1920/PINES-ECS-DEPLOYMENT.git  --branch base_template app
+          cd app
+
+          cat > /home/ec2-user/app/.env << EOF
+          MODEL_S3_PATH=${ModelS3Path}
+          MAX_LENGTH=256
+          AWS_REGION=${AWS::Region}
+          QUEUE_URL=${InferenceQueue}
+          EOF
+
+          systemctl enable docker
+          systemctl start docker
+
+          # Build Docker image
+          echo "Starting docker build"
+          docker build -t bert-worker .
+          echo "Finished docker build"
+          docker run -d --restart unless-stopped --env-file .env bert-worker
+          echo "Docker is now running"
+
+Outputs:
+  InferenceQueueURL:
+    Value: !Ref InferenceQueue
+  
+  ResponseQueueURL:
+    Value: !Ref ResponseQueue
+
+  WebsiteURL:
+    Value: !Join
+      - ''
+      - - http://
+        - !GetAtt WebServer.PublicDnsName
+    Description: Website URL
