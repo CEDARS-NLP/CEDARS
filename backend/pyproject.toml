@@ -21,6 +21,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
+    "bcrypt>=4.0,<4.1",
     "boto3>=1.35",
     "redis>=5.2",
     "arq>=0.26",
