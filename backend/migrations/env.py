@@ -20,6 +20,7 @@ from sqlmodel import SQLModel  # noqa: E402
 
 # Import all models so their tables are registered in SQLModel.metadata
 from app.auth.models import User  # noqa: E402, F401
+from app.projects.models import Project, ProjectMember  # noqa: E402, F401
 
 target_metadata = SQLModel.metadata
 
