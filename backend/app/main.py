@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.projects.router import router as projects_router
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(auth_router)
+    application.include_router(projects_router)
 
     @application.get("/api/v1/health")
     async def health_check():
