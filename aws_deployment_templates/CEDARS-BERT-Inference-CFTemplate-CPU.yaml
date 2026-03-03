@@ -279,6 +279,7 @@ Resources:
           REDIS_PORT=6379
           RQ_DASHBOARD_URL=/rq
           PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          BERT_INFERENCE_TYPE=SQS_Inference
           INFERENCE_QUEUE_URL=${InferenceQueue}
           RESPONSE_QUEUE_URL=${ResponseQueue}
           EOF
