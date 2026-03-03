@@ -329,3 +329,49 @@ INTEGRATION_TEST_OPENAI=1 python tests/integration_test_predictors.py
 INTEGRATION_TEST_BEDROCK=1 python tests/integration_test_predictors.py
 INTEGRATION_TEST_PINES=1 PINES_API_URL=http://localhost:8000 python tests/integration_test_predictors.py
 ```
+
+---
+
+## CEDARS v2 Platform Redesign
+
+**Design doc:** `docs/plans/2026-03-03-cedars-v2-platform-redesign.md`
+
+### Summary
+
+Full reimplementation: Flask → FastAPI, Jinja2 → React+TypeScript, MongoDB → PostgreSQL. Single-project → multi-tenant platform. Unified evaluation framework for all predictor types.
+
+### v2 Architecture
+
+| Component | Current (v1) | v2 |
+|-----------|-------------|-----|
+| Backend | Flask | FastAPI |
+| Frontend | Jinja2 + Bootstrap | React + TypeScript + shadcn/ui |
+| Database | MongoDB (+SQLite) | PostgreSQL (JSONB for flexibility) |
+| ORM | PyMongo / raw | SQLAlchemy 2.0 + SQLModel + Alembic |
+| Auth | flask-login (session) | JWT + refresh tokens |
+| Queue | RQ (two worker types) | ARQ (unified pool, queue routing) |
+| Storage | MinIO only | S3-compatible (MinIO, AWS S3, GCS) |
+| Tenancy | One project per instance | Multi-project, multi-user platform |
+| Evaluation | LLM-only eval framework | Unified eval for all predictor types |
+| Connectors | File upload only | Plugin architecture (file upload + Databricks) |
+| Real-time | Page reload | WebSocket (job progress, annotations) |
+| Deployment | Docker Compose | Docker Compose (K8s deferred to v2+) |
+
+### v2 Deferred Features (Future Roadmap)
+
+These are explicitly deferred — do not implement in v2 initial release:
+
+- OIDC/SAML SSO for institutional identity providers
+- Kubernetes Helm charts
+- AWS-native deployment (ECS/EKS + RDS)
+- In-platform GPU training (DPO/KTO via TRL) — export data for offline training instead
+- Automated drift detection and alerting
+- De-identification plugin for PHI stripping
+- Additional connectors beyond file upload + Databricks (Snowflake, BigQuery, FHIR)
+- Pluggable NLP backends (alternative to spaCy)
+- R package / programmatic API for researchers
+
+### Migration Approach
+
+Strangler fig — build alongside existing, migrate domain by domain:
+1. Auth + users → 2. Projects → 3. Upload/ingestion → 4. LLM predictors → 5. Adjudication UI → 6. Evaluation → 7. NLP + PINES → 8. Remove Flask
