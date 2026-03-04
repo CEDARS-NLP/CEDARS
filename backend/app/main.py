@@ -53,6 +53,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(application).expose(application)
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],

@@ -44,6 +44,25 @@ services:
       timeout: 5s
       retries: 5
 
+  worker:
+    build: ./backend
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
+      CEDARS_REDIS_URL: redis://redis:6379
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./prometheus.v2.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
 volumes:
   pgdata:
   minio_data:

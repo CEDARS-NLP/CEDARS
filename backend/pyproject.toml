@@ -28,6 +28,11 @@ dependencies = [
     "litellm>=1.40",
     "httpx>=0.28",
     "email-validator>=2.0",
+    "tiktoken>=0.7",
+    "prometheus-fastapi-instrumentator>=7.0",
+    "python-multipart>=0.0.9",
+    "spacy>=3.7",
+    "scispacy>=0.6.0",
 ]
 
 [project.optional-dependencies]
