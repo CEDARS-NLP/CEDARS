@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -46,20 +45,19 @@ export default function CreateProjectPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-md">
+    <div className="flex h-full items-start justify-center px-8 py-12">
+      <Card className="w-full max-w-lg border-border/60">
         <CardHeader>
-          <CardTitle className="text-2xl">New Project</CardTitle>
-          <CardDescription>
-            Create a new clinical event detection project
-          </CardDescription>
+          <CardTitle>New Project</CardTitle>
         </CardHeader>
         <form onSubmit={handleSubmit}>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="space-y-5">
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
             )}
-            <div className="flex flex-col gap-2">
+            <div className="space-y-2">
               <Label htmlFor="name">Project Name</Label>
               <Input
                 id="name"
@@ -70,7 +68,7 @@ export default function CreateProjectPage() {
                 required
               />
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Input
                 id="description"

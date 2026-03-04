@@ -1,12 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  Link,
-  NavLink,
-  Outlet,
-  useParams,
-} from "react-router-dom";
+import { Link, Outlet, useParams } from "react-router-dom";
 import { api } from "@/api/client";
-import { useAuth } from "@/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 
 interface ProjectDetail {
@@ -17,18 +11,8 @@ interface ProjectDetail {
   created_at: string;
 }
 
-const navItems = [
-  { label: "Overview", to: "" },
-  { label: "Data", to: "data" },
-  { label: "Pipeline", to: "pipeline" },
-  { label: "Annotations", to: "annotations" },
-  { label: "Evaluation", to: "evaluation" },
-  { label: "Export", to: "export" },
-];
-
 export default function ProjectLayout() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { logout } = useAuth();
 
   const {
     data: project,
@@ -42,7 +26,7 @@ export default function ProjectLayout() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-full items-center justify-center" aria-live="polite">
         <p className="text-muted-foreground">Loading project...</p>
       </div>
     );
@@ -50,9 +34,10 @@ export default function ProjectLayout() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+      <div className="flex h-full flex-col items-center justify-center gap-4">
         <p className="text-destructive">
-          Failed to load project: {error instanceof Error ? error.message : "Unknown error"}
+          Failed to load project:{" "}
+          {error instanceof Error ? error.message : "Unknown error"}
         </p>
         <Button variant="outline" asChild>
           <Link to="/projects">Back to Projects</Link>
@@ -62,51 +47,29 @@ export default function ProjectLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            <Link
-              to="/projects"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              Projects
-            </Link>
-            <span className="text-muted-foreground">/</span>
-            <h1 className="text-lg font-semibold">
-              {project?.name ?? "Project"}
-            </h1>
-          </div>
-          <Button variant="ghost" size="sm" onClick={logout}>
-            Sign out
-          </Button>
+    <div className="h-full">
+      {/* Project header bar */}
+      <div className="border-b border-border bg-card px-8 py-5">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link to="/projects" className="hover:text-foreground transition-colors">
+            Projects
+          </Link>
+          <span>/</span>
+          <span className="font-medium text-foreground">
+            {project?.name ?? "Project"}
+          </span>
         </div>
-      </header>
+        {project?.description && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {project.description}
+          </p>
+        )}
+      </div>
 
-      <nav className="border-b">
-        <div className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-6">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.label}
-              to={item.to}
-              end={item.to === ""}
-              className={({ isActive }) =>
-                `whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
-
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      {/* Page content — sidebar nav handles tab selection */}
+      <div className="px-8 py-6">
         <Outlet context={{ project }} />
-      </main>
+      </div>
     </div>
   );
 }

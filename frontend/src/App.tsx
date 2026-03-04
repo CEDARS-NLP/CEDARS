@@ -3,11 +3,16 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import LoginPage from "@/auth/LoginPage";
 import RegisterPage from "@/auth/RegisterPage";
+import AppLayout from "@/components/AppLayout";
 import ProjectListPage from "@/projects/ProjectListPage";
 import CreateProjectPage from "@/projects/CreateProjectPage";
 import ProjectLayout from "@/projects/ProjectLayout";
 import ProjectOverview from "@/projects/ProjectOverview";
-import PlaceholderSection from "@/projects/PlaceholderSection";
+import DataPage from "@/projects/DataPage";
+import PipelinePage from "@/projects/PipelinePage";
+import AnnotationsPage from "@/projects/AnnotationsPage";
+import EvaluationPage from "@/projects/EvaluationPage";
+import ExportPage from "@/projects/ExportPage";
 
 const queryClient = new QueryClient();
 
@@ -16,7 +21,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <p className="text-muted-foreground">Loading...</p>
       </div>
     );
@@ -34,7 +39,7 @@ function GuestRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <p className="text-muted-foreground">Loading...</p>
       </div>
     );
@@ -53,50 +58,7 @@ export default function App() {
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            {/* Redirect root to projects */}
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Navigate to="/projects" replace />
-                </ProtectedRoute>
-              }
-            />
-
-            {/* Project routes */}
-            <Route
-              path="/projects"
-              element={
-                <ProtectedRoute>
-                  <ProjectListPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/projects/new"
-              element={
-                <ProtectedRoute>
-                  <CreateProjectPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/projects/:projectId"
-              element={
-                <ProtectedRoute>
-                  <ProjectLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<ProjectOverview />} />
-              <Route path="data" element={<PlaceholderSection title="Data" />} />
-              <Route path="pipeline" element={<PlaceholderSection title="Pipeline" />} />
-              <Route path="annotations" element={<PlaceholderSection title="Annotations" />} />
-              <Route path="evaluation" element={<PlaceholderSection title="Evaluation" />} />
-              <Route path="export" element={<PlaceholderSection title="Export" />} />
-            </Route>
-
-            {/* Auth routes */}
+            {/* Auth routes — no sidebar */}
             <Route
               path="/login"
               element={
@@ -113,6 +75,27 @@ export default function App() {
                 </GuestRoute>
               }
             />
+
+            {/* App routes — with sidebar */}
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<Navigate to="/projects" replace />} />
+              <Route path="/projects" element={<ProjectListPage />} />
+              <Route path="/projects/new" element={<CreateProjectPage />} />
+              <Route path="/projects/:projectId" element={<ProjectLayout />}>
+                <Route index element={<ProjectOverview />} />
+                <Route path="data" element={<DataPage />} />
+                <Route path="pipeline" element={<PipelinePage />} />
+                <Route path="annotations" element={<AnnotationsPage />} />
+                <Route path="evaluation" element={<EvaluationPage />} />
+                <Route path="export" element={<ExportPage />} />
+              </Route>
+            </Route>
           </Routes>
         </AuthProvider>
       </BrowserRouter>

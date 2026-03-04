@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, FolderOpen } from "lucide-react";
 import { api } from "@/api/client";
-import { useAuth } from "@/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,11 +23,11 @@ interface Project {
 function roleBadgeClass(role: string): string {
   switch (role) {
     case "owner":
-      return "bg-primary/10 text-primary";
+      return "bg-primary/10 text-primary dark:bg-primary/20";
     case "admin":
-      return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
+      return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
     case "annotator":
-      return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+      return "bg-accent/10 text-accent dark:bg-accent/20";
     default:
       return "bg-secondary text-secondary-foreground";
   }
@@ -44,7 +43,6 @@ function formatDate(dateStr: string): string {
 
 export default function ProjectListPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
 
   const {
     data: projects,
@@ -56,95 +54,99 @@ export default function ProjectListPage() {
   });
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <h1 className="text-xl font-bold">CEDARS</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              {user?.name ?? user?.email}
-            </span>
-            <Button variant="ghost" size="sm" onClick={logout}>
-              Sign out
-            </Button>
-          </div>
+    <div className="px-8 py-8">
+      {/* Page header */}
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Projects</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage your clinical event detection projects
+          </p>
         </div>
-      </header>
+        <Button asChild>
+          <Link to="/projects/new">
+            <Plus className="mr-1.5 h-4 w-4" />
+            New Project
+          </Link>
+        </Button>
+      </div>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">Projects</h2>
-            <p className="text-sm text-muted-foreground">
-              Manage your clinical event detection projects
-            </p>
+      <div aria-live="polite">
+        {isLoading && (
+          <div className="flex items-center justify-center py-20">
+            <p className="text-muted-foreground">Loading projects...</p>
           </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Failed to load projects:{" "}
+          {error instanceof Error ? error.message : "Unknown error"}
+        </div>
+      )}
+
+      {projects && projects.length === 0 && (
+        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-16">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <FolderOpen className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <p className="mb-1 text-lg font-medium text-foreground">
+            No projects yet
+          </p>
+          <p className="mb-6 text-sm text-muted-foreground">
+            Create your first project to get started.
+          </p>
           <Button asChild>
             <Link to="/projects/new">
-              <Plus />
-              New Project
+              <Plus className="mr-1.5 h-4 w-4" />
+              Create Project
             </Link>
           </Button>
         </div>
+      )}
 
-        {isLoading && (
-          <p className="text-muted-foreground">Loading projects...</p>
-        )}
-
-        {error && (
-          <p className="text-sm text-destructive">
-            Failed to load projects: {error instanceof Error ? error.message : "Unknown error"}
-          </p>
-        )}
-
-        {projects && projects.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <p className="mb-2 text-lg font-medium">No projects yet</p>
-              <p className="mb-6 text-sm text-muted-foreground">
-                Create your first project to get started with clinical event detection.
-              </p>
-              <Button asChild>
-                <Link to="/projects/new">
-                  <Plus />
-                  Create Project
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {projects && projects.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
-              <Card
-                key={project.id}
-                className="cursor-pointer transition-shadow hover:shadow-md"
-                onClick={() => navigate(`/projects/${project.id}`)}
-              >
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-lg">{project.name}</CardTitle>
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass(project.role)}`}
-                    >
-                      {project.role}
-                    </span>
-                  </div>
-                  <CardDescription>
-                    {project.description || "No description"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">
-                    Created {formatDate(project.created_at)}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </main>
+      {projects && projects.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {projects.map((project) => (
+            <Card
+              key={project.id}
+              className="cursor-pointer border-border/60 transition-all hover:border-accent/40 hover:shadow-md focus-within:ring-2 focus-within:ring-ring"
+              tabIndex={0}
+              role="link"
+              aria-label={project.name}
+              onClick={() => navigate(`/projects/${project.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  navigate(`/projects/${project.id}`);
+                }
+              }}
+            >
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-base leading-snug">
+                    {project.name}
+                  </CardTitle>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${roleBadgeClass(project.role)}`}
+                  >
+                    {project.role}
+                  </span>
+                </div>
+                <CardDescription className="line-clamp-2">
+                  {project.description || "No description"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <p className="text-xs text-muted-foreground">
+                  Created {formatDate(project.created_at)}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
