@@ -1,6 +1,9 @@
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
@@ -15,12 +18,29 @@ from app.audit.models import AuditEntry  # noqa: F401
 from app.common.database import get_session
 from app.main import create_app
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///test.db"
+TEST_DATABASE_URL = "sqlite+aiosqlite://"
+
+
+@pytest.fixture(autouse=True)
+def _force_sync_nlp_dispatch():
+    """Force dispatch_nlp_job to use the synchronous fallback path in all tests.
+
+    When Redis is running locally, ARQ enqueue succeeds but no worker
+    processes the job, leaving it stuck in 'pending'. Patching create_pool
+    to raise ensures the sync fallback is always used in tests.
+    """
+    with patch("arq.create_pool", side_effect=ConnectionError("no Redis in tests")):
+        yield
 
 
 @pytest.fixture
 async def app():
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
