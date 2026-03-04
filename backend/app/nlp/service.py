@@ -146,6 +146,68 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
     }
 
 
+async def _process_notes_into_sentences(
+    session: AsyncSession,
+    project_id: str,
+    progress_callback=None,
+) -> dict:
+    """Core NLP pipeline: fetch queries, find unprocessed notes, create sentences.
+
+    Returns {"total_notes": int, "processed_notes": int}.
+    """
+    # Get active search queries
+    queries = await list_search_queries(session, project_id)
+    active_queries = [q for q in queries if q.is_active]
+
+    all_query_groups = []
+    for q in active_queries:
+        groups = parse_query(q.query)
+        all_query_groups.extend(groups)
+
+    # Get notes that haven't been processed yet (no sentences exist)
+    notes_stmt = (
+        select(Note)
+        .outerjoin(Sentence, Sentence.note_id == Note.id)
+        .where(
+            Note.project_id == project_id,
+            Note.deleted_at.is_(None),
+            Sentence.id.is_(None),
+        )
+        .order_by(Note.created_at)
+    )
+    result = await session.execute(notes_stmt)
+    notes = list(result.scalars().all())
+
+    total = len(notes)
+    if not notes:
+        return {"total_notes": 0, "processed_notes": 0}
+
+    for i, note in enumerate(notes):
+        sentences = process_note(note.text, all_query_groups)
+
+        for sent_data in sentences:
+            sentence = Sentence(
+                note_id=note.id,
+                project_id=project_id,
+                sentence_number=sent_data["sentence_number"],
+                text=sent_data["text"],
+                start_pos=sent_data["start_pos"],
+                end_pos=sent_data["end_pos"],
+                is_negated=sent_data["is_negated"],
+                is_target=sent_data["is_target"],
+                matched_tokens=sent_data["matched_tokens"],
+            )
+            session.add(sentence)
+
+        await session.flush()
+
+        if (i + 1) % 50 == 0 or i == total - 1:
+            if progress_callback:
+                await progress_callback(i + 1, total)
+
+    return {"total_notes": total, "processed_notes": total}
+
+
 async def run_nlp_pipeline(
     session: AsyncSession, project_id: str
 ) -> NlpJob:
@@ -154,80 +216,28 @@ async def run_nlp_pipeline(
 
     Creates sentences for all notes that haven't been processed yet.
     """
-    # Create job record
     job = NlpJob(project_id=project_id)
     session.add(job)
     await session.commit()
     await session.refresh(job)
 
     try:
-        # Get active search queries
-        queries = await list_search_queries(session, project_id)
-        active_queries = [q for q in queries if q.is_active]
-
-        # Parse all queries into pattern groups
-        all_query_groups = []
-        for q in active_queries:
-            groups = parse_query(q.query)
-            all_query_groups.extend(groups)
-
-        # Get notes that haven't been processed yet (no sentences exist)
-        notes_stmt = (
-            select(Note)
-            .outerjoin(Sentence, Sentence.note_id == Note.id)
-            .where(
-                Note.project_id == project_id,
-                Note.deleted_at.is_(None),
-                Sentence.id.is_(None),  # no sentences yet
-            )
-            .order_by(Note.created_at)
-        )
-        result = await session.execute(notes_stmt)
-        notes = list(result.scalars().all())
-
-        # Update job with total
         job.status = NlpJobStatus.RUNNING
-        job.total_notes = len(notes)
         job.started_at = datetime.now(UTC)
         session.add(job)
         await session.commit()
 
-        if not notes:
-            job.status = NlpJobStatus.COMPLETED
-            job.completed_at = datetime.now(UTC)
+        async def _progress(processed, total):
+            job.total_notes = total
+            job.processed_notes = processed
             session.add(job)
             await session.commit()
-            await session.refresh(job)
-            return job
 
-        # Process notes
-        for i, note in enumerate(notes):
-            sentences = process_note(note.text, all_query_groups)
-
-            for sent_data in sentences:
-                sentence = Sentence(
-                    note_id=note.id,
-                    project_id=project_id,
-                    sentence_number=sent_data["sentence_number"],
-                    text=sent_data["text"],
-                    start_pos=sent_data["start_pos"],
-                    end_pos=sent_data["end_pos"],
-                    is_negated=sent_data["is_negated"],
-                    is_target=sent_data["is_target"],
-                    matched_tokens=sent_data["matched_tokens"],
-                )
-                session.add(sentence)
-
-            await session.flush()
-
-            # Update progress periodically
-            if (i + 1) % 50 == 0 or i == len(notes) - 1:
-                job.processed_notes = i + 1
-                session.add(job)
-                await session.commit()
+        stats = await _process_notes_into_sentences(session, project_id, _progress)
 
         job.status = NlpJobStatus.COMPLETED
-        job.processed_notes = len(notes)
+        job.total_notes = stats["total_notes"]
+        job.processed_notes = stats["processed_notes"]
         job.completed_at = datetime.now(UTC)
 
     except Exception as exc:
