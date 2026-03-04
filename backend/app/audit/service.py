@@ -31,6 +31,7 @@ async def log_action(
         session.add(entry)
         await session.commit()
     except Exception:
+        await session.rollback()
         logger.exception("Failed to write audit entry: %s %s", action, detail)
 
 

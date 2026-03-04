@@ -1,14 +1,24 @@
 """API routes for data export."""
 
-from fastapi import APIRouter, Depends, Query
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
 from app.dependencies import require_project_role
-from app.export.schemas import ExportAnnotationRow, ExportStatsResponse
+from app.export.databricks import ExportType, export_to_databricks
+from app.export.schemas import (
+    DatabricksExportRequest,
+    DatabricksExportResponse,
+    ExportAnnotationRow,
+    ExportStatsResponse,
+)
 from app.export.service import export_annotations, format_csv, get_export_stats
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/export",
@@ -51,4 +61,43 @@ async def export_annotations_csv_endpoint(
         content=csv_content,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=annotations-{project_id[:8]}.csv"},
+    )
+
+
+@router.post("/databricks", response_model=DatabricksExportResponse)
+async def export_to_databricks_endpoint(
+    project_id: str,
+    body: DatabricksExportRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_project_role("admin")),
+):
+    """Export project results to a Databricks table."""
+    try:
+        export_type = ExportType(body.export_type)
+    except ValueError:
+        valid = [e.value for e in ExportType]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid export_type '{body.export_type}'. Must be one of: {valid}",
+        )
+
+    try:
+        rows_exported = await export_to_databricks(
+            session=session,
+            project_id=project_id,
+            data_source_id=body.data_source_id,
+            target_table=body.target_table,
+            export_type=export_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception:
+        logger.exception("Databricks export failed")
+        raise HTTPException(status_code=500, detail="Export to Databricks failed")
+
+    return DatabricksExportResponse(
+        rows_exported=rows_exported,
+        target_table=body.target_table,
+        export_type=body.export_type,
+        status="success",
     )

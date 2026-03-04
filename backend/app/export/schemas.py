@@ -25,3 +25,16 @@ class ExportStatsResponse(BaseModel):
     reviewed: int
     events: int
     total_eval_tokens: int = 0
+
+
+class DatabricksExportRequest(BaseModel):
+    data_source_id: str
+    target_table: str
+    export_type: str  # "annotations", "predictions", or "evaluation"
+
+
+class DatabricksExportResponse(BaseModel):
+    rows_exported: int
+    target_table: str
+    export_type: str
+    status: str
