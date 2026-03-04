@@ -14,10 +14,9 @@ interface User {
   name: string;
 }
 
-interface TokenResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
+interface LoginResponse {
+  message: string;
+  user: User;
 }
 
 interface AuthContextValue {
@@ -39,30 +38,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await api.get<User>("/auth/me");
       setUser(me);
     } catch {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
       setUser(null);
     }
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (token) {
-      fetchUser().finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
+    fetchUser().finally(() => setIsLoading(false));
   }, [fetchUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const tokens = await api.post<TokenResponse>("/auth/login", {
+    const resp = await api.post<LoginResponse>("/auth/login", {
       email,
       password,
     });
-    localStorage.setItem("access_token", tokens.access_token);
-    localStorage.setItem("refresh_token", tokens.refresh_token);
-    const me = await api.get<User>("/auth/me");
-    setUser(me);
+    setUser(resp.user);
   }, []);
 
   const register = useCallback(
@@ -73,9 +62,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [login]
   );
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/auth/logout", {});
+    } catch {
+      // Ignore errors during logout
+    }
     setUser(null);
   }, []);
 

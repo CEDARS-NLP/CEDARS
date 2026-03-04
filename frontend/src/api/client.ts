@@ -1,13 +1,52 @@
 const API_BASE = "/api/v1";
 
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (isRefreshing && refreshPromise) return refreshPromise;
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem("access_token");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+
+  if (res.status === 401 && !path.includes("/auth/")) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      const retry = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+      if (retry.ok) return retry.json() as Promise<T>;
+    }
+    window.location.href = "/login";
+    throw new Error("Session expired");
+  }
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Request failed" }));
