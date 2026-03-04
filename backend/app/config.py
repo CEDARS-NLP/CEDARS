@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # LLM settings
     allow_cloud_llm: bool = True
 
+    # CORS
+    cors_origins: str = "http://localhost:5173"
+
     # NLP / spaCy settings
     # Set to a spaCy model name (e.g. "en_core_web_sm") to use a trained model.
     # Leave blank to use the default blank English model with sentencizer.
