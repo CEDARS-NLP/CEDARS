@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from app.audit.models import AuditAction
+from app.audit.service import log_action
 from app.connectors.models import (
     ConnectorType,
     DataSource,
@@ -135,6 +137,13 @@ async def run_ingestion(
     session.add(ds)
     await session.commit()
     await session.refresh(ds)
+
+    if ds.status == IngestionStatus.COMPLETED:
+        await log_action(
+            session, project_id, AuditAction.DATA_INGESTED,
+            detail={"data_source_id": data_source_id, "row_count": total_rows},
+        )
+
     return ds
 
 
@@ -192,6 +201,13 @@ async def resync_data_source(
     session.add(ds)
     await session.commit()
     await session.refresh(ds)
+
+    if ds.status == IngestionStatus.COMPLETED:
+        await log_action(
+            session, project_id, AuditAction.DATA_RESYNCED,
+            detail={"data_source_id": data_source_id, "row_count": total_rows},
+        )
+
     return ds
 
 
@@ -345,6 +361,11 @@ async def purge_data_source(
     ds.last_sync = None
     session.add(ds)
     await session.commit()
+
+    await log_action(
+        session, project_id, AuditAction.DATA_PURGED,
+        detail={"data_source_id": data_source_id, "deleted_notes": len(note_ids)},
+    )
 
     return len(note_ids)
 

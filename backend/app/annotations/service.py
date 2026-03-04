@@ -8,6 +8,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
+from app.audit.models import AuditAction
+from app.audit.service import log_action
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery, Sentence
 from app.predictors.base import PredictionResult, PredictorError
@@ -252,6 +254,19 @@ async def review_annotation(
     await session.commit()
     await session.refresh(annotation)
     await _check_patient_completion(session, project_id, annotation.patient_id)
+
+    await log_action(
+        session, project_id, AuditAction.ANNOTATION_REVIEWED,
+        user_id=user_id, patient_id=annotation.patient_id,
+        detail={"annotation_id": annotation_id, "skipped_count": skipped_count},
+    )
+    if event_date:
+        await log_action(
+            session, project_id, AuditAction.EVENT_DATE_SET,
+            user_id=user_id, patient_id=annotation.patient_id,
+            detail={"annotation_id": annotation_id, "event_date": event_date.isoformat()},
+        )
+
     return {"annotation": annotation, "skipped_count": skipped_count}
 
 
@@ -273,6 +288,13 @@ async def skip_annotation(
     await session.commit()
     await session.refresh(annotation)
     await _check_patient_completion(session, project_id, annotation.patient_id)
+
+    await log_action(
+        session, project_id, AuditAction.ANNOTATION_SKIPPED,
+        user_id=user_id, patient_id=annotation.patient_id,
+        detail={"annotation_id": annotation_id},
+    )
+
     return annotation
 
 
@@ -423,6 +445,11 @@ async def get_next_patient_for_review(
     session.add(patient)
     await session.commit()
 
+    await log_action(
+        session, project_id, AuditAction.PATIENT_LOCKED,
+        user_id=user_id, patient_id=patient.id,
+    )
+
     # Count annotations
     total = (
         await session.execute(
@@ -531,6 +558,11 @@ async def unlock_patient(
     session.add(patient)
     await session.commit()
 
+    await log_action(
+        session, project_id, AuditAction.PATIENT_UNLOCKED,
+        user_id=user_id, patient_id=patient_id,
+    )
+
 
 async def delete_event_date(
     session: AsyncSession,
@@ -574,6 +606,12 @@ async def delete_event_date(
         patient.status = PatientStatus.REVIEWING
         session.add(patient)
         await session.commit()
+
+    await log_action(
+        session, project_id, AuditAction.EVENT_DATE_DELETED,
+        user_id=user_id, patient_id=annotation.patient_id,
+        detail={"annotation_id": annotation_id, "reverted_count": reverted_count},
+    )
 
     return {"annotation": annotation, "reverted_count": reverted_count}
 
