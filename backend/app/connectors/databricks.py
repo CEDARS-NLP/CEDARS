@@ -1,5 +1,6 @@
 """Databricks SQL warehouse connector."""
 
+import asyncio
 import logging
 import re
 
@@ -22,10 +23,13 @@ def _validate_identifier(name: str, label: str) -> None:
 
 def connect_databricks(config: dict):
     """Create a Databricks SQL connection from config."""
+    from app.common.crypto import decrypt_value
+
+    token = decrypt_value(config["token"])
     return databricks_sql.connect(
         server_hostname=config["host"],
         http_path=config["http_path"],
-        access_token=config["token"],
+        access_token=token,
     )
 
 
@@ -38,6 +42,62 @@ def _fqn(config: dict) -> str:
     _validate_identifier(schema, "schema")
     _validate_identifier(table, "table")
     return f"`{catalog}`.`{schema}`.`{table}`"
+
+
+def _test_connection(config: dict) -> str | None:
+    """Test Databricks connection. Returns error message or None."""
+    try:
+        conn = connect_databricks(config)
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.close()
+        conn.close()
+        return None
+    except Exception as e:
+        return f"Could not connect to Databricks: {e}"
+
+
+def _preview_sync(config: dict, limit: int) -> PreviewResult:
+    """Synchronous preview implementation."""
+    conn = connect_databricks(config)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM {_fqn(config)} LIMIT {int(limit)}")
+        columns = [desc[0] for desc in cursor.description]
+        raw_rows = cursor.fetchall()
+        rows = [dict(zip(columns, row)) for row in raw_rows]
+        cursor.close()
+
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM {_fqn(config)}")
+        total = cursor.fetchone()[0]
+        cursor.close()
+
+        return PreviewResult(columns=columns, rows=rows, total_available=total)
+    finally:
+        conn.close()
+
+
+def _fetch_sync(config: dict, batch_size: int, offset: int) -> FetchResult:
+    """Synchronous fetch implementation."""
+    conn = connect_databricks(config)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM {_fqn(config)} LIMIT {int(batch_size)} OFFSET {int(offset)}"
+        )
+        columns = [desc[0] for desc in cursor.description]
+        raw_rows = cursor.fetchall()
+        rows = [dict(zip(columns, row)) for row in raw_rows]
+        cursor.close()
+
+        return FetchResult(
+            rows=rows,
+            has_more=len(rows) == batch_size,
+            offset=offset,
+        )
+    finally:
+        conn.close()
 
 
 class DatabricksConnector(ConnectorBase):
@@ -86,59 +146,20 @@ class DatabricksConnector(ConnectorBase):
         if errors:
             return errors
 
-        # Test connection
-        try:
-            conn = connect_databricks(config)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            errors.append(f"Could not connect to Databricks: {e}")
+        # Test connection in a thread to avoid blocking the event loop
+        error = await asyncio.to_thread(_test_connection, config)
+        if error:
+            errors.append(error)
 
         return errors
 
     async def preview(self, config: dict, limit: int = 10) -> PreviewResult:
-        conn = connect_databricks(config)
-        try:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM {_fqn(config)} LIMIT {int(limit)}")
-            columns = [desc[0] for desc in cursor.description]
-            raw_rows = cursor.fetchall()
-            rows = [dict(zip(columns, row)) for row in raw_rows]
-            cursor.close()
-
-            # Get total count
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT COUNT(*) FROM {_fqn(config)}")
-            total = cursor.fetchone()[0]
-            cursor.close()
-
-            return PreviewResult(columns=columns, rows=rows, total_available=total)
-        finally:
-            conn.close()
+        return await asyncio.to_thread(_preview_sync, config, limit)
 
     async def fetch(
         self, config: dict, batch_size: int = 1000, offset: int = 0
     ) -> FetchResult:
-        conn = connect_databricks(config)
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"SELECT * FROM {_fqn(config)} LIMIT {int(batch_size)} OFFSET {int(offset)}"
-            )
-            columns = [desc[0] for desc in cursor.description]
-            raw_rows = cursor.fetchall()
-            rows = [dict(zip(columns, row)) for row in raw_rows]
-            cursor.close()
-
-            return FetchResult(
-                rows=rows,
-                has_more=len(rows) == batch_size,
-                offset=offset,
-            )
-        finally:
-            conn.close()
+        return await asyncio.to_thread(_fetch_sync, config, batch_size, offset)
 
     def required_columns(self) -> list[str]:
         return ["patient_id", "text_id", "text", "note_date"]
