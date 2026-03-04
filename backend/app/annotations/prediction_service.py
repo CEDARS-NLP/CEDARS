@@ -56,6 +56,7 @@ async def run_bulk_predictions(
         .where(
             Sentence.project_id == project_id,
             Sentence.is_target == True,  # noqa: E712
+            Note.deleted_at.is_(None),
             Sentence.id.notin_(existing_annotations),
         )
     )
