@@ -62,6 +62,9 @@ async def get_project(
     return result.scalar_one_or_none()
 
 
+_PROJECT_UPDATE_FIELDS = {"name", "description", "settings"}
+
+
 async def update_project(
     session: AsyncSession,
     project_id: str,
@@ -73,7 +76,7 @@ async def update_project(
         return None
 
     for key, value in updates.items():
-        if value is not None:
+        if key in _PROJECT_UPDATE_FIELDS and value is not None:
             setattr(project, key, value)
 
     session.add(project)

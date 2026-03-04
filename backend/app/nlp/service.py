@@ -66,6 +66,9 @@ async def get_search_query(
     return result.scalar_one_or_none()
 
 
+_QUERY_UPDATE_FIELDS = {"query", "name", "is_active", "nlp_apply", "hide_duplicates", "skip_after_event"}
+
+
 async def update_search_query(
     session: AsyncSession, project_id: str, query_id: str, updates: dict
 ) -> SearchQuery | None:
@@ -73,7 +76,7 @@ async def update_search_query(
     if not sq:
         return None
     for key, value in updates.items():
-        if value is not None and hasattr(sq, key):
+        if key in _QUERY_UPDATE_FIELDS and value is not None:
             setattr(sq, key, value)
     session.add(sq)
     await session.commit()
