@@ -18,6 +18,11 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class LoginResponse(BaseModel):
+    message: str = "Login successful"
+    user: "UserResponse"
+
+
 class UserResponse(BaseModel):
     id: str
     email: str

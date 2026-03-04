@@ -27,12 +27,13 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    cookie_secure: bool = False
 
     # S3 / MinIO object storage
-    s3_endpoint: str = ""
-    s3_bucket: str = ""
-    s3_access_key: str = ""
-    s3_secret_key: str = ""
+    s3_endpoint: str = "http://localhost:9000"
+    s3_bucket: str = "cedars"
+    s3_access_key: str = "rootuser"
+    s3_secret_key: str = "rootpassword"
     s3_region: str = ""
 
     # PINES NLP service
@@ -40,6 +41,11 @@ class Settings(BaseSettings):
 
     # LLM settings
     allow_cloud_llm: bool = True
+
+    # NLP / spaCy settings
+    # Set to a spaCy model name (e.g. "en_core_web_sm") to use a trained model.
+    # Leave blank to use the default blank English model with sentencizer.
+    spacy_model: str = ""
 
 
 settings = Settings()

@@ -1,22 +1,22 @@
 """Shared FastAPI dependencies for authentication and authorization."""
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User, UserRole
 from app.auth.service import decode_token
 from app.common.database import get_session
 
-security = HTTPBearer()
-
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """Validate JWT bearer token and return the authenticated user."""
-    payload = decode_token(credentials.credentials)
+    """Validate JWT from httpOnly cookie and return the authenticated user."""
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = decode_token(token)
     if not payload or payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     user = await session.get(User, payload["sub"])
