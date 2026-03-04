@@ -3,7 +3,7 @@
 import pytest
 
 
-async def register_and_login(client, email, name="Test User", password="pass123"):
+async def register_and_login(client, email, name="Test User", password="pass1234"):
     """Helper: register a user and login. Cookies are set automatically by httpx."""
     await client.post("/api/v1/auth/register", json={
         "email": email, "name": name, "password": password,
@@ -179,11 +179,11 @@ async def test_list_members(client):
 
     # Register second user (using same client, then re-login as first user)
     await client.post("/api/v1/auth/register", json={
-        "email": "list-mem2@test.com", "name": "Member 2", "password": "pass123",
+        "email": "list-mem2@test.com", "name": "Member 2", "password": "pass1234",
     })
     # Re-login as first user
     await client.post("/api/v1/auth/login", json={
-        "email": "list-mem@test.com", "password": "pass123",
+        "email": "list-mem@test.com", "password": "pass1234",
     })
 
     resp = await client.post("/api/v1/projects", json={"name": "Multi-member"})

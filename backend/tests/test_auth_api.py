@@ -20,10 +20,10 @@ async def test_register_user(client):
 @pytest.mark.asyncio
 async def test_register_duplicate_email(client):
     await client.post("/api/v1/auth/register", json={
-        "email": "dupe@test.com", "name": "First", "password": "pass123"
+        "email": "dupe@test.com", "name": "First", "password": "pass1234"
     })
     response = await client.post("/api/v1/auth/register", json={
-        "email": "dupe@test.com", "name": "Second", "password": "pass456"
+        "email": "dupe@test.com", "name": "Second", "password": "pass4567"
     })
     assert response.status_code == 400
 
@@ -56,10 +56,10 @@ async def test_login_wrong_password(client):
 @pytest.mark.asyncio
 async def test_get_current_user(client):
     await client.post("/api/v1/auth/register", json={
-        "email": "me@test.com", "name": "Me", "password": "pass123"
+        "email": "me@test.com", "name": "Me", "password": "pass1234"
     })
     await client.post("/api/v1/auth/login", json={
-        "email": "me@test.com", "password": "pass123"
+        "email": "me@test.com", "password": "pass1234"
     })
     # Cookies are set automatically by httpx from Set-Cookie headers
     response = await client.get("/api/v1/auth/me")
