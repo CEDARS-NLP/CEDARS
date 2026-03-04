@@ -149,7 +149,7 @@ async def _full_setup(client: AsyncClient, use_dates: bool = False) -> str:
     await add_predictor(client, pid)
 
     mock_result = PredictionResult(score=0.85, label=1, model="test", reasoning="test")
-    with patch("app.annotations.service.create_predictor") as mock_factory:
+    with patch("app.annotations.prediction_service.create_predictor") as mock_factory:
         mock_predictor = AsyncMock()
         mock_predictor.predict.return_value = mock_result
         mock_factory.return_value = mock_predictor
@@ -167,7 +167,7 @@ class TestBulkRun:
 
         mock_result = PredictionResult(score=0.85, label=1, model="test", reasoning="troponin elevated")
 
-        with patch("app.annotations.service.create_predictor") as mock_factory:
+        with patch("app.annotations.prediction_service.create_predictor") as mock_factory:
             mock_predictor = AsyncMock()
             mock_predictor.predict.return_value = mock_result
             mock_factory.return_value = mock_predictor

@@ -429,7 +429,7 @@ async def activate_validated_predictor(
     validated_id: str,
 ) -> tuple[ValidatedPredictor | None, dict | None]:
     """Activate a validated predictor, its PredictorConfig, and trigger bulk predictions."""
-    from app.annotations.service import run_bulk_predictions
+    from app.annotations.prediction_service import run_bulk_predictions
 
     # Deactivate current validated predictors
     stmt = select(ValidatedPredictor).where(
