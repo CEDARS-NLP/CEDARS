@@ -138,6 +138,217 @@ async def run_ingestion(
     return ds
 
 
+async def resync_data_source(
+    session: AsyncSession, project_id: str, data_source_id: str
+) -> DataSource:
+    """Re-fetch data from connector. Update existing notes by text_id, insert new ones."""
+    ds = await get_data_source(session, project_id, data_source_id)
+    if not ds:
+        raise ValueError("Data source not found")
+
+    connector = get_connector(ds.connector_type)
+
+    errors = await connector.validate_config(ds.config)
+    if errors:
+        ds.status = IngestionStatus.FAILED
+        ds.error_message = "; ".join(errors)
+        session.add(ds)
+        await session.commit()
+        await session.refresh(ds)
+        return ds
+
+    ds.status = IngestionStatus.RUNNING
+    ds.error_message = None
+    session.add(ds)
+    await session.commit()
+
+    try:
+        total_rows = 0
+        offset = 0
+        batch_size = 1000
+
+        while True:
+            batch = await connector.fetch(ds.config, batch_size=batch_size, offset=offset)
+            if not batch.rows:
+                break
+
+            mapping = ds.config.get("column_mapping", {})
+            upserted = await _upsert_rows(session, project_id, ds.id, batch.rows, mapping)
+            total_rows += upserted
+            offset += batch_size
+
+            if not batch.has_more:
+                break
+
+        ds.status = IngestionStatus.COMPLETED
+        ds.row_count = total_rows
+        ds.last_sync = datetime.now(UTC)
+        ds.error_message = None
+
+    except Exception as exc:
+        ds.status = IngestionStatus.FAILED
+        ds.error_message = str(exc)
+
+    session.add(ds)
+    await session.commit()
+    await session.refresh(ds)
+    return ds
+
+
+async def _upsert_rows(
+    session: AsyncSession,
+    project_id: str,
+    data_source_id: str,
+    rows: list[dict],
+    column_mapping: dict,
+) -> int:
+    """Insert new rows or update existing ones (matched by text_id)."""
+    pid_col = column_mapping.get("patient_id", "patient_id")
+    text_id_col = column_mapping.get("text_id", "text_id")
+    text_col = column_mapping.get("text", "text")
+    date_col = column_mapping.get("note_date")
+    ref_col = column_mapping.get("source_ref")
+
+    if rows:
+        actual_keys = list(rows[0].keys())
+        norm_lookup: dict[str, str] = {}
+        for key in actual_keys:
+            normalized = key.strip().lower().replace(" ", "_")
+            norm_lookup[normalized] = key
+
+        def resolve(mapped_name: str | None) -> str | None:
+            if mapped_name is None:
+                return None
+            if rows and mapped_name in rows[0]:
+                return mapped_name
+            normalized = mapped_name.strip().lower().replace(" ", "_")
+            return norm_lookup.get(normalized, mapped_name)
+
+        pid_col = resolve(pid_col) or pid_col
+        text_id_col = resolve(text_id_col) or text_id_col
+        text_col = resolve(text_col) or text_col
+        date_col = resolve(date_col)
+        ref_col = resolve(ref_col)
+
+    patient_cache: dict[str, str] = {}
+    upserted = 0
+
+    for row in rows:
+        patient_id_ext = str(row.get(pid_col, "")).strip()
+        text_id = str(row.get(text_id_col, "")).strip()
+        note_text = str(row.get(text_col, "")).strip()
+        if not patient_id_ext or not text_id or not note_text:
+            continue
+
+        note_date = None
+        if date_col and row.get(date_col):
+            try:
+                note_date = datetime.fromisoformat(str(row[date_col]).strip())
+            except (ValueError, TypeError):
+                pass
+        if note_date is None:
+            continue
+
+        if patient_id_ext not in patient_cache:
+            patient = await _get_or_create_patient(
+                session, project_id, patient_id_ext, data_source_id
+            )
+            patient_cache[patient_id_ext] = patient.id
+        patient_db_id = patient_cache[patient_id_ext]
+
+        source_ref = str(row[ref_col]) if ref_col and row.get(ref_col) else None
+
+        existing = await session.execute(
+            select(Note).where(
+                Note.project_id == project_id,
+                Note.text_id == text_id,
+            )
+        )
+        existing_note = existing.scalar_one_or_none()
+
+        if existing_note:
+            existing_note.text = note_text
+            existing_note.note_date = note_date
+            if source_ref is not None:
+                existing_note.source_ref = source_ref
+            session.add(existing_note)
+        else:
+            known_cols = {pid_col, text_id_col, text_col, date_col, ref_col}
+            extra = {k: v for k, v in row.items() if k not in known_cols and k is not None}
+            note = Note(
+                project_id=project_id,
+                patient_id=patient_db_id,
+                text_id=text_id,
+                note_date=note_date,
+                text=note_text,
+                source_ref=source_ref,
+                data_source_id=data_source_id,
+                metadata_=extra,
+            )
+            session.add(note)
+        upserted += 1
+
+    await session.flush()
+    return upserted
+
+
+async def purge_data_source(
+    session: AsyncSession, project_id: str, data_source_id: str
+) -> int:
+    """Delete all patients, notes, sentences, and annotations from a data source.
+
+    Returns count of deleted notes.
+    """
+    from sqlalchemy import delete
+
+    from app.annotations.models import Annotation
+    from app.nlp.models import Sentence
+
+    ds = await get_data_source(session, project_id, data_source_id)
+    if not ds:
+        raise ValueError("Data source not found")
+
+    note_ids_stmt = select(Note.id).where(
+        Note.project_id == project_id,
+        Note.data_source_id == data_source_id,
+    )
+    note_ids = [r[0] for r in (await session.execute(note_ids_stmt)).all()]
+
+    if not note_ids:
+        return 0
+
+    await session.execute(
+        delete(Annotation).where(Annotation.note_id.in_(note_ids))
+    )
+    await session.execute(
+        delete(Sentence).where(Sentence.note_id.in_(note_ids))
+    )
+    await session.execute(
+        delete(Note).where(Note.id.in_(note_ids))
+    )
+
+    patient_ids_stmt = select(Patient.id).where(
+        Patient.project_id == project_id,
+        Patient.data_source_id == data_source_id,
+    )
+    for pid in [r[0] for r in (await session.execute(patient_ids_stmt)).all()]:
+        remaining = (
+            await session.execute(
+                select(func.count()).select_from(Note).where(Note.patient_id == pid)
+            )
+        ).scalar() or 0
+        if remaining == 0:
+            await session.execute(delete(Patient).where(Patient.id == pid))
+
+    ds.status = IngestionStatus.PENDING
+    ds.row_count = None
+    ds.last_sync = None
+    session.add(ds)
+    await session.commit()
+
+    return len(note_ids)
+
+
 async def _ingest_rows(
     session: AsyncSession,
     project_id: str,

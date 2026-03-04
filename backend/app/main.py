@@ -12,6 +12,7 @@ from app.evaluation.router import router as evaluation_router
 from app.export.router import router as export_router
 from app.nlp.router import router as nlp_router
 from app.admin.router import router as admin_router
+from app.audit.router import router as audit_router
 from app.predictors.router import router as predictors_router
 from app.projects.router import router as projects_router
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     application.include_router(evaluation_router)
     application.include_router(export_router)
     application.include_router(admin_router)
+    application.include_router(audit_router)
 
     @application.get("/api/v1/health")
     async def health_check():

@@ -27,6 +27,7 @@ from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
 from app.annotations.models import Annotation  # noqa: E402, F401
 from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: E402, F401
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
+from app.audit.models import AuditEntry  # noqa: E402, F401
 
 target_metadata = SQLModel.metadata
 

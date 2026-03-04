@@ -199,6 +199,51 @@ async def ingest_data_source_endpoint(
     )
 
 
+
+@router.post("/sources/{data_source_id}/resync", response_model=IngestionResponse)
+async def resync_data_source_endpoint(
+    project_id: str,
+    data_source_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    """Re-sync a data source: update existing notes, add new ones."""
+    ds = await get_data_source(session, project_id, data_source_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    from app.connectors.service import resync_data_source
+    result = await resync_data_source(session, project_id, data_source_id)
+    return IngestionResponse(
+        data_source_id=result.id,
+        status=result.status,
+        message=f"Re-synced {result.row_count or 0} rows" if result.row_count else result.error_message or "No data",
+    )
+
+
+@router.delete("/sources/{data_source_id}/data")
+async def purge_data_source_endpoint(
+    project_id: str,
+    data_source_id: str,
+    confirm: bool = False,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    """Purge all data (patients, notes, sentences, annotations) from a data source."""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Pass ?confirm=true to confirm data deletion",
+        )
+
+    ds = await get_data_source(session, project_id, data_source_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    from app.connectors.service import purge_data_source
+    deleted = await purge_data_source(session, project_id, data_source_id)
+    return {"deleted_notes": deleted, "data_source_id": data_source_id}
+
 # ── Patients + Notes ──────────────────────────────────────────────
 
 
