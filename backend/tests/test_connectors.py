@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -70,13 +70,19 @@ class TestRegistry:
         types = list_connector_types()
         assert "file_upload" in types
 
+    def test_databricks_registered(self):
+        types = list_connector_types()
+        assert "databricks" in types
+
     def test_get_file_upload_connector(self):
         connector = get_connector(ConnectorType.FILE_UPLOAD)
         assert isinstance(connector, FileUploadConnector)
 
-    def test_get_unknown_connector_raises(self):
-        with pytest.raises(ValueError, match="Unknown connector type"):
-            get_connector(ConnectorType.DATABRICKS)
+    def test_get_databricks_connector(self):
+        from app.connectors.databricks import DatabricksConnector
+
+        connector = get_connector(ConnectorType.DATABRICKS)
+        assert isinstance(connector, DatabricksConnector)
 
 
 # ── FileUploadConnector tests ─────────────────────────────────────
@@ -182,3 +188,152 @@ class TestFileUploadConnector:
         assert "text_id" in cols
         assert "text" in cols
         assert "note_date" in cols
+
+
+# ── DatabricksConnector tests ────────────────────────────────────
+
+
+class TestDatabricksConnector:
+    @pytest.fixture
+    def connector(self):
+        from app.connectors.databricks import DatabricksConnector
+
+        return DatabricksConnector()
+
+    def test_required_columns(self, connector):
+        cols = connector.required_columns()
+        assert "patient_id" in cols
+        assert "text_id" in cols
+        assert "text" in cols
+        assert "note_date" in cols
+
+    async def test_validate_config_valid(self, connector):
+        config = {
+            "host": "adb-123.azuredatabricks.net",
+            "http_path": "/sql/1.0/warehouses/abc",
+            "token": "dapi-test-token",
+            "catalog": "hive_metastore",
+            "schema": "clinical",
+            "table": "notes",
+            "column_mapping": {
+                "patient_id": "mrn",
+                "text_id": "note_id",
+                "text": "note_text",
+                "note_date": "date_created",
+            },
+        }
+        with patch("app.connectors.databricks.connect_databricks") as mock_connect:
+            mock_conn = MagicMock()
+            mock_cursor = MagicMock()
+            mock_conn.cursor.return_value = mock_cursor
+            mock_connect.return_value = mock_conn
+            errors = await connector.validate_config(config)
+        assert errors == []
+
+    async def test_validate_config_missing_fields(self, connector):
+        config = {"host": "adb-123.azuredatabricks.net"}
+        errors = await connector.validate_config(config)
+        assert any("http_path" in e for e in errors)
+        assert any("token" in e for e in errors)
+        assert any("table" in e for e in errors)
+
+    async def test_validate_config_missing_column_mapping(self, connector):
+        config = {
+            "host": "h",
+            "http_path": "p",
+            "token": "t",
+            "schema": "s",
+            "table": "tbl",
+            "column_mapping": {},
+        }
+        errors = await connector.validate_config(config)
+        assert any("patient_id" in e for e in errors)
+        assert any("text_id" in e for e in errors)
+        assert any("text" in e for e in errors)
+        assert any("note_date" in e for e in errors)
+
+    async def test_validate_config_connection_failure(self, connector):
+        config = {
+            "host": "bad-host",
+            "http_path": "/sql/1.0/warehouses/abc",
+            "token": "bad-token",
+            "catalog": "hive_metastore",
+            "schema": "clinical",
+            "table": "notes",
+            "column_mapping": {
+                "patient_id": "mrn",
+                "text_id": "note_id",
+                "text": "note_text",
+                "note_date": "date_created",
+            },
+        }
+        with patch(
+            "app.connectors.databricks.connect_databricks",
+            side_effect=Exception("Connection refused"),
+        ):
+            errors = await connector.validate_config(config)
+        assert any("connect" in e.lower() for e in errors)
+
+    async def test_preview(self, connector):
+        config = {
+            "host": "h",
+            "http_path": "p",
+            "token": "t",
+            "catalog": "cat",
+            "schema": "s",
+            "table": "tbl",
+            "column_mapping": {
+                "patient_id": "mrn",
+                "text_id": "nid",
+                "text": "txt",
+                "note_date": "dt",
+            },
+        }
+        with patch("app.connectors.databricks.connect_databricks") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.description = [("mrn",), ("nid",), ("txt",), ("dt",)]
+            mock_cursor.fetchall.return_value = [
+                ("P001", "N001", "Note one", "2024-01-01"),
+                ("P002", "N002", "Note two", "2024-01-02"),
+            ]
+            mock_cursor.fetchone.return_value = (2,)
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value = mock_cursor
+            mock_connect.return_value = mock_conn
+
+            result = await connector.preview(config, limit=5)
+        assert result.columns == ["mrn", "nid", "txt", "dt"]
+        assert len(result.rows) == 2
+        assert result.rows[0]["mrn"] == "P001"
+        assert result.total_available == 2
+
+    async def test_fetch_batching(self, connector):
+        config = {
+            "host": "h",
+            "http_path": "p",
+            "token": "t",
+            "catalog": "cat",
+            "schema": "s",
+            "table": "tbl",
+            "column_mapping": {
+                "patient_id": "mrn",
+                "text_id": "nid",
+                "text": "txt",
+                "note_date": "dt",
+            },
+        }
+        with patch("app.connectors.databricks.connect_databricks") as mock_connect:
+            mock_cursor = MagicMock()
+            mock_cursor.description = [("mrn",), ("nid",), ("txt",), ("dt",)]
+            mock_cursor.fetchall.return_value = [
+                ("P001", "N001", "Note one", "2024-01-01"),
+                ("P002", "N002", "Note two", "2024-01-02"),
+            ]
+            mock_conn = MagicMock()
+            mock_conn.cursor.return_value = mock_cursor
+            mock_connect.return_value = mock_conn
+
+            result = await connector.fetch(config, batch_size=2, offset=0)
+        assert len(result.rows) == 2
+        assert result.has_more is True
+        assert result.offset == 0
