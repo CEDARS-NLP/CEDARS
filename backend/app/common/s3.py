@@ -1,5 +1,6 @@
 """S3-compatible object storage client."""
 
+import functools
 import io
 from typing import BinaryIO
 
@@ -9,8 +10,9 @@ from botocore.config import Config as BotoConfig
 from app.config import settings
 
 
+@functools.lru_cache(maxsize=1)
 def get_s3_client():
-    """Create an S3 client from application settings."""
+    """Create or return cached boto3 S3 client."""
     kwargs: dict = {
         "region_name": settings.s3_region or None,
         "config": BotoConfig(signature_version="s3v4"),
