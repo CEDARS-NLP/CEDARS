@@ -1,12 +1,13 @@
 """Business logic for data sources, ingestion, patients, and notes."""
 
+import io
+import json
 import logging
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-logger = logging.getLogger(__name__)
 
 from app.audit.models import AuditAction
 from app.audit.service import log_action
@@ -18,6 +19,8 @@ from app.connectors.models import (
     Patient,
 )
 from app.connectors.registry import get_connector
+
+logger = logging.getLogger(__name__)
 
 
 # ── Data Source CRUD ──────────────────────────────────────────────
@@ -76,6 +79,63 @@ async def delete_data_source(
     session.add(ds)
     await session.commit()
     return True
+
+
+# ── File Upload ──────────────────────────────────────────────────
+
+
+async def upload_and_create_data_source(
+    session: AsyncSession,
+    project_id: str,
+    filename: str,
+    file_data: bytes,
+    content_type: str,
+    column_mapping: str | None = None,
+) -> DataSource:
+    """Validate upload, store in S3, create data source record.
+
+    Raises ValueError for invalid inputs.
+    """
+    from app.common.s3 import upload_file
+    from app.config import settings
+
+    if not settings.s3_bucket or not settings.s3_endpoint:
+        raise EnvironmentError(
+            "Object storage is not configured. Set CEDARS_S3_ENDPOINT and CEDARS_S3_BUCKET."
+        )
+
+    if not filename:
+        raise ValueError("Filename is required")
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ("csv", "json"):
+        raise ValueError("Only CSV and JSON files are supported")
+
+    # Parse column mapping
+    mapping = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "note_date"}
+    if column_mapping:
+        try:
+            user_mapping = json.loads(column_mapping)
+            if isinstance(user_mapping, dict):
+                mapping.update(user_mapping)
+        except json.JSONDecodeError:
+            raise ValueError("column_mapping must be valid JSON")
+
+    for required in ("patient_id", "text_id", "text", "note_date"):
+        if not mapping.get(required):
+            raise ValueError(f"Column mapping must include '{required}'")
+
+    # Upload to S3
+    s3_key = f"projects/{project_id}/uploads/{uuid.uuid4()}/{filename}"
+    upload_file(s3_key, io.BytesIO(file_data), content_type=content_type)
+
+    config = {
+        "s3_key": s3_key,
+        "file_type": ext,
+        "column_mapping": mapping,
+    }
+
+    return await create_data_source(session, project_id, filename, ConnectorType.FILE_UPLOAD, config)
 
 
 # ── Ingestion ─────────────────────────────────────────────────────

@@ -1,15 +1,10 @@
 """API routes for data sources, ingestion, patients, and notes."""
 
-import io
-import uuid
-
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
-from app.common.s3 import upload_file
-from app.connectors.models import ConnectorType
 from app.connectors.registry import get_connector
 from app.connectors.schemas import (
     CreateDataSourceRequest,
@@ -27,6 +22,7 @@ from app.connectors.service import (
     list_data_sources,
     list_patients,
     run_ingestion,
+    upload_and_create_data_source,
 )
 from app.dependencies import require_project_role
 
@@ -100,56 +96,20 @@ async def upload_file_endpoint(
     CEDARS field names to the file's column names, e.g.:
     ``{"patient_id": "MRN", "text_id": "note_id", "text": "note_text"}``
     """
-    import json as _json
-
-    from app.config import settings
-
-    if not settings.s3_bucket or not settings.s3_endpoint:
-        raise HTTPException(
-            status_code=503,
-            detail="Object storage is not configured. Set CEDARS_S3_ENDPOINT and CEDARS_S3_BUCKET.",
-        )
-
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ("csv", "json"):
-        raise HTTPException(status_code=400, detail="Only CSV and JSON files are supported")
-
-    # Parse column mapping from form data
-    mapping = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "note_date"}
-    if column_mapping:
-        try:
-            user_mapping = _json.loads(column_mapping)
-            if isinstance(user_mapping, dict):
-                mapping.update(user_mapping)
-        except _json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="column_mapping must be valid JSON")
-
-    # Validate required fields are present in mapping
-    for required in ("patient_id", "text_id", "text", "note_date"):
-        if not mapping.get(required):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Column mapping must include '{required}'",
-            )
-
-    # Upload to S3
-    s3_key = f"projects/{project_id}/uploads/{uuid.uuid4()}/{file.filename}"
     content = await file.read()
-    upload_file(s3_key, io.BytesIO(content), content_type=file.content_type or "application/octet-stream")
-
-    config = {
-        "s3_key": s3_key,
-        "file_type": ext,
-        "column_mapping": mapping,
-    }
-
-    ds = await create_data_source(
-        session, project_id, file.filename, ConnectorType.FILE_UPLOAD, config
-    )
-    return ds
+    try:
+        return await upload_and_create_data_source(
+            session,
+            project_id,
+            filename=file.filename or "",
+            file_data=content,
+            content_type=file.content_type or "application/octet-stream",
+            column_mapping=column_mapping,
+        )
+    except EnvironmentError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Preview ───────────────────────────────────────────────────────

@@ -214,7 +214,7 @@ class TestFileUpload:
         csv_content = b"patient_id,text,note_date\nP001,Hello world,2024-01-01"
         mapping = json.dumps({"patient_id": "patient_id", "text_id": "patient_id", "text": "text", "note_date": "note_date"})
 
-        with patch("app.connectors.router.upload_file") as mock_upload:
+        with patch("app.common.s3.upload_file") as mock_upload:
             mock_upload.return_value = "projects/p/uploads/test.csv"
             resp = await client.post(
                 f"/api/v1/projects/{project_id}/data/upload",
