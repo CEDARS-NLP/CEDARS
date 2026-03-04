@@ -21,6 +21,12 @@ from sqlmodel import SQLModel  # noqa: E402
 # Import all models so their tables are registered in SQLModel.metadata
 from app.auth.models import User  # noqa: E402, F401
 from app.projects.models import Project, ProjectMember  # noqa: E402, F401
+from app.connectors.models import DataSource, Patient, Note  # noqa: E402, F401
+from app.predictors.models import PredictorConfig  # noqa: E402, F401
+from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
+from app.annotations.models import Annotation  # noqa: E402, F401
+from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: E402, F401
+from app.jobs.models import BackgroundJob  # noqa: E402, F401
 
 target_metadata = SQLModel.metadata
 
