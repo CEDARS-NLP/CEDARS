@@ -4,15 +4,13 @@ import pytest
 
 
 async def register_and_login(client, email, name="Test User", password="pass123"):
-    """Helper: register a user, login, and return the auth header dict."""
+    """Helper: register a user and login. Cookies are set automatically by httpx."""
     await client.post("/api/v1/auth/register", json={
         "email": email, "name": name, "password": password,
     })
-    resp = await client.post("/api/v1/auth/login", json={
+    await client.post("/api/v1/auth/login", json={
         "email": email, "password": password,
     })
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
 
 
 # --- Project CRUD ---
@@ -20,11 +18,11 @@ async def register_and_login(client, email, name="Test User", password="pass123"
 
 @pytest.mark.asyncio
 async def test_create_project(client):
-    headers = await register_and_login(client, "creator@test.com")
+    await register_and_login(client, "creator@test.com")
     resp = await client.post("/api/v1/projects", json={
         "name": "MI Study",
         "description": "Myocardial infarction detection",
-    }, headers=headers)
+    })
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "MI Study"
@@ -35,15 +33,13 @@ async def test_create_project(client):
 
 @pytest.mark.asyncio
 async def test_create_project_user_is_admin_member(client):
-    headers = await register_and_login(client, "admin-check@test.com")
+    await register_and_login(client, "admin-check@test.com")
     resp = await client.post("/api/v1/projects", json={
         "name": "Test Project",
-    }, headers=headers)
+    })
     project_id = resp.json()["id"]
 
-    members_resp = await client.get(
-        f"/api/v1/projects/{project_id}/members", headers=headers
-    )
+    members_resp = await client.get(f"/api/v1/projects/{project_id}/members")
     assert members_resp.status_code == 200
     members = members_resp.json()
     assert len(members) == 1
@@ -52,98 +48,101 @@ async def test_create_project_user_is_admin_member(client):
 
 
 @pytest.mark.asyncio
-async def test_list_projects_returns_only_user_projects(client):
-    headers_a = await register_and_login(client, "usera@test.com", "User A")
-    headers_b = await register_and_login(client, "userb@test.com", "User B")
+async def test_list_projects_returns_only_user_projects(client_factory):
+    async with client_factory() as client_a, client_factory() as client_b:
+        await register_and_login(client_a, "usera@test.com", "User A")
+        await register_and_login(client_b, "userb@test.com", "User B")
 
-    await client.post("/api/v1/projects", json={"name": "Project A"}, headers=headers_a)
-    await client.post("/api/v1/projects", json={"name": "Project B"}, headers=headers_b)
+        await client_a.post("/api/v1/projects", json={"name": "Project A"})
+        await client_b.post("/api/v1/projects", json={"name": "Project B"})
 
-    resp_a = await client.get("/api/v1/projects", headers=headers_a)
-    assert resp_a.status_code == 200
-    projects = resp_a.json()
-    assert len(projects) == 1
-    assert projects[0]["name"] == "Project A"
+        resp_a = await client_a.get("/api/v1/projects")
+        assert resp_a.status_code == 200
+        projects = resp_a.json()
+        assert len(projects) == 1
+        assert projects[0]["name"] == "Project A"
 
-    resp_b = await client.get("/api/v1/projects", headers=headers_b)
-    projects_b = resp_b.json()
-    assert len(projects_b) == 1
-    assert projects_b[0]["name"] == "Project B"
+        resp_b = await client_b.get("/api/v1/projects")
+        projects_b = resp_b.json()
+        assert len(projects_b) == 1
+        assert projects_b[0]["name"] == "Project B"
 
 
 @pytest.mark.asyncio
 async def test_get_project_as_member(client):
-    headers = await register_and_login(client, "member-get@test.com")
-    resp = await client.post("/api/v1/projects", json={"name": "Visible"}, headers=headers)
+    await register_and_login(client, "member-get@test.com")
+    resp = await client.post("/api/v1/projects", json={"name": "Visible"})
     project_id = resp.json()["id"]
 
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers)
+    resp = await client.get(f"/api/v1/projects/{project_id}")
     assert resp.status_code == 200
     assert resp.json()["name"] == "Visible"
 
 
 @pytest.mark.asyncio
-async def test_get_project_as_non_member_returns_403(client):
-    headers_owner = await register_and_login(client, "owner-get@test.com")
-    headers_other = await register_and_login(client, "other-get@test.com")
+async def test_get_project_as_non_member_returns_403(client_factory):
+    async with client_factory() as client_owner, client_factory() as client_other:
+        await register_and_login(client_owner, "owner-get@test.com")
+        await register_and_login(client_other, "other-get@test.com")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Private"}, headers=headers_owner)
-    project_id = resp.json()["id"]
+        resp = await client_owner.post("/api/v1/projects", json={"name": "Private"})
+        project_id = resp.json()["id"]
 
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers_other)
-    assert resp.status_code == 403
+        resp = await client_other.get(f"/api/v1/projects/{project_id}")
+        assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_project_as_admin(client):
-    headers = await register_and_login(client, "update-admin@test.com")
-    resp = await client.post("/api/v1/projects", json={"name": "Old Name"}, headers=headers)
+    await register_and_login(client, "update-admin@test.com")
+    resp = await client.post("/api/v1/projects", json={"name": "Old Name"})
     project_id = resp.json()["id"]
 
     resp = await client.put(f"/api/v1/projects/{project_id}", json={
         "name": "New Name",
         "description": "Updated description",
-    }, headers=headers)
+    })
     assert resp.status_code == 200
     assert resp.json()["name"] == "New Name"
     assert resp.json()["description"] == "Updated description"
 
 
 @pytest.mark.asyncio
-async def test_update_project_as_annotator_returns_403(client):
-    headers_admin = await register_and_login(client, "upd-admin@test.com")
-    headers_annotator = await register_and_login(client, "upd-annotator@test.com")
+async def test_update_project_as_annotator_returns_403(client_factory):
+    async with client_factory() as client_admin, client_factory() as client_annotator:
+        await register_and_login(client_admin, "upd-admin@test.com")
+        await register_and_login(client_annotator, "upd-annotator@test.com")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Locked"}, headers=headers_admin)
-    project_id = resp.json()["id"]
+        resp = await client_admin.post("/api/v1/projects", json={"name": "Locked"})
+        project_id = resp.json()["id"]
 
-    # Add annotator
-    await client.post(f"/api/v1/projects/{project_id}/members", json={
-        "email": "upd-annotator@test.com", "role": "annotator",
-    }, headers=headers_admin)
+        # Add annotator
+        await client_admin.post(f"/api/v1/projects/{project_id}/members", json={
+            "email": "upd-annotator@test.com", "role": "annotator",
+        })
 
-    resp = await client.put(f"/api/v1/projects/{project_id}", json={
-        "name": "Hacked",
-    }, headers=headers_annotator)
-    assert resp.status_code == 403
+        resp = await client_annotator.put(f"/api/v1/projects/{project_id}", json={
+            "name": "Hacked",
+        })
+        assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_project_soft_deletes(client):
-    headers = await register_and_login(client, "deleter@test.com")
-    resp = await client.post("/api/v1/projects", json={"name": "To Delete"}, headers=headers)
+    await register_and_login(client, "deleter@test.com")
+    resp = await client.post("/api/v1/projects", json={"name": "To Delete"})
     project_id = resp.json()["id"]
 
-    resp = await client.delete(f"/api/v1/projects/{project_id}", headers=headers)
+    resp = await client.delete(f"/api/v1/projects/{project_id}")
     assert resp.status_code == 204
 
     # No longer appears in list
-    resp = await client.get("/api/v1/projects", headers=headers)
+    resp = await client.get("/api/v1/projects")
     assert resp.status_code == 200
     assert len(resp.json()) == 0
 
     # Direct get returns 403 (non-member check fails since project is deleted)
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers)
+    resp = await client.get(f"/api/v1/projects/{project_id}")
     # The project is soft-deleted so get_project returns None -> 404
     # But the membership check happens first in the dependency - member still exists
     # so the dependency passes, then get_project returns None -> 404
@@ -154,38 +153,47 @@ async def test_delete_project_soft_deletes(client):
 
 
 @pytest.mark.asyncio
-async def test_add_member(client):
-    headers_admin = await register_and_login(client, "mem-admin@test.com")
-    headers_new = await register_and_login(client, "mem-new@test.com", "New Member")
+async def test_add_member(client_factory):
+    async with client_factory() as client_admin, client_factory() as client_new:
+        await register_and_login(client_admin, "mem-admin@test.com")
+        await register_and_login(client_new, "mem-new@test.com", "New Member")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Team Project"}, headers=headers_admin)
-    project_id = resp.json()["id"]
+        resp = await client_admin.post("/api/v1/projects", json={"name": "Team Project"})
+        project_id = resp.json()["id"]
 
-    resp = await client.post(f"/api/v1/projects/{project_id}/members", json={
-        "email": "mem-new@test.com", "role": "annotator",
-    }, headers=headers_admin)
-    assert resp.status_code == 201
-    assert resp.json()["email"] == "mem-new@test.com"
-    assert resp.json()["role"] == "annotator"
+        resp = await client_admin.post(f"/api/v1/projects/{project_id}/members", json={
+            "email": "mem-new@test.com", "role": "annotator",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["email"] == "mem-new@test.com"
+        assert resp.json()["role"] == "annotator"
 
-    # New member can access the project
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers_new)
-    assert resp.status_code == 200
+        # New member can access the project
+        resp = await client_new.get(f"/api/v1/projects/{project_id}")
+        assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_list_members(client):
-    headers = await register_and_login(client, "list-mem@test.com")
-    await register_and_login(client, "list-mem2@test.com", "Member 2")
+    await register_and_login(client, "list-mem@test.com")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Multi-member"}, headers=headers)
+    # Register second user (using same client, then re-login as first user)
+    await client.post("/api/v1/auth/register", json={
+        "email": "list-mem2@test.com", "name": "Member 2", "password": "pass123",
+    })
+    # Re-login as first user
+    await client.post("/api/v1/auth/login", json={
+        "email": "list-mem@test.com", "password": "pass123",
+    })
+
+    resp = await client.post("/api/v1/projects", json={"name": "Multi-member"})
     project_id = resp.json()["id"]
 
     await client.post(f"/api/v1/projects/{project_id}/members", json={
         "email": "list-mem2@test.com", "role": "viewer",
-    }, headers=headers)
+    })
 
-    resp = await client.get(f"/api/v1/projects/{project_id}/members", headers=headers)
+    resp = await client.get(f"/api/v1/projects/{project_id}/members")
     assert resp.status_code == 200
     members = resp.json()
     assert len(members) == 2
@@ -195,65 +203,66 @@ async def test_list_members(client):
 
 
 @pytest.mark.asyncio
-async def test_remove_member(client):
-    headers_admin = await register_and_login(client, "rm-admin@test.com")
-    headers_member = await register_and_login(client, "rm-member@test.com", "To Remove")
+async def test_remove_member(client_factory):
+    async with client_factory() as client_admin, client_factory() as client_member:
+        await register_and_login(client_admin, "rm-admin@test.com")
+        await register_and_login(client_member, "rm-member@test.com", "To Remove")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Shrinking Team"}, headers=headers_admin)
-    project_id = resp.json()["id"]
+        resp = await client_admin.post("/api/v1/projects", json={"name": "Shrinking Team"})
+        project_id = resp.json()["id"]
 
-    # Add member
-    await client.post(f"/api/v1/projects/{project_id}/members", json={
-        "email": "rm-member@test.com", "role": "annotator",
-    }, headers=headers_admin)
+        # Add member
+        await client_admin.post(f"/api/v1/projects/{project_id}/members", json={
+            "email": "rm-member@test.com", "role": "annotator",
+        })
 
-    # Get the member's user_id
-    me_resp = await client.get("/api/v1/auth/me", headers=headers_member)
-    member_user_id = me_resp.json()["id"]
+        # Get the member's user_id
+        me_resp = await client_member.get("/api/v1/auth/me")
+        member_user_id = me_resp.json()["id"]
 
-    # Remove member
-    resp = await client.delete(
-        f"/api/v1/projects/{project_id}/members/{member_user_id}",
-        headers=headers_admin,
-    )
-    assert resp.status_code == 204
+        # Remove member
+        resp = await client_admin.delete(
+            f"/api/v1/projects/{project_id}/members/{member_user_id}",
+        )
+        assert resp.status_code == 204
 
-    # Removed user can no longer access
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers_member)
-    assert resp.status_code == 403
+        # Removed user can no longer access
+        resp = await client_member.get(f"/api/v1/projects/{project_id}")
+        assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_non_member_cannot_access_project(client):
-    headers_owner = await register_and_login(client, "access-owner@test.com")
-    headers_outsider = await register_and_login(client, "access-outsider@test.com")
+async def test_non_member_cannot_access_project(client_factory):
+    async with client_factory() as client_owner, client_factory() as client_outsider:
+        await register_and_login(client_owner, "access-owner@test.com")
+        await register_and_login(client_outsider, "access-outsider@test.com")
 
-    resp = await client.post("/api/v1/projects", json={"name": "Restricted"}, headers=headers_owner)
-    project_id = resp.json()["id"]
+        resp = await client_owner.post("/api/v1/projects", json={"name": "Restricted"})
+        project_id = resp.json()["id"]
 
-    # Cannot get project
-    resp = await client.get(f"/api/v1/projects/{project_id}", headers=headers_outsider)
-    assert resp.status_code == 403
+        # Cannot get project
+        resp = await client_outsider.get(f"/api/v1/projects/{project_id}")
+        assert resp.status_code == 403
 
-    # Cannot list members
-    resp = await client.get(f"/api/v1/projects/{project_id}/members", headers=headers_outsider)
-    assert resp.status_code == 403
+        # Cannot list members
+        resp = await client_outsider.get(f"/api/v1/projects/{project_id}/members")
+        assert resp.status_code == 403
 
-    # Cannot add members
-    resp = await client.post(f"/api/v1/projects/{project_id}/members", json={
-        "email": "someone@test.com",
-    }, headers=headers_outsider)
-    assert resp.status_code == 403
+        # Cannot add members
+        resp = await client_outsider.post(f"/api/v1/projects/{project_id}/members", json={
+            "email": "someone@test.com",
+        })
+        assert resp.status_code == 403
 
-    # Cannot update
-    resp = await client.put(f"/api/v1/projects/{project_id}", json={
-        "name": "Hacked",
-    }, headers=headers_outsider)
-    assert resp.status_code == 403
+        # Cannot update
+        resp = await client_outsider.put(f"/api/v1/projects/{project_id}", json={
+            "name": "Hacked",
+        })
+        assert resp.status_code == 403
 
-    # Cannot delete
-    resp = await client.delete(f"/api/v1/projects/{project_id}", headers=headers_outsider)
-    assert resp.status_code == 403
+        # Cannot delete
+        resp = await client_outsider.delete(f"/api/v1/projects/{project_id}")
+        assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -264,11 +273,11 @@ async def test_create_project_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_add_member_nonexistent_email_returns_404(client):
-    headers = await register_and_login(client, "add-nonexist@test.com")
-    resp = await client.post("/api/v1/projects", json={"name": "Test"}, headers=headers)
+    await register_and_login(client, "add-nonexist@test.com")
+    resp = await client.post("/api/v1/projects", json={"name": "Test"})
     project_id = resp.json()["id"]
 
     resp = await client.post(f"/api/v1/projects/{project_id}/members", json={
         "email": "nobody@test.com",
-    }, headers=headers)
+    })
     assert resp.status_code == 404
