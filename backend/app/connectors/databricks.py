@@ -1,12 +1,23 @@
 """Databricks SQL warehouse connector."""
 
 import logging
+import re
 
 from databricks import sql as databricks_sql
 
 from app.connectors.base import ConnectorBase, FetchResult, PreviewResult
 
 logger = logging.getLogger(__name__)
+
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
+
+def _validate_identifier(name: str, label: str) -> None:
+    """Raise ValueError if name contains non-alphanumeric characters."""
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid {label}: {name!r} — only alphanumeric and underscores allowed"
+        )
 
 
 def connect_databricks(config: dict):
@@ -23,6 +34,9 @@ def _fqn(config: dict) -> str:
     catalog = config.get("catalog", "hive_metastore")
     schema = config["schema"]
     table = config["table"]
+    _validate_identifier(catalog, "catalog")
+    _validate_identifier(schema, "schema")
+    _validate_identifier(table, "table")
     return f"`{catalog}`.`{schema}`.`{table}`"
 
 
@@ -55,6 +69,14 @@ class DatabricksConnector(ConnectorBase):
 
         if not config.get("schema"):
             errors.append("schema is required")
+
+        # Validate identifier safety for SQL-interpolated fields
+        for field in ("catalog", "schema", "table"):
+            value = config.get(field)
+            if value and not _IDENTIFIER_RE.match(value):
+                errors.append(
+                    f"Invalid {field}: {value!r} — only alphanumeric and underscores allowed"
+                )
 
         mapping = config.get("column_mapping", {})
         for col in ("patient_id", "text_id", "text", "note_date"):

@@ -337,3 +337,27 @@ class TestDatabricksConnector:
         assert len(result.rows) == 2
         assert result.has_more is True
         assert result.offset == 0
+
+    async def test_validate_config_rejects_injection(self, connector):
+        """SQL injection attempts in identifier fields should be rejected."""
+        config = {
+            "host": "test.databricks.com",
+            "http_path": "/sql/1.0/warehouses/abc",
+            "token": "dapi-test",
+            "schema": "default; DROP TABLE --",
+            "table": "notes",
+            "column_mapping": {
+                "patient_id": "mrn",
+                "text_id": "nid",
+                "text": "txt",
+                "note_date": "dt",
+            },
+        }
+        errors = await connector.validate_config(config)
+        assert any("Invalid" in e for e in errors)
+
+    def test_fqn_rejects_injection(self):
+        from app.connectors.databricks import _fqn
+
+        with pytest.raises(ValueError, match="Invalid"):
+            _fqn({"catalog": "hive_metastore", "schema": "x; DROP TABLE", "table": "notes"})
