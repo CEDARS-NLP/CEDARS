@@ -27,6 +27,7 @@ dependencies = [
     "arq>=0.26",
     "litellm>=1.40",
     "httpx>=0.28",
+    "databricks-sql-connector>=3.0.0",
     "email-validator>=2.0",
     "tiktoken>=0.7",
     "prometheus-fastapi-instrumentator>=7.0",
