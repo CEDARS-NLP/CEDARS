@@ -14,6 +14,7 @@ from app.projects.schemas import (
     ProjectResponse,
     UpdateProjectRequest,
 )
+from app.projects.stats import get_project_stats
 from app.projects.service import (
     add_member,
     create_project,
@@ -78,6 +79,16 @@ async def get_project_endpoint(
         raise HTTPException(status_code=404, detail="Project not found")
     role = await get_user_project_role(session, project_id, current_user.id)
     return _project_response(project, role=role.value if role else None)
+
+
+@router.get("/{project_id}/stats")
+async def project_stats_endpoint(
+    project_id: str,
+    current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Get comprehensive project statistics."""
+    return await get_project_stats(session, project_id)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
