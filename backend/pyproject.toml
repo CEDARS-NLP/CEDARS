@@ -32,7 +32,6 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0",
     "python-multipart>=0.0.9",
     "spacy>=3.7",
-    "scispacy>=0.6.0",
 ]
 
 [project.optional-dependencies]
