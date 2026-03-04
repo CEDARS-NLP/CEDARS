@@ -196,9 +196,23 @@ async def activate_validated_endpoint(
     _user: User = Depends(require_project_role("admin")),
 ):
     """Activate a validated predictor, its config, and trigger bulk predictions."""
-    validated, bulk_stats = await activate_validated_predictor(session, project_id, validated_id)
+    import logging
+
+    from app.annotations.prediction_service import run_bulk_predictions
+
+    validated = await activate_validated_predictor(session, project_id, validated_id)
     if not validated:
         raise HTTPException(status_code=404, detail="Validated predictor not found")
+
+    # Orchestrate: trigger bulk predictions at the integration boundary
+    bulk_stats = None
+    try:
+        bulk_stats = await run_bulk_predictions(session, project_id)
+    except (ValueError, Exception) as e:
+        logging.getLogger(__name__).warning(
+            "Bulk prediction run after activation failed: %s", e
+        )
+
     return ActivateResponse(
         validated=ValidatedPredictorResponse.model_validate(validated, from_attributes=True),
         bulk_run=BulkRunStats(**bulk_stats) if bulk_stats else None,

@@ -427,10 +427,11 @@ async def activate_validated_predictor(
     session: AsyncSession,
     project_id: str,
     validated_id: str,
-) -> tuple[ValidatedPredictor | None, dict | None]:
-    """Activate a validated predictor, its PredictorConfig, and trigger bulk predictions."""
-    from app.annotations.prediction_service import run_bulk_predictions
+) -> ValidatedPredictor | None:
+    """Activate a validated predictor and its PredictorConfig.
 
+    Does NOT trigger bulk predictions — that is the caller's responsibility.
+    """
     # Deactivate current validated predictors
     stmt = select(ValidatedPredictor).where(
         ValidatedPredictor.project_id == project_id,
@@ -449,7 +450,7 @@ async def activate_validated_predictor(
     ).scalar_one_or_none()
 
     if not validated:
-        return None, None
+        return None
 
     validated.is_active = True
     session.add(validated)
@@ -478,15 +479,7 @@ async def activate_validated_predictor(
 
     await session.commit()
     await session.refresh(validated)
-
-    # Auto-trigger bulk predictions
-    bulk_stats = None
-    try:
-        bulk_stats = await run_bulk_predictions(session, project_id)
-    except (ValueError, Exception) as e:
-        logger.warning("Bulk prediction run after activation failed: %s", e)
-
-    return validated, bulk_stats
+    return validated
 
 
 # ── List helpers ─────────────────────────────────────────────────
