@@ -2,16 +2,15 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from app.auth.models import User
 from app.auth.schemas import LoginRequest, LoginResponse, RegisterRequest, UserResponse
 from app.auth.service import (
+    authenticate_user,
     create_access_token,
     create_refresh_token,
-    decode_token,
-    hash_password,
-    verify_password,
+    refresh_access_token,
+    register_user,
 )
 from app.common.database import get_session
 from app.config import settings
@@ -45,26 +44,19 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, session: AsyncSession = Depends(get_session)):
     """Create a new user account."""
-    existing = (await session.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-
-    user = User(
-        email=body.email,
-        name=body.name,
-        password_hash=hash_password(body.password),
-    )
-    session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    try:
+        user = await register_user(session, body.email, body.name, body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return user
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, response: Response, session: AsyncSession = Depends(get_session)):
     """Authenticate and set httpOnly auth cookies."""
-    user = (await session.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
+    try:
+        user = await authenticate_user(session, body.email, body.password)
+    except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     access_token = create_access_token(user.id, user.role.value)
@@ -89,18 +81,12 @@ async def refresh(request: Request, response: Response, session: AsyncSession = 
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
 
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "refresh":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    try:
+        user, new_access, new_refresh = await refresh_access_token(session, token)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
-    user = await session.get(User, payload["sub"])
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-
-    new_access = create_access_token(user.id, user.role.value)
-    new_refresh = create_refresh_token(user.id)
     _set_auth_cookies(response, new_access, new_refresh)
-
     return {"message": "Token refreshed"}
 
 

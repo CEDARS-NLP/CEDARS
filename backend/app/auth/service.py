@@ -1,10 +1,13 @@
-"""Auth service: password hashing and JWT token management."""
+"""Auth service: password hashing, JWT token management, and user operations."""
 
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
+from app.auth.models import User
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -48,3 +51,46 @@ def decode_token(token: str) -> dict | None:
         return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     except JWTError:
         return None
+
+
+# --- User Operations ---
+
+
+async def register_user(
+    session: AsyncSession, email: str, name: str, password: str
+) -> User:
+    """Register a new user. Raises ValueError if email already taken."""
+    existing = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if existing:
+        raise ValueError("Email already registered")
+    user = User(email=email, name=name, password_hash=hash_password(password))
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def authenticate_user(
+    session: AsyncSession, email: str, password: str
+) -> User:
+    """Authenticate user by email/password. Raises ValueError on failure."""
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if not user or not verify_password(password, user.password_hash):
+        raise ValueError("Invalid email or password")
+    return user
+
+
+async def refresh_access_token(
+    session: AsyncSession, refresh_token: str
+) -> tuple[User, str, str]:
+    """Validate refresh token, return (user, new_access_token, new_refresh_token).
+
+    Raises ValueError on invalid token or inactive user.
+    """
+    payload = decode_token(refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise ValueError("Invalid refresh token")
+    user = await session.get(User, payload["sub"])
+    if not user or not user.is_active:
+        raise ValueError("User not found or inactive")
+    return user, create_access_token(user.id, user.role.value), create_refresh_token(user.id)
