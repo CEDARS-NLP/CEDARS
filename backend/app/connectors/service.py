@@ -81,17 +81,20 @@ async def delete_data_source(
 # ── Ingestion ─────────────────────────────────────────────────────
 
 
-async def run_ingestion(
-    session: AsyncSession, project_id: str, data_source_id: str
+async def _run_ingestion_pipeline(
+    session: AsyncSession,
+    project_id: str,
+    data_source_id: str,
+    row_handler,
+    audit_action: AuditAction,
 ) -> DataSource:
-    """Fetch data from connector and insert patients + notes in batches."""
+    """Shared pipeline: validate connector, fetch batches, call row_handler, update status."""
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
         raise ValueError("Data source not found")
 
     connector = get_connector(ds.connector_type)
 
-    # Validate config
     errors = await connector.validate_config(ds.config)
     if errors:
         ds.status = IngestionStatus.FAILED
@@ -101,7 +104,6 @@ async def run_ingestion(
         await session.refresh(ds)
         return ds
 
-    # Mark as running
     ds.status = IngestionStatus.RUNNING
     ds.error_message = None
     session.add(ds)
@@ -118,8 +120,8 @@ async def run_ingestion(
                 break
 
             mapping = ds.config.get("column_mapping", {})
-            inserted = await _ingest_rows(session, project_id, ds.id, batch.rows, mapping)
-            total_rows += inserted
+            count = await row_handler(session, project_id, ds.id, batch.rows, mapping)
+            total_rows += count
             offset += batch_size
 
             if not batch.has_more:
@@ -140,75 +142,71 @@ async def run_ingestion(
 
     if ds.status == IngestionStatus.COMPLETED:
         await log_action(
-            session, project_id, AuditAction.DATA_INGESTED,
+            session, project_id, audit_action,
             detail={"data_source_id": data_source_id, "row_count": total_rows},
         )
 
     return ds
+
+
+async def run_ingestion(
+    session: AsyncSession, project_id: str, data_source_id: str
+) -> DataSource:
+    """Fetch data from connector and insert patients + notes in batches."""
+    return await _run_ingestion_pipeline(
+        session, project_id, data_source_id, _ingest_rows, AuditAction.DATA_INGESTED,
+    )
 
 
 async def resync_data_source(
     session: AsyncSession, project_id: str, data_source_id: str
 ) -> DataSource:
     """Re-fetch data from connector. Update existing notes by text_id, insert new ones."""
-    ds = await get_data_source(session, project_id, data_source_id)
-    if not ds:
-        raise ValueError("Data source not found")
+    return await _run_ingestion_pipeline(
+        session, project_id, data_source_id, _upsert_rows, AuditAction.DATA_RESYNCED,
+    )
 
-    connector = get_connector(ds.connector_type)
 
-    errors = await connector.validate_config(ds.config)
-    if errors:
-        ds.status = IngestionStatus.FAILED
-        ds.error_message = "; ".join(errors)
-        session.add(ds)
-        await session.commit()
-        await session.refresh(ds)
-        return ds
+def _normalize_columns(
+    rows: list[dict],
+    column_mapping: dict,
+) -> dict[str, str | None]:
+    """Resolve logical column names to actual CSV column names using normalized matching.
 
-    ds.status = IngestionStatus.RUNNING
-    ds.error_message = None
-    session.add(ds)
-    await session.commit()
+    Returns a dict with keys: patient_id, text_id, text, note_date, source_ref.
+    """
+    resolved = {
+        "patient_id": column_mapping.get("patient_id", "patient_id"),
+        "text_id": column_mapping.get("text_id", "text_id"),
+        "text": column_mapping.get("text", "text"),
+        "note_date": column_mapping.get("note_date"),
+        "source_ref": column_mapping.get("source_ref"),
+    }
 
-    try:
-        total_rows = 0
-        offset = 0
-        batch_size = 1000
+    if not rows:
+        return resolved
 
-        while True:
-            batch = await connector.fetch(ds.config, batch_size=batch_size, offset=offset)
-            if not batch.rows:
-                break
+    actual_keys = list(rows[0].keys())
+    norm_lookup: dict[str, str] = {}
+    for key in actual_keys:
+        normalized = key.strip().lower().replace(" ", "_")
+        norm_lookup[normalized] = key
 
-            mapping = ds.config.get("column_mapping", {})
-            upserted = await _upsert_rows(session, project_id, ds.id, batch.rows, mapping)
-            total_rows += upserted
-            offset += batch_size
+    def resolve(mapped_name: str | None) -> str | None:
+        if mapped_name is None:
+            return None
+        if mapped_name in rows[0]:
+            return mapped_name
+        normalized = mapped_name.strip().lower().replace(" ", "_")
+        return norm_lookup.get(normalized, mapped_name)
 
-            if not batch.has_more:
-                break
+    resolved["patient_id"] = resolve(resolved["patient_id"]) or resolved["patient_id"]
+    resolved["text_id"] = resolve(resolved["text_id"]) or resolved["text_id"]
+    resolved["text"] = resolve(resolved["text"]) or resolved["text"]
+    resolved["note_date"] = resolve(resolved["note_date"])
+    resolved["source_ref"] = resolve(resolved["source_ref"])
 
-        ds.status = IngestionStatus.COMPLETED
-        ds.row_count = total_rows
-        ds.last_sync = datetime.now(UTC)
-        ds.error_message = None
-
-    except Exception as exc:
-        ds.status = IngestionStatus.FAILED
-        ds.error_message = str(exc)
-
-    session.add(ds)
-    await session.commit()
-    await session.refresh(ds)
-
-    if ds.status == IngestionStatus.COMPLETED:
-        await log_action(
-            session, project_id, AuditAction.DATA_RESYNCED,
-            detail={"data_source_id": data_source_id, "row_count": total_rows},
-        )
-
-    return ds
+    return resolved
 
 
 async def _upsert_rows(
@@ -219,32 +217,12 @@ async def _upsert_rows(
     column_mapping: dict,
 ) -> int:
     """Insert new rows or update existing ones (matched by text_id)."""
-    pid_col = column_mapping.get("patient_id", "patient_id")
-    text_id_col = column_mapping.get("text_id", "text_id")
-    text_col = column_mapping.get("text", "text")
-    date_col = column_mapping.get("note_date")
-    ref_col = column_mapping.get("source_ref")
-
-    if rows:
-        actual_keys = list(rows[0].keys())
-        norm_lookup: dict[str, str] = {}
-        for key in actual_keys:
-            normalized = key.strip().lower().replace(" ", "_")
-            norm_lookup[normalized] = key
-
-        def resolve(mapped_name: str | None) -> str | None:
-            if mapped_name is None:
-                return None
-            if rows and mapped_name in rows[0]:
-                return mapped_name
-            normalized = mapped_name.strip().lower().replace(" ", "_")
-            return norm_lookup.get(normalized, mapped_name)
-
-        pid_col = resolve(pid_col) or pid_col
-        text_id_col = resolve(text_id_col) or text_id_col
-        text_col = resolve(text_col) or text_col
-        date_col = resolve(date_col)
-        ref_col = resolve(ref_col)
+    cols = _normalize_columns(rows, column_mapping)
+    pid_col = cols["patient_id"]
+    text_id_col = cols["text_id"]
+    text_col = cols["text"]
+    date_col = cols["note_date"]
+    ref_col = cols["source_ref"]
 
     patient_cache: dict[str, str] = {}
     upserted = 0
@@ -378,35 +356,12 @@ async def _ingest_rows(
     column_mapping: dict,
 ) -> int:
     """Insert a batch of rows as patients and notes. Returns count of inserted rows."""
-    pid_col = column_mapping.get("patient_id", "patient_id")
-    text_id_col = column_mapping.get("text_id", "text_id")
-    text_col = column_mapping.get("text", "text")
-    date_col = column_mapping.get("note_date")
-    ref_col = column_mapping.get("source_ref")
-
-    # Build a lookup from normalized (lowercase, stripped) column names to actual keys
-    # so that "patient ID" matches a mapping value of "patient_id"
-    if rows:
-        actual_keys = list(rows[0].keys())
-        norm_lookup: dict[str, str] = {}
-        for key in actual_keys:
-            normalized = key.strip().lower().replace(" ", "_")
-            norm_lookup[normalized] = key
-
-        def resolve(mapped_name: str | None) -> str | None:
-            if mapped_name is None:
-                return None
-            # Try exact match first, then normalized
-            if rows and mapped_name in rows[0]:
-                return mapped_name
-            normalized = mapped_name.strip().lower().replace(" ", "_")
-            return norm_lookup.get(normalized, mapped_name)
-
-        pid_col = resolve(pid_col) or pid_col
-        text_id_col = resolve(text_id_col) or text_id_col
-        text_col = resolve(text_col) or text_col
-        date_col = resolve(date_col)
-        ref_col = resolve(ref_col)
+    cols = _normalize_columns(rows, column_mapping)
+    pid_col = cols["patient_id"]
+    text_id_col = cols["text_id"]
+    text_col = cols["text"]
+    date_col = cols["note_date"]
+    ref_col = cols["source_ref"]
 
     # Cache patient lookups within the batch
     patient_cache: dict[str, str] = {}
