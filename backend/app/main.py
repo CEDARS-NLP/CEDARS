@@ -6,13 +6,40 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.connectors.router import router as data_router
+from app.annotations.router import router as annotations_router
+from app.evaluation.router import router as evaluation_router
+from app.export.router import router as export_router
+from app.nlp.router import router as nlp_router
+from app.admin.router import router as admin_router
+from app.predictors.router import router as predictors_router
 from app.projects.router import router as projects_router
+
+
+def _ensure_s3_bucket():
+    """Create the S3 bucket if it doesn't exist (for local MinIO dev)."""
+    from app.config import settings
+
+    if not settings.s3_bucket or not settings.s3_endpoint:
+        return
+    try:
+        from app.common.s3 import get_s3_client
+
+        client = get_s3_client()
+        try:
+            client.head_bucket(Bucket=settings.s3_bucket)
+        except client.exceptions.ClientError:
+            client.create_bucket(Bucket=settings.s3_bucket)
+    except Exception:
+        # Non-fatal — S3 may not be running in all environments
+        pass
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager for startup/shutdown events."""
     # Startup
+    _ensure_s3_bucket()
     yield
     # Shutdown
 
@@ -36,6 +63,13 @@ def create_app() -> FastAPI:
 
     application.include_router(auth_router)
     application.include_router(projects_router)
+    application.include_router(data_router)
+    application.include_router(predictors_router)
+    application.include_router(nlp_router)
+    application.include_router(annotations_router)
+    application.include_router(evaluation_router)
+    application.include_router(export_router)
+    application.include_router(admin_router)
 
     @application.get("/api/v1/health")
     async def health_check():
