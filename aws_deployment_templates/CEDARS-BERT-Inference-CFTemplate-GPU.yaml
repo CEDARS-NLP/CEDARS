@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Fully self-contained CEDARS with AutoScaling for GPU BERT Model via SQS
+Description: Fully self-contained CEDARS with AutoScaling for CPU BERT Model via SQS
 
 Parameters:
   VpcId:
@@ -7,12 +7,6 @@ Parameters:
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-
-  PINESInstanceType:
-    Type: String
-    Default: g4dn.xlarge
-    AllowedValues:
-      - g4dn.xlarge
   
   WebServerInstanceType:
     Description: CEDARS CPU EC2 instance type
@@ -63,47 +57,6 @@ Resources:
       BucketName: !Sub "${MinioBucketTitle}"
       VersioningConfiguration:
         Status: Enabled
-
-# -----------------------
-# Minio IAM User Permissions and Security
-# -----------------------
-  MinioIamUser:
-    Type: AWS::IAM::User
-    Properties:
-      UserName: !Sub "minio-s3-${AWS::StackName}"
-      Policies:
-        - PolicyName: MinioS3Access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub "arn:aws:s3:::${CedarsBucket}"
-                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
-
-  MinioAccessKey:
-    Type: AWS::IAM::AccessKey
-    Properties:
-      UserName: !Ref MinioIamUser
-  
-  MinioSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow MinIO access
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 9000
-          ToPort: 9000
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0
 
 # -----------------------
 # Web Server Security Rules
@@ -164,6 +117,20 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt ResponseQueue.Arn
+
+        - PolicyName: MinioS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${CedarsBucket}"
+                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
 
   SenderInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -238,16 +205,14 @@ Resources:
           MINIO_ACCESS_KEY=rootuser
           MINIO_SECRET_KEY=$MINIO_PASSWORD
           MINIO_VERSION=RELEASE.2024-05-10T01-41-38Z
-          AWS_ACCESS_KEY_ID=${MinioAccessKey}
-          AWS_SECRET_ACCESS_KEY=${MinioAccessKey.SecretAccessKey}
           S3_BUCKET_NAME=${CedarsBucket}
           AWS_REGION=${AWS::Region}
-          MINIO_CONNECTION_TYPE=AWS_S3
+          MINIO_CONNECTION_TYPE=LOCAL_DOCKER
           ENV=prod
           REDIS_PORT=6379
           WORKER_SCALE=2
-          GPU_SCALE=0
-          PINES_WORKERS=0
+          GPU_SCALE=1
+          PINES_WORKERS=1
           BERT_INFERENCE_TYPE=SQS_Inference
           INFERENCE_QUEUE_URL=${InferenceQueue}
           RESPONSE_QUEUE_URL=${ResponseQueue}
@@ -268,17 +233,16 @@ Resources:
           MINIO_PORT=9000
           MINIO_ACCESS_KEY=rootuser
           MINIO_SECRET_KEY=$MINIO_PASSWORD
-          AWS_ACCESS_KEY_ID=${MinioAccessKey}
-          AWS_SECRET_ACCESS_KEY=${MinioAccessKey.SecretAccessKey}
           S3_BUCKET_NAME=${CedarsBucket}
           AWS_REGION=${AWS::Region}
-          MINIO_CONNECTION_TYPE=AWS_S3
+          MINIO_CONNECTION_TYPE=LOCAL_DOCKER
           ENV=dev
           PINES_API_URL=http://pines:8036
           REDIS_URL=redis
           REDIS_PORT=6379
           RQ_DASHBOARD_URL=/rq
           PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          BERT_INFERENCE_TYPE=SQS_Inference
           INFERENCE_QUEUE_URL=${InferenceQueue}
           RESPONSE_QUEUE_URL=${ResponseQueue}
           EOF
@@ -405,7 +369,7 @@ Resources:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
-        InstanceType: !Ref PINESInstanceType
+        InstanceType: g4dn.xlarge
         ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
         IamInstanceProfile:
           Name: !Ref BERTInferenceInstanceProfile
