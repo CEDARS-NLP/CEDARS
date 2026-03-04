@@ -27,11 +27,16 @@ def list_connector_types() -> list[str]:
 
 def _register_builtins() -> None:
     """Register built-in connectors."""
-    from app.connectors.databricks import DatabricksConnector
     from app.connectors.file_upload import FileUploadConnector
 
     register_connector(ConnectorType.FILE_UPLOAD, FileUploadConnector)
-    register_connector(ConnectorType.DATABRICKS, DatabricksConnector)
+
+    try:
+        from app.connectors.databricks import DatabricksConnector
+
+        register_connector(ConnectorType.DATABRICKS, DatabricksConnector)
+    except ImportError:
+        pass  # databricks-sql-connector not installed
 
 
 _register_builtins()
