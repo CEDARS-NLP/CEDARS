@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import User
 from app.common.database import get_session
 from app.dependencies import require_project_role
+from app.audit.schemas import AuditLogResponse, PatientActivityResponse
 from app.audit.service import get_patient_activity, query_audit_log
 
 router = APIRouter(
@@ -16,7 +17,7 @@ router = APIRouter(
 )
 
 
-@router.get("/audit")
+@router.get("/audit", response_model=AuditLogResponse)
 async def query_audit_endpoint(
     project_id: str,
     patient_id: str | None = Query(None),
@@ -42,7 +43,7 @@ async def query_audit_endpoint(
     )
 
 
-@router.get("/patients/{patient_id}/activity")
+@router.get("/patients/{patient_id}/activity", response_model=PatientActivityResponse)
 async def patient_activity_endpoint(
     project_id: str,
     patient_id: str,

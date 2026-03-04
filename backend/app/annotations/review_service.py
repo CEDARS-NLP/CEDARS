@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.schemas import NextPatientResponse, PatientReviewStats
 from app.audit.models import AuditAction
 from app.audit.service import log_action
 from app.connectors.models import Note, Patient, PatientStatus
@@ -158,7 +159,7 @@ async def get_next_patient_for_review(
     session: AsyncSession,
     project_id: str,
     user_id: str,
-) -> dict:
+) -> NextPatientResponse:
     """Find next unlocked patient with unreviewed annotations, lock them.
 
     Returns dict with patient info or all_complete flag.
@@ -196,13 +197,13 @@ async def get_next_patient_for_review(
                 )
             )
         ).scalar() or 0
-        return {
-            "patient_id": None,
-            "patient_id_ext": None,
-            "total_annotations": 0,
-            "unreviewed_annotations": 0,
-            "all_complete": total_unreviewed == 0,
-        }
+        return NextPatientResponse(
+            patient_id=None,
+            patient_id_ext=None,
+            total_annotations=0,
+            unreviewed_annotations=0,
+            all_complete=total_unreviewed == 0,
+        )
 
     patient.locked_by = user_id
     patient.locked_at = datetime.now(UTC)
@@ -239,13 +240,13 @@ async def get_next_patient_for_review(
         )
     ).scalar() or 0
 
-    return {
-        "patient_id": patient.id,
-        "patient_id_ext": patient.patient_id_ext,
-        "total_annotations": total,
-        "unreviewed_annotations": unreviewed,
-        "all_complete": False,
-    }
+    return NextPatientResponse(
+        patient_id=patient.id,
+        patient_id_ext=patient.patient_id_ext,
+        total_annotations=total,
+        unreviewed_annotations=unreviewed,
+        all_complete=False,
+    )
 
 
 async def get_patient_annotations(
@@ -385,7 +386,7 @@ async def get_patient_review_stats(
     session: AsyncSession,
     project_id: str,
     patient_id: str,
-) -> dict:
+) -> PatientReviewStats:
     """Return review stats for a specific patient."""
     base = (
         select(func.count())
@@ -423,14 +424,14 @@ async def get_patient_review_stats(
         )
     ).scalar_one_or_none()
 
-    return {
-        "total": total,
-        "unreviewed": unreviewed,
-        "reviewed": reviewed,
-        "skipped": skipped,
-        "current_event_date": event_annotation.event_date if event_annotation else None,
-        "event_annotation_id": event_annotation.id if event_annotation else None,
-    }
+    return PatientReviewStats(
+        total=total,
+        unreviewed=unreviewed,
+        reviewed=reviewed,
+        skipped=skipped,
+        current_event_date=event_annotation.event_date if event_annotation else None,
+        event_annotation_id=event_annotation.id if event_annotation else None,
+    )
 
 
 async def reopen_patient(

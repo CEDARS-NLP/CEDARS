@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.schemas import AnnotationStatsResponse
 from app.connectors.models import Note, Patient
 from app.nlp.models import Sentence
 
@@ -66,7 +67,7 @@ async def get_next_unreviewed(
 async def get_annotation_stats(
     session: AsyncSession,
     project_id: str,
-) -> dict:
+) -> AnnotationStatsResponse:
     """Get annotation review statistics for the project."""
     base = select(func.count()).select_from(Annotation).where(
         Annotation.project_id == project_id
@@ -94,14 +95,14 @@ async def get_annotation_stats(
         )
     ).scalar() or 0
 
-    return {
-        "total": total,
-        "unreviewed": unreviewed,
-        "reviewed": reviewed,
-        "skipped": skipped,
-        "events_found": events_found,
-        "is_complete": total > 0 and unreviewed == 0,
-    }
+    return AnnotationStatsResponse(
+        total=total,
+        unreviewed=unreviewed,
+        reviewed=reviewed,
+        skipped=skipped,
+        events_found=events_found,
+        is_complete=total > 0 and unreviewed == 0,
+    )
 
 
 async def get_note_context(
