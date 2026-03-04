@@ -25,6 +25,10 @@ class FileUploadConnector(ConnectorBase):
         }
     """
 
+    def __init__(self):
+        self._cached_rows: list[dict] | None = None
+        self._cached_key: str | None = None
+
     async def validate_config(self, config: dict) -> list[str]:
         errors: list[str] = []
         if not config.get("s3_key"):
@@ -44,7 +48,7 @@ class FileUploadConnector(ConnectorBase):
         return errors
 
     async def preview(self, config: dict, limit: int = 10) -> PreviewResult:
-        rows = self._read_file(config)
+        rows = self._get_rows(config)
         return PreviewResult(
             columns=list(rows[0].keys()) if rows else [],
             rows=rows[:limit],
@@ -54,7 +58,7 @@ class FileUploadConnector(ConnectorBase):
     async def fetch(
         self, config: dict, batch_size: int = 1000, offset: int = 0
     ) -> FetchResult:
-        rows = self._read_file(config)
+        rows = self._get_rows(config)
         batch = rows[offset : offset + batch_size]
         return FetchResult(
             rows=batch,
@@ -64,6 +68,14 @@ class FileUploadConnector(ConnectorBase):
 
     def required_columns(self) -> list[str]:
         return ["patient_id", "text_id", "text", "note_date"]
+
+    def _get_rows(self, config: dict) -> list[dict]:
+        """Return parsed rows, caching to avoid re-downloading on each batch."""
+        s3_key = config["s3_key"]
+        if self._cached_key != s3_key or self._cached_rows is None:
+            self._cached_rows = self._read_file(config)
+            self._cached_key = s3_key
+        return self._cached_rows
 
     def _read_file(self, config: dict) -> list[dict]:
         """Download from S3 and parse into list of dicts."""
