@@ -36,7 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { PredictionJobStatus, BulkEstimate } from "./types";
+import type { PredictionJobStatus, BulkEstimate } from "./types";
 
 // ── Types ───────────────────────────────────────────────────────
 
