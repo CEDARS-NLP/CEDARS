@@ -357,6 +357,84 @@ Full reimplementation: Flask → FastAPI, Jinja2 → React+TypeScript, MongoDB �
 | Real-time | Page reload | WebSocket (job progress, annotations) |
 | Deployment | Docker Compose | Docker Compose (K8s deferred to v2+) |
 
+### v2 Backend Structure (`backend/`)
+
+```
+backend/
+├── app/
+│   ├── admin/            # Platform admin endpoints (queue/worker monitoring)
+│   ├── annotations/      # Annotation CRUD, bulk prediction runs, patient-first review
+│   ├── auth/             # JWT auth with httpOnly cookies, refresh tokens
+│   ├── common/           # Database session, S3 client
+│   ├── connectors/       # Data sources, file upload, ingestion, patient/note models
+│   ├── evaluation/       # Eval sessions, judgments, validated predictors
+│   ├── export/           # CSV/JSON export
+│   ├── jobs/             # Background job models
+│   ├── nlp/              # spaCy pipeline, search queries, sentence processing
+│   ├── predictors/       # LLM/PINES predictor configs, testing, activation
+│   ├── projects/         # Multi-project CRUD, membership, stats
+│   ├── config.py         # Settings from environment
+│   ├── dependencies.py   # Auth + role-based access (require_project_role)
+│   ├── main.py           # FastAPI app factory
+│   └── worker.py         # ARQ worker
+├── migrations/           # Alembic migrations
+├── tests/                # pytest async tests (SQLite + aiosqlite)
+└── pyproject.toml        # uv-managed dependencies
+```
+
+### v2 Build & Development Commands
+
+```bash
+# Backend (FastAPI) — uses uv
+cd backend
+uv sync                                    # Install dependencies
+uv run uvicorn app.main:create_app --factory --reload  # Dev server
+uv run pytest -v                           # Run all tests
+uv run pytest tests/test_file.py::TestClass::test_name -v  # Single test
+uv run alembic upgrade head                # Run migrations
+uv run alembic revision -m "description"   # Create migration
+
+# Frontend (React + TypeScript) — uses npm
+cd frontend
+npm install                                # Install dependencies
+npm run dev                                # Dev server (Vite)
+npx tsc --noEmit                          # Type check
+npx eslint src/                           # Lint
+npm run build                             # Production build
+```
+
+### v2 Frontend Structure (`frontend/`)
+
+```
+frontend/src/
+├── api/client.ts         # Typed API client
+├── auth/                 # AuthProvider, LoginPage, RegisterPage
+├── components/           # AppLayout, AppSidebar, WorkflowBreadcrumb, shadcn/ui
+├── projects/             # All project pages:
+│   ├── ProjectListPage   # Multi-project dashboard
+│   ├── ProjectOverview   # Project stats
+│   ├── DataPage          # File upload + column mapping + ingestion
+│   ├── PipelinePage      # NLP search queries + processing
+│   ├── EvaluationPage    # Predictor config, eval sessions, validation
+│   ├── AnnotationsPage   # Patient-first annotation review UI
+│   ├── ExportPage        # CSV/JSON export
+│   ├── PatientsPage      # (planned) Searchable patient browser
+│   └── PatientDetailPage # (planned) Note viewer + annotation decisions
+├── lib/utils.ts          # Tailwind CN utility
+└── main.tsx              # App entry point
+```
+
+### v2 Access Control
+
+| Role | Scope | Permissions |
+|------|-------|-------------|
+| **Platform Admin** | Global | Bypasses all project role checks, admin dashboard |
+| **Admin** | Per-project | Full control: data, predictors, evaluation, annotations, export |
+| **Annotator** | Per-project | Review annotations, submit judgments. Cannot configure predictors or ingest data |
+| **Viewer** | Per-project | Read-only: browse data, annotations, stats, export |
+
+Project listing is membership-filtered — users only see projects they belong to.
+
 ### v2 Deferred Features (Future Roadmap)
 
 These are explicitly deferred — do not implement in v2 initial release:
@@ -375,3 +453,25 @@ These are explicitly deferred — do not implement in v2 initial release:
 
 Strangler fig — build alongside existing, migrate domain by domain:
 1. Auth + users → 2. Projects → 3. Upload/ingestion → 4. LLM predictors → 5. Adjudication UI → 6. Evaluation → 7. NLP + PINES → 8. Remove Flask
+
+---
+
+## Pending Work Items
+
+### In-Progress (Plans Written)
+
+1. **Patient Browser** — `docs/plans/2026-03-03-patient-browser-implementation.md`
+   - Searchable patient list + detail page for attending oversight
+   - Backend: search/filter on patient list, reopen endpoint
+   - Frontend: `/patients` and `/patients/:id` pages
+
+2. **Database Scale Optimizations** — `.claude/plans/magical-mixing-cook.md`
+   - 7 composite indexes (Alembic migration)
+   - Query rewrites: consolidate COUNTs, anti-join pattern, batch N+1
+   - Target: handle 10M notes per project
+
+### Upcoming
+
+3. **App Versioning** — add semantic versioning to the application
+4. **Automated Integration Tests** — CI-level tests with full stack
+5. **AWS Deployment via CI/CD** — pipeline for automated deployment

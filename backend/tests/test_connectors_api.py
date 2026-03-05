@@ -157,7 +157,7 @@ class TestIngestion:
             f"/api/v1/projects/{project_id}/data/patients",
         )
         assert patients_resp.status_code == 200
-        patients = patients_resp.json()
+        patients = patients_resp.json()["items"]
         assert len(patients) == 2  # P001 and P002
 
         # Find P001 and check note count
@@ -278,3 +278,87 @@ class TestPreview:
         assert data["columns"] == ["MRN", "note"]
         assert len(data["rows"]) == 1
         assert data["total_available"] == 2
+
+
+# -- Patient search / filter tests ────────────────────────────────
+
+
+class TestPatientSearch:
+    async def _ingest_patients(self, client):
+        """Helper: register, create project, ingest 3 patients."""
+        await register_and_login(client)
+        project_id = await create_project(client)
+
+        create_resp = await client.post(
+            f"/api/v1/projects/{project_id}/data/sources",
+            json={
+                "name": "test.csv",
+                "connector_type": "file_upload",
+                "config": {
+                    "s3_key": "test.csv",
+                    "file_type": "csv",
+                    "column_mapping": {
+                        "patient_id": "patient_id",
+                        "text_id": "text_id",
+                        "text": "text",
+                        "note_date": "date",
+                    },
+                },
+            },
+        )
+        ds_id = create_resp.json()["id"]
+
+        csv_data = (
+            b"patient_id,text_id,text,date\n"
+            b"MRN001,N001,Note one,2024-01-01\n"
+            b"MRN002,N002,Note two,2024-01-02\n"
+            b"MRN003,N003,Note three,2024-01-03\n"
+        )
+        with patch("app.connectors.file_upload.download_file", return_value=csv_data):
+            await client.post(
+                f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
+            )
+        return project_id
+
+    async def test_search_patients_by_ext_id(self, client):
+        project_id = await self._ingest_patients(client)
+
+        resp = await client.get(
+            f"/api/v1/projects/{project_id}/data/patients?search=MRN001"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        assert any(p["patient_id_ext"] == "MRN001" for p in data["items"])
+
+    async def test_search_patients_case_insensitive(self, client):
+        project_id = await self._ingest_patients(client)
+
+        resp = await client.get(
+            f"/api/v1/projects/{project_id}/data/patients?search=mrn00"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+
+    async def test_filter_patients_by_status(self, client):
+        project_id = await self._ingest_patients(client)
+
+        resp = await client.get(
+            f"/api/v1/projects/{project_id}/data/patients?status=new"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert all(p["status"] == "new" for p in data["items"])
+
+    async def test_patients_response_includes_total(self, client):
+        project_id = await self._ingest_patients(client)
+
+        resp = await client.get(
+            f"/api/v1/projects/{project_id}/data/patients?limit=1"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert len(data["items"]) == 1

@@ -423,6 +423,17 @@ async def _ingest_rows(
     date_col = cols["note_date"]
     ref_col = cols["source_ref"]
 
+    # Batch duplicate check: collect all text_ids, query once
+    all_text_ids = [str(row.get(text_id_col, "")).strip() for row in rows]
+    all_text_ids = [tid for tid in all_text_ids if tid]
+    existing_result = await session.execute(
+        select(Note.text_id).where(
+            Note.project_id == project_id,
+            Note.text_id.in_(all_text_ids),
+        )
+    )
+    existing_text_ids: set[str] = {r[0] for r in existing_result.all()}
+
     # Cache patient lookups within the batch
     patient_cache: dict[str, str] = {}
     inserted = 0
@@ -434,14 +445,8 @@ async def _ingest_rows(
         if not patient_id_ext or not text_id or not note_text:
             continue
 
-        # Skip duplicate text_ids (already ingested)
-        existing = await session.execute(
-            select(Note.id).where(
-                Note.project_id == project_id,
-                Note.text_id == text_id,
-            )
-        )
-        if existing.scalar_one_or_none():
+        # Skip duplicate text_ids (already ingested) — in-memory check
+        if text_id in existing_text_ids:
             continue
 
         # Get or create patient
@@ -534,28 +539,41 @@ async def list_patients(
     project_id: str,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict]:
-    """List patients with note counts."""
+    search: str | None = None,
+    status: str | None = None,
+) -> dict:
+    """List patients with note counts, optional search and status filter."""
+    base_where = [Patient.project_id == project_id, Patient.deleted_at.is_(None)]
+
+    if search:
+        base_where.append(Patient.patient_id_ext.ilike(f"%{search}%"))
+    if status:
+        base_where.append(Patient.status == status)
+
+    # Count total matching
+    count_stmt = select(func.count()).select_from(Patient).where(*base_where)
+    total = (await session.execute(count_stmt)).scalar() or 0
+
+    # Fetch page with note counts
     stmt = (
         select(
             Patient,
             func.count(Note.id).label("note_count"),
         )
         .outerjoin(Note, (Note.patient_id == Patient.id) & Note.deleted_at.is_(None))
-        .where(Patient.project_id == project_id, Patient.deleted_at.is_(None))
+        .where(*base_where)
         .group_by(Patient.id)
         .order_by(Patient.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
     result = await session.execute(stmt)
-    return [
-        {
-            "patient": row[0],
-            "note_count": row[1],
-        }
+    items = [
+        {"patient": row[0], "note_count": row[1]}
         for row in result.all()
     ]
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 async def get_patient_notes(

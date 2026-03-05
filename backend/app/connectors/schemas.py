@@ -51,6 +51,13 @@ class PatientResponse(BaseModel):
     created_at: datetime
 
 
+class PatientListResponse(BaseModel):
+    items: list[PatientResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class NoteResponse(BaseModel):
     id: str
     patient_id: str

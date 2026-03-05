@@ -29,6 +29,7 @@ from app.annotations.service import (
     get_patient_annotations,
     get_patient_review_stats,
     list_annotations,
+    reopen_patient,
     review_annotation,
     run_bulk_predictions,
     skip_annotation,
@@ -155,6 +156,20 @@ async def unlock_patient_endpoint(
 ):
     """Unlock a patient (release review lock)."""
     await unlock_patient(session, project_id, patient_id, current_user.id)
+    return {"ok": True}
+
+
+@router.post("/patient/{patient_id}/reopen")
+async def reopen_patient_endpoint(
+    project_id: str,
+    patient_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    """Re-queue a reviewed patient. Admin only. Preserves annotation decisions."""
+    success = await reopen_patient(session, project_id, patient_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Patient not found or not in reviewed state")
     return {"ok": True}
 
 

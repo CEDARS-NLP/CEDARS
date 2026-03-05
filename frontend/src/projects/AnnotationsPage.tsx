@@ -331,7 +331,7 @@ function PredictionSummary({ annotation }: { annotation: PatientAnnotation }) {
     : `Score: ${formatScore(annotation.predicted_score)}`;
 
   return (
-    <CollapsibleSection summary={summaryLine}>
+    <CollapsibleSection summary={summaryLine} defaultOpen>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2.5">
           {hasLabel && (
@@ -886,7 +886,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           {contextLoading ? (
             <Skeleton className="h-6 w-48 rounded-md" />
           ) : context ? (
-            <CollapsibleSection summary="Full note context">
+            <CollapsibleSection summary="Full note context" defaultOpen>
               <NoteViewer context={context} targetSentenceId={current.sentence_id} />
             </CollapsibleSection>
           ) : (

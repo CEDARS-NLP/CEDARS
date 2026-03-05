@@ -3,7 +3,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.models import Note, Patient, PatientStatus
@@ -259,56 +259,40 @@ async def run_nlp_pipeline(
 
 async def get_nlp_stats(session: AsyncSession, project_id: str) -> dict:
     """Get NLP processing stats for a project."""
-    total_notes = (
-        await session.execute(
-            select(func.count(Note.id)).where(
-                Note.project_id == project_id, Note.deleted_at.is_(None)
-            )
+    # Query 1: note counts (total + processed via distinct sentence.note_id)
+    notes_stmt = (
+        select(
+            func.count(Note.id).label("total_notes"),
+            func.count(func.distinct(Sentence.note_id)).label("processed_notes"),
         )
-    ).scalar() or 0
+        .select_from(Note)
+        .outerjoin(Sentence, (Sentence.note_id == Note.id) & (Sentence.project_id == project_id))
+        .where(Note.project_id == project_id, Note.deleted_at.is_(None))
+    )
+    notes_row = (await session.execute(notes_stmt)).one()
 
-    # Notes that have sentences
-    processed_notes = (
-        await session.execute(
-            select(func.count(func.distinct(Sentence.note_id))).where(
-                Sentence.project_id == project_id
-            )
+    # Query 2: sentence counts with conditional aggregation
+    sent_stmt = (
+        select(
+            func.count().label("total_sentences"),
+            func.count(case(
+                (Sentence.is_target.is_(True), 1),
+            )).label("target_sentences"),
+            func.count(case(
+                (Sentence.is_target.is_(True) & Sentence.is_negated.is_(True), 1),
+            )).label("negated_sentences"),
         )
-    ).scalar() or 0
-
-    total_sentences = (
-        await session.execute(
-            select(func.count(Sentence.id)).where(
-                Sentence.project_id == project_id
-            )
-        )
-    ).scalar() or 0
-
-    target_sentences = (
-        await session.execute(
-            select(func.count(Sentence.id)).where(
-                Sentence.project_id == project_id,
-                Sentence.is_target.is_(True),
-            )
-        )
-    ).scalar() or 0
-
-    negated_sentences = (
-        await session.execute(
-            select(func.count(Sentence.id)).where(
-                Sentence.project_id == project_id,
-                Sentence.is_target.is_(True),
-                Sentence.is_negated.is_(True),
-            )
-        )
-    ).scalar() or 0
+        .select_from(Sentence)
+        .where(Sentence.project_id == project_id)
+    )
+    sent_row = (await session.execute(sent_stmt)).one()
 
     return {
-        "total_notes": total_notes,
-        "processed_notes": processed_notes,
-        "total_sentences": total_sentences,
-        "target_sentences": target_sentences,
-        "negated_sentences": negated_sentences,
+        "total_notes": notes_row.total_notes,
+        "processed_notes": notes_row.processed_notes,
+        "total_sentences": sent_row.total_sentences,
+        "target_sentences": sent_row.target_sentences,
+        "negated_sentences": sent_row.negated_sentences,
     }
 
 

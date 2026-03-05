@@ -11,6 +11,7 @@ from app.connectors.schemas import (
     DataSourceResponse,
     IngestionResponse,
     NoteResponse,
+    PatientListResponse,
     PatientResponse,
     PreviewResponse,
 )
@@ -207,25 +208,34 @@ async def purge_data_source_endpoint(
 # ── Patients + Notes ──────────────────────────────────────────────
 
 
-@router.get("/patients", response_model=list[PatientResponse])
+@router.get("/patients", response_model=PatientListResponse)
 async def list_patients_endpoint(
     project_id: str,
     limit: int = 50,
     offset: int = 0,
+    search: str | None = None,
+    status: str | None = None,
     session: AsyncSession = Depends(get_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
-    results = await list_patients(session, project_id, limit=limit, offset=offset)
-    return [
-        PatientResponse(
-            id=r["patient"].id,
-            patient_id_ext=r["patient"].patient_id_ext,
-            status=r["patient"].status.value,
-            note_count=r["note_count"],
-            created_at=r["patient"].created_at,
-        )
-        for r in results
-    ]
+    result = await list_patients(
+        session, project_id, limit=limit, offset=offset, search=search, status=status,
+    )
+    return PatientListResponse(
+        items=[
+            PatientResponse(
+                id=r["patient"].id,
+                patient_id_ext=r["patient"].patient_id_ext,
+                status=r["patient"].status.value,
+                note_count=r["note_count"],
+                created_at=r["patient"].created_at,
+            )
+            for r in result["items"]
+        ],
+        total=result["total"],
+        limit=result["limit"],
+        offset=result["offset"],
+    )
 
 
 @router.get("/patients/{patient_id}/notes", response_model=list[NoteResponse])

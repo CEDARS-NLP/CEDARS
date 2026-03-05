@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Upload,
   FileText,
+  Database,
   Trash2,
   Play,
   CheckCircle2,
@@ -20,6 +21,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 interface DataSource {
@@ -170,6 +172,26 @@ export default function DataPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
 
+  // Source type selector
+  const [sourceType, setSourceType] = useState<"file" | "databricks">("file");
+
+  // Databricks form state
+  const [databricksForm, setDatabricksForm] = useState({
+    name: "",
+    host: "",
+    http_path: "",
+    token: "",
+    catalog: "hive_metastore",
+    schema: "",
+    table: "",
+    patient_id: "",
+    text_id: "",
+    text: "",
+    note_date: "",
+    source_ref: "",
+  });
+  const [databricksError, setDatabricksError] = useState("");
+
   // Upload state
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -213,6 +235,33 @@ export default function DataPage() {
     onError: (err: Error) => setUploadError(err.message),
   });
 
+  const createDatabricksMutation = useMutation({
+    mutationFn: (payload: {
+      name: string;
+      connector_type: string;
+      config: Record<string, unknown>;
+    }) => api.post(`/projects/${projectId}/data/sources`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["data-sources", projectId] });
+      setDatabricksError("");
+      setDatabricksForm({
+        name: "",
+        host: "",
+        http_path: "",
+        token: "",
+        catalog: "hive_metastore",
+        schema: "",
+        table: "",
+        patient_id: "",
+        text_id: "",
+        text: "",
+        note_date: "",
+        source_ref: "",
+      });
+    },
+    onError: (err: Error) => setDatabricksError(err.message),
+  });
+
   const ingestMutation = useMutation({
     mutationFn: (dsId: string) =>
       api.post(`/projects/${projectId}/data/sources/${dsId}/ingest`, {}),
@@ -236,6 +285,37 @@ export default function DataPage() {
     setParseError("");
     setPreviewRows([]);
   }
+
+  function updateDatabricksField(field: string, value: string) {
+    setDatabricksForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function handleDatabricksSubmit() {
+    const columnMapping: Record<string, string> = {};
+    for (const f of REQUIRED_FIELDS) {
+      if (!databricksForm[f.key as keyof typeof databricksForm]) return;
+      columnMapping[f.key] = databricksForm[f.key as keyof typeof databricksForm];
+    }
+    if (databricksForm.source_ref) {
+      columnMapping.source_ref = databricksForm.source_ref;
+    }
+
+    createDatabricksMutation.mutate({
+      name: databricksForm.name,
+      connector_type: "databricks",
+      config: {
+        host: databricksForm.host,
+        http_path: databricksForm.http_path,
+        token: databricksForm.token,
+        catalog: databricksForm.catalog,
+        schema: databricksForm.schema,
+        table: databricksForm.table,
+        column_mapping: columnMapping,
+      },
+    });
+  }
+
+  const databricksRequiredMissing = !databricksForm.name || !databricksForm.host || !databricksForm.http_path || !databricksForm.token || !databricksForm.schema || !databricksForm.table || REQUIRED_FIELDS.some((f) => !databricksForm[f.key as keyof typeof databricksForm]);
 
   /** Read file headers and set up column mapping UI */
   async function handleFileSelected(file: File) {
@@ -332,8 +412,28 @@ export default function DataPage() {
   return (
     <div className="space-y-6">
       <WorkflowBreadcrumb currentStep="data" projectId={projectId!} />
+      {/* Source type selector */}
+      <div className="flex gap-2">
+        <Button
+          variant={sourceType === "file" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setSourceType("file")}
+        >
+          <Upload className="mr-1.5 h-4 w-4" />
+          File Upload
+        </Button>
+        <Button
+          variant={sourceType === "databricks" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setSourceType("databricks")}
+        >
+          <Database className="mr-1.5 h-4 w-4" />
+          Databricks
+        </Button>
+      </div>
+
       {/* Upload zone (shown when no file is pending) */}
-      {!pendingFile && (
+      {sourceType === "file" && !pendingFile && (
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -377,7 +477,7 @@ export default function DataPage() {
       )}
 
       {/* Column mapping step (shown after file selected) */}
-      {pendingFile && (
+      {sourceType === "file" && pendingFile && (
         <Card>
           <CardContent className="space-y-5 pt-6">
             {/* File info */}
@@ -538,6 +638,157 @@ export default function DataPage() {
         </Card>
       )}
 
+      {/* Databricks connection form */}
+      {sourceType === "databricks" && (
+        <Card>
+          <CardContent className="space-y-5 pt-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 dark:bg-primary/20">
+                <Database className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">Databricks Connection</p>
+                <p className="text-xs text-muted-foreground">Connect to a Databricks SQL warehouse table</p>
+              </div>
+            </div>
+
+            {/* Connection fields */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Name <span className="text-destructive">*</span></Label>
+                <Input
+                  value={databricksForm.name}
+                  onChange={(e) => updateDatabricksField("name", e.target.value)}
+                  placeholder="My clinical notes"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Host <span className="text-destructive">*</span></Label>
+                <Input
+                  value={databricksForm.host}
+                  onChange={(e) => updateDatabricksField("host", e.target.value)}
+                  placeholder="adb-123.azuredatabricks.net"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>HTTP Path <span className="text-destructive">*</span></Label>
+                <Input
+                  value={databricksForm.http_path}
+                  onChange={(e) => updateDatabricksField("http_path", e.target.value)}
+                  placeholder="/sql/1.0/warehouses/abcd1234"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Token <span className="text-destructive">*</span></Label>
+                <Input
+                  type="password"
+                  value={databricksForm.token}
+                  onChange={(e) => updateDatabricksField("token", e.target.value)}
+                  placeholder="dapi..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Catalog</Label>
+                <Input
+                  value={databricksForm.catalog}
+                  onChange={(e) => updateDatabricksField("catalog", e.target.value)}
+                  placeholder="hive_metastore"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Schema <span className="text-destructive">*</span></Label>
+                <Input
+                  value={databricksForm.schema}
+                  onChange={(e) => updateDatabricksField("schema", e.target.value)}
+                  placeholder="clinical_data"
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Table <span className="text-destructive">*</span></Label>
+                <Input
+                  value={databricksForm.table}
+                  onChange={(e) => updateDatabricksField("table", e.target.value)}
+                  placeholder="patient_notes"
+                />
+              </div>
+            </div>
+
+            {/* Column mapping */}
+            <div>
+              <Label className="mb-3 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Column Mapping
+              </Label>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Enter the column names in your Databricks table that correspond to each field.
+              </p>
+
+              <div className="space-y-3">
+                {REQUIRED_FIELDS.map((field) => (
+                  <div key={field.key} className="grid grid-cols-[1fr,auto,1fr] items-center gap-3">
+                    <div>
+                      <span className="text-sm font-medium text-foreground">{field.label}</span>
+                      <span className="ml-1.5 text-[10px] font-medium uppercase text-destructive">required</span>
+                      <p className="text-xs text-muted-foreground">{field.description}</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">&larr;</span>
+                    <Input
+                      value={databricksForm[field.key as keyof typeof databricksForm]}
+                      onChange={(e) => updateDatabricksField(field.key, e.target.value)}
+                      placeholder={field.key}
+                    />
+                  </div>
+                ))}
+
+                <div className="my-1 border-t border-border" />
+
+                {OPTIONAL_FIELDS.map((field) => (
+                  <div key={field.key} className="grid grid-cols-[1fr,auto,1fr] items-center gap-3">
+                    <div>
+                      <span className="text-sm font-medium text-foreground">{field.label}</span>
+                      <span className="ml-1.5 text-[10px] text-muted-foreground">optional</span>
+                      <p className="text-xs text-muted-foreground">{field.description}</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">&larr;</span>
+                    <Input
+                      value={databricksForm[field.key as keyof typeof databricksForm]}
+                      onChange={(e) => updateDatabricksField(field.key, e.target.value)}
+                      placeholder={field.key}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Submit */}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleDatabricksSubmit}
+                disabled={databricksRequiredMissing || createDatabricksMutation.isPending}
+              >
+                {createDatabricksMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-1.5 h-4 w-4" />
+                    Create Data Source
+                  </>
+                )}
+              </Button>
+              {databricksRequiredMissing && (
+                <span className="text-sm text-muted-foreground">Fill all required fields to continue</span>
+              )}
+            </div>
+
+            {databricksError && (
+              <p className="text-sm text-destructive">{databricksError}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Data sources list */}
       <div>
         <h3 className="mb-3 text-sm font-medium text-muted-foreground">
@@ -550,7 +801,7 @@ export default function DataPage() {
 
         {sources && sources.length === 0 && !pendingFile && (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No data sources yet. Upload a file to get started.
+            No data sources yet. Upload a file or connect to Databricks to get started.
           </p>
         )}
 
@@ -560,7 +811,11 @@ export default function DataPage() {
               <Card key={ds.id} className="border-border/60">
                 <CardContent className="flex items-center gap-4 py-4">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 dark:bg-primary/20">
-                    <FileText className="h-5 w-5 text-primary" />
+                    {ds.connector_type === "databricks" ? (
+                      <Database className="h-5 w-5 text-primary" />
+                    ) : (
+                      <FileText className="h-5 w-5 text-primary" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">

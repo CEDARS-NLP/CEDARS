@@ -3,6 +3,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import {
   LayoutDashboard,
   Database,
+  Users,
   Workflow,
   MessageSquareText,
   BarChart3,
@@ -17,6 +18,7 @@ import { useEffect, useState } from "react";
 const projectNavSections = [
   { label: "Overview", suffix: "", icon: LayoutDashboard, end: true },
   { label: "Data", suffix: "/data", icon: Database },
+  { label: "Patients", suffix: "/patients", icon: Users },
   { label: "Pipeline", suffix: "/pipeline", icon: Workflow },
   { label: "Evaluation", suffix: "/evaluation", icon: BarChart3 },
   { label: "Annotations", suffix: "/annotations", icon: MessageSquareText },

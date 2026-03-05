@@ -496,3 +496,14 @@ class TestPatientReview:
         data = next_resp2.json()
         if data["patient_id"] is not None:
             assert data["patient_id"] != patient_id
+
+
+class TestReopenPatient:
+    async def test_reopen_nonexistent_patient(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/annotations/patient/nonexistent/reopen",
+        )
+        assert resp.status_code == 404
