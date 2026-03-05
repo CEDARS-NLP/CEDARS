@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   HelpCircle,
   X,
+  Play,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -20,12 +21,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PredictionJobStatus, BulkEstimate } from "./types";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -980,6 +991,270 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   );
 }
 
+// ── Prediction Job Banner ────────────────────────────────────────
+
+function PredictionJobBanner({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const [showConfirm, setShowConfirm] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Fetch latest job status
+  const { data: jobStatus, refetch: refetchStatus } = useQuery<PredictionJobStatus | null>({
+    queryKey: ["prediction-job", projectId],
+    queryFn: () => api.get<PredictionJobStatus | null>(`/projects/${projectId}/annotations/predictions/status`),
+  });
+
+  // Fetch estimate for confirmation dialog
+  const { data: estimate } = useQuery<BulkEstimate>({
+    queryKey: ["bulk-estimate", projectId],
+    queryFn: () => api.get<BulkEstimate>(`/projects/${projectId}/annotations/estimate`),
+    enabled: showConfirm,
+  });
+
+  // Run predictions mutation
+  const runMutation = useMutation({
+    mutationFn: () => api.post<PredictionJobStatus>(`/projects/${projectId}/annotations/predictions/run`, {}),
+    onSuccess: () => {
+      setShowConfirm(false);
+      refetchStatus();
+    },
+  });
+
+  // Cancel mutation
+  const cancelMutation = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/annotations/predictions/cancel`, {}),
+    onSuccess: () => refetchStatus(),
+  });
+
+  const isActive = jobStatus?.status === "running" || jobStatus?.status === "pending";
+
+  // WebSocket connection for live progress
+  useEffect(() => {
+    if (!isActive || !jobStatus?.job_id) return;
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/projects/${projectId}/jobs/${jobStatus.job_id}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      // Update job status in React Query cache
+      queryClient.setQueryData<PredictionJobStatus | null>(
+        ["prediction-job", projectId],
+        (old) => old ? { ...old, ...msg } : null,
+      );
+      // Invalidate annotation data as patients complete
+      if (msg.result_summary?.patients_processed) {
+        queryClient.invalidateQueries({ queryKey: ["patient-next", projectId] });
+        queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      }
+      // Terminal state — refetch to get final status
+      if (["completed", "cancelled", "failed"].includes(msg.type)) {
+        refetchStatus();
+      }
+    };
+
+    ws.onerror = () => { /* WebSocket errors are non-fatal, fall back to polling */ };
+
+    return () => { ws.close(); wsRef.current = null; };
+  }, [isActive, jobStatus?.job_id, projectId, queryClient, refetchStatus]);
+
+  const summary = jobStatus?.result_summary;
+
+  // No job or unknown status — show run button
+  if (!jobStatus || !["pending", "running", "completed", "cancelled", "failed"].includes(jobStatus.status)) {
+    return (
+      <>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
+          <Play className="h-3.5 w-3.5" aria-hidden="true" />
+          Run Predictions
+        </Button>
+        <PredictionConfirmDialog
+          open={showConfirm}
+          onOpenChange={setShowConfirm}
+          estimate={estimate ?? null}
+          isPending={runMutation.isPending}
+          onConfirm={() => runMutation.mutate()}
+        />
+      </>
+    );
+  }
+
+  // Active job (pending/running)
+  if (isActive) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+              Predictions running{summary?.patients_processed != null && summary?.total_patients
+                ? ` \u2014 ${summary.patients_processed}/${summary.total_patients} patients`
+                : "\u2026"}
+            </p>
+            {summary?.predictions_made != null && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {summary.predictions_made} predictions made
+                {summary.errors ? ` \u00b7 ${summary.errors} errors` : ""}
+              </p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => cancelMutation.mutate()}
+            disabled={cancelMutation.isPending}
+            className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-500/50 dark:text-amber-200 dark:hover:bg-amber-500/20"
+          >
+            {cancelMutation.isPending ? "Cancelling\u2026" : "Cancel"}
+          </Button>
+        </div>
+        <Progress value={jobStatus.progress} className="mt-2 h-1.5" />
+      </div>
+    );
+  }
+
+  // Completed
+  if (jobStatus.status === "completed") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+              Predictions complete
+            </p>
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+              {summary?.annotations_created ?? 0} annotations created
+              {summary?.predictions_made != null ? ` from ${summary.predictions_made} predictions` : ""}
+              {summary?.token_usage ? ` \u00b7 ${summary.token_usage.total_tokens.toLocaleString()} tokens` : ""}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            Run Again
+          </Button>
+        </div>
+        <PredictionConfirmDialog
+          open={showConfirm}
+          onOpenChange={setShowConfirm}
+          estimate={estimate ?? null}
+          isPending={runMutation.isPending}
+          onConfirm={() => runMutation.mutate()}
+        />
+      </div>
+    );
+  }
+
+  // Cancelled
+  if (jobStatus.status === "cancelled") {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+              Predictions cancelled
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {summary?.predictions_made ?? 0} predictions made before cancellation
+              {summary?.patients_processed != null && summary?.total_patients
+                ? ` \u00b7 ${summary.patients_processed}/${summary.total_patients} patients`
+                : ""}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            Run Again
+          </Button>
+        </div>
+        <PredictionConfirmDialog
+          open={showConfirm}
+          onOpenChange={setShowConfirm}
+          estimate={estimate ?? null}
+          isPending={runMutation.isPending}
+          onConfirm={() => runMutation.mutate()}
+        />
+      </div>
+    );
+  }
+
+  // Failed
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-500/30 dark:bg-red-500/10">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-red-900 dark:text-red-200">
+            Prediction run failed
+          </p>
+          <p className="text-xs text-red-700 dark:text-red-300">
+            {summary?.errors ? `${summary.errors} errors` : "An error occurred during prediction"}
+            {summary?.predictions_made ? ` \u00b7 ${summary.predictions_made} predictions completed` : ""}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
+          <Play className="h-3.5 w-3.5" aria-hidden="true" />
+          Retry
+        </Button>
+      </div>
+      <PredictionConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        estimate={estimate ?? null}
+        isPending={runMutation.isPending}
+        onConfirm={() => runMutation.mutate()}
+      />
+    </div>
+  );
+}
+
+function PredictionConfirmDialog({
+  open,
+  onOpenChange,
+  estimate,
+  isPending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  estimate: BulkEstimate | null;
+  isPending: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Run Predictions</DialogTitle>
+          <DialogDescription>
+            This will run the active predictor on all unprocessed sentences.
+          </DialogDescription>
+        </DialogHeader>
+        {estimate ? (
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Sentences to process</span>
+              <span className="font-medium tabular-nums">{estimate.sentence_count.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Estimated tokens</span>
+              <span className="font-medium tabular-nums">{estimate.estimated_total_tokens.toLocaleString()}</span>
+            </div>
+          </div>
+        ) : (
+          <Skeleton className="h-16 w-full" />
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} disabled={isPending || !estimate} className="gap-1.5">
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            {isPending ? "Starting\u2026" : "Confirm"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Page Component ─────────────────────────────────────────
 
 export default function AnnotationsPage() {
@@ -1000,26 +1275,31 @@ export default function AnnotationsPage() {
       {/* Header + project progress */}
       <div className="flex items-baseline justify-between">
         <h2 className="text-lg font-semibold text-foreground">Annotations</h2>
-        {stats && stats.total > 0 && (
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span>
-              <span className="font-medium tabular-nums text-foreground">{stats.reviewed}</span>/{stats.total} reviewed
-            </span>
-            <span className="text-border">|</span>
-            <span>
-              <span className="font-medium tabular-nums text-foreground">{stats.unreviewed}</span> remaining
-            </span>
-            {stats.events_found > 0 && (
-              <>
-                <span className="text-border">|</span>
-                <span>
-                  <span className="font-medium tabular-nums text-foreground">{stats.events_found}</span> event{stats.events_found !== 1 ? "s" : ""}
-                </span>
-              </>
-            )}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {stats && stats.total > 0 && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>
+                <span className="font-medium tabular-nums text-foreground">{stats.reviewed}</span>/{stats.total} reviewed
+              </span>
+              <span className="text-border">|</span>
+              <span>
+                <span className="font-medium tabular-nums text-foreground">{stats.unreviewed}</span> remaining
+              </span>
+              {stats.events_found > 0 && (
+                <>
+                  <span className="text-border">|</span>
+                  <span>
+                    <span className="font-medium tabular-nums text-foreground">{stats.events_found}</span> event{stats.events_found !== 1 ? "s" : ""}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Prediction job banner */}
+      <PredictionJobBanner projectId={projectId!} />
 
       {/* Review panel */}
       {statsLoading ? (

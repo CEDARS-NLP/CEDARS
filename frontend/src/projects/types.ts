@@ -113,6 +113,25 @@ export interface ValidatedPredictor {
   created_at: string;
 }
 
+export interface PredictionJobStatus {
+  job_id: string;
+  status: string; // "pending" | "running" | "completed" | "failed" | "cancelled"
+  progress: number;
+  result_summary: {
+    total_sentences?: number;
+    predictions_made?: number;
+    annotations_created?: number;
+    errors?: number;
+    patients_processed?: number;
+    total_patients?: number;
+    token_usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  } | null;
+  is_cancelled?: boolean;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
 export interface BulkEstimate {
   sentence_count: number;
   estimated_prompt_tokens: number;
