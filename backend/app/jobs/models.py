@@ -23,6 +23,7 @@ class JobStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class BackgroundJob(SQLModel, table=True):
@@ -44,6 +45,7 @@ class BackgroundJob(SQLModel, table=True):
         default=None,
         sa_column=Column(Text, nullable=True),
     )
+    is_cancelled: bool = Field(default=False)
     created_by: str | None = Field(default=None, foreign_key="users.id")
     started_at: datetime | None = Field(
         default=None,
