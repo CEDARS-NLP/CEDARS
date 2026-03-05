@@ -1,95 +1,112 @@
-# Agentic Pipeline Redesign
+# Agentic Pipeline Redesign (v2)
 
 **Date:** 2026-03-05
 **Status:** Design approved, pending implementation plan
+**Supersedes:** Initial agentic design (per-patient agent loop) — replaced for scalability.
 
 ## Problem
 
-Large cohort NLP processing (100K+ patients) takes too long as a blocking batch operation. The current architecture runs NLP and LLM predictions as separate sequential pipelines across the entire corpus before any results are available to annotators. This creates several issues:
+Large cohort NLP processing (100K+ patients, 1M+ notes) takes too long as a blocking batch operation. The current architecture runs NLP and LLM predictions as separate sequential pipelines across the entire corpus before any results are available to annotators. This creates several issues:
 
 - Long wait times before any results are reviewable
 - No way to validate the pipeline configuration on a sample before committing to a full run
 - Separate configuration and evaluation flows for NLP (regex) and LLM (predictions)
+- Clinicians must write regex patterns manually instead of describing events in natural language
 - Limited job management (no retry of failed patients, no job dashboard)
 
 ## Solution
 
-Replace the separate NLP and LLM prediction pipelines with a **unified agentic pipeline** that processes patients one at a time, making results available immediately. The LLM acts as an agent with tools (keyword search, dynamic regex, note reading) to find clinical events in each patient's records.
+Replace the separate NLP and LLM prediction pipelines with a **two-phase architecture** that separates interactive exploration from batch execution:
+
+- **Phase 1 (Interactive):** An LLM agent helps the clinician build a search strategy from natural language. Runs on a sample for fast iteration and evaluation.
+- **Phase 2 (Batch):** The approved search + classification pipeline runs per-patient across the full corpus. Results stream to annotators immediately as each patient completes.
 
 ### Core changes
 
 | Aspect | Current | New |
 |--------|---------|-----|
-| Processing unit | Entire corpus (all notes, then all predictions) | Per-patient (NLP → LLM → annotation, one patient at a time) |
-| NLP + LLM relationship | Two separate pipelines, separate configs | Unified agent — NLP tools serve the LLM's search |
-| Configuration | SearchQuery + PredictorConfig separately | Single EventConfig (queries + LLM + event definition) |
-| Evaluation | Separate eval for predictions only | Unified eval: run sample, review, calibrate, approve full run |
+| Configuration | Clinician writes regex manually + configures LLM separately | Clinician describes event in natural language; LLM generates search patterns |
+| Processing unit | Entire corpus (all notes NLP, then all predictions) | Per-patient (search → classify → annotate, one patient at a time) |
+| Evaluation | Separate eval for LLM predictions only | Unified eval: sample run with both search + classification |
 | Result availability | Only after full pipeline completes | Immediately per-patient as each completes |
+| Scalability | O(corpus) LLM calls | O(matched notes) LLM calls — most notes never touch the LLM |
 | Job management | Per-pipeline cancel only | Full dashboard with cancel, retry failed, retry stalled |
 | Annotation unit | Individual sentences | Patient-level finding with evidence excerpts |
 
 ## Architecture
 
-### Per-Patient Agent
+### Phase 1: Interactive Exploration (Sample)
 
-For each patient, an LLM agent runs a bounded tool-use loop:
+The clinician works with an LLM agent to build a search strategy. This runs on a sample of patients (50-100) for fast iteration.
 
-```python
-async def process_patient(patient_id, event_config, max_rounds=5):
-    messages = [system_prompt(event_config)]
+#### Step 1: Pattern Generation
 
-    for round in range(max_rounds):
-        response = await llm.acompletion(messages, tools=TOOLS)
-
-        if response.has_tool_calls:
-            for tool_call in response.tool_calls:
-                result = await execute_tool(tool_call, patient_id)
-                messages.append(tool_result(result))
-
-        if response.has_final_answer:
-            return response.finding
-
-    return Finding(label="inconclusive", reason="max rounds reached")
-```
-
-### Agent Tools
-
-| Tool | Input | Output | Purpose |
-|------|-------|--------|---------|
-| `search_notes` | keyword query | Matching sentences with note context | Run clinician-defined keyword queries via spaCy matcher |
-| `regex_search` | regex pattern | Matching note excerpts | Agent constructs dynamic regex to narrow search. Runs server-side with timeout protection. |
-| `read_note` | note_id | Full note text | Read complete note when agent needs more context |
-| `submit_finding` | label, evidence, reasoning | — | Record determination. Terminates the agent loop. |
-
-The `search_notes` tool uses the existing spaCy NLP engine (tokenization, NegEx negation detection, keyword matching). The `regex_search` tool lets the agent construct targeted patterns dynamically — reducing the number of full notes sent to the LLM and saving tokens.
-
-### System Prompt
+Clinician provides a natural language event description. The LLM generates search patterns:
 
 ```
-You are a clinical event detection agent.
+Clinician: "Find patients with confirmed myocardial infarction — troponin
+            elevation, ECG changes, but not rule-outs or family history"
 
-Event: {event_config.name}
-Description: {event_config.description}
-Include criteria: {event_config.include_criteria}
-Exclude criteria: {event_config.exclude_criteria}
-
-Search this patient's medical records for evidence of this event.
-Use search_notes to find relevant mentions using keyword queries.
-Use regex_search to construct targeted patterns for specific clinical values or phrases.
-Use read_note if you need more context around a match.
-Use submit_finding when you have enough evidence to make a determination.
-
-If no evidence is found, submit a negative finding.
+LLM generates:
+{
+  "keywords": ["troponin", "myocardial infarction", "MI", "STEMI", "NSTEMI"],
+  "regex_patterns": [
+    "troponin.*(?:elevated|positive|>\\s*0\\.04)",
+    "(?:ST|EKG|ECG).*(?:elevation|changes)",
+    "(?:confirmed|diagnosed).*(?:MI|myocardial)"
+  ],
+  "exclusion_patterns": ["rule.?out", "family history", "suspected"]
+}
 ```
 
-### Typical Agent Flow (example: Myocardial Infarction)
+#### Step 2: Sample Search + Classification
 
-1. `search_notes("MI OR myocardial infarction OR heart attack")` → 3 matches across 50 notes
-2. `regex_search("troponin.*(?:positive|elevated|>\\s*0\\.04)")` → 2 additional notes
-3. `read_note(note_123)` → reads full cardiology consult note
-4. `submit_finding(label="positive", evidence=[...], reasoning="Troponin elevated at 2.4, ECG shows ST elevation...")`
+Run the generated patterns on a sample of patients. For each patient with matches, the LLM classifies with one call per patient (sending matched note context):
 
-Result: Agent read 1-3 full notes instead of 50. Significant token savings.
+```
+Per sample patient:
+  1. Run keywords + regex on all their notes     → deterministic, fast
+  2. If matches found → 1 LLM classification call → label + reasoning + evidence
+  3. Create annotation immediately
+```
+
+#### Step 3: Clinician Review + Calibration
+
+Clinician reviews sample results:
+- Sees generated patterns and match statistics
+- Reviews each patient's classification (confirm/reject)
+- System computes precision/recall/F1 from reviews
+- Suggests calibrated confidence threshold
+- Clinician can refine the natural language description and re-run
+
+#### Step 4: Commit
+
+Clinician approves the config. This locks the search patterns, LLM model, classification prompt, and calibrated threshold.
+
+### Phase 2: Batch Execution (Full Corpus)
+
+The approved pipeline runs per-patient across the full corpus:
+
+```
+Per patient (via PatientTask queue):
+  1. Run committed search patterns on all their notes    → deterministic
+  2. If no matches → mark as "no_match", skip LLM       → free
+  3. If matches → 1 LLM classification call              → targeted
+  4. Create annotation + evidence records                → immediately available
+  5. Annotators can review this patient right away
+```
+
+Workers pull patients from the queue via `SELECT ... FOR UPDATE SKIP LOCKED`. Multiple workers process patients in parallel.
+
+### Cost at Scale
+
+| Cohort | Total Notes | Match Rate | LLM Calls | Batch API Cost (GPT-4o-mini) |
+|--------|------------|------------|-----------|------------------------------|
+| 1K patients | 5K | 10% | 500 | ~$0.25 |
+| 10K patients | 50K | 10% | 5K | ~$2.50 |
+| 100K patients | 500K | 10% | 50K (batchable) | ~$25 |
+
+The LLM only touches notes with search matches. Most of the corpus is filtered deterministically.
 
 ## Data Model
 
@@ -99,17 +116,25 @@ Result: Agent read 1-3 full notes instead of 50. Significant token savings.
 EventConfig:
   id: UUID (PK)
   project_id: UUID (FK)
-  name: str                           # e.g., "Myocardial Infarction"
-  description: str                    # What the event is
-  include_criteria: str               # Natural language include criteria
-  exclude_criteria: str               # Natural language exclude criteria
-  search_queries: JSON                # Array of keyword patterns
-  llm_provider: str                   # e.g., "openai", "anthropic", "ollama"
-  llm_model: str                      # e.g., "gpt-4o", "claude-sonnet-4-20250514"
-  llm_api_base: str | null            # For self-hosted (vLLM, Ollama)
-  max_agent_rounds: int (default 5)   # Bounded tool-use iterations
-  confidence_threshold: float | null  # Calibrated from eval session
-  is_committed: bool (default false)  # Locked after eval approval
+
+  # Event definition (natural language from clinician)
+  name: str                            # e.g., "Myocardial Infarction"
+  description: str                     # Natural language description
+  include_criteria: str                # What to look for
+  exclude_criteria: str                # What to exclude
+
+  # LLM-generated search patterns (generated from description)
+  search_patterns: JSON                # { keywords: [], regex_patterns: [], exclusion_patterns: [] }
+
+  # LLM configuration
+  llm_provider: str                    # e.g., "openai", "anthropic", "ollama"
+  llm_model: str                       # e.g., "gpt-4o-mini", "claude-sonnet-4-20250514"
+  llm_api_base: str | null             # For self-hosted (vLLM, Ollama)
+
+  # Calibration (set after eval on sample)
+  confidence_threshold: float | null   # Calibrated from eval session
+  is_committed: bool (default false)   # Locked after eval approval
+
   created_at, updated_at: datetime
 ```
 
@@ -122,11 +147,11 @@ PipelineRun:
   event_config_id: UUID (FK)
   run_type: "sample" | "full"
   status: queued | running | completed | failed | cancelled
-  config_snapshot: JSON               # Frozen EventConfig at run time
-  sample_size: int | null             # For sample runs
+  config_snapshot: JSON                # Frozen EventConfig at run time
+  sample_size: int | null              # For sample runs
   total_patients: int
   is_cancelled: bool (default false)
-  result_summary: JSON                # Aggregate stats after completion
+  result_summary: JSON                 # Aggregate stats after completion
   error_message: str | null
   created_by: UUID (FK)
   started_at, completed_at, created_at: datetime
@@ -141,19 +166,20 @@ PatientTask:
   patient_id: UUID (FK)
   status: queued | processing | completed | failed | skipped
 
-  # Agent results
-  agent_trace: JSON                   # Full tool-use audit trail
+  # Search results
   notes_searched: int (default 0)
-  notes_read: int (default 0)
-  tool_calls: int (default 0)
-  finding_label: str | null           # positive | negative | inconclusive
+  notes_matched: int (default 0)
+
+  # Classification results
+  finding_label: str | null            # positive | negative | inconclusive | no_match
   finding_reasoning: str | null
-  finding_evidence: JSON | null       # note_ids, sentence excerpts
-  token_usage: JSON | null            # {prompt_tokens, completion_tokens}
+  finding_evidence: JSON | null        # note_ids, matched excerpts
+  predicted_score: float | null
+  token_usage: JSON | null             # {prompt_tokens, completion_tokens}
   error_message: str | null
 
   started_at, completed_at: datetime
-  INDEX: (pipeline_run_id, status)    # For worker queue pulls with SKIP LOCKED
+  INDEX: (pipeline_run_id, status)     # For worker queue pulls with SKIP LOCKED
 ```
 
 ### Evidence
@@ -163,15 +189,14 @@ Evidence:
   id: UUID (PK)
   patient_task_id: bigint (FK)
   note_id: UUID (FK)
-  text: str                           # The extracted excerpt
-  start_pos: int                      # Character offset in note.text
-  end_pos: int                        # Character offset end
-  match_source: str                   # "keyword_search" | "regex_search" | "full_note_read"
-  match_query: str | null             # The query/regex that found this
-  agent_round: int                    # Which tool-use round produced this
+  text: str                            # The matched excerpt
+  start_pos: int                       # Character offset in note.text
+  end_pos: int                         # Character offset end
+  match_source: str                    # "keyword" | "regex" | "exclusion_match"
+  match_pattern: str | null            # The pattern that matched
 ```
 
-### Annotation (patient-level, replaces sentence-level)
+### Annotation (patient-level)
 
 ```
 Annotation:
@@ -180,13 +205,13 @@ Annotation:
   pipeline_run_id: UUID (FK)
   patient_task_id: bigint (FK)
 
-  # Agent determination
-  predicted_label: str                # positive | negative | inconclusive
+  # Classification result
+  predicted_label: str                 # positive | negative | inconclusive
   predicted_reasoning: str
   predicted_score: float | null
 
   # Human review
-  review_status: pending | confirmed | rejected
+  review_status: pending | confirmed | rejected | skipped
   reviewer_label: str | null
   event_date: date | null
   reviewer_notes: str | null
@@ -197,7 +222,7 @@ Annotation:
 
 ### Models removed/replaced
 
-- `SearchQuery` → merged into `EventConfig.search_queries`
+- `SearchQuery` → merged into `EventConfig.search_patterns` (LLM-generated)
 - `PredictorConfig` → merged into `EventConfig`
 - `NlpJob` → replaced by `PipelineRun`
 - Separate NLP and PREDICTION BackgroundJob types → single PIPELINE type
@@ -206,7 +231,7 @@ Annotation:
 ### Models unchanged
 
 - `Patient`, `Note` — unchanged
-- `Sentence` — still created by spaCy as tool output, but no longer the annotation unit
+- `Sentence` — still created by search (but as Evidence records, not a separate model)
 - `BackgroundJob` — still used for INGESTION and EXPORT job types
 
 ## Pipeline Flow
@@ -214,93 +239,103 @@ Annotation:
 ### Unified Workflow
 
 ```
-1. CONFIGURE (Eval Page)
-   ├── Define event (name, description, include/exclude criteria)
-   ├── Set search queries (keyword patterns)
+1. CONFIGURE (Event Config Page)
+   ├── Clinician describes event in natural language
+   ├── LLM generates search patterns (keywords, regex, exclusions)
+   ├── Clinician reviews generated patterns
    ├── Configure LLM (provider, model)
-   └── Iterate on sample until satisfied
+   └── Iterate until patterns look right
 
-2. RUN SAMPLE
+2. RUN SAMPLE (same page)
    ├── PipelineRun(run_type="sample", sample_size=N)
    ├── Picks N random patients → creates PatientTasks
-   ├── Per patient: agent loop (search → regex → read → submit_finding)
+   ├── Per patient: search notes → classify matched notes (1 LLM call)
    ├── Creates Evidence records and Annotations
-   └── Shows results in eval UI with metrics
+   └── Shows results: match stats + classification results
 
 3. REVIEW & CALIBRATE
-   ├── User reviews sample predictions, marks correct/incorrect
-   ├── System computes calibrated threshold from eval judgments
-   ├── Shows precision/recall at different thresholds
-   └── User "commits" the config (locks EventConfig)
+   ├── Clinician reviews sample findings (confirm/reject each)
+   ├── System computes precision/recall/F1 from reviews
+   ├── Shows metrics at different score thresholds
+   ├── Clinician can refine description and re-run sample
+   └── Clinician "commits" the config (locks everything)
 
 4. RUN FULL PIPELINE
    ├── PipelineRun(run_type="full")
-   ├── Creates PatientTask for ALL patients (sample patients already completed)
-   ├── Workers pull patients via SELECT ... FOR UPDATE SKIP LOCKED
-   ├── Multiple workers can process patients in parallel
-   ├── Progress: real-time via WebSocket (patients completed / total)
-   └── Results available in annotation UI immediately per-patient
+   ├── Creates PatientTask for ALL patients (sample already done)
+   ├── Workers pull patients via SKIP LOCKED
+   ├── Per patient: search → classify if matched → create annotation
+   ├── Progress: WebSocket (patients completed / total)
+   └── Results available for annotation immediately per-patient
 
 5. ANNOTATE
-   ├── Shows only predictions above calibrated threshold
-   ├── Patient-first review: agent determination + evidence excerpts
+   ├── Patient-first review: classification + evidence excerpts
    ├── Annotator sees highlighted evidence in full note context
+   ├── Predictions below calibrated threshold hidden by default
    └── Confirm/reject with optional event date and notes
 ```
 
-### Cost estimation
+### Cost Estimation
 
-Progressive estimates using sample data:
+After the sample run, the system can extrapolate:
+- Match rate from sample → estimated matched notes in full corpus
+- Avg tokens per matched note from sample → estimated total tokens
+- Provider pricing → estimated cost
 
-1. **After sample NLP**: Extrapolate target sentence hit rate → "Estimated ~750 notes with target sentences out of 5,000"
-2. **After sample LLM**: Extrapolate actual token usage per patient → "Estimated ~2.1M tokens for full cohort"
-
-Since the LLM processes full notes (not just sentences), token counts vary significantly note-to-note. Sample-based estimation is far more accurate than raw character counting.
+```
+Sample (50 patients): 12% match rate, avg 1,800 tokens/note
+Full corpus (100K patients, 500K notes):
+  Estimated matches: 60,000 notes
+  Estimated tokens: 108M
+  Estimated cost (GPT-4o-mini batch): ~$27
+```
 
 ## Scaling
 
-### Worker parallelism
+### Worker Parallelism
 
 Multiple ARQ workers process patients concurrently:
 
 ```sql
 SELECT id, patient_id FROM patient_task
 WHERE pipeline_run_id = :run_id AND status = 'queued'
-ORDER BY id
-LIMIT 1
+ORDER BY id LIMIT 1
 FOR UPDATE SKIP LOCKED
 ```
 
-Postgres advisory locks prevent conflicts. Each worker processes one patient at a time.
+Each worker: pull patient → search notes → classify → commit → next.
 
-### Concurrent LLM calls per patient
+### Batch API Support (Phase 2 optimization)
 
-For a patient with multiple notes containing target sentences, all LLM calls fire concurrently:
+For full runs, instead of per-patient LLM calls, collect all matched notes and submit via batch API (OpenAI Batch, Anthropic Batches). This provides:
+- 50% cost reduction (OpenAI Batch pricing)
+- No rate limits
+- Higher throughput
+
+The PatientTask model supports this: batch submission creates tasks in `processing` state, batch completion callback updates them to `completed`.
+
+### Concurrent Classification per Patient
+
+For patients with multiple matched notes, classify concurrently:
 
 ```python
 results = await asyncio.gather(*[
-    llm.acompletion(messages_for_note)
-    for note in notes_with_targets
+    classify_note(note, event_config)
+    for note in matched_notes
 ])
 ```
-
-This is Level 1 batching. Level 2 (server-side batch APIs for vLLM, OpenAI Batch, Anthropic Batches) is deferred.
 
 ### Cancellation
 
 - `PipelineRun.is_cancelled = True` → workers check before each patient
-- Instant: no need to wait for current patient to finish (current patient completes, then stops)
-- `PatientTask` status remains `queued` for unprocessed patients
+- Current patient completes, then stops
+- Unprocessed PatientTasks remain `queued`
 
 ### Retry
 
 - **Retry failed**: `UPDATE patient_task SET status = 'queued' WHERE status = 'failed'`
-- **Retry stalled**: Reset `processing` tasks older than timeout threshold back to `queued`
-- Granular: can retry individual patients or all failures at once
-
-### Resume after crash
-
-Any `PatientTask` with `status = 'processing'` that stalled (no heartbeat) gets reset to `queued` on worker restart.
+- **Retry stalled**: Reset `processing` tasks older than timeout back to `queued`
+- Granular: retry individual patients or all failures
 
 ## Annotation Interface
 
@@ -309,8 +344,8 @@ Any `PatientTask` with `status = 'processing'` that stalled (no heartbeat) gets 
 ```
 Patient List (filtered by predicted_label + calibrated threshold)
   └── Patient Card
-        ├── Agent Determination: "Positive — Myocardial Infarction"
-        ├── Agent Reasoning: "Troponin elevated at 2.4, ECG shows ST elevation..."
+        ├── Classification: "Positive — Myocardial Infarction"
+        ├── Reasoning: "Troponin elevated at 2.4, ECG shows ST elevation..."
         ├── Confidence: 0.87 (calibrated)
         ├── Evidence (3 excerpts across 2 notes):
         │     ├── Note 2024-01-15 (Cardiology Consult)
@@ -325,13 +360,13 @@ Patient List (filtered by predicted_label + calibrated threshold)
 
 ### Evidence highlighting
 
-When annotator expands a note, evidence spans are highlighted using `start_pos`/`end_pos` from the Evidence model. Surrounding text provides clinical context.
+When annotator expands a note, evidence spans are highlighted using `start_pos`/`end_pos` from the Evidence model.
 
 ### Filtering
 
 - Predictions below the calibrated confidence threshold are hidden by default
-- Annotator can adjust filter to see lower-confidence predictions if needed
 - Filter by predicted label (positive/negative/inconclusive)
+- Annotator can adjust threshold to see more/fewer results
 
 ## Job Dashboard
 
@@ -339,34 +374,29 @@ New page at `/projects/:id/jobs` showing all pipeline runs and background jobs.
 
 ### Pipeline runs table
 
-| Run | Type | Status | Progress | Patients | Started | Actions |
-|-----|------|--------|----------|----------|---------|---------|
-| #12 | Full | Running | 2,450 / 10,000 | 24.5% | 5 min ago | Cancel |
-| #11 | Sample | Completed | 50 / 50 | 100% | 1 hr ago | View |
-| #10 | Sample | Cancelled | 22 / 50 | — | 2 hrs ago | — |
+| Run | Type | Status | Progress | Patients | Matched | Started | Actions |
+|-----|------|--------|----------|----------|---------|---------|---------|
+| #12 | Full | Running | 2,450 / 10,000 | 24.5% | 310 | 5 min ago | Cancel |
+| #11 | Sample | Completed | 50 / 50 | 100% | 8 | 1 hr ago | View |
 
 ### Expandable detail per run
 
-- Patient task breakdown: completed / failed / skipped / queued
+- Patient task breakdown: completed / failed / skipped / queued / no_match
 - Failed patients list with error messages + individual retry
 - Token usage summary (prompt, completion, total)
-- Config snapshot (queries, predictor, threshold)
-- Agent trace viewer for individual patients
+- Config snapshot (patterns, LLM, threshold)
+- Match rate and extrapolated cost
 
 ### Actions
 
 - **Cancel**: Sets `is_cancelled=true`, workers stop after current patient
 - **Retry failed**: Re-queues all `status=failed` patient tasks
 - **Retry stalled**: Re-queues `processing` tasks older than timeout
-- **View details**: Expand to see per-patient breakdown
-
-### Other job types
-
-Ingestion and export jobs shown in separate sections using existing `BackgroundJob` model.
 
 ## What Gets Removed
 
 - Separate "Run NLP" and "Run Predictions" buttons/flows
+- Manual regex writing by clinician (LLM generates from natural language)
 - `NlpJob` model
 - NLP and PREDICTION `BackgroundJob` types
 - Sentence-level annotation workflow
@@ -374,7 +404,8 @@ Ingestion and export jobs shown in separate sections using existing `BackgroundJ
 
 ## Future Considerations (deferred)
 
-- **Prompt caching**: Token usage JSON on PatientTask is extensible to track cache hits. Per-patient processing naturally groups shared system prompts.
-- **Server-side batch APIs**: vLLM batch endpoint, OpenAI Batch API (50% cheaper), Anthropic Message Batches for cost optimization on large runs.
-- **Sandboxed code execution**: `run_python` tool for agent to do complex data transformations. Requires RestrictedPython or container sandboxing for security.
-- **Additional structured tools**: `search_by_date_range`, `extract_lab_values` for common clinical queries without code execution.
+- **Prompt caching**: Anthropic/OpenAI cache headers for shared system prompts across notes
+- **Server-side batch APIs**: OpenAI Batch API (50% cheaper), Anthropic Message Batches. Design supports this — PatientTask status model is compatible with async batch workflows.
+- **Per-patient agent deep-dive**: For inconclusive/low-confidence patients, run a full multi-round agent loop. The tiered approach: batch classify most patients cheaply, agent-investigate the hard cases.
+- **Sandboxed code execution**: Future agent tool for complex data transformations
+- **Additional search tools**: Date range filters, lab value extraction, structured data queries
