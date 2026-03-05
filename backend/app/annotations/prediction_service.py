@@ -207,6 +207,8 @@ async def dispatch_prediction_job(
         logger.warning("ARQ unavailable, running prediction synchronously")
 
     if use_sync:
+        import asyncio
+
         from sqlalchemy.ext.asyncio import async_sessionmaker
         from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
@@ -215,8 +217,9 @@ async def dispatch_prediction_job(
         factory = async_sessionmaker(
             session.bind, class_=_AsyncSession, expire_on_commit=False
         )
-        await execute_prediction_job(project_id, bg_job.id, session_factory=factory)
-        await session.refresh(bg_job)
+        # Run as a background task so the endpoint returns immediately
+        # and the job is cancellable via the cancel endpoint.
+        asyncio.create_task(execute_prediction_job(project_id, bg_job.id, session_factory=factory))
 
     return {
         "job_id": bg_job.id,
