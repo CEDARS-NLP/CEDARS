@@ -219,7 +219,14 @@ async def dispatch_prediction_job(
         )
         # Run as a background task so the endpoint returns immediately
         # and the job is cancellable via the cancel endpoint.
-        asyncio.create_task(execute_prediction_job(project_id, bg_job.id, session_factory=factory))
+        def _on_done(t: asyncio.Task) -> None:
+            if not t.cancelled() and t.exception():
+                logger.exception("Background prediction task failed", exc_info=t.exception())
+
+        task = asyncio.create_task(
+            execute_prediction_job(project_id, bg_job.id, session_factory=factory)
+        )
+        task.add_done_callback(_on_done)
 
     return {
         "job_id": bg_job.id,
@@ -259,14 +266,20 @@ async def cancel_prediction_job(
     session: AsyncSession,
     project_id: str,
 ) -> dict | None:
-    """Cancel a running or pending prediction job for a project."""
+    """Cancel a running or pending prediction job for a project.
+
+    Also handles stuck/zombie jobs: if the job is already cancelled but
+    still in a non-terminal status, force it to CANCELLED.
+    """
+    from datetime import UTC, datetime
+
+    # Find any non-terminal prediction job (pending, running)
     stmt = (
         select(BackgroundJob)
         .where(
             BackgroundJob.project_id == project_id,
             BackgroundJob.job_type == JobType.PREDICTION,
             BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
-            BackgroundJob.is_cancelled == False,  # noqa: E712
         )
         .order_by(BackgroundJob.created_at.desc())
         .limit(1)
@@ -277,6 +290,10 @@ async def cancel_prediction_job(
         return None
 
     bg_job.is_cancelled = True
+    # If job is stuck (already cancelled but still "running"), force terminal state
+    if bg_job.status in (JobStatus.PENDING, JobStatus.RUNNING):
+        bg_job.status = JobStatus.CANCELLED
+        bg_job.completed_at = datetime.now(UTC)
     session.add(bg_job)
     await session.commit()
 
