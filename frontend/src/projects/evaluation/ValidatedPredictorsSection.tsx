@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ValidatedPredictor, BulkEstimate } from "@/projects/types";
+import type { ValidatedPredictor } from "@/projects/types";
 
 export default function ValidatedPredictorsSection({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
@@ -24,16 +24,9 @@ export default function ValidatedPredictorsSection({ projectId }: { projectId: s
       api.get<ValidatedPredictor[]>(`/projects/${projectId}/evaluation/validated`),
   });
 
-  const { data: estimate } = useQuery<BulkEstimate>({
-    queryKey: ["bulk-estimate", projectId],
-    queryFn: () =>
-      api.get<BulkEstimate>(`/projects/${projectId}/annotations/estimate`),
-    enabled: !!activateTarget,
-  });
-
   const activateMutation = useMutation({
     mutationFn: (validatedId: string) =>
-      api.post<{ validated: ValidatedPredictor; bulk_run: { annotations_created: number; total_sentences: number; token_usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } } | null }>(
+      api.post<{ validated: ValidatedPredictor }>(
         `/projects/${projectId}/evaluation/validated/${validatedId}/activate`,
         {}
       ),
@@ -41,14 +34,11 @@ export default function ValidatedPredictorsSection({ projectId }: { projectId: s
       queryClient.invalidateQueries({ queryKey: ["validated-predictors", projectId] });
       queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
       queryClient.invalidateQueries({ queryKey: ["annotations", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["bulk-estimate", projectId] });
       setActivateTarget(null);
     },
   });
 
   if (!validated || validated.length === 0) return null;
-
-  const bulkRun = activateMutation.data as { bulk_run?: { annotations_created: number; token_usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } } } | undefined;
 
   return (
     <div className="space-y-3">
@@ -101,27 +91,11 @@ export default function ValidatedPredictorsSection({ projectId }: { projectId: s
           <DialogHeader>
             <DialogTitle>Activate predictor?</DialogTitle>
             <DialogDescription>
-              This will run predictions on all target sentences that haven't been
-              processed yet. This may create a large number of annotation records.
+              This will set the selected configuration as the active predictor
+              for this project. To run predictions on target sentences, go to
+              the Annotations page after activation.
             </DialogDescription>
           </DialogHeader>
-
-          {/* Token estimate */}
-          {estimate && estimate.sentence_count > 0 && (
-            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
-              <p className="mb-2 font-medium text-foreground">Estimated token usage</p>
-              <div className="grid grid-cols-2 gap-y-1.5 text-sm">
-                <span className="text-muted-foreground">Sentences to process</span>
-                <span className="font-medium tabular-nums">{estimate.sentence_count.toLocaleString()}</span>
-                <span className="text-muted-foreground">Prompt tokens</span>
-                <span className="font-medium tabular-nums">{estimate.estimated_prompt_tokens.toLocaleString()}</span>
-                <span className="text-muted-foreground">Completion tokens</span>
-                <span className="font-medium tabular-nums">{estimate.estimated_completion_tokens.toLocaleString()}</span>
-                <span className="text-muted-foreground">Total tokens</span>
-                <span className="font-medium tabular-nums">{estimate.estimated_total_tokens.toLocaleString()}</span>
-              </div>
-            </div>
-          )}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setActivateTarget(null)}>
@@ -131,7 +105,7 @@ export default function ValidatedPredictorsSection({ projectId }: { projectId: s
               onClick={() => activateTarget && activateMutation.mutate(activateTarget)}
               disabled={activateMutation.isPending}
             >
-              {activateMutation.isPending ? "Activating\u2026" : "Activate & Run Predictions"}
+              {activateMutation.isPending ? "Activating\u2026" : "Activate Predictor"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -141,13 +115,7 @@ export default function ValidatedPredictorsSection({ projectId }: { projectId: s
       <div aria-live="polite" aria-atomic="true">
         {activateMutation.isSuccess && activateMutation.data && (
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            Activated.
-            {bulkRun?.bulk_run
-              ? ` Created ${bulkRun.bulk_run.annotations_created} annotations.`
-              : ""}
-            {bulkRun?.bulk_run?.token_usage
-              ? ` Used ${bulkRun.bulk_run.token_usage.total_tokens.toLocaleString()} tokens.`
-              : ""}
+            Predictor activated. Go to Annotations to run predictions.
           </p>
         )}
         {activateMutation.isError && (
