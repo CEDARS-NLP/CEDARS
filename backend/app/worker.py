@@ -32,8 +32,10 @@ async def run_nlp_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
 
 
 async def run_prediction_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
-    """ARQ task: run bulk predictions. (Placeholder)"""
-    return {"status": "not_implemented"}
+    """ARQ task: run bulk predictions with per-patient batching."""
+    from app.jobs.prediction import execute_prediction_job
+
+    return await execute_prediction_job(project_id, job_db_id)
 
 
 async def run_export_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
