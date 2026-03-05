@@ -459,6 +459,23 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     }
   }, [annotations]);
 
+  // Prefetch next annotation's note context for snappier navigation
+  useEffect(() => {
+    if (!annotations || annotations.length <= 1) return;
+    const nextAnno = annotations.find(
+      (a, i) => i > currentIndex && a.review_status === "unreviewed"
+    );
+    if (nextAnno) {
+      queryClient.prefetchQuery({
+        queryKey: ["annotation-context", nextAnno.id],
+        queryFn: () =>
+          api.get<NoteContext>(
+            `/projects/${nextAnno.project_id}/annotations/${nextAnno.id}/context`
+          ),
+      });
+    }
+  }, [annotations, currentIndex, queryClient]);
+
   // After action: refresh and advance
   const handlePostAction = useCallback(async () => {
     const { data: freshAnnotations } = await refetchAnnotations();
@@ -477,6 +494,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       setCompletionMessage(
         `Patient ${patientInfo?.patient_id_ext} complete \u2014 ${reviewed} reviewed, ${skipped} skipped, ${events} event${events !== 1 ? "s" : ""}`
       );
+      // Prefetch next patient immediately so it loads faster after the delay
+      queryClient.prefetchQuery({
+        queryKey: ["patient-next", projectId],
+        queryFn: () => api.get<PatientInfo>(`/projects/${projectId}/annotations/patient/next`),
+      });
       setTimeout(() => {
         setCompletionMessage(null);
         setCurrentIndex(0);
