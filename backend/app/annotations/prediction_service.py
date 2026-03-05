@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
 from app.connectors.models import Note
+from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.models import Sentence
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
@@ -150,3 +151,119 @@ async def estimate_bulk_predictions(
         "estimated_completion_tokens": estimated_completion_tokens,
         "estimated_total_tokens": total_prompt_tokens + estimated_completion_tokens,
     }
+
+
+async def dispatch_prediction_job(
+    session: AsyncSession,
+    project_id: str,
+    user_id: str,
+) -> dict:
+    """Create a BackgroundJob and enqueue prediction processing via ARQ.
+
+    Falls back to synchronous execution if Redis/ARQ is unavailable.
+    Raises ValueError if no active predictor is configured.
+    """
+    # Verify active predictor exists before dispatching
+    stmt = select(PredictorConfig).where(
+        PredictorConfig.project_id == project_id,
+        PredictorConfig.is_active == True,  # noqa: E712
+        PredictorConfig.deleted_at.is_(None),
+    )
+    result = await session.execute(stmt)
+    if not result.scalar_one_or_none():
+        raise ValueError("No active predictor configured for this project")
+
+    bg_job = BackgroundJob(
+        project_id=project_id,
+        job_type=JobType.PREDICTION,
+        status=JobStatus.PENDING,
+        created_by=user_id,
+    )
+    session.add(bg_job)
+    await session.commit()
+    await session.refresh(bg_job)
+
+    try:
+        from arq import create_pool
+
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+        arq_job = await redis.enqueue_job("run_prediction_job", project_id, bg_job.id)
+        bg_job.arq_job_id = arq_job.job_id
+        session.add(bg_job)
+        await session.commit()
+        await redis.aclose()
+    except Exception:
+        logger.warning("ARQ unavailable, running prediction synchronously")
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+        from app.jobs.prediction import execute_prediction_job
+
+        factory = async_sessionmaker(
+            session.bind, class_=_AsyncSession, expire_on_commit=False
+        )
+        await execute_prediction_job(project_id, bg_job.id, session_factory=factory)
+        await session.refresh(bg_job)
+
+    return {
+        "job_id": bg_job.id,
+        "status": bg_job.status.value,
+        "progress": bg_job.progress,
+    }
+
+
+async def get_prediction_job_status(
+    session: AsyncSession,
+    project_id: str,
+) -> dict | None:
+    """Get the latest prediction job status for a project."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.PREDICTION,
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+    if not bg_job:
+        return None
+
+    return {
+        "job_id": bg_job.id,
+        "status": bg_job.status.value,
+        "progress": bg_job.progress,
+        "result_summary": bg_job.result_summary,
+    }
+
+
+async def cancel_prediction_job(
+    session: AsyncSession,
+    project_id: str,
+) -> dict | None:
+    """Cancel a running or pending prediction job for a project."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.PREDICTION,
+            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            BackgroundJob.is_cancelled == False,  # noqa: E712
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+    if not bg_job:
+        return None
+
+    bg_job.is_cancelled = True
+    session.add(bg_job)
+    await session.commit()
+
+    return {"job_id": bg_job.id, "cancelled": True}

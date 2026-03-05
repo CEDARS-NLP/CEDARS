@@ -50,6 +50,15 @@ class BulkEstimateResponse(BaseModel):
     estimated_total_tokens: int
 
 
+class PredictionJobResponse(BaseModel):
+    """Response when dispatching or querying a prediction job."""
+
+    job_id: str
+    status: str
+    progress: int = 0
+    result_summary: dict | None = None
+
+
 class PatientAnnotationResponse(AnnotationResponse):
     """Annotation with note context for patient review."""
 

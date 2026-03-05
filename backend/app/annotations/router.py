@@ -15,11 +15,14 @@ from app.annotations.schemas import (
     NextPatientResponse,
     PatientAnnotationResponse,
     PatientReviewStats,
+    PredictionJobResponse,
     ReviewRequest,
     ReviewResultResponse,
 )
 from app.annotations.service import (
+    cancel_prediction_job,
     delete_event_date,
+    dispatch_prediction_job,
     estimate_bulk_predictions,
     get_annotation,
     get_annotation_stats,
@@ -28,6 +31,7 @@ from app.annotations.service import (
     get_note_context,
     get_patient_annotations,
     get_patient_review_stats,
+    get_prediction_job_status,
     list_annotations,
     reopen_patient,
     review_annotation,
@@ -66,6 +70,46 @@ async def run_predictions_endpoint(
         result = await run_bulk_predictions(session, project_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+# ── Prediction Job Dispatch ─────────────────────────────────────
+
+
+@router.post("/predictions/run", response_model=PredictionJobResponse)
+async def dispatch_predictions_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    """Dispatch a background prediction job for all unprocessed target sentences."""
+    try:
+        result = await dispatch_prediction_job(session, project_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/predictions/status", response_model=PredictionJobResponse | None)
+async def prediction_status_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get the latest prediction job status for this project."""
+    return await get_prediction_job_status(session, project_id)
+
+
+@router.post("/predictions/cancel")
+async def cancel_predictions_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    """Cancel the running prediction job."""
+    result = await cancel_prediction_job(session, project_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No running prediction job found")
     return result
 
 
