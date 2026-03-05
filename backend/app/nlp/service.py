@@ -116,19 +116,30 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
     await session.commit()
     await session.refresh(bg_job)
 
+    use_sync = True
     try:
         from arq import create_pool
 
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
-        arq_job = await redis.enqueue_job("run_nlp_job", project_id, bg_job.id)
-        bg_job.arq_job_id = arq_job.job_id
-        session.add(bg_job)
-        await session.commit()
+
+        # Check if any ARQ workers are active before enqueuing
+        worker_keys = await redis.keys("arq:worker:*")
+        if worker_keys:
+            arq_job = await redis.enqueue_job("run_nlp_job", project_id, bg_job.id)
+            bg_job.arq_job_id = arq_job.job_id
+            session.add(bg_job)
+            await session.commit()
+            use_sync = False
+        else:
+            logger.warning("No ARQ workers found, running NLP synchronously")
+
         await redis.aclose()
     except Exception:
         logger.warning("ARQ unavailable, running NLP synchronously")
+
+    if use_sync:
         from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as _AsyncSession
 
         from app.jobs.nlp import execute_nlp_job
