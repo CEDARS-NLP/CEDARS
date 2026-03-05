@@ -334,7 +334,8 @@ class TestValidation:
         assert resp.status_code == 200
         data = resp.json()
         assert data["validated"]["is_active"] is True
-        assert "bulk_run" in data
+        # Activation no longer triggers bulk predictions
+        assert data.get("bulk_run") is None
 
     async def test_list_validated(self, client):
         pid, sid = await self._setup_completed_session(client)
