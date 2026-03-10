@@ -343,7 +343,7 @@ Resources:
       BucketName: !Ref CedarsBucket
 
 # -----------------------
-# IAM Roles
+# IAM Inference Role
 # -----------------------
   BERTInferenceInstanceRole:
     Type: AWS::IAM::Role
