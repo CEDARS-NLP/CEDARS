@@ -1912,6 +1912,10 @@ def get_prediction_sqs(note: str, sqs_handler) -> float:
     except Exception as e:
         logger.error(f"Failed to get prediction for note: {note}")
         raise e
+<<<<<<< copilot/sub-pr-208
+=======
+
+>>>>>>> aws_template
 
 @log_function_call
 def get_max_prediction_score(patient_id: str):
