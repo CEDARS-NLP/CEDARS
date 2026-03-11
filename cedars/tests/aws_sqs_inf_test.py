@@ -1,12 +1,13 @@
 import boto3
 import json
+import os
 import time
 import uuid
 
-sqs = boto3.client("sqs", region_name="us-east-1")
+sqs = boto3.client("sqs", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
-INFERENCE_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/211125748499/bert-inference"
-RESPONSE_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/211125748499/bert-response"
+INFERENCE_QUEUE_URL = os.getenv("INFERENCE_QUEUE_URL")
+RESPONSE_QUEUE_URL = os.getenv("RESPONSE_QUEUE_URL")
 
 
 def send_warmup():

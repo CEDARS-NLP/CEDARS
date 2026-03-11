@@ -1906,11 +1906,11 @@ def get_prediction_sqs(note: str, sqs_handler) -> float:
 
         score = float(response['results'][0]['score'])
         return score
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to get prediction for note: {note}")
-        raise e
     except TimeoutError as e:
         logger.error("SQS inference request timed out while waiting for response")
+        raise e
+    except Exception as e:
+        logger.error(f"Failed to get prediction for note: {note}")
         raise e
 
 @log_function_call
