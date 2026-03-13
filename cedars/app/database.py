@@ -43,7 +43,6 @@ def get_minio():
                 region=g.region
             )
 
-
             # IMPORTANT:
             # In S3 gateway mode, MinIO does NOT create buckets.
             # The bucket already exists in AWS S3.

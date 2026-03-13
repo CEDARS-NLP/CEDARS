@@ -1,5 +1,6 @@
 import os
 import json
+import os
 import time
 import uuid
 import boto3
@@ -7,7 +8,7 @@ from dotenv import dotenv_values
 
 config = dotenv_values(".env")
 
-sqs = boto3.client("sqs", region_name=os.getenv("AWS_REGION"))
+sqs = boto3.client("sqs", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
 INFERENCE_QUEUE_URL = os.getenv("INFERENCE_QUEUE_URL")
 RESPONSE_QUEUE_URL = os.getenv("RESPONSE_QUEUE_URL")
