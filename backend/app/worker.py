@@ -10,6 +10,16 @@ from arq.connections import RedisSettings
 
 from app.config import settings
 
+# Import ALL models at worker startup so SQLAlchemy can resolve foreign keys.
+# The ARQ worker runs in a separate process without the FastAPI app context.
+import app.auth.models  # noqa: F401
+import app.projects.models  # noqa: F401
+import app.connectors.models  # noqa: F401
+import app.nlp.models  # noqa: F401
+import app.annotations.models  # noqa: F401
+import app.pipeline.models  # noqa: F401
+import app.evaluation.models  # noqa: F401  # Phase 1: unified eval models
+
 logger = logging.getLogger(__name__)
 
 

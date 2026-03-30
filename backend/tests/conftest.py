@@ -12,7 +12,8 @@ from app.connectors.models import DataSource, Patient, Note  # noqa: F401
 from app.predictors.models import PredictorConfig  # noqa: F401
 from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: F401
 from app.annotations.models import Annotation  # noqa: F401
-from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: F401
+from app.evaluation.models import EvaluationSession, SearchMatch, PatientResult  # noqa: F401  # Phase 1: new models
+# from app.evaluation.models import OldEvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: F401  # Phase 1: old models removed
 from app.jobs.models import BackgroundJob  # noqa: F401
 from app.pipeline.models import EventConfig as _EC, PipelineRun as _PR, PatientTask as _PT, Evidence as _Ev  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
