@@ -17,7 +17,7 @@ from app.predictors.models import PredictorConfig, PredictorType  # noqa: F401
 from app.annotations.models import Annotation, ReviewStatus  # noqa: F401
 from app.jobs.models import BackgroundJob, JobStatus, JobType  # noqa: F401
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
-from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: F401
+from app.evaluation.models import EvaluationSession, SearchMatch, PatientResult  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.predictors.base import PredictionResult, TokenUsage, PredictorError
 
