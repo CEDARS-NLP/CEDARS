@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Moon,
   Sun,
+  Activity,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -20,6 +21,7 @@ const projectNavSections = [
   { label: "Data", suffix: "/data", icon: Database },
   { label: "Patients", suffix: "/patients", icon: Users },
   { label: "Pipeline", suffix: "/pipeline", icon: Workflow },
+  { label: "Jobs", suffix: "/jobs", icon: Activity },
   { label: "Evaluation", suffix: "/evaluation", icon: BarChart3 },
   { label: "Annotations", suffix: "/annotations", icon: MessageSquareText },
   { label: "Export", suffix: "/export", icon: Download },

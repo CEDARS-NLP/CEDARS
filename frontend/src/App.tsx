@@ -15,6 +15,7 @@ import EvaluationPage from "@/projects/EvaluationPage";
 import ExportPage from "@/projects/ExportPage";
 import PatientsPage from "@/projects/PatientsPage";
 import PatientDetailPage from "@/projects/PatientDetailPage";
+import JobDashboardPage from "@/projects/JobDashboardPage";
 
 const queryClient = new QueryClient();
 
@@ -95,6 +96,7 @@ export default function App() {
                 <Route path="patients" element={<PatientsPage />} />
                 <Route path="patients/:patientId" element={<PatientDetailPage />} />
                 <Route path="pipeline" element={<EventConfigPage />} />
+                <Route path="jobs" element={<JobDashboardPage />} />
                 <Route path="annotations" element={<AnnotationsPage />} />
                 <Route path="evaluation" element={<EvaluationPage />} />
                 <Route path="export" element={<ExportPage />} />
