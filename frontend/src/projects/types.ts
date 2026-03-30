@@ -322,3 +322,154 @@ export function formToPayload(form: PredictorFormState) {
 
   return { name: form.name, predictor_type: form.type, config };
 }
+
+// ── Unified Evaluation Session Types ─────────────────────────────
+
+export type UnifiedSessionStatus = "draft" | "reviewing" | "committed" | "completed" | "discarded";
+
+export interface SearchQueryItem {
+  query: string;
+  type: "include" | "exclude";
+}
+
+export interface UnifiedSession {
+  id: string;
+  project_id: string;
+  status: UnifiedSessionStatus;
+  search_queries: SearchQueryItem[];
+  event_name: string | null;
+  event_description: string | null;
+  include_criteria: string | null;
+  exclude_criteria: string | null;
+  llm_provider: string | null;
+  llm_model: string | null;
+  llm_api_base: string | null;
+  sample_size: number;
+  metrics: UnifiedMetrics | null;
+  committed_config: Record<string, unknown> | null;
+  committed_at: string | null;
+  cloned_from_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnifiedSessionListItem {
+  id: string;
+  project_id: string;
+  status: UnifiedSessionStatus;
+  search_queries: SearchQueryItem[];
+  event_name: string | null;
+  sample_size: number;
+  metrics: UnifiedMetrics | null;
+  committed_at: string | null;
+  created_at: string;
+}
+
+export interface UnifiedMetrics {
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  tp: number;
+  fp: number;
+  tn: number;
+  fn: number;
+  total_reviewed: number;
+  total_pending: number;
+}
+
+export interface FunnelStats {
+  sample_patients: number;
+  sample_notes: number;
+  matched_patients: number;
+  matched_notes: number;
+  filter_percent: number;
+  llm_positive: number | null;
+  llm_negative: number | null;
+  llm_inconclusive: number | null;
+  estimated_cost: number | null;
+}
+
+export interface MatchPosition {
+  start: number;
+  end: number;
+  token: string;
+}
+
+export interface NoteSearchMatch {
+  id: number;
+  patient_id: string;
+  note_id: string;
+  matched_tokens: string[];
+  match_positions: MatchPosition[];
+  is_negated: boolean;
+}
+
+export interface NoteWithMatches {
+  note_id: string;
+  patient_id: string;
+  note_text: string;
+  note_date: string | null;
+  note_type: string | null;
+  matches: NoteSearchMatch[];
+}
+
+export interface QueryMatchesResult {
+  query_index: number;
+  query: string;
+  query_type: string;
+  total_notes: number;
+  total_patients: number;
+  notes: NoteWithMatches[];
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface SuggestedQuery {
+  query: string;
+  type: "include" | "exclude";
+}
+
+export interface PatientResultItem {
+  id: number;
+  patient_id: string;
+  status: string;
+  finding_label: string | null;
+  finding_reasoning: string | null;
+  finding_evidence: { note_id: string; text: string; note_date: string }[] | null;
+  event_date: string | null;
+  predicted_score: number | null;
+  review_judgment: string | null;
+  reviewer_date_override: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  notes_searched: number;
+  notes_matched: number;
+}
+
+export interface PatientResultsPage {
+  results: PatientResultItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface UnifiedPipelineStats {
+  total: number;
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  no_match: number;
+  is_cancelled: boolean;
+}
+
+export interface CommitResult {
+  session: UnifiedSession;
+  pipeline_run_id: string;
+  total_patients: number;
+  estimated_cost: number | null;
+}
