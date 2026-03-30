@@ -1,5 +1,6 @@
 """Pipeline run orchestration: dispatch, cancel, retry, stats."""
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -14,6 +15,8 @@ from app.pipeline.models import (
     PipelineRunStatus,
 )
 
+logger = logging.getLogger(__name__)
+
 
 async def _check_no_active_run(session: AsyncSession, event_config_id: str) -> None:
     """Reject if there's already an active run for this event config (Decision #35)."""
@@ -25,6 +28,21 @@ async def _check_no_active_run(session: AsyncSession, event_config_id: str) -> N
     result = await session.execute(stmt)
     if result.scalar_one_or_none():
         raise ValueError("An active pipeline run already exists for this event config")
+
+
+async def _enqueue_pipeline_run(run_id: str) -> None:
+    """Enqueue a pipeline run to the ARQ worker queue."""
+    try:
+        from arq import create_pool
+
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+        await redis.enqueue_job("run_pipeline_job", run_id)
+        await redis.aclose()
+        logger.info("Enqueued pipeline run %s to ARQ", run_id)
+    except Exception:
+        logger.exception("Failed to enqueue pipeline run %s — no worker will pick it up", run_id)
 
 
 async def dispatch_sample_run(
@@ -89,6 +107,7 @@ async def dispatch_sample_run(
 
     await session.commit()
     await session.refresh(run)
+    await _enqueue_pipeline_run(run.id)
     return run
 
 
@@ -163,6 +182,7 @@ async def dispatch_full_run(
 
     await session.commit()
     await session.refresh(run)
+    await _enqueue_pipeline_run(run.id)
     return run
 
 
@@ -215,6 +235,7 @@ async def retry_failed(
     session.add(run)
     await session.commit()
     await session.refresh(run)
+    await _enqueue_pipeline_run(run.id)
     return run
 
 
