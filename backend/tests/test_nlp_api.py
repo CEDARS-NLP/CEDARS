@@ -132,10 +132,12 @@ class TestNlpProcessing:
             b"P001,N002,No evidence of DVT was found in lower extremities.,2026-01-11\n"
             b"P002,N003,Confirmed myocardial infarction with ST elevation.,2026-01-12\n"
         )
+        import asyncio
         with patch("app.connectors.file_upload.download_file", return_value=csv_data):
             await client.post(
                 f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest",
             )
+            await asyncio.sleep(0.5)
 
     async def test_run_nlp_pipeline(self, client):
         await register_and_login(client)
@@ -148,14 +150,16 @@ class TestNlpProcessing:
             json={"query": "troponin OR myocardial"},
         )
 
-        # Run NLP (dispatched via BackgroundJob, falls back to sync in tests)
+        # Run NLP (dispatched via BackgroundJob, runs as background task)
+        import asyncio
         resp = await client.post(f"/api/v1/projects/{pid}/nlp/run")
         assert resp.status_code == 200
         data = resp.json()
         assert "job_id" in data
         assert data["status"] in ("pending", "running", "completed")
+        await asyncio.sleep(0.5)
 
-        # Check stats — sync fallback means processing is already done
+        # Check stats
         stats_resp = await client.get(f"/api/v1/projects/{pid}/nlp/stats")
         stats = stats_resp.json()
         assert stats["total_notes"] == 3
@@ -169,9 +173,11 @@ class TestNlpProcessing:
         await self._setup_project_with_notes(client, pid)
 
         # Run NLP without any search queries -- all sentences, none targeted
+        import asyncio
         resp = await client.post(f"/api/v1/projects/{pid}/nlp/run")
         assert resp.status_code == 200
         assert resp.json()["status"] in ("pending", "running", "completed")
+        await asyncio.sleep(0.5)
 
         stats_resp = await client.get(f"/api/v1/projects/{pid}/nlp/stats")
         stats = stats_resp.json()
@@ -186,7 +192,9 @@ class TestNlpProcessing:
             f"/api/v1/projects/{pid}/nlp/queries",
             json={"query": "troponin"},
         )
+        import asyncio
         await client.post(f"/api/v1/projects/{pid}/nlp/run")
+        await asyncio.sleep(0.5)
 
         resp = await client.get(f"/api/v1/projects/{pid}/nlp/sentences")
         assert resp.status_code == 200
@@ -205,7 +213,9 @@ class TestNlpProcessing:
         )
 
         # First run
+        import asyncio
         await client.post(f"/api/v1/projects/{pid}/nlp/run")
+        await asyncio.sleep(0.5)
 
         # Reprocess
         resp = await client.post(f"/api/v1/projects/{pid}/nlp/reprocess")

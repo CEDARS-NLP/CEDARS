@@ -11,6 +11,10 @@ from app.jobs.models import BackgroundJob, JobStatus
 logger = logging.getLogger(__name__)
 
 
+class _NlpCancelledError(Exception):
+    """Raised when the NLP job detects the is_cancelled flag."""
+
+
 def _make_session_factory() -> async_sessionmaker[AsyncSession]:
     """Create a standalone session factory for worker processes."""
     engine = create_async_engine(settings.database_url, echo=False)
@@ -45,6 +49,10 @@ async def execute_nlp_job(
 
         try:
             async def _progress(processed, total):
+                # Check cancellation between progress updates
+                await session.refresh(bg_job)
+                if bg_job.is_cancelled:
+                    raise _NlpCancelledError()
                 bg_job.progress = int((processed / total) * 100)
                 bg_job.result_summary = {
                     "total_notes": total,
@@ -61,6 +69,11 @@ async def execute_nlp_job(
             bg_job.progress = 100
             bg_job.completed_at = datetime.now(UTC)
             bg_job.result_summary = stats
+
+        except _NlpCancelledError:
+            logger.info("NLP job cancelled for project %s", project_id)
+            bg_job.status = JobStatus.CANCELLED
+            bg_job.completed_at = datetime.now(UTC)
 
         except Exception as exc:
             logger.exception("NLP job failed for project %s", project_id)

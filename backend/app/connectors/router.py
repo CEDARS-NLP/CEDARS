@@ -16,15 +16,18 @@ from app.connectors.schemas import (
     PreviewResponse,
 )
 from app.connectors.service import (
+    cancel_ingestion_job,
     create_data_source,
     delete_data_source,
+    dispatch_ingestion_job,
     get_data_source,
+    get_ingestion_job_status,
     get_patient_notes,
     list_data_sources,
     list_patients,
-    run_ingestion,
     upload_and_create_data_source,
 )
+from app.jobs.schemas import BackgroundJobResponse
 from app.dependencies import require_project_role
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/data", tags=["data"])
@@ -140,25 +143,44 @@ async def preview_data_source_endpoint(
 # ── Ingestion ─────────────────────────────────────────────────────
 
 
-@router.post("/sources/{data_source_id}/ingest", response_model=IngestionResponse)
+@router.post("/sources/{data_source_id}/ingest", response_model=BackgroundJobResponse)
 async def ingest_data_source_endpoint(
+    project_id: str,
+    data_source_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    """Trigger ingestion of a data source as a background job."""
+    ds = await get_data_source(session, project_id, data_source_id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    return await dispatch_ingestion_job(session, project_id, data_source_id, current_user.id)
+
+
+@router.get("/sources/{data_source_id}/ingest/status", response_model=BackgroundJobResponse | None)
+async def ingestion_job_status_endpoint(
+    project_id: str,
+    data_source_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get the latest ingestion job status for a data source."""
+    return await get_ingestion_job_status(session, project_id, data_source_id)
+
+
+@router.post("/sources/{data_source_id}/ingest/cancel")
+async def cancel_ingestion_endpoint(
     project_id: str,
     data_source_id: str,
     session: AsyncSession = Depends(get_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
-    """Trigger ingestion of a data source into the project."""
-    ds = await get_data_source(session, project_id, data_source_id)
-    if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
-
-    result = await run_ingestion(session, project_id, data_source_id)
-    return IngestionResponse(
-        data_source_id=result.id,
-        status=result.status,
-        message=f"Ingested {result.row_count or 0} rows" if result.row_count else result.error_message or "No data",
-    )
-
+    """Cancel a running ingestion job."""
+    result = await cancel_ingestion_job(session, project_id, data_source_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No active ingestion job found")
+    return result
 
 
 @router.post("/sources/{data_source_id}/resync", response_model=IngestionResponse)

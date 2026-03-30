@@ -38,13 +38,20 @@ async def run_prediction_job(ctx: dict, project_id: str, job_db_id: str) -> dict
     return await execute_prediction_job(project_id, job_db_id)
 
 
+async def run_ingestion_job(ctx: dict, project_id: str, job_db_id: str, data_source_id: str) -> dict:
+    """ARQ task: run data ingestion for a data source."""
+    from app.jobs.ingestion import execute_ingestion_job
+
+    return await execute_ingestion_job(project_id, job_db_id, data_source_id)
+
+
 async def run_export_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
     """ARQ task: generate export. (Placeholder)"""
     return {"status": "not_implemented"}
 
 
 class WorkerSettings:
-    functions = [run_nlp_job, run_prediction_job, run_export_job]
+    functions = [run_nlp_job, run_prediction_job, run_ingestion_job, run_export_job]
     redis_settings = parse_redis_settings()
     max_jobs = 10
     job_timeout = 3600

@@ -58,10 +58,13 @@ async def setup_notes_and_nlp(client: AsyncClient, pid: str):
         b"P001,N002,No evidence of DVT was found in lower extremities.,2026-01-11\n"
         b"P002,N003,Confirmed myocardial infarction with ST elevation.,2026-01-12\n"
     )
+    import asyncio
     with mock_patch("app.connectors.file_upload.download_file", return_value=csv_data):
         await client.post(
             f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest",
         )
+        # Wait for background ingestion task to complete
+        await asyncio.sleep(0.5)
 
     # Add search query and run NLP
     await client.post(
@@ -69,6 +72,8 @@ async def setup_notes_and_nlp(client: AsyncClient, pid: str):
         json={"query": "troponin OR myocardial"},
     )
     await client.post(f"/api/v1/projects/{pid}/nlp/run")
+    # Wait for background NLP task to complete
+    await asyncio.sleep(0.5)
 
 
 async def setup_notes_with_dates(client: AsyncClient, pid: str):
@@ -102,10 +107,13 @@ async def setup_notes_with_dates(client: AsyncClient, pid: str):
         b"P002,N004,Patient with myocardial infarction confirmed.,2026-02-01\n"
         b"P002,N005,Follow-up myocardial function test.,2026-02-10\n"
     )
+    import asyncio
     with mock_patch("app.connectors.file_upload.download_file", return_value=csv_data):
         await client.post(
             f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest",
         )
+        # Wait for background ingestion task to complete
+        await asyncio.sleep(0.5)
 
     # Add search query (with default skip_after_event=True) and run NLP
     await client.post(
@@ -113,6 +121,7 @@ async def setup_notes_with_dates(client: AsyncClient, pid: str):
         json={"query": "troponin OR myocardial"},
     )
     await client.post(f"/api/v1/projects/{pid}/nlp/run")
+    await asyncio.sleep(0.5)
 
 
 async def add_predictor(client: AsyncClient, pid: str) -> str:

@@ -51,7 +51,11 @@ class BulkEstimateResponse(BaseModel):
 
 
 class PredictionJobResponse(BaseModel):
-    """Response when dispatching or querying a prediction job."""
+    """Response when dispatching or querying a prediction job.
+
+    Note: For new code, prefer ``BackgroundJobResponse`` from ``app.jobs.schemas``.
+    This alias is kept for backwards compatibility.
+    """
 
     job_id: str
     status: str

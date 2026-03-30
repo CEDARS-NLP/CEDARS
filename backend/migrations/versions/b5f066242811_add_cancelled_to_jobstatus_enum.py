@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add 'cancelled' value to the jobstatus PostgreSQL enum."""
-    op.execute("ALTER TYPE jobstatus ADD VALUE IF NOT EXISTS 'cancelled'")
+    op.execute("ALTER TYPE jobstatus ADD VALUE IF NOT EXISTS 'CANCELLED'")
 
 
 def downgrade() -> None:

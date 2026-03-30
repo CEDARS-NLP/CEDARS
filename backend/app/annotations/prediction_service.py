@@ -192,8 +192,8 @@ async def dispatch_prediction_job(
         redis = await create_pool(parse_redis_settings())
 
         # Check if any ARQ workers are active before enqueuing
-        worker_keys = await redis.keys("arq:worker:*")
-        if worker_keys:
+        health_key = await redis.exists(b"arq:queue:health-check")
+        if health_key:
             arq_job = await redis.enqueue_job("run_prediction_job", project_id, bg_job.id)
             bg_job.arq_job_id = arq_job.job_id
             session.add(bg_job)

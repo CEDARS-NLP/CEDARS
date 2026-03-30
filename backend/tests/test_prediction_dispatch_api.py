@@ -32,10 +32,13 @@ async def setup_notes_and_nlp(client: AsyncClient, pid: str):
         b"P001,N001,Patient presents with troponin elevation.,2026-01-10\n"
         b"P002,N002,Confirmed myocardial infarction.,2026-01-12\n"
     )
+    import asyncio
     with mock_patch("app.connectors.file_upload.download_file", return_value=csv_data):
         await client.post(f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest")
+        await asyncio.sleep(0.5)
     await client.post(f"/api/v1/projects/{pid}/nlp/queries", json={"query": "troponin OR myocardial"})
     await client.post(f"/api/v1/projects/{pid}/nlp/run")
+    await asyncio.sleep(0.5)
 
 
 async def add_predictor(client: AsyncClient, pid: str) -> str:

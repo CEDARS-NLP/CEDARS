@@ -14,6 +14,7 @@ class JobType(str, enum.Enum):
     NLP = "nlp"
     PREDICTION = "prediction"
     EXPORT = "export"
+    INGESTION = "ingestion"
 
 
 class JobStatus(str, enum.Enum):

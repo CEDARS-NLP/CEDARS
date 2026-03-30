@@ -7,6 +7,7 @@ from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.models import Note, Patient, PatientStatus
+from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.engine import parse_query, process_note
 from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
 
@@ -104,8 +105,6 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
 
     Falls back to synchronous execution if Redis/ARQ is unavailable.
     """
-    from app.jobs.models import BackgroundJob, JobStatus, JobType
-
     bg_job = BackgroundJob(
         project_id=project_id,
         job_type=JobType.NLP,
@@ -125,8 +124,8 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
         redis = await create_pool(parse_redis_settings())
 
         # Check if any ARQ workers are active before enqueuing
-        worker_keys = await redis.keys("arq:worker:*")
-        if worker_keys:
+        health_key = await redis.exists(b"arq:queue:health-check")
+        if health_key:
             arq_job = await redis.enqueue_job("run_nlp_job", project_id, bg_job.id)
             bg_job.arq_job_id = arq_job.job_id
             session.add(bg_job)
@@ -140,6 +139,8 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
         logger.warning("ARQ unavailable, running NLP synchronously")
 
     if use_sync:
+        import asyncio
+
         from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as _AsyncSession
 
         from app.jobs.nlp import execute_nlp_job
@@ -150,14 +151,78 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
         factory = async_sessionmaker(
             session.bind, class_=_AsyncSession, expire_on_commit=False
         )
-        await execute_nlp_job(project_id, bg_job.id, session_factory=factory)
-        await session.refresh(bg_job)
+        # Run as a background task so the endpoint returns immediately
+        # and the job is cancellable via the cancel endpoint.
+        def _on_done(t: asyncio.Task) -> None:
+            if not t.cancelled() and t.exception():
+                logger.exception("Background NLP task failed", exc_info=t.exception())
+
+        task = asyncio.create_task(
+            execute_nlp_job(project_id, bg_job.id, session_factory=factory)
+        )
+        task.add_done_callback(_on_done)
 
     return {
         "job_id": bg_job.id,
         "status": bg_job.status.value,
         "progress": bg_job.progress,
     }
+
+
+async def get_nlp_job_status(
+    session: AsyncSession,
+    project_id: str,
+) -> dict | None:
+    """Get the latest NLP background job status for a project."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.NLP,
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+    if not bg_job:
+        return None
+
+    return {
+        "job_id": bg_job.id,
+        "status": bg_job.status.value,
+        "progress": bg_job.progress,
+        "result_summary": bg_job.result_summary,
+    }
+
+
+async def cancel_nlp_job(
+    session: AsyncSession,
+    project_id: str,
+) -> dict | None:
+    """Cancel a running or pending NLP job for a project."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.NLP,
+            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+    if not bg_job:
+        return None
+
+    bg_job.is_cancelled = True
+    bg_job.status = JobStatus.CANCELLED
+    bg_job.completed_at = datetime.now(UTC)
+    session.add(bg_job)
+    await session.commit()
+
+    return {"job_id": bg_job.id, "cancelled": True}
 
 
 async def _process_notes_into_sentences(

@@ -19,6 +19,7 @@ from app.connectors.models import (
     Patient,
 )
 from app.connectors.registry import get_connector
+from app.jobs.models import BackgroundJob, JobStatus, JobType
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,140 @@ async def run_ingestion(
     return await _run_ingestion_pipeline(
         session, project_id, data_source_id, _ingest_rows, AuditAction.DATA_INGESTED,
     )
+
+
+async def dispatch_ingestion_job(
+    session: AsyncSession,
+    project_id: str,
+    data_source_id: str,
+    user_id: str,
+) -> dict:
+    """Create a BackgroundJob and enqueue ingestion via ARQ.
+
+    Falls back to async background task if Redis/ARQ is unavailable.
+    """
+    bg_job = BackgroundJob(
+        project_id=project_id,
+        job_type=JobType.INGESTION,
+        status=JobStatus.PENDING,
+        created_by=user_id,
+        result_summary={"data_source_id": data_source_id},
+    )
+    session.add(bg_job)
+    await session.commit()
+    await session.refresh(bg_job)
+
+    use_sync = True
+    try:
+        from arq import create_pool
+
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+
+        health_key = await redis.exists(b"arq:queue:health-check")
+        if health_key:
+            arq_job = await redis.enqueue_job(
+                "run_ingestion_job", project_id, bg_job.id, data_source_id
+            )
+            bg_job.arq_job_id = arq_job.job_id
+            session.add(bg_job)
+            await session.commit()
+            use_sync = False
+        else:
+            logger.warning("No ARQ workers found, running ingestion as background task")
+
+        await redis.aclose()
+    except Exception:
+        logger.warning("ARQ unavailable, running ingestion as background task")
+
+    if use_sync:
+        import asyncio
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+        from app.jobs.ingestion import execute_ingestion_job
+
+        factory = async_sessionmaker(
+            session.bind, class_=_AsyncSession, expire_on_commit=False
+        )
+
+        def _on_done(t: asyncio.Task) -> None:
+            if not t.cancelled() and t.exception():
+                logger.exception("Background ingestion task failed", exc_info=t.exception())
+
+        task = asyncio.create_task(
+            execute_ingestion_job(project_id, bg_job.id, data_source_id, session_factory=factory)
+        )
+        task.add_done_callback(_on_done)
+
+    return {
+        "job_id": bg_job.id,
+        "status": bg_job.status.value,
+        "progress": bg_job.progress,
+    }
+
+
+async def get_ingestion_job_status(
+    session: AsyncSession,
+    project_id: str,
+    data_source_id: str,
+) -> dict | None:
+    """Get the latest ingestion background job for a data source."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.INGESTION,
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+
+    # Filter by data_source_id stored in result_summary
+    if not bg_job or (bg_job.result_summary or {}).get("data_source_id") != data_source_id:
+        return None
+
+    return {
+        "job_id": bg_job.id,
+        "status": bg_job.status.value,
+        "progress": bg_job.progress,
+        "result_summary": bg_job.result_summary,
+    }
+
+
+async def cancel_ingestion_job(
+    session: AsyncSession,
+    project_id: str,
+    data_source_id: str,
+) -> dict | None:
+    """Cancel a running or pending ingestion job for a data source."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type == JobType.INGESTION,
+            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+        )
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    bg_job = result.scalar_one_or_none()
+
+    if not bg_job or (bg_job.result_summary or {}).get("data_source_id") != data_source_id:
+        return None
+
+    bg_job.is_cancelled = True
+    bg_job.status = JobStatus.CANCELLED
+    bg_job.completed_at = datetime.now(UTC)
+    session.add(bg_job)
+    await session.commit()
+
+    return {"job_id": bg_job.id, "cancelled": True}
 
 
 async def resync_data_source(

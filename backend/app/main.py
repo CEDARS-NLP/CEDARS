@@ -79,9 +79,9 @@ def create_app() -> FastAPI:
     application.include_router(admin_router)
     application.include_router(audit_router)
 
-    from app.annotations.ws import prediction_job_ws
+    from app.jobs.ws import job_progress_ws
 
-    application.websocket("/ws/projects/{project_id}/jobs/{job_id}")(prediction_job_ws)
+    application.websocket("/ws/projects/{project_id}/jobs/{job_id}")(job_progress_ws)
 
     @application.get("/api/v1/health")
     async def health_check():

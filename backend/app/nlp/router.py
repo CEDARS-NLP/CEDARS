@@ -15,12 +15,15 @@ from app.nlp.schemas import (
     UpdateSearchQueryRequest,
 )
 from app.nlp.engine import get_pipeline_info
+from app.jobs.schemas import BackgroundJobResponse
 from app.nlp.service import (
+    cancel_nlp_job,
     clear_sentences,
     create_search_query,
     delete_search_query,
     dispatch_nlp_job,
     get_latest_job,
+    get_nlp_job_status,
     get_nlp_stats,
     get_search_query,
     list_search_queries,
@@ -119,6 +122,29 @@ async def run_nlp_endpoint(
 ):
     """Trigger NLP processing for all unprocessed notes in the project."""
     return await dispatch_nlp_job(session, project_id, current_user.id)
+
+
+@router.get("/job/status", response_model=BackgroundJobResponse | None)
+async def nlp_job_status_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get the latest NLP background job status."""
+    return await get_nlp_job_status(session, project_id)
+
+
+@router.post("/cancel")
+async def cancel_nlp_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    """Cancel a running NLP job."""
+    result = await cancel_nlp_job(session, project_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No active NLP job found")
+    return result
 
 
 @router.post("/reprocess", response_model=NlpJobResponse)

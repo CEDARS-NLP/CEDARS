@@ -143,14 +143,17 @@ class TestIngestion:
 
         # Mock S3 download
         csv_data = b"MRN,text_id,note_text,date\nP001,N001,Note one,2024-01-01\nP001,N002,Note two,2024-01-02\nP002,N003,Note three,2024-01-03"
+        import asyncio
         with patch("app.connectors.file_upload.download_file", return_value=csv_data):
             resp = await client.post(
                 f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
             )
+            # Wait for background ingestion task to complete
+            await asyncio.sleep(0.5)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "completed"
-        assert "3 rows" in data["message"]
+        assert "job_id" in data
+        assert data["status"] in ("pending", "running", "completed")
 
         # Verify patients created
         patients_resp = await client.get(
@@ -186,12 +189,15 @@ class TestIngestion:
         )
         ds_id = create_resp.json()["id"]
 
+        import asyncio
         resp = await client.post(
             f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
         )
+        await asyncio.sleep(0.5)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "failed"
+        # Job is dispatched; it will fail in the background
+        assert "job_id" in data
 
     async def test_ingest_nonexistent_source(self, client):
         await register_and_login(client)
@@ -314,10 +320,12 @@ class TestPatientSearch:
             b"MRN002,N002,Note two,2024-01-02\n"
             b"MRN003,N003,Note three,2024-01-03\n"
         )
+        import asyncio
         with patch("app.connectors.file_upload.download_file", return_value=csv_data):
             await client.post(
                 f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
             )
+            await asyncio.sleep(0.5)
         return project_id
 
     async def test_search_patients_by_ext_id(self, client):

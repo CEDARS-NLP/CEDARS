@@ -37,9 +37,11 @@ async def test_dispatch_creates_background_job(app, auth_client):
     )
     project_id = resp.json()["id"]
 
+    import asyncio
     resp = await auth_client.post(f"/api/v1/projects/{project_id}/nlp/run")
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]
+    await asyncio.sleep(0.5)
 
     # Verify the BackgroundJob exists via DB
     from app.common.database import get_session

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/api/client";
 import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
+import JobBanner from "@/components/JobBanner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -262,14 +263,6 @@ export default function DataPage() {
     onError: (err: Error) => setDatabricksError(err.message),
   });
 
-  const ingestMutation = useMutation({
-    mutationFn: (dsId: string) =>
-      api.post(`/projects/${projectId}/data/sources/${dsId}/ingest`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["data-sources", projectId] });
-    },
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (dsId: string) =>
       api.delete(`/projects/${projectId}/data/sources/${dsId}`),
@@ -329,7 +322,12 @@ export default function DataPage() {
     }
 
     try {
-      const text = await file.text();
+      // Only read the first 64KB for column detection and preview —
+      // reading the entire file would hang the browser on large files.
+      const PEEK_SIZE = 64 * 1024;
+      const slice = file.slice(0, PEEK_SIZE);
+      const text = await slice.text();
+
       const columns = ext === "csv" ? parseCSVHeaders(text) : parseJSONHeaders(text);
 
       if (columns.length === 0) {
@@ -347,7 +345,9 @@ export default function DataPage() {
       // Parse a few preview rows
       let preview: Record<string, string>[] = [];
       if (ext === "csv") {
+        // Drop the last line of the slice — it may be truncated
         const lines = text.split(/\r?\n/).filter(Boolean);
+        if (text.length >= PEEK_SIZE) lines.pop();
         const headers = parseCSVHeaders(text);
         preview = lines.slice(1, 4).map((line) => {
           const values = line.split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
@@ -356,6 +356,8 @@ export default function DataPage() {
           return row;
         });
       } else {
+        // For JSON, the 64KB slice likely won't be valid JSON for large files.
+        // Try to parse; if it fails, at least headers were detected above.
         try {
           const data = JSON.parse(text);
           const records = Array.isArray(data) ? data : data?.records || [];
@@ -364,7 +366,7 @@ export default function DataPage() {
             for (const [k, v] of Object.entries(r)) row[k] = String(v ?? "");
             return row;
           });
-        } catch { /* ignore */ }
+        } catch { /* truncated JSON — skip preview */ }
       }
 
       setPendingFile(file);
@@ -808,59 +810,103 @@ export default function DataPage() {
         {sources && sources.length > 0 && (
           <div className="space-y-3">
             {sources.map((ds) => (
-              <Card key={ds.id} className="border-border/60">
-                <CardContent className="flex items-center gap-4 py-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 dark:bg-primary/20">
-                    {ds.connector_type === "databricks" ? (
-                      <Database className="h-5 w-5 text-primary" />
-                    ) : (
-                      <FileText className="h-5 w-5 text-primary" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {ds.name}
-                    </p>
-                    <div className="mt-0.5 flex items-center gap-2">
-                      {statusIcon(ds.status)}
-                      <span className="text-xs text-muted-foreground">
-                        {statusLabel(ds.status)}
-                        {ds.row_count != null && ` \u00b7 ${ds.row_count} rows`}
-                      </span>
-                      {ds.error_message && (
-                        <span className="truncate text-xs text-destructive" title={ds.error_message}>
-                          {ds.error_message}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {ds.status === "pending" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => ingestMutation.mutate(ds.id)}
-                        disabled={ingestMutation.isPending}
-                      >
-                        <Play className="mr-1 h-3.5 w-3.5" />
-                        Ingest
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteMutation.mutate(ds.id)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <DataSourceCard
+                key={ds.id}
+                ds={ds}
+                projectId={projectId!}
+                onDelete={() => deleteMutation.mutate(ds.id)}
+                deleteDisabled={deleteMutation.isPending}
+              />
             ))}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// ── Data Source Card with Job Banner ────────────────────────────
+
+function DataSourceCard({
+  ds,
+  projectId,
+  onDelete,
+  deleteDisabled,
+}: {
+  ds: DataSource;
+  projectId: string;
+  onDelete: () => void;
+  deleteDisabled: boolean;
+}) {
+  const queryClient = useQueryClient();
+
+  const handleTerminal = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["data-sources", projectId] });
+  }, [queryClient, projectId]);
+
+  const renderIngestionSummary = useCallback((summary: Record<string, unknown>) => {
+    const totalRows = summary.total_rows as number | undefined;
+    const batches = summary.batches as number | undefined;
+    if (totalRows != null) {
+      return `${totalRows} rows ingested${batches != null ? ` in ${batches} batch${batches !== 1 ? "es" : ""}` : ""}`;
+    }
+    return null;
+  }, []);
+
+  return (
+    <Card className="border-border/60">
+      <CardContent className="space-y-3 py-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 dark:bg-primary/20">
+            {ds.connector_type === "databricks" ? (
+              <Database className="h-5 w-5 text-primary" />
+            ) : (
+              <FileText className="h-5 w-5 text-primary" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="truncate text-sm font-medium text-foreground">
+              {ds.name}
+            </p>
+            <div className="mt-0.5 flex items-center gap-2">
+              {statusIcon(ds.status)}
+              <span className="text-xs text-muted-foreground">
+                {statusLabel(ds.status)}
+                {ds.row_count != null && ` \u00b7 ${ds.row_count} rows`}
+              </span>
+              {ds.error_message && (
+                <span className="truncate text-xs text-destructive" title={ds.error_message}>
+                  {ds.error_message}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              disabled={deleteDisabled}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Ingestion job banner — shown for pending sources or sources with job history */}
+        {ds.status !== "completed" && (
+          <JobBanner
+            projectId={projectId}
+            jobQueryKey={["ingestion-job", projectId, ds.id]}
+            statusUrl={`/projects/${projectId}/data/sources/${ds.id}/ingest/status`}
+            runUrl={`/projects/${projectId}/data/sources/${ds.id}/ingest`}
+            cancelUrl={`/projects/${projectId}/data/sources/${ds.id}/ingest/cancel`}
+            label="Ingestion"
+            renderSummary={renderIngestionSummary}
+            onTerminal={handleTerminal}
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }

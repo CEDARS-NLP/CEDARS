@@ -58,10 +58,12 @@ async def setup_project_with_data(client: AsyncClient, pid: str) -> str:
         b"P002,N004,Patient reports feeling better after medication.,2026-01-13\n"
         b"P003,N005,Elevated troponin levels noted on admission.,2026-01-14\n"
     )
+    import asyncio
     with patch("app.connectors.file_upload.download_file", return_value=csv_data):
         await client.post(
             f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest",
         )
+        await asyncio.sleep(0.5)
 
     # Add predictor
     resp = await client.post(
