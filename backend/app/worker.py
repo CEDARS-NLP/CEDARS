@@ -50,8 +50,15 @@ async def run_export_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
     return {"status": "not_implemented"}
 
 
+async def run_pipeline_job(ctx: dict, pipeline_run_id: str) -> dict:
+    """ARQ task: execute a pipeline run (search + classify per patient)."""
+    from app.jobs.pipeline import execute_pipeline_run
+
+    return await execute_pipeline_run(pipeline_run_id)
+
+
 class WorkerSettings:
-    functions = [run_nlp_job, run_prediction_job, run_ingestion_job, run_export_job]
+    functions = [run_nlp_job, run_prediction_job, run_ingestion_job, run_export_job, run_pipeline_job]
     redis_settings = parse_redis_settings()
     max_jobs = 10
     job_timeout = 3600

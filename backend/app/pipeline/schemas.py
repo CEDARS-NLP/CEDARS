@@ -46,3 +46,46 @@ class EventConfigResponse(BaseModel):
     is_committed: bool
     created_at: datetime
     updated_at: datetime
+
+
+class RunSampleRequest(BaseModel):
+    sample_size: int = Field(default=10, ge=1, le=1000)
+
+
+class PipelineRunResponse(BaseModel):
+    id: str
+    project_id: str
+    event_config_id: str
+    run_type: str
+    status: str
+    config_snapshot: dict
+    sample_size: int | None
+    total_patients: int
+    processed_patients: int
+    failed_patients: int
+    is_cancelled: bool
+    result_summary: dict | None
+    created_by: str
+    snapshot_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatientTaskResponse(BaseModel):
+    id: int
+    pipeline_run_id: str
+    patient_id: str
+    status: str
+    error_message: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class RunStatsResponse(BaseModel):
+    total: int
+    queued: int
+    processing: int
+    completed: int
+    failed: int
+    no_match: int

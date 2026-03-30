@@ -128,6 +128,8 @@ class PipelineRun(SQLModel, table=True):
     # Run parameters
     sample_size: int | None = Field(default=None)
     total_patients: int = Field(default=0)
+    processed_patients: int = Field(default=0)
+    failed_patients: int = Field(default=0)
     is_cancelled: bool = Field(default=False)
 
     # Results
@@ -137,6 +139,10 @@ class PipelineRun(SQLModel, table=True):
     # Metadata
     created_by: str = Field(default="")
     created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
@@ -184,6 +190,10 @@ class PatientTask(SQLModel, table=True):
     error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
     # Timestamps
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
     started_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
