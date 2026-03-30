@@ -13,6 +13,7 @@ from app.pipeline.schemas import (
     PatientTaskResponse,
     PipelineRunResponse,
     RunSampleRequest,
+    RunMetricsResponse,
     RunStatsResponse,
     UpdateEventConfigRequest,
 )
@@ -251,6 +252,22 @@ async def get_run_stats_endpoint(
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
     return await get_run_stats(session, run_id)
+
+
+@router.get("/runs/{run_id}/metrics", response_model=RunMetricsResponse)
+async def get_run_metrics_endpoint(
+    project_id: str,
+    run_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    from app.pipeline.orchestrator import get_run
+    from app.pipeline.service import compute_run_metrics
+
+    run = await get_run(session, project_id, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    return await compute_run_metrics(session, run_id)
 
 
 @router.get("/runs/{run_id}/tasks", response_model=list[PatientTaskResponse])

@@ -1,4 +1,4 @@
-"""Business logic for pipeline EventConfig management."""
+"""Business logic for pipeline EventConfig management and metrics."""
 
 from datetime import UTC, datetime
 
@@ -118,3 +118,70 @@ async def commit_event_config(
     await session.commit()
     await session.refresh(ec)
     return ec
+
+
+async def compute_run_metrics(session: AsyncSession, run_id: str) -> dict:
+    """Compute precision/recall/F1 from reviewed annotations in a pipeline run."""
+    from app.annotations.models import Annotation, ReviewStatus
+
+    stmt = select(Annotation).where(
+        Annotation.pipeline_run_id == run_id,
+        Annotation.review_status.in_([ReviewStatus.CONFIRMED, ReviewStatus.REJECTED]),
+    )
+    result = await session.execute(stmt)
+    annotations = list(result.scalars().all())
+
+    if not annotations:
+        return {
+            "total_reviewed": 0,
+            "true_positives": 0,
+            "false_positives": 0,
+            "false_negatives": 0,
+            "true_negatives": 0,
+            "precision": None,
+            "recall": None,
+            "f1_score": None,
+            "suggested_threshold": None,
+        }
+
+    tp = fp = fn = tn = 0
+    scores: list[float] = []
+
+    for ann in annotations:
+        predicted_positive = (ann.predicted_label == 1)
+        reviewer_positive = (ann.review_status == ReviewStatus.CONFIRMED)
+
+        if predicted_positive and reviewer_positive:
+            tp += 1
+        elif predicted_positive and not reviewer_positive:
+            fp += 1
+        elif not predicted_positive and reviewer_positive:
+            fn += 1
+        else:
+            tn += 1
+
+        if ann.predicted_score is not None:
+            scores.append(ann.predicted_score)
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else None
+    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+
+    # Suggest threshold: median of true positive scores, or None
+    tp_scores = [
+        s for s, a in zip(scores, annotations)
+        if a.predicted_label == 1 and a.review_status == ReviewStatus.CONFIRMED
+    ]
+    suggested = sorted(tp_scores)[len(tp_scores) // 2] if tp_scores else None
+
+    return {
+        "total_reviewed": len(annotations),
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "true_negatives": tn,
+        "precision": round(precision, 4) if precision is not None else None,
+        "recall": round(recall, 4) if recall is not None else None,
+        "f1_score": round(f1, 4) if f1 is not None else None,
+        "suggested_threshold": suggested,
+    }

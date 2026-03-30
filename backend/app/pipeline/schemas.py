@@ -89,3 +89,15 @@ class RunStatsResponse(BaseModel):
     completed: int
     failed: int
     no_match: int
+
+
+class RunMetricsResponse(BaseModel):
+    total_reviewed: int
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    true_negatives: int
+    precision: float | None
+    recall: float | None
+    f1_score: float | None
+    suggested_threshold: float | None
