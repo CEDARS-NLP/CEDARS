@@ -393,10 +393,7 @@ async def commit_endpoint(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
-    """Commit an evaluation session, locking its configuration.
-
-    Pipeline dispatch will be wired in Task 9.
-    """
+    """Commit an evaluation session and dispatch a full pipeline run."""
     await _get_session_or_404(db, project_id, session_id)
     try:
         session = await commit_session(
@@ -406,19 +403,61 @@ async def commit_endpoint(
             confidence_threshold=body.confidence_threshold,
         )
 
-        # Count total patients in project for the response
-        from sqlalchemy import func, select
-        from app.connectors.models import Patient
-
-        count_result = await db.execute(
-            select(func.count(Patient.id)).where(Patient.project_id == project_id)
-        )
-        total_patients = count_result.scalar() or 0
+        from app.evaluation.service import dispatch_full_pipeline_run
+        run = await dispatch_full_pipeline_run(db, session)
 
         return CommitResponse(
             session=SessionResponse.model_validate(session, from_attributes=True),
-            pipeline_run_id="pending",  # Placeholder until Task 9 wires dispatch
-            total_patients=total_patients,
+            pipeline_run_id=run.id,
+            total_patients=run.total_patients,
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/pipeline/stats", response_model=PipelineStatsResponse)
+async def pipeline_stats_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get full pipeline run progress for a committed session."""
+    await _get_session_or_404(db, project_id, session_id)
+    from app.evaluation.service import get_pipeline_stats
+    try:
+        return await get_pipeline_stats(db, session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/pipeline/cancel")
+async def cancel_pipeline_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin")),
+):
+    """Cancel a running full pipeline."""
+    await _get_session_or_404(db, project_id, session_id)
+    from app.evaluation.service import cancel_pipeline_run
+    try:
+        return await cancel_pipeline_run(db, session_id, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/pipeline/retry-failed")
+async def retry_failed_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin")),
+):
+    """Retry failed patients in the full pipeline run."""
+    await _get_session_or_404(db, project_id, session_id)
+    from app.evaluation.service import retry_failed_pipeline
+    try:
+        return await retry_failed_pipeline(db, session_id, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

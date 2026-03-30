@@ -19,6 +19,8 @@ from app.evaluation.models import (
 )
 from app.nlp.engine import parse_query, process_note
 from app.pipeline.classifier import classify_patient
+from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
+from app.pipeline.orchestrator import _enqueue_pipeline_run
 
 logger = logging.getLogger(__name__)
 
@@ -825,3 +827,222 @@ async def commit_session(
     await db.commit()
     await db.refresh(session)
     return session
+
+
+# ── Pipeline Dispatch ────────────────────────────────────────────
+
+
+async def _get_or_create_event_config_for_session(
+    db: AsyncSession, eval_session: EvaluationSession
+) -> EventConfig:
+    """Create a synthetic EventConfig from the committed session config.
+
+    This bridges the new evaluation session model with the existing pipeline
+    infrastructure which requires an EventConfig.
+    """
+    ec = EventConfig(
+        project_id=eval_session.project_id,
+        name=eval_session.event_name or "Evaluation Session",
+        description=eval_session.event_description or "",
+        include_criteria=eval_session.include_criteria or "",
+        exclude_criteria=eval_session.exclude_criteria or "",
+        search_patterns={"queries": eval_session.search_queries or []},
+        llm_provider=eval_session.llm_provider or "",
+        llm_model=eval_session.llm_model or "",
+        llm_api_base=eval_session.llm_api_base,
+        is_committed=True,
+    )
+    db.add(ec)
+    await db.flush()
+    return ec
+
+
+async def dispatch_full_pipeline_run(
+    db: AsyncSession, eval_session: EvaluationSession
+) -> PipelineRun:
+    """Create a PipelineRun for the committed session and dispatch to workers."""
+    # Create synthetic EventConfig for pipeline compatibility
+    ec = await _get_or_create_event_config_for_session(db, eval_session)
+
+    # Count all patients in project
+    stmt = select(func.count(Patient.id)).where(
+        Patient.project_id == eval_session.project_id,
+        Patient.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    total_patients = result.scalar() or 0
+
+    run = PipelineRun(
+        project_id=eval_session.project_id,
+        event_config_id=ec.id,
+        run_type="full",
+        status=PipelineRunStatus.QUEUED,
+        config_snapshot=eval_session.committed_config or {},
+        total_patients=total_patients,
+        created_by=eval_session.committed_by or "",
+    )
+    db.add(run)
+    await db.flush()
+
+    # Get ALL patient IDs
+    stmt = select(Patient.id).where(
+        Patient.project_id == eval_session.project_id,
+        Patient.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    all_patient_ids = [row[0] for row in result.all()]
+
+    # Copy completed sample results
+    sample_result_map = {}
+    stmt = select(PatientResult).where(
+        PatientResult.session_id == eval_session.id,
+        PatientResult.pipeline_run_id.is_(None),
+        PatientResult.status.in_([PatientResultStatus.COMPLETED, PatientResultStatus.NO_MATCH]),
+    )
+    result = await db.execute(stmt)
+    for sr in result.scalars().all():
+        sample_result_map[sr.patient_id] = sr
+
+    for pid in all_patient_ids:
+        if pid in sample_result_map:
+            sr = sample_result_map[pid]
+            pr = PatientResult(
+                session_id=eval_session.id,
+                pipeline_run_id=run.id,
+                patient_id=pid,
+                status=sr.status,
+                notes_searched=sr.notes_searched,
+                notes_matched=sr.notes_matched,
+                finding_label=sr.finding_label,
+                finding_reasoning=sr.finding_reasoning,
+                finding_evidence=sr.finding_evidence,
+                event_date=sr.event_date,
+                predicted_score=sr.predicted_score,
+                token_usage=sr.token_usage,
+                completed_at=sr.completed_at,
+            )
+        else:
+            pr = PatientResult(
+                session_id=eval_session.id,
+                pipeline_run_id=run.id,
+                patient_id=pid,
+                status=PatientResultStatus.QUEUED,
+            )
+        db.add(pr)
+
+    await db.commit()
+    await db.refresh(run)
+    await _enqueue_pipeline_run(run.id)
+    return run
+
+
+async def get_pipeline_stats(db: AsyncSession, session_id: str) -> dict:
+    """Get pipeline run stats for a committed session."""
+    session = await db.get(EvaluationSession, session_id)
+    if not session or session.status not in (SessionStatus.COMMITTED, SessionStatus.COMPLETED):
+        raise ValueError("No committed pipeline for this session")
+
+    # Find the pipeline run via PatientResult linkage
+    stmt = select(PatientResult.pipeline_run_id).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.isnot(None),
+    ).distinct().limit(1)
+    result = await db.execute(stmt)
+    row = result.first()
+    if not row:
+        raise ValueError("Pipeline run not found for this session")
+
+    run_id = row[0]
+    run = await db.get(PipelineRun, run_id)
+    if not run:
+        raise ValueError("Pipeline run not found")
+
+    # Aggregate PatientResult statuses for the pipeline run
+    stmt = (
+        select(PatientResult.status, func.count())
+        .where(
+            PatientResult.session_id == session_id,
+            PatientResult.pipeline_run_id == run_id,
+        )
+        .group_by(PatientResult.status)
+    )
+    result = await db.execute(stmt)
+    counts = {s.value: c for s, c in result.all()}
+
+    return {
+        "total": sum(counts.values()),
+        "queued": counts.get("queued", 0),
+        "processing": counts.get("processing", 0),
+        "completed": counts.get("completed", 0),
+        "failed": counts.get("failed", 0),
+        "no_match": counts.get("no_match", 0),
+        "is_cancelled": run.is_cancelled,
+    }
+
+
+async def cancel_pipeline_run(db: AsyncSession, session_id: str, project_id: str) -> dict:
+    """Cancel the pipeline run for a committed session."""
+    from app.pipeline.orchestrator import cancel_run
+
+    session = await db.get(EvaluationSession, session_id)
+    if not session:
+        raise ValueError("Session not found")
+
+    # Find associated pipeline run
+    stmt = select(PatientResult.pipeline_run_id).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.isnot(None),
+    ).distinct().limit(1)
+    result = await db.execute(stmt)
+    row = result.first()
+    if not row:
+        raise ValueError("No pipeline run found for this session")
+
+    run = await cancel_run(db, project_id, row[0])
+    if not run:
+        raise ValueError("Pipeline run not found")
+
+    # Move session to discarded so new sessions can be created
+    session.status = SessionStatus.DISCARDED
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+
+    return {"status": "cancelled", "run_id": run.id}
+
+
+async def retry_failed_pipeline(db: AsyncSession, session_id: str, project_id: str) -> dict:
+    """Retry failed patients in the full pipeline run."""
+    stmt = select(PatientResult.pipeline_run_id).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.isnot(None),
+    ).distinct().limit(1)
+    result = await db.execute(stmt)
+    row = result.first()
+    if not row:
+        raise ValueError("No pipeline run found for this session")
+
+    run_id = row[0]
+
+    # Reset failed PatientResults to queued
+    stmt = select(PatientResult).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id == run_id,
+        PatientResult.status == PatientResultStatus.FAILED,
+    )
+    result = await db.execute(stmt)
+    failed = list(result.scalars().all())
+
+    if not failed:
+        raise ValueError("No failed patients to retry")
+
+    for pr in failed:
+        pr.status = PatientResultStatus.QUEUED
+        pr.error_message = None
+        pr.started_at = None
+        pr.completed_at = None
+        db.add(pr)
+
+    await db.commit()
+    await _enqueue_pipeline_run(run_id)
+    return {"requeued": len(failed), "run_id": run_id}
