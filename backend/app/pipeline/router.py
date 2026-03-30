@@ -124,3 +124,38 @@ async def commit_event_config_endpoint(
     if not ec:
         raise HTTPException(status_code=404, detail="EventConfig not found")
     return ec
+
+
+@router.post("/events/{event_config_id}/generate-patterns", response_model=EventConfigResponse)
+async def generate_patterns_endpoint(
+    project_id: str,
+    event_config_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    ec = await get_event_config(session, project_id, event_config_id)
+    if not ec:
+        raise HTTPException(status_code=404, detail="EventConfig not found")
+    if ec.is_committed:
+        raise HTTPException(status_code=400, detail="Cannot modify a committed EventConfig")
+
+    from app.pipeline.pattern_generator import generate_search_patterns
+
+    try:
+        patterns = await generate_search_patterns(
+            event_name=ec.name,
+            description=ec.description,
+            include_criteria=ec.include_criteria,
+            exclude_criteria=ec.exclude_criteria,
+            llm_provider=ec.llm_provider,
+            llm_model=ec.llm_model,
+            llm_api_base=ec.llm_api_base,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    ec = await update_event_config(
+        session, project_id, event_config_id,
+        search_patterns=patterns,
+    )
+    return ec
