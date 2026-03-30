@@ -14,6 +14,7 @@ from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: F401
 from app.annotations.models import Annotation  # noqa: F401
 from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: F401
 from app.jobs.models import BackgroundJob  # noqa: F401
+from app.pipeline.models import EventConfig as _EC, PipelineRun as _PR, PatientTask as _PT, Evidence as _Ev  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.common.database import get_session
 from app.main import create_app
