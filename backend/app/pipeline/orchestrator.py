@@ -260,6 +260,34 @@ async def get_run_stats(session: AsyncSession, run_id: str) -> dict:
     }
 
 
+async def retry_stalled(
+    session: AsyncSession, project_id: str, run_id: str, stale_minutes: int = 10
+) -> int:
+    """Re-queue patient tasks stuck in 'processing' for too long."""
+    run = await session.get(PipelineRun, run_id)
+    if not run or run.project_id != project_id:
+        raise ValueError("Pipeline run not found")
+
+    cutoff = datetime.now(UTC) - __import__("datetime").timedelta(minutes=stale_minutes)
+    stmt = select(PatientTask).where(
+        PatientTask.pipeline_run_id == run_id,
+        PatientTask.status == PatientTaskStatus.PROCESSING,
+        PatientTask.started_at < cutoff,
+    )
+    result = await session.execute(stmt)
+    stalled = list(result.scalars().all())
+
+    for task in stalled:
+        task.status = PatientTaskStatus.QUEUED
+        task.started_at = None
+        task.error_message = "Re-queued: stalled in processing"
+        session.add(task)
+
+    if stalled:
+        await session.commit()
+    return len(stalled)
+
+
 async def list_tasks(
     session: AsyncSession,
     run_id: str,

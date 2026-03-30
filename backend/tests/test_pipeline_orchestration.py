@@ -215,3 +215,38 @@ class TestRunManagement:
 
         resp = await client.get(f"/api/v1/projects/{pid}/pipeline/runs/nonexistent")
         assert resp.status_code == 404
+
+    async def test_retry_stalled(self, app, client):
+        """Re-queue tasks stuck in 'processing' for too long."""
+        from app.common.database import get_session
+        from app.pipeline.models import PatientTask, PatientTaskStatus
+
+        await register_and_login(client)
+        pid = await create_project(client)
+        await _seed_patients(app, pid, count=3)
+        eid = await _create_and_get_event_config(client, pid)
+
+        create_resp = await client.post(
+            f"/api/v1/projects/{pid}/pipeline/events/{eid}/run-sample",
+            json={"sample_size": 3},
+        )
+        run_id = create_resp.json()["id"]
+
+        # Simulate one task stuck in processing with old started_at
+        from sqlalchemy import select
+
+        async for session in app.dependency_overrides[get_session]():
+            stmt = select(PatientTask).where(PatientTask.pipeline_run_id == run_id)
+            result = await session.execute(stmt)
+            tasks = list(result.scalars().all())
+            task = tasks[0]
+            task.status = PatientTaskStatus.PROCESSING
+            task.started_at = datetime(2020, 1, 1, tzinfo=UTC)  # Very old
+            session.add(task)
+            await session.commit()
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/pipeline/runs/{run_id}/retry-stalled?stale_minutes=1",
+        )
+        assert resp.status_code == 200
+        assert resp.json()["requeued"] == 1

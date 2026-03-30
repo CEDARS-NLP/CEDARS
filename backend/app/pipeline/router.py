@@ -322,3 +322,20 @@ async def retry_failed_endpoint(
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
     return run
+
+
+@router.post("/runs/{run_id}/retry-stalled")
+async def retry_stalled_endpoint(
+    project_id: str,
+    run_id: str,
+    stale_minutes: int = Query(default=10, ge=1, le=1440),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    from app.pipeline.orchestrator import retry_stalled
+
+    try:
+        count = await retry_stalled(session, project_id, run_id, stale_minutes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"requeued": count}
