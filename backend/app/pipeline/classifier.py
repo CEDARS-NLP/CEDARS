@@ -13,7 +13,7 @@ import litellm
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a patient's clinical notes contain evidence of a specific medical event. You will receive relevant excerpts from the patient's notes. Respond ONLY with a JSON object.
+SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a patient's clinical notes contain evidence of a specific medical event. You will receive relevant excerpts from the patient's notes sorted chronologically. Respond ONLY with a JSON object.
 
 Classification rules:
 - Analyze ALL provided excerpts together for a unified patient-level decision
@@ -21,12 +21,16 @@ Classification rules:
 - Consider inclusion and exclusion criteria carefully
 - Negated mentions (e.g., "no evidence of", "ruled out") should NOT be classified as positive
 - A single strong positive excerpt is sufficient for a positive classification
+- If the event is detected, identify the EARLIEST confirmed occurrence date
+- Distinguish between the note date and the actual event date mentioned in the text
 
 Response format (JSON only, no other text):
 {
   "event_detected": true or false,
   "confidence": 0.0 to 1.0,
-  "reasoning": "Brief explanation referencing specific excerpts"
+  "event_date": "YYYY-MM-DD or null if not detected or unknown",
+  "reasoning": "Brief explanation referencing specific excerpts",
+  "evidence": [{"note_id": "...", "text": "relevant excerpt", "note_date": "YYYY-MM-DD"}]
 }"""
 
 
@@ -35,13 +39,15 @@ class ClassificationResult:
     label: str  # "positive" or "negative"
     confidence: float
     reasoning: str
+    event_date: str | None = None  # ISO date string
+    evidence: list[dict] | None = None
     token_usage: dict | None = field(default=None)
 
 
 def _build_user_prompt(excerpts: list[dict], event_config) -> str:
     """Build user prompt with all excerpts for a single patient."""
     excerpt_text = "\n\n".join(
-        f"--- Excerpt from note {e['note_id']} ---\n{e['text']}"
+        f"--- Excerpt from note {e['note_id']} (date: {e.get('note_date', 'unknown')}) ---\n{e['text']}"
         for e in excerpts
     )
     return f"""Event to detect: {event_config.name}
@@ -49,11 +55,11 @@ Description: {event_config.description}
 Include criteria: {event_config.include_criteria}
 Exclude criteria: {event_config.exclude_criteria}
 
-Patient excerpts ({len(excerpts)} matched notes):
+Patient excerpts ({len(excerpts)} matched notes, chronological order):
 
 {excerpt_text}
 
-Based on ALL excerpts above, classify whether this patient has evidence of the event. Respond with JSON only."""
+Based on ALL excerpts above, classify whether this patient has evidence of the event. Identify the EARLIEST confirmed occurrence date if positive. Respond with JSON only."""
 
 
 def _build_litellm_model(provider: str, model: str) -> str:
@@ -144,10 +150,14 @@ async def classify_patient(
     detected = data.get("event_detected", False)
     confidence = float(data.get("confidence", 0.5))
     reasoning = data.get("reasoning", "")
+    event_date = data.get("event_date") if detected else None
+    evidence = data.get("evidence", [])
 
     return ClassificationResult(
         label="positive" if detected else "negative",
         confidence=confidence,
         reasoning=reasoning,
+        event_date=event_date,
+        evidence=evidence,
         token_usage=token_usage,
     )
