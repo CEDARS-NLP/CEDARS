@@ -186,6 +186,53 @@ class TestPatientTaskModel:
         assert task.status == PatientTaskStatus.QUEUED
 
 
+class TestAnnotationPipelineLinkage:
+    async def test_annotation_with_pipeline_fields(self, app):
+        """Annotation can link to pipeline run and patient task."""
+        from app.annotations.models import Annotation, ReviewStatus
+
+        ann = Annotation(
+            project_id="proj-1",
+            patient_id="patient-1",
+            note_id="note-1",
+            sentence_id="sent-1",
+            sentence_text="Troponin elevated",
+            pipeline_run_id="run-1",
+            patient_task_id=1,
+            predicted_reasoning="Troponin level elevated at 2.4",
+            reviewer_label="positive",
+            reviewer_notes="Confirmed by Dr. Smith",
+            review_status=ReviewStatus.PENDING,
+        )
+        assert ann.pipeline_run_id == "run-1"
+        assert ann.patient_task_id == 1
+        assert ann.predicted_reasoning == "Troponin level elevated at 2.4"
+        assert ann.reviewer_label == "positive"
+        assert ann.review_status == ReviewStatus.PENDING
+
+    async def test_annotation_without_pipeline_fields(self, app):
+        """Existing annotations work without pipeline fields."""
+        from app.annotations.models import Annotation, ReviewStatus
+
+        ann = Annotation(
+            project_id="proj-1",
+            patient_id="patient-1",
+            note_id="note-1",
+            sentence_id="sent-1",
+            sentence_text="Some text",
+            review_status=ReviewStatus.UNREVIEWED,
+        )
+        assert ann.pipeline_run_id is None
+        assert ann.patient_task_id is None
+        assert ann.predicted_reasoning is None
+
+    async def test_review_status_has_pipeline_values(self, app):
+        from app.annotations.models import ReviewStatus
+        assert ReviewStatus.PENDING == "pending"
+        assert ReviewStatus.CONFIRMED == "confirmed"
+        assert ReviewStatus.REJECTED == "rejected"
+
+
 class TestEvidenceModel:
     async def test_create_evidence(self, app):
         from app.pipeline.models import Evidence

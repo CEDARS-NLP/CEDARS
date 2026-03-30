@@ -14,6 +14,10 @@ class ReviewStatus(str, enum.Enum):
     UNREVIEWED = "unreviewed"
     REVIEWED = "reviewed"
     SKIPPED = "skipped"
+    # Pipeline-specific statuses
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
 
 
 class Annotation(SQLModel, table=True):
@@ -48,6 +52,13 @@ class Annotation(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+    # Pipeline linkage (optional — set when created by pipeline runs)
+    pipeline_run_id: str | None = Field(default=None, foreign_key="pipeline_runs.id", index=True)
+    patient_task_id: int | None = Field(default=None, foreign_key="patient_tasks.id", index=True)
+    predicted_reasoning: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    reviewer_label: str | None = Field(default=None, max_length=20)
+    reviewer_notes: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
     # Event tracking
     event_date: datetime | None = Field(
