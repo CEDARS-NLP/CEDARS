@@ -1,8 +1,10 @@
-"""Evaluation service: session CRUD, search query execution, funnel stats."""
+"""Evaluation service: session CRUD, search query execution, funnel stats, LLM run, review, metrics, commit."""
 
 import logging
+import math
 import random
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,7 @@ from app.evaluation.models import (
     SessionStatus,
 )
 from app.nlp.engine import parse_query, process_note
+from app.pipeline.classifier import classify_patient
 
 logger = logging.getLogger(__name__)
 
@@ -455,3 +458,370 @@ async def get_query_matches(
         "page_size": page_size,
         "matches": items,
     }
+
+
+# ── LLM classification ──────────────────────────────────────────
+
+
+async def run_llm_on_sample(
+    db: AsyncSession,
+    session_id: str,
+) -> dict:
+    """Run LLM classification on all matched patients in the evaluation sample.
+
+    Clears previous sample PatientResult rows (pipeline_run_id IS NULL),
+    classifies each matched patient, creates NO_MATCH results for unmatched
+    sample patients, and sets session status to REVIEWING.
+
+    Returns:
+        Dict with patients_classified, patients_no_match, patients_failed, token_usage.
+    """
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    # Clear previous sample results (pipeline_run_id IS NULL)
+    await db.execute(
+        delete(PatientResult).where(
+            PatientResult.session_id == session_id,
+            PatientResult.pipeline_run_id.is_(None),
+        )
+    )
+
+    sample_patient_ids = set(session.sample_patient_ids or [])
+
+    # Find matched patient IDs from non-negated SearchMatch records
+    matched_stmt = select(func.distinct(SearchMatch.patient_id)).where(
+        SearchMatch.session_id == session_id,
+        SearchMatch.is_negated.is_(False),
+    )
+    result = await db.execute(matched_stmt)
+    matched_patient_ids = {r[0] for r in result.all()}
+
+    # Build config object for classify_patient
+    config = SimpleNamespace(
+        name=session.event_name or "",
+        description=session.event_description or "",
+        include_criteria=session.include_criteria or "",
+        exclude_criteria=session.exclude_criteria or "",
+        llm_provider=session.llm_provider or "",
+        llm_model=session.llm_model or "",
+        llm_api_base=session.llm_api_base,
+    )
+
+    patients_classified = 0
+    patients_failed = 0
+    total_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    for patient_id in matched_patient_ids:
+        # Get matched notes for this patient, sorted by note_date
+        notes_stmt = (
+            select(Note)
+            .where(
+                Note.patient_id == patient_id,
+                Note.id.in_(
+                    select(SearchMatch.note_id).where(
+                        SearchMatch.session_id == session_id,
+                        SearchMatch.patient_id == patient_id,
+                        SearchMatch.is_negated.is_(False),
+                    )
+                ),
+            )
+            .order_by(Note.note_date)
+        )
+        notes_result = await db.execute(notes_stmt)
+        notes = notes_result.scalars().all()
+
+        excerpts = [
+            {
+                "note_id": note.id,
+                "text": note.text,
+                "note_date": note.note_date.isoformat() if note.note_date else "unknown",
+            }
+            for note in notes
+        ]
+
+        try:
+            classification = await classify_patient(excerpts, config)
+            pr = PatientResult(
+                session_id=session_id,
+                patient_id=patient_id,
+                notes_searched=len(notes),
+                notes_matched=len(notes),
+                finding_label=classification.label,
+                finding_reasoning=classification.reasoning,
+                finding_evidence=classification.evidence,
+                event_date=classification.event_date,
+                predicted_score=classification.confidence,
+                token_usage=classification.token_usage,
+                status=PatientResultStatus.COMPLETED,
+                completed_at=datetime.now(UTC),
+            )
+            db.add(pr)
+            patients_classified += 1
+
+            if classification.token_usage:
+                for key in total_token_usage:
+                    total_token_usage[key] += classification.token_usage.get(key, 0)
+
+        except Exception as exc:
+            logger.warning("LLM classification failed for patient %s: %s", patient_id, exc)
+            pr = PatientResult(
+                session_id=session_id,
+                patient_id=patient_id,
+                notes_searched=len(notes),
+                notes_matched=len(notes),
+                status=PatientResultStatus.FAILED,
+                error_message=str(exc),
+                completed_at=datetime.now(UTC),
+            )
+            db.add(pr)
+            patients_failed += 1
+
+    # Create NO_MATCH results for unmatched sample patients
+    unmatched_ids = sample_patient_ids - matched_patient_ids
+    for patient_id in unmatched_ids:
+        pr = PatientResult(
+            session_id=session_id,
+            patient_id=patient_id,
+            status=PatientResultStatus.NO_MATCH,
+            completed_at=datetime.now(UTC),
+        )
+        db.add(pr)
+
+    # Update session status
+    session.status = SessionStatus.REVIEWING
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+
+    return {
+        "patients_classified": patients_classified,
+        "patients_no_match": len(unmatched_ids),
+        "patients_failed": patients_failed,
+        "token_usage": total_token_usage,
+    }
+
+
+# ── Review & results ─────────────────────────────────────────────
+
+
+async def list_patient_results(
+    db: AsyncSession,
+    session_id: str,
+    label_filter: str | None = None,
+    reviewed_filter: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """Return paginated patient results with optional filtering.
+
+    Args:
+        label_filter: Filter by finding_label (e.g. "positive", "negative"). "all" or None = no filter.
+        reviewed_filter: "unreviewed" to show only unreviewed results.
+        page: 1-based page number.
+        page_size: Results per page.
+
+    Returns:
+        Dict with results, total, page, page_size, total_pages.
+    """
+    base = select(PatientResult).where(PatientResult.session_id == session_id)
+
+    if label_filter and label_filter != "all":
+        base = base.where(PatientResult.finding_label == label_filter)
+
+    if reviewed_filter == "unreviewed":
+        base = base.where(PatientResult.review_judgment.is_(None))
+
+    # Order by predicted_score desc, nulls last
+    base = base.order_by(PatientResult.predicted_score.desc().nullslast())
+
+    # Count total
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # Paginate
+    offset = (page - 1) * page_size
+    results_stmt = base.offset(offset).limit(page_size)
+    result = await db.execute(results_stmt)
+    results = list(result.scalars().all())
+
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+
+    return {
+        "results": results,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
+async def submit_judgment(
+    db: AsyncSession,
+    patient_result_id: int,
+    judgment: str,
+    user_id: str,
+    event_date_override: str | None = None,
+) -> PatientResult:
+    """Submit clinician judgment on a patient result.
+
+    Args:
+        patient_result_id: The PatientResult row ID.
+        judgment: e.g. "correct", "wrong", "skipped".
+        user_id: The reviewing clinician's user ID.
+        event_date_override: Optional corrected event date (ISO string).
+
+    Returns:
+        Updated PatientResult.
+    """
+    pr = (
+        await db.execute(
+            select(PatientResult).where(PatientResult.id == patient_result_id)
+        )
+    ).scalar_one()
+
+    pr.review_judgment = judgment
+    pr.reviewed_by = user_id
+    pr.reviewed_at = datetime.now(UTC)
+    if event_date_override is not None:
+        pr.reviewer_date_override = event_date_override
+
+    db.add(pr)
+    await db.commit()
+    await db.refresh(pr)
+    return pr
+
+
+# ── Metrics ──────────────────────────────────────────────────────
+
+
+async def compute_metrics(
+    db: AsyncSession,
+    session_id: str,
+) -> dict:
+    """Compute live accuracy metrics from reviewed patient results.
+
+    Only considers sample results (pipeline_run_id IS NULL) that are
+    COMPLETED (excludes NO_MATCH). Skipped judgments are excluded from
+    the confusion matrix.
+
+    Returns:
+        Dict with tp, fp, tn, fn, accuracy, precision, recall, f1, total_reviewed.
+    """
+    stmt = select(PatientResult).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.is_(None),
+        PatientResult.status == PatientResultStatus.COMPLETED,
+    )
+    result = await db.execute(stmt)
+    all_results = result.scalars().all()
+
+    tp = fp = tn = fn = 0
+    for pr in all_results:
+        if not pr.review_judgment or pr.review_judgment == "skipped":
+            continue
+        is_positive = pr.finding_label == "positive"
+        is_correct = pr.review_judgment == "correct"
+
+        if is_positive and is_correct:
+            tp += 1
+        elif is_positive and not is_correct:
+            fp += 1
+        elif not is_positive and is_correct:
+            tn += 1
+        else:  # negative and wrong
+            fn += 1
+
+    total_reviewed = tp + fp + tn + fn
+    accuracy = (tp + tn) / total_reviewed if total_reviewed > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    metrics = {
+        "tp": tp,
+        "fp": fp,
+        "tn": tn,
+        "fn": fn,
+        "accuracy": round(accuracy, 4),
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "total_reviewed": total_reviewed,
+    }
+
+    # Persist metrics on session
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+    session.metrics = metrics
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+
+    return metrics
+
+
+# ── Commit ───────────────────────────────────────────────────────
+
+
+async def commit_session(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str,
+    confidence_threshold: float | None = None,
+) -> EvaluationSession:
+    """Lock the session configuration and mark as COMMITTED.
+
+    Only REVIEWING sessions can be committed. Snapshots all config into
+    committed_config JSON for reproducibility.
+
+    Args:
+        session_id: The evaluation session to commit.
+        user_id: The user performing the commit.
+        confidence_threshold: Optional threshold to include in committed config.
+
+    Returns:
+        Updated EvaluationSession with status COMMITTED.
+    """
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    if session.status != SessionStatus.REVIEWING:
+        raise ValueError(
+            f"Cannot commit session in {session.status.value} status; "
+            "only REVIEWING sessions can be committed"
+        )
+
+    committed_config = {
+        "search_queries": session.search_queries,
+        "event_name": session.event_name,
+        "event_description": session.event_description,
+        "include_criteria": session.include_criteria,
+        "exclude_criteria": session.exclude_criteria,
+        "llm_provider": session.llm_provider,
+        "llm_model": session.llm_model,
+        "llm_api_base": session.llm_api_base,
+        "sample_size": session.sample_size,
+        "metrics": session.metrics,
+    }
+    if confidence_threshold is not None:
+        committed_config["confidence_threshold"] = confidence_threshold
+
+    session.committed_config = committed_config
+    session.committed_at = datetime.now(UTC)
+    session.committed_by = user_id
+    session.status = SessionStatus.COMMITTED
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session

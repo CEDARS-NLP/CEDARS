@@ -564,3 +564,326 @@ class TestUpdateLlmConfig:
         )
         assert updated.event_name == "Test"
         assert not hasattr(updated, "bogus_field") or getattr(updated, "bogus_field", None) is None
+
+
+# ── Helpers for LLM tests ────────────────────────────────────────
+
+from unittest.mock import AsyncMock
+from app.pipeline.classifier import ClassificationResult
+
+
+def _mock_parse_query(query_str):
+    """Return a fake query group matching 'troponin'."""
+    return [[{"pattern": [{"LOWER": "troponin"}], "negated": False, "text": "troponin"}]]
+
+
+def _mock_process_note(note_text, query_groups):
+    """Return a match if 'troponin' appears in note text."""
+    if "troponin" in note_text.lower():
+        return [{
+            "sentence_number": 0,
+            "text": note_text,
+            "start_pos": 0,
+            "end_pos": len(note_text),
+            "is_target": True,
+            "is_negated": False,
+            "matched_tokens": ["troponin"],
+        }]
+    return [{
+        "sentence_number": 0,
+        "text": note_text,
+        "start_pos": 0,
+        "end_pos": len(note_text),
+        "is_target": False,
+        "is_negated": False,
+        "matched_tokens": [],
+    }]
+
+
+async def _create_session_with_search(seeded_db):
+    """Helper: create session, configure LLM, execute search. Returns session."""
+    session = await eval_service.create_session(
+        seeded_db,
+        project_id="proj-1",
+        user_id="user-1",
+        search_queries=[{"query": "troponin", "type": "include"}],
+    )
+    await eval_service.update_llm_config(
+        seeded_db,
+        session.id,
+        event_name="MI Detection",
+        event_description="Myocardial infarction",
+        include_criteria="Troponin elevation",
+        exclude_criteria="Rule-out MI",
+        llm_provider="openai",
+        llm_model="gpt-4o",
+    )
+    with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+         patch.object(eval_service, "process_note", side_effect=_mock_process_note):
+        await eval_service.execute_search_queries(seeded_db, session.id)
+
+    # Refresh to pick up updated fields
+    refreshed = await eval_service.get_session(seeded_db, session.id)
+    return refreshed
+
+
+class TestLlmRun:
+    async def test_run_llm_creates_patient_results(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive",
+            confidence=0.95,
+            reasoning="Troponin elevation detected",
+            event_date="2024-01-15",
+            evidence=[{"note_id": "note-1-1", "text": "troponin elevation"}],
+            token_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        )
+
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        assert stats["patients_classified"] == 5  # all 5 patients matched troponin
+        assert stats["patients_no_match"] == 0
+        assert stats["patients_failed"] == 0
+        assert stats["token_usage"]["total_tokens"] == 750  # 150 * 5
+
+        # Session should be REVIEWING now
+        updated = await eval_service.get_session(seeded_db, session.id)
+        assert updated.status == SessionStatus.REVIEWING
+
+    async def test_run_llm_handles_failures(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        async def failing_classify(*args, **kwargs):
+            raise ValueError("LLM API error")
+
+        with patch.object(eval_service, "classify_patient", side_effect=failing_classify):
+            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        assert stats["patients_classified"] == 0
+        assert stats["patients_failed"] == 5
+
+    async def test_run_llm_creates_no_match_results(self, seeded_db):
+        """When search has no matches, all sample patients get NO_MATCH."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "nonexistent_term", "type": "include"}],
+        )
+        # Execute search with no results
+        def no_match_process(note_text, query_groups):
+            return [{
+                "sentence_number": 0, "text": note_text,
+                "start_pos": 0, "end_pos": len(note_text),
+                "is_target": False, "is_negated": False, "matched_tokens": [],
+            }]
+
+        with patch.object(eval_service, "parse_query", return_value=[[{"pattern": [], "negated": False, "text": "x"}]]), \
+             patch.object(eval_service, "process_note", side_effect=no_match_process):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        await eval_service.update_llm_config(
+            seeded_db, session.id,
+            event_name="Test", llm_provider="openai", llm_model="gpt-4o",
+        )
+
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock):
+            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        assert stats["patients_classified"] == 0
+        assert stats["patients_no_match"] == 5
+
+
+class TestListPatientResults:
+    async def test_list_patient_results_paginated(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        result = await eval_service.list_patient_results(
+            seeded_db, session.id, page=1, page_size=3,
+        )
+        assert result["total"] == 5
+        assert len(result["results"]) == 3
+        assert result["total_pages"] == 2
+
+    async def test_list_patient_results_filter_by_label(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        call_count = 0
+
+        async def alternating_classify(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            label = "positive" if call_count % 2 == 0 else "negative"
+            return ClassificationResult(
+                label=label, confidence=0.8, reasoning="Test",
+                token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            )
+
+        with patch.object(eval_service, "classify_patient", side_effect=alternating_classify):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        pos = await eval_service.list_patient_results(
+            seeded_db, session.id, label_filter="positive",
+        )
+        neg = await eval_service.list_patient_results(
+            seeded_db, session.id, label_filter="negative",
+        )
+        assert pos["total"] + neg["total"] == 5
+
+
+class TestReview:
+    async def test_submit_judgment(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.95, reasoning="Troponin found",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        # Get the first result
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        first_result = listing["results"][0]
+
+        judged = await eval_service.submit_judgment(
+            seeded_db,
+            patient_result_id=first_result.id,
+            judgment="correct",
+            user_id="user-1",
+        )
+        assert judged.review_judgment == "correct"
+        assert judged.reviewed_by == "user-1"
+        assert judged.reviewed_at is not None
+
+    async def test_submit_judgment_with_date_override(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        first_result = listing["results"][0]
+
+        judged = await eval_service.submit_judgment(
+            seeded_db,
+            patient_result_id=first_result.id,
+            judgment="correct",
+            user_id="user-1",
+            event_date_override="2024-01-20",
+        )
+        assert judged.reviewer_date_override == "2024-01-20"
+
+    async def test_compute_metrics(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.95, reasoning="Troponin found",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        # Judge all results as correct
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        for pr in listing["results"]:
+            if pr.finding_label:  # skip NO_MATCH
+                await eval_service.submit_judgment(
+                    seeded_db, patient_result_id=pr.id,
+                    judgment="correct", user_id="user-1",
+                )
+
+        metrics = await eval_service.compute_metrics(seeded_db, session.id)
+        assert metrics["total_reviewed"] == 5
+        assert metrics["tp"] == 5  # all positive + correct
+        assert metrics["accuracy"] == 1.0
+        assert metrics["precision"] == 1.0
+        assert metrics["recall"] == 1.0
+        assert metrics["f1"] == 1.0
+
+    async def test_compute_metrics_mixed(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        results = listing["results"]
+
+        # Judge some correct, some wrong
+        for i, pr in enumerate(results):
+            if pr.finding_label:
+                judgment = "correct" if i < 3 else "wrong"
+                await eval_service.submit_judgment(
+                    seeded_db, patient_result_id=pr.id,
+                    judgment=judgment, user_id="user-1",
+                )
+
+        metrics = await eval_service.compute_metrics(seeded_db, session.id)
+        assert metrics["total_reviewed"] == 5
+        assert metrics["tp"] == 3  # positive + correct
+        assert metrics["fp"] == 2  # positive + wrong
+        assert metrics["accuracy"] > 0
+
+
+class TestCommit:
+    async def test_commit_session(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        committed = await eval_service.commit_session(
+            seeded_db, session.id, user_id="user-1",
+        )
+        assert committed.status == SessionStatus.COMMITTED
+        assert committed.committed_config is not None
+        assert committed.committed_config["event_name"] == "MI Detection"
+        assert committed.committed_config["llm_provider"] == "openai"
+        assert committed.committed_at is not None
+        assert committed.committed_by == "user-1"
+
+    async def test_commit_session_with_threshold(self, seeded_db):
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.run_llm_on_sample(seeded_db, session.id)
+
+        committed = await eval_service.commit_session(
+            seeded_db, session.id, user_id="user-1", confidence_threshold=0.8,
+        )
+        assert committed.committed_config["confidence_threshold"] == 0.8
+
+    async def test_commit_draft_session_fails(self, seeded_db):
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+        )
+        with pytest.raises(ValueError, match="Cannot commit session"):
+            await eval_service.commit_session(seeded_db, session.id, user_id="user-1")
