@@ -1,521 +1,457 @@
-"""Evaluation service: sampling, prediction runs, judgment collection, metrics."""
+"""Evaluation service: session CRUD, search query execution, funnel stats."""
 
 import logging
 import random
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.connectors.models import Note
+from app.connectors.models import Note, Patient
 from app.evaluation.models import (
-    EvaluationJudgment,
     EvaluationSession,
-    JudgmentValue,
+    PatientResult,
+    PatientResultStatus,
+    SearchMatch,
     SessionStatus,
-    ValidatedPredictor,
 )
-from app.nlp.models import Sentence
-from app.predictors.base import PredictorError
-from app.predictors.factory import create_predictor
-from app.predictors.models import PredictorConfig
+from app.nlp.engine import parse_query, process_note
 
 logger = logging.getLogger(__name__)
 
 
-# ── Session management ───────────────────────────────────────────
+# ── Session CRUD ─────────────────────────────────────────────────
 
 
 async def create_session(
-    session: AsyncSession,
+    db: AsyncSession,
     project_id: str,
-    predictor_config_id: str,
     user_id: str,
-    name: str = "",
-    sample_config: dict | None = None,
+    search_queries: list[dict] | None = None,
+    cloned_from_id: str | None = None,
 ) -> EvaluationSession:
-    """Create an evaluation session and sample notes."""
-    config = sample_config or {"size": 50, "keyword_match_ratio": 0.6, "keywords": []}
+    """Create a new evaluation session with patient sampling.
 
-    eval_session = EvaluationSession(
-        project_id=project_id,
-        predictor_config_id=predictor_config_id,
-        name=name,
-        status=SessionStatus.SAMPLING,
-        sample_config=config,
-        created_by=user_id,
-    )
-    session.add(eval_session)
-    await session.flush()
-
-    # Sample notes using keyword-based stratification
-    note_ids = await _sample_notes(session, project_id, config)
-    eval_session.total_notes = len(note_ids)
-
-    # Create judgment placeholders
-    for note_id in note_ids:
-        judgment = EvaluationJudgment(
-            session_id=eval_session.id,
-            note_id=note_id,
-        )
-        session.add(judgment)
-
-    eval_session.status = SessionStatus.SAMPLING
-    await session.commit()
-    await session.refresh(eval_session)
-    return eval_session
-
-
-async def _sample_notes(
-    session: AsyncSession,
-    project_id: str,
-    config: dict,
-) -> list[str]:
-    """Sample notes using keyword-based stratification.
-
-    If keywords are provided, splits notes into matched/unmatched buckets
-    and allocates according to keyword_match_ratio.
+    Rules:
+    - Block if an active session (DRAFT or REVIEWING) already exists for the project.
+    - Block if a COMMITTED session exists for the project.
+    - Sample min(100, total_patients) patients from the project.
+    - If cloned_from_id is provided, copy queries + LLM config from that session.
     """
-    size = min(config.get("size", 50), 500)
-    keywords = config.get("keywords", [])
-    ratio = config.get("keyword_match_ratio", 0.6)
-
-    if not keywords:
-        # Random sample from all project notes
-        stmt = select(Note.id).where(Note.project_id == project_id)
-        result = await session.execute(stmt)
-        all_ids = [r[0] for r in result.all()]
-        random.shuffle(all_ids)
-        return all_ids[:size]
-
-    # Find notes with keyword-matching target sentences
-    matched_stmt = (
-        select(Sentence.note_id)
-        .where(
-            Sentence.project_id == project_id,
-            Sentence.is_target == True,  # noqa: E712
-        )
-        .distinct()
+    # Check for blocking sessions
+    blocking_stmt = select(EvaluationSession).where(
+        EvaluationSession.project_id == project_id,
+        EvaluationSession.status.in_([
+            SessionStatus.DRAFT,
+            SessionStatus.REVIEWING,
+            SessionStatus.COMMITTED,
+        ]),
     )
-    result = await session.execute(matched_stmt)
-    matched_ids = list({r[0] for r in result.all()})
-
-    # All notes
-    all_stmt = select(Note.id).where(Note.project_id == project_id)
-    result = await session.execute(all_stmt)
-    all_ids = [r[0] for r in result.all()]
-
-    unmatched_ids = [nid for nid in all_ids if nid not in set(matched_ids)]
-
-    random.shuffle(matched_ids)
-    random.shuffle(unmatched_ids)
-
-    # Allocate by ratio
-    n_matched = min(int(size * ratio), len(matched_ids))
-    n_unmatched = min(size - n_matched, len(unmatched_ids))
-
-    # Backfill if either bucket is short
-    selected = matched_ids[:n_matched] + unmatched_ids[:n_unmatched]
-    remaining = size - len(selected)
-    if remaining > 0:
-        extras = [nid for nid in matched_ids[n_matched:] + unmatched_ids[n_unmatched:]
-                  if nid not in set(selected)]
-        selected.extend(extras[:remaining])
-
-    return selected
-
-
-async def run_predictions(
-    session: AsyncSession,
-    eval_session_id: str,
-) -> EvaluationSession:
-    """Run predictor on all sampled notes in the session."""
-    eval_session = (
-        await session.execute(
-            select(EvaluationSession).where(EvaluationSession.id == eval_session_id)
+    result = await db.execute(blocking_stmt)
+    blocking = result.scalars().first()
+    if blocking:
+        raise ValueError(
+            f"Cannot create session: project already has a {blocking.status.value} session"
         )
-    ).scalar_one()
 
-    # Get predictor
-    predictor_config = (
-        await session.execute(
-            select(PredictorConfig).where(
-                PredictorConfig.id == eval_session.predictor_config_id
+    # Handle cloning
+    queries = search_queries or []
+    event_name = None
+    event_description = None
+    include_criteria = None
+    exclude_criteria = None
+    llm_provider = None
+    llm_model = None
+    llm_api_base = None
+
+    if cloned_from_id:
+        clone_source = (
+            await db.execute(
+                select(EvaluationSession).where(EvaluationSession.id == cloned_from_id)
             )
-        )
-    ).scalar_one()
-
-    predictor = create_predictor(predictor_config)
-    eval_session.status = SessionStatus.RUNNING
-    session.add(eval_session)
-    await session.commit()
-
-    # Get all judgments for this session
-    judgments = (
-        await session.execute(
-            select(EvaluationJudgment).where(
-                EvaluationJudgment.session_id == eval_session_id
-            )
-        )
-    ).scalars().all()
-
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-    total_tokens = 0
-
-    for judgment in judgments:
-        if judgment.predicted_label is not None:
-            continue  # Already predicted
-
-        note = (
-            await session.execute(select(Note).where(Note.id == judgment.note_id))
         ).scalar_one_or_none()
+        if clone_source:
+            queries = queries or clone_source.search_queries or []
+            event_name = clone_source.event_name
+            event_description = clone_source.event_description
+            include_criteria = clone_source.include_criteria
+            exclude_criteria = clone_source.exclude_criteria
+            llm_provider = clone_source.llm_provider
+            llm_model = clone_source.llm_model
+            llm_api_base = clone_source.llm_api_base
 
-        if not note:
-            continue
+    # Sample patients
+    patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
+    result = await db.execute(patient_stmt)
+    all_patient_ids = [r[0] for r in result.all()]
 
-        try:
-            result = await predictor.predict(note.text)
-            judgment.predicted_label = result.label
-            judgment.predicted_score = result.score
-            judgment.reasoning = result.reasoning
-            if result.token_usage:
-                total_prompt_tokens += result.token_usage.prompt_tokens
-                total_completion_tokens += result.token_usage.completion_tokens
-                total_tokens += result.token_usage.total_tokens
-        except PredictorError as e:
-            logger.warning("Prediction failed for note %s: %s", judgment.note_id, e)
-            judgment.predicted_label = None
-            judgment.predicted_score = None
-            judgment.reasoning = f"Error: {e}"
+    sample_size = min(100, len(all_patient_ids))
+    sampled_ids = random.sample(all_patient_ids, sample_size) if all_patient_ids else []
 
-        session.add(judgment)
-
-    eval_session.metrics = {
-        **eval_session.metrics,
-        "token_usage": {
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "total_tokens": total_tokens,
-        },
-    }
-    eval_session.status = SessionStatus.REVIEWING
-    session.add(eval_session)
-    await session.commit()
-    await session.refresh(eval_session)
-    return eval_session
-
-
-# ── Judgment operations ──────────────────────────────────────────
-
-
-async def get_next_pending(
-    session: AsyncSession,
-    eval_session_id: str,
-) -> EvaluationJudgment | None:
-    """Get the next pending judgment for review."""
-    stmt = (
-        select(EvaluationJudgment)
-        .where(
-            EvaluationJudgment.session_id == eval_session_id,
-            EvaluationJudgment.judgment == JudgmentValue.PENDING,
-        )
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def get_next_pending_with_note(
-    session: AsyncSession,
-    eval_session_id: str,
-) -> dict | None:
-    """Get the next pending judgment joined with its note text."""
-    judgment = await get_next_pending(session, eval_session_id)
-    if not judgment:
-        return None
-
-    note = (
-        await session.execute(select(Note).where(Note.id == judgment.note_id))
-    ).scalar_one_or_none()
-
-    return {
-        "id": judgment.id,
-        "session_id": judgment.session_id,
-        "note_id": judgment.note_id,
-        "predicted_label": judgment.predicted_label,
-        "predicted_score": judgment.predicted_score,
-        "reasoning": judgment.reasoning,
-        "judgment": judgment.judgment,
-        "judged_by": judgment.judged_by,
-        "judged_at": judgment.judged_at,
-        "note_text": note.text if note else "",
-        "note_text_id": note.text_id if note else "",
-        "patient_id": note.patient_id if note else "",
-    }
-
-
-async def submit_judgment(
-    session: AsyncSession,
-    judgment_id: str,
-    judgment_value: str,
-    user_id: str,
-) -> EvaluationJudgment | None:
-    """Record a clinician's judgment and recompute metrics."""
-    judgment = (
-        await session.execute(
-            select(EvaluationJudgment).where(EvaluationJudgment.id == judgment_id)
-        )
-    ).scalar_one_or_none()
-
-    if not judgment:
-        return None
-
-    judgment.judgment = JudgmentValue(judgment_value)
-    judgment.judged_by = user_id
-    judgment.judged_at = datetime.now(UTC)
-    session.add(judgment)
-
-    # Recompute metrics for the session
-    eval_session = (
-        await session.execute(
-            select(EvaluationSession).where(
-                EvaluationSession.id == judgment.session_id
-            )
-        )
-    ).scalar_one()
-
-    metrics = await compute_metrics(session, judgment.session_id)
-    eval_session.metrics = metrics
-    eval_session.judged_notes = metrics["total_judged"]
-
-    # Auto-complete session if all judged
-    if metrics["total_pending"] == 0:
-        eval_session.status = SessionStatus.COMPLETED
-        eval_session.completed_at = datetime.now(UTC)
-
-    session.add(eval_session)
-    await session.commit()
-    await session.refresh(judgment)
-    return judgment
-
-
-async def list_judgments(
-    session: AsyncSession,
-    eval_session_id: str,
-) -> list[EvaluationJudgment]:
-    stmt = (
-        select(EvaluationJudgment)
-        .where(EvaluationJudgment.session_id == eval_session_id)
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
-# ── Metrics computation ──────────────────────────────────────────
-
-
-async def compute_metrics(
-    session: AsyncSession,
-    eval_session_id: str,
-) -> dict:
-    """Compute P/R/F1/accuracy from judgments."""
-    judgments = (
-        await session.execute(
-            select(EvaluationJudgment).where(
-                EvaluationJudgment.session_id == eval_session_id
-            )
-        )
-    ).scalars().all()
-
-    tp = fp = tn = fn = 0
-    total_judged = 0
-    total_pending = 0
-
-    for j in judgments:
-        if j.judgment == JudgmentValue.PENDING:
-            total_pending += 1
-            continue
-        if j.judgment == JudgmentValue.SKIPPED:
-            continue
-
-        total_judged += 1
-        predicted_positive = j.predicted_label == 1
-
-        if j.judgment == JudgmentValue.CORRECT:
-            if predicted_positive:
-                tp += 1
-            else:
-                tn += 1
-        elif j.judgment == JudgmentValue.WRONG:
-            if predicted_positive:
-                fp += 1
-            else:
-                fn += 1
-
-    total = tp + fp + tn + fn
-    accuracy = (tp + tn) / total if total > 0 else 0.0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-
-    return {
-        "accuracy": round(accuracy, 4),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "tp": tp,
-        "fp": fp,
-        "tn": tn,
-        "fn": fn,
-        "total_judged": total_judged,
-        "total_pending": total_pending,
-    }
-
-
-# ── Validation ───────────────────────────────────────────────────
-
-
-async def validate_predictor(
-    session: AsyncSession,
-    project_id: str,
-    eval_session_id: str,
-    user_id: str,
-    name: str,
-    notes: str = "",
-    threshold: float = 0.5,
-) -> ValidatedPredictor:
-    """Validate the predictor config from an evaluation session."""
-    eval_session = (
-        await session.execute(
-            select(EvaluationSession).where(EvaluationSession.id == eval_session_id)
-        )
-    ).scalar_one()
-
-    predictor_config = (
-        await session.execute(
-            select(PredictorConfig).where(
-                PredictorConfig.id == eval_session.predictor_config_id
-            )
-        )
-    ).scalar_one()
-
-    metrics = await compute_metrics(session, eval_session_id)
-
-    # Carry forward token usage from session metrics
-    if eval_session.metrics and "token_usage" in eval_session.metrics:
-        metrics["token_usage"] = eval_session.metrics["token_usage"]
-
-    validated = ValidatedPredictor(
+    session = EvaluationSession(
         project_id=project_id,
-        predictor_config_id=predictor_config.id,
-        session_id=eval_session_id,
-        name=name,
-        notes=notes,
-        config_snapshot=predictor_config.config,
-        metrics_snapshot=metrics,
-        threshold=threshold,
-        validated_by=user_id,
+        created_by=user_id,
+        status=SessionStatus.DRAFT,
+        search_queries=queries,
+        sample_patient_ids=sampled_ids,
+        sample_size=sample_size,
+        cloned_from_id=cloned_from_id,
+        event_name=event_name,
+        event_description=event_description,
+        include_criteria=include_criteria,
+        exclude_criteria=exclude_criteria,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        llm_api_base=llm_api_base,
     )
-    session.add(validated)
-    await session.commit()
-    await session.refresh(validated)
-    return validated
-
-
-async def activate_validated_predictor(
-    session: AsyncSession,
-    project_id: str,
-    validated_id: str,
-) -> ValidatedPredictor | None:
-    """Activate a validated predictor and its PredictorConfig.
-
-    Does NOT trigger bulk predictions — that is the caller's responsibility.
-    """
-    # Deactivate current validated predictors
-    stmt = select(ValidatedPredictor).where(
-        ValidatedPredictor.project_id == project_id,
-        ValidatedPredictor.is_active == True,  # noqa: E712
-    )
-    result = await session.execute(stmt)
-    for vp in result.scalars().all():
-        vp.is_active = False
-        session.add(vp)
-
-    # Activate the new validated predictor
-    validated = (
-        await session.execute(
-            select(ValidatedPredictor).where(ValidatedPredictor.id == validated_id)
-        )
-    ).scalar_one_or_none()
-
-    if not validated:
-        return None
-
-    validated.is_active = True
-    session.add(validated)
-
-    # Also activate the corresponding PredictorConfig (and deactivate others)
-    deactivate_stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-    )
-    result = await session.execute(deactivate_stmt)
-    for pc in result.scalars().all():
-        pc.is_active = False
-        session.add(pc)
-
-    predictor_config = (
-        await session.execute(
-            select(PredictorConfig).where(
-                PredictorConfig.id == validated.predictor_config_id
-            )
-        )
-    ).scalar_one_or_none()
-
-    if predictor_config:
-        predictor_config.is_active = True
-        session.add(predictor_config)
-
-    await session.commit()
-    await session.refresh(validated)
-    return validated
-
-
-# ── List helpers ─────────────────────────────────────────────────
-
-
-async def list_sessions(
-    session: AsyncSession,
-    project_id: str,
-) -> list[EvaluationSession]:
-    stmt = (
-        select(EvaluationSession)
-        .where(EvaluationSession.project_id == project_id)
-        .order_by(EvaluationSession.created_at.desc())
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    db.add(session)
+    await db.flush()
+    await db.commit()
+    await db.refresh(session)
+    return session
 
 
 async def get_session(
     db: AsyncSession,
     session_id: str,
 ) -> EvaluationSession | None:
+    """Get an evaluation session by ID."""
     result = await db.execute(
         select(EvaluationSession).where(EvaluationSession.id == session_id)
     )
     return result.scalar_one_or_none()
 
 
-async def list_validated_predictors(
-    session: AsyncSession,
+async def list_sessions(
+    db: AsyncSession,
     project_id: str,
-) -> list[ValidatedPredictor]:
+) -> list[EvaluationSession]:
+    """List all sessions for a project, ordered by created_at desc."""
     stmt = (
-        select(ValidatedPredictor)
-        .where(ValidatedPredictor.project_id == project_id)
-        .order_by(ValidatedPredictor.created_at.desc())
+        select(EvaluationSession)
+        .where(EvaluationSession.project_id == project_id)
+        .order_by(EvaluationSession.created_at.desc())
     )
-    result = await session.execute(stmt)
+    result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def discard_session(
+    db: AsyncSession,
+    session_id: str,
+) -> EvaluationSession:
+    """Set session status to DISCARDED. Only allowed from DRAFT or REVIEWING."""
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    if session.status not in (SessionStatus.DRAFT, SessionStatus.REVIEWING):
+        raise ValueError(
+            f"Cannot discard session in {session.status.value} status; "
+            "only DRAFT or REVIEWING sessions can be discarded"
+        )
+
+    session.status = SessionStatus.DISCARDED
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def update_queries(
+    db: AsyncSession,
+    session_id: str,
+    search_queries: list[dict],
+) -> EvaluationSession:
+    """Update the query list and clear old SearchMatch records."""
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    session.search_queries = search_queries
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+
+    # Clear old search matches
+    await db.execute(
+        delete(SearchMatch).where(SearchMatch.session_id == session_id)
+    )
+
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def update_llm_config(
+    db: AsyncSession,
+    session_id: str,
+    **kwargs,
+) -> EvaluationSession:
+    """Update LLM configuration fields on the session."""
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    allowed_fields = {
+        "event_name", "event_description", "include_criteria",
+        "exclude_criteria", "llm_provider", "llm_model", "llm_api_base",
+    }
+    for key, value in kwargs.items():
+        if key in allowed_fields:
+            setattr(session, key, value)
+
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+# ── Search execution ─────────────────────────────────────────────
+
+
+async def execute_search_queries(
+    db: AsyncSession,
+    session_id: str,
+) -> EvaluationSession:
+    """Run spaCy search on sample notes for each include query.
+
+    For each include query, uses parse_query and process_note from app.nlp.engine
+    to find matching sentences. Stores SearchMatch records for each match.
+    """
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    # Clear existing matches
+    await db.execute(
+        delete(SearchMatch).where(SearchMatch.session_id == session_id)
+    )
+
+    sample_patient_ids = session.sample_patient_ids or []
+    if not sample_patient_ids:
+        await db.commit()
+        await db.refresh(session)
+        return session
+
+    # Get all notes for sampled patients
+    notes_stmt = select(Note).where(Note.patient_id.in_(sample_patient_ids))
+    result = await db.execute(notes_stmt)
+    notes = result.scalars().all()
+
+    queries = session.search_queries or []
+    include_queries = [q for q in queries if q.get("type") == "include"]
+
+    for query_index, query_def in enumerate(include_queries):
+        query_str = query_def.get("query", "")
+        if not query_str:
+            continue
+
+        query_groups = parse_query(query_str)
+        if not query_groups:
+            continue
+
+        for note in notes:
+            sentences = process_note(note.text, query_groups)
+            for sent in sentences:
+                if sent.get("is_target") and not sent.get("is_negated"):
+                    match = SearchMatch(
+                        session_id=session_id,
+                        query_index=query_index,
+                        patient_id=note.patient_id,
+                        note_id=note.id,
+                        matched_tokens=sent.get("matched_tokens", []),
+                        match_positions=[{
+                            "start": sent["start_pos"],
+                            "end": sent["end_pos"],
+                            "sentence_number": sent["sentence_number"],
+                            "text": sent["text"],
+                        }],
+                        is_negated=sent.get("is_negated", False),
+                    )
+                    db.add(match)
+
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+# ── Stats & queries ──────────────────────────────────────────────
+
+
+async def get_funnel_stats(
+    db: AsyncSession,
+    session_id: str,
+) -> dict:
+    """Return funnel statistics for an evaluation session.
+
+    Returns:
+        sample_patients: number of sampled patients
+        sample_notes: number of notes for sampled patients
+        matched_patients: patients with at least one search match
+        matched_notes: notes with at least one search match
+        filter_percent: percentage of notes filtered by search
+        llm_stats: LLM processing statistics (from patient results)
+    """
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
+
+    sample_patient_ids = session.sample_patient_ids or []
+    sample_patients = len(sample_patient_ids)
+
+    # Count notes for sampled patients
+    if sample_patient_ids:
+        notes_count_result = await db.execute(
+            select(func.count(Note.id)).where(Note.patient_id.in_(sample_patient_ids))
+        )
+        sample_notes = notes_count_result.scalar() or 0
+    else:
+        sample_notes = 0
+
+    # Count matched patients and notes from SearchMatch
+    matched_patients_result = await db.execute(
+        select(func.count(func.distinct(SearchMatch.patient_id))).where(
+            SearchMatch.session_id == session_id
+        )
+    )
+    matched_patients = matched_patients_result.scalar() or 0
+
+    matched_notes_result = await db.execute(
+        select(func.count(func.distinct(SearchMatch.note_id))).where(
+            SearchMatch.session_id == session_id
+        )
+    )
+    matched_notes = matched_notes_result.scalar() or 0
+
+    filter_percent = (
+        round((1 - matched_notes / sample_notes) * 100, 1) if sample_notes > 0 else 0.0
+    )
+
+    # LLM stats from patient results
+    llm_completed_result = await db.execute(
+        select(func.count(PatientResult.id)).where(
+            PatientResult.session_id == session_id,
+            PatientResult.status == PatientResultStatus.COMPLETED,
+        )
+    )
+    llm_completed = llm_completed_result.scalar() or 0
+
+    llm_pending_result = await db.execute(
+        select(func.count(PatientResult.id)).where(
+            PatientResult.session_id == session_id,
+            PatientResult.status.in_([
+                PatientResultStatus.QUEUED,
+                PatientResultStatus.PROCESSING,
+            ]),
+        )
+    )
+    llm_pending = llm_pending_result.scalar() or 0
+
+    llm_failed_result = await db.execute(
+        select(func.count(PatientResult.id)).where(
+            PatientResult.session_id == session_id,
+            PatientResult.status == PatientResultStatus.FAILED,
+        )
+    )
+    llm_failed = llm_failed_result.scalar() or 0
+
+    return {
+        "sample_patients": sample_patients,
+        "sample_notes": sample_notes,
+        "matched_patients": matched_patients,
+        "matched_notes": matched_notes,
+        "filter_percent": filter_percent,
+        "llm_stats": {
+            "completed": llm_completed,
+            "pending": llm_pending,
+            "failed": llm_failed,
+        },
+    }
+
+
+async def get_query_matches(
+    db: AsyncSession,
+    session_id: str,
+    query_index: int,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """Return paginated note previews with match highlights for a query.
+
+    Returns:
+        total: total number of matches
+        page: current page
+        page_size: items per page
+        matches: list of match dicts with note text and highlights
+    """
+    # Count total matches
+    count_result = await db.execute(
+        select(func.count(SearchMatch.id)).where(
+            SearchMatch.session_id == session_id,
+            SearchMatch.query_index == query_index,
+        )
+    )
+    total = count_result.scalar() or 0
+
+    # Get paginated matches
+    offset = (page - 1) * page_size
+    matches_stmt = (
+        select(SearchMatch)
+        .where(
+            SearchMatch.session_id == session_id,
+            SearchMatch.query_index == query_index,
+        )
+        .offset(offset)
+        .limit(page_size)
+    )
+    result = await db.execute(matches_stmt)
+    matches = result.scalars().all()
+
+    # Enrich with note text
+    items = []
+    for match in matches:
+        note = (
+            await db.execute(select(Note).where(Note.id == match.note_id))
+        ).scalar_one_or_none()
+
+        note_text = note.text if note else ""
+        # Build highlight context from match_positions
+        highlights = []
+        for pos in (match.match_positions or []):
+            highlights.append({
+                "text": pos.get("text", ""),
+                "start": pos.get("start", 0),
+                "end": pos.get("end", 0),
+                "sentence_number": pos.get("sentence_number", 0),
+            })
+
+        items.append({
+            "match_id": match.id,
+            "note_id": match.note_id,
+            "patient_id": match.patient_id,
+            "matched_tokens": match.matched_tokens,
+            "is_negated": match.is_negated,
+            "highlights": highlights,
+            "note_text": note_text,
+        })
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "matches": items,
+    }
