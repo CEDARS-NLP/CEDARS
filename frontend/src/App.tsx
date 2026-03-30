@@ -9,7 +9,7 @@ import CreateProjectPage from "@/projects/CreateProjectPage";
 import ProjectLayout from "@/projects/ProjectLayout";
 import ProjectOverview from "@/projects/ProjectOverview";
 import DataPage from "@/projects/DataPage";
-import PipelinePage from "@/projects/PipelinePage";
+import EventConfigPage from "@/projects/EventConfigPage";
 import AnnotationsPage from "@/projects/AnnotationsPage";
 import EvaluationPage from "@/projects/EvaluationPage";
 import ExportPage from "@/projects/ExportPage";
@@ -94,7 +94,7 @@ export default function App() {
                 <Route path="data" element={<DataPage />} />
                 <Route path="patients" element={<PatientsPage />} />
                 <Route path="patients/:patientId" element={<PatientDetailPage />} />
-                <Route path="pipeline" element={<PipelinePage />} />
+                <Route path="pipeline" element={<EventConfigPage />} />
                 <Route path="annotations" element={<AnnotationsPage />} />
                 <Route path="evaluation" element={<EvaluationPage />} />
                 <Route path="export" element={<ExportPage />} />

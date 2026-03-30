@@ -167,6 +167,89 @@ export const EMPTY_FORM: PredictorFormState = {
   exclude: "",
 };
 
+// ── Background Job (used by JobBanner) ─────────────────────────
+
+export interface BackgroundJobStatus {
+  job_id: string;
+  status: string;
+  progress: number;
+  result_summary: Record<string, unknown> | null;
+}
+
+// ── Agentic Pipeline Types ─────────────────────────────────────
+
+export interface EventConfig {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  include_criteria: string;
+  exclude_criteria: string;
+  search_patterns: {
+    keywords?: string[];
+    regex_patterns?: string[];
+    exclusion_patterns?: string[];
+  };
+  llm_provider: string;
+  llm_model: string;
+  llm_api_base: string | null;
+  confidence_threshold: number | null;
+  is_committed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PipelineRun {
+  id: string;
+  project_id: string;
+  event_config_id: string;
+  run_type: string;
+  status: string;
+  config_snapshot: Record<string, unknown>;
+  sample_size: number | null;
+  total_patients: number;
+  processed_patients: number;
+  failed_patients: number;
+  is_cancelled: boolean;
+  result_summary: Record<string, unknown> | null;
+  created_by: string;
+  snapshot_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PipelineRunStats {
+  total: number;
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  no_match: number;
+}
+
+export interface RunMetrics {
+  total_reviewed: number;
+  true_positives: number;
+  false_positives: number;
+  false_negatives: number;
+  true_negatives: number;
+  precision: number | null;
+  recall: number | null;
+  f1_score: number | null;
+  suggested_threshold: number | null;
+}
+
+export interface PatientTaskSummary {
+  id: number;
+  pipeline_run_id: string;
+  patient_id: string;
+  status: string;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
 export interface ProjectStats {
   patients: {
     total: number;
