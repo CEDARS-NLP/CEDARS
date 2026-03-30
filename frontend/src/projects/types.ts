@@ -11,20 +11,6 @@ export interface Predictor {
   created_at: string;
 }
 
-export interface TokenUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-}
-
-export interface TestResult {
-  score: number;
-  label: number;
-  model: string;
-  reasoning: string;
-  token_usage: TokenUsage | null;
-}
-
 export interface SearchQuery {
   id: string;
   project_id: string;
@@ -55,64 +41,6 @@ export interface NlpJob {
   completed_at: string | null;
 }
 
-export interface Metrics {
-  accuracy?: number;
-  precision?: number;
-  recall?: number;
-  f1?: number;
-  tp?: number;
-  fp?: number;
-  tn?: number;
-  fn?: number;
-  total_judged?: number;
-  total_pending?: number;
-  token_usage?: TokenUsage;
-}
-
-export interface EvalSession {
-  id: string;
-  project_id: string;
-  predictor_config_id: string;
-  name: string;
-  status: string;
-  sample_config: { size?: number; keyword_match_ratio?: number; keywords?: string[] };
-  metrics: Metrics;
-  total_notes: number;
-  judged_notes: number;
-  created_at: string;
-  completed_at: string | null;
-}
-
-export interface Judgment {
-  id: string;
-  session_id: string;
-  note_id: string;
-  predicted_label: number | null;
-  predicted_score: number | null;
-  reasoning: string;
-  judgment: string;
-  judged_by: string | null;
-  judged_at: string | null;
-}
-
-export interface JudgmentWithNote extends Judgment {
-  note_text: string;
-  note_text_id: string;
-  patient_id: string;
-}
-
-export interface ValidatedPredictor {
-  id: string;
-  name: string;
-  predictor_config_id: string;
-  session_id: string;
-  config_snapshot: Record<string, unknown>;
-  metrics_snapshot: Metrics;
-  threshold: number;
-  is_active: boolean;
-  created_at: string;
-}
-
 export interface PredictionJobStatus {
   job_id: string;
   status: string; // "pending" | "running" | "completed" | "failed" | "cancelled"
@@ -139,34 +67,6 @@ export interface BulkEstimate {
   estimated_total_tokens: number;
 }
 
-export interface PredictorFormState {
-  name: string;
-  type: "llm" | "pines";
-  provider: string;
-  model: string;
-  apiBase: string;
-  apiKey: string;
-  pinesUrl: string;
-  eventName: string;
-  eventDesc: string;
-  include: string;
-  exclude: string;
-}
-
-export const EMPTY_FORM: PredictorFormState = {
-  name: "",
-  type: "llm",
-  provider: "ollama",
-  model: "llama3",
-  apiBase: "http://localhost:11434",
-  apiKey: "",
-  pinesUrl: "http://localhost:8000",
-  eventName: "",
-  eventDesc: "",
-  include: "",
-  exclude: "",
-};
-
 // ── Background Job (used by JobBanner) ─────────────────────────
 
 export interface BackgroundJobStatus {
@@ -177,27 +77,6 @@ export interface BackgroundJobStatus {
 }
 
 // ── Agentic Pipeline Types ─────────────────────────────────────
-
-export interface EventConfig {
-  id: string;
-  project_id: string;
-  name: string;
-  description: string;
-  include_criteria: string;
-  exclude_criteria: string;
-  search_patterns: {
-    keywords?: string[];
-    regex_patterns?: string[];
-    exclusion_patterns?: string[];
-  };
-  llm_provider: string;
-  llm_model: string;
-  llm_api_base: string | null;
-  confidence_threshold: number | null;
-  is_committed: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface PipelineRun {
   id: string;
@@ -225,18 +104,6 @@ export interface PipelineRunStats {
   completed: number;
   failed: number;
   no_match: number;
-}
-
-export interface RunMetrics {
-  total_reviewed: number;
-  true_positives: number;
-  false_positives: number;
-  false_negatives: number;
-  true_negatives: number;
-  precision: number | null;
-  recall: number | null;
-  f1_score: number | null;
-  suggested_threshold: number | null;
 }
 
 export interface PatientTaskSummary {
@@ -283,44 +150,6 @@ export interface ProjectStats {
     active_count: number;
     failed_count: number;
   };
-}
-
-export function formFromPredictor(pred: Predictor): PredictorFormState {
-  const c = pred.config as Record<string, unknown>;
-  const evt = (c.event_definition || {}) as Record<string, string>;
-  return {
-    name: pred.name,
-    type: pred.predictor_type as "llm" | "pines",
-    provider: (c.provider as string) || "ollama",
-    model: (c.model as string) || "",
-    apiBase: (c.api_base as string) || "",
-    apiKey: (c.api_key as string) || "",
-    pinesUrl: (c.pines_api_url as string) || "http://localhost:8000",
-    eventName: evt.name || "",
-    eventDesc: evt.description || "",
-    include: evt.include_criteria || "",
-    exclude: evt.exclude_criteria || "",
-  };
-}
-
-export function formToPayload(form: PredictorFormState) {
-  const config: Record<string, unknown> =
-    form.type === "llm"
-      ? {
-          provider: form.provider,
-          model: form.model,
-          api_base: form.apiBase || undefined,
-          api_key: form.apiKey || undefined,
-          event_definition: {
-            name: form.eventName,
-            description: form.eventDesc,
-            include_criteria: form.include,
-            exclude_criteria: form.exclude,
-          },
-        }
-      : { pines_api_url: form.pinesUrl };
-
-  return { name: form.name, predictor_type: form.type, config };
 }
 
 // ── Unified Evaluation Session Types ─────────────────────────────
