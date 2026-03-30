@@ -25,7 +25,9 @@ from app.connectors.models import DataSource, Patient, Note  # noqa: E402, F401
 from app.predictors.models import PredictorConfig  # noqa: E402, F401
 from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
 from app.annotations.models import Annotation  # noqa: E402, F401
-from app.evaluation.models import EvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: E402, F401
+from app.evaluation.models import (  # noqa: E402, F401
+    EvaluationSession, SearchMatch, PatientResult
+)
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
 from app.audit.models import AuditEntry  # noqa: E402, F401
 
