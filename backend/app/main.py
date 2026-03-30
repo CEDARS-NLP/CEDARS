@@ -82,8 +82,10 @@ def create_app() -> FastAPI:
     application.include_router(pipeline_router)
 
     from app.jobs.ws import job_progress_ws
+    from app.pipeline.ws import pipeline_progress_ws
 
     application.websocket("/ws/projects/{project_id}/jobs/{job_id}")(job_progress_ws)
+    application.websocket("/ws/projects/{project_id}/pipeline/{run_id}")(pipeline_progress_ws)
 
     @application.get("/api/v1/health")
     async def health_check():
