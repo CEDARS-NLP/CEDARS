@@ -5,7 +5,6 @@ import type { ProjectStats } from "@/projects/types";
 import { Progress } from "@/components/ui/progress";
 import {
   Database,
-  Workflow,
   BarChart3,
   MessageSquareText,
   Download,
@@ -19,11 +18,6 @@ interface DataSource {
   id: string;
   status: string;
   row_count: number | null;
-}
-
-interface Predictor {
-  id: string;
-  is_active: boolean;
 }
 
 interface ValidatedPredictor {
@@ -49,14 +43,8 @@ const stepConfig = [
     icon: Database,
   },
   {
-    label: "Pipeline",
-    description: "Configure NLP + predictor",
-    path: "pipeline",
-    icon: Workflow,
-  },
-  {
     label: "Evaluation",
-    description: "Evaluate predictor accuracy",
+    description: "Configure search, LLM, and evaluate",
     path: "evaluation",
     icon: BarChart3,
   },
@@ -128,11 +116,6 @@ export default function ProjectOverview() {
     queryFn: () => api.get<DataSource[]>(`/projects/${projectId}/data/sources`),
   });
 
-  const { data: predictors } = useQuery<Predictor[]>({
-    queryKey: ["predictors", projectId],
-    queryFn: () => api.get<Predictor[]>(`/projects/${projectId}/predictors`),
-  });
-
   const { data: validated } = useQuery<ValidatedPredictor[]>({
     queryKey: ["validated-predictors", projectId],
     queryFn: () =>
@@ -150,8 +133,6 @@ export default function ProjectOverview() {
   const hasData = completedSources.length > 0;
   const totalNotes = completedSources.reduce((sum, s) => sum + (s.row_count ?? 0), 0);
 
-  const hasActivePredictor = predictors?.some((p) => p.is_active) ?? false;
-
   const activeValidated = validated?.find((v) => v.is_active);
   const hasValidated = !!activeValidated;
 
@@ -168,16 +149,13 @@ export default function ProjectOverview() {
     switch (stepIndex) {
       case 0: // Data
         return hasData ? "done" : "current";
-      case 1: // Pipeline
+      case 1: // Evaluation
         if (!hasData) return "locked";
-        return hasActivePredictor ? "done" : "current";
-      case 2: // Evaluation
-        if (!hasActivePredictor) return "locked";
         return hasValidated ? "done" : "current";
-      case 3: // Annotations
+      case 2: // Annotations
         if (!hasValidated) return "locked";
         return hasAnnotations && (annotationStats?.is_complete ?? false) ? "done" : "current";
-      case 4: // Export
+      case 3: // Export
         if (!hasAnnotations) return "locked";
         return "current";
       default:
@@ -192,18 +170,15 @@ export default function ProjectOverview() {
         return hasData ? `${totalNotes} notes uploaded` : "Upload clinical notes to get started";
       case 1:
         if (state === "locked") return "Waiting for data upload";
-        return hasActivePredictor ? "Active predictor configured" : "Configure a predictor";
-      case 2:
-        if (state === "locked") return "Waiting for pipeline setup";
         if (hasValidated && activeValidated?.metrics_snapshot?.f1 !== undefined)
           return `Validated, F1: ${(activeValidated.metrics_snapshot.f1 * 100).toFixed(1)}%`;
-        return "Evaluate predictor accuracy";
-      case 3:
+        return "Configure search queries and evaluate LLM";
+      case 2:
         if (state === "locked") return "Waiting for evaluation";
         if (hasAnnotations)
           return `${reviewedCount + (annotationStats?.skipped ?? 0)}/${totalAnnotations} reviewed`;
         return "No annotations yet";
-      case 4:
+      case 3:
         if (state === "locked") return "Waiting for annotations";
         return "Download results";
       default:
