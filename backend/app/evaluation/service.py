@@ -56,7 +56,7 @@ async def create_session(
     blocking = result.scalars().first()
     if blocking:
         raise ValueError(
-            f"Cannot create session: project already has a {blocking.status.value} session"
+            f"Cannot create session: project already has a {getattr(blocking.status, 'value', blocking.status)} session"
         )
 
     # Handle cloning
@@ -154,7 +154,7 @@ async def discard_session(
 
     if session.status not in (SessionStatus.DRAFT, SessionStatus.REVIEWING):
         raise ValueError(
-            f"Cannot discard session in {session.status.value} status; "
+            f"Cannot discard session in {getattr(session.status, 'value', session.status)} status; "
             "only DRAFT or REVIEWING sessions can be discarded"
         )
 
@@ -799,7 +799,7 @@ async def commit_session(
 
     if session.status != SessionStatus.REVIEWING:
         raise ValueError(
-            f"Cannot commit session in {session.status.value} status; "
+            f"Cannot commit session in {getattr(session.status, 'value', session.status)} status; "
             "only REVIEWING sessions can be committed"
         )
 

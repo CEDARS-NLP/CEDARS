@@ -20,10 +20,10 @@ interface DataSource {
   row_count: number | null;
 }
 
-interface ValidatedPredictor {
+interface EvalSessionSummary {
   id: string;
-  is_active: boolean;
-  metrics_snapshot: { f1?: number };
+  status: string;
+  metrics: { f1?: number } | null;
 }
 
 interface AnnotationStats {
@@ -116,10 +116,10 @@ export default function ProjectOverview() {
     queryFn: () => api.get<DataSource[]>(`/projects/${projectId}/data/sources`),
   });
 
-  const { data: validated } = useQuery<ValidatedPredictor[]>({
-    queryKey: ["validated-predictors", projectId],
+  const { data: sessions } = useQuery<EvalSessionSummary[]>({
+    queryKey: ["eval-sessions", projectId],
     queryFn: () =>
-      api.get<ValidatedPredictor[]>(`/projects/${projectId}/evaluation/validated`),
+      api.get<EvalSessionSummary[]>(`/projects/${projectId}/evaluation/sessions`),
   });
 
   const { data: annotationStats } = useQuery<AnnotationStats>({
@@ -133,8 +133,8 @@ export default function ProjectOverview() {
   const hasData = completedSources.length > 0;
   const totalNotes = completedSources.reduce((sum, s) => sum + (s.row_count ?? 0), 0);
 
-  const activeValidated = validated?.find((v) => v.is_active);
-  const hasValidated = !!activeValidated;
+  const committedSession = sessions?.find((s) => s.status === "committed" || s.status === "completed");
+  const hasCommitted = !!committedSession;
 
   const hasAnnotations = (annotationStats?.total ?? 0) > 0;
   const reviewedCount = annotationStats?.reviewed ?? 0;
@@ -151,9 +151,9 @@ export default function ProjectOverview() {
         return hasData ? "done" : "current";
       case 1: // Evaluation
         if (!hasData) return "locked";
-        return hasValidated ? "done" : "current";
+        return hasCommitted ? "done" : "current";
       case 2: // Annotations
-        if (!hasValidated) return "locked";
+        if (!hasCommitted) return "locked";
         return hasAnnotations && (annotationStats?.is_complete ?? false) ? "done" : "current";
       case 3: // Export
         if (!hasAnnotations) return "locked";
@@ -170,8 +170,8 @@ export default function ProjectOverview() {
         return hasData ? `${totalNotes} notes uploaded` : "Upload clinical notes to get started";
       case 1:
         if (state === "locked") return "Waiting for data upload";
-        if (hasValidated && activeValidated?.metrics_snapshot?.f1 !== undefined)
-          return `Validated, F1: ${(activeValidated.metrics_snapshot.f1 * 100).toFixed(1)}%`;
+        if (hasCommitted && committedSession?.metrics?.f1 !== undefined)
+          return `Committed, F1: ${(committedSession.metrics.f1 * 100).toFixed(1)}%`;
         return "Configure search queries and evaluate LLM";
       case 2:
         if (state === "locked") return "Waiting for evaluation";

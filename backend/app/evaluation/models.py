@@ -10,7 +10,7 @@ import enum
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Index, JSON, Text
+from sqlalchemy import Column, DateTime, Index, JSON, String, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -50,8 +50,11 @@ class EvaluationSession(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
 
-    # Status
-    status: SessionStatus = Field(default=SessionStatus.DRAFT)
+    # Status — stored as VARCHAR to avoid PG enum conflicts with old migrations
+    status: SessionStatus = Field(
+        default=SessionStatus.DRAFT,
+        sa_column=Column(String(20), nullable=False, default=SessionStatus.DRAFT.value),
+    )
 
     # Search queries
     search_queries: list = Field(default=[], sa_column=Column(JSON, default=[]))
@@ -147,8 +150,11 @@ class PatientResult(SQLModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
 
-    # Execution
-    status: PatientResultStatus = Field(default=PatientResultStatus.QUEUED)
+    # Execution — stored as VARCHAR to avoid PG enum conflicts
+    status: PatientResultStatus = Field(
+        default=PatientResultStatus.QUEUED,
+        sa_column=Column(String(20), nullable=False, default=PatientResultStatus.QUEUED.value),
+    )
     error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     started_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
