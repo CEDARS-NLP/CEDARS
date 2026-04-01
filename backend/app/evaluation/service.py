@@ -1273,3 +1273,96 @@ async def rerun_pipeline(
 
     run = await dispatch_full_pipeline_run(db, session)
     return {"run_id": run.id, "total_patients": run.total_patients}
+
+
+async def get_result_note_context(
+    db: AsyncSession,
+    session_id: str,
+    result_id: int,
+) -> dict | None:
+    """Get full note context for a patient result, including search matches."""
+    pr = (
+        await db.execute(
+            select(PatientResult).where(
+                PatientResult.id == result_id,
+                PatientResult.session_id == session_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not pr:
+        return None
+
+    patient = (
+        await db.execute(select(Patient).where(Patient.id == pr.patient_id))
+    ).scalar_one_or_none()
+
+    eval_session = await db.get(EvaluationSession, session_id)
+    search_keywords = []
+    if eval_session and eval_session.search_queries:
+        for q in eval_session.search_queries:
+            if isinstance(q, dict) and q.get("type") != "exclude":
+                search_keywords.append(q["query"])
+
+    matches_stmt = (
+        select(SearchMatch)
+        .where(
+            SearchMatch.session_id == session_id,
+            SearchMatch.patient_id == pr.patient_id,
+        )
+    )
+    matches_result = await db.execute(matches_stmt)
+    search_matches = matches_result.scalars().all()
+
+    matches_by_note: dict[str, list] = {}
+    for m in search_matches:
+        matches_by_note.setdefault(m.note_id, []).append(m)
+
+    evidence_note_ids = set()
+    if pr.finding_evidence:
+        for ev in pr.finding_evidence:
+            if isinstance(ev, dict) and "note_id" in ev:
+                evidence_note_ids.add(ev["note_id"])
+
+    note_ids = list(matches_by_note.keys())
+    if not note_ids:
+        return {
+            "patient_id": pr.patient_id,
+            "patient_id_ext": patient.patient_id_ext if patient else None,
+            "notes": [],
+            "search_keywords": search_keywords,
+        }
+
+    notes_stmt = (
+        select(Note)
+        .where(Note.id.in_(note_ids))
+        .order_by(Note.note_date)
+    )
+    notes_result = await db.execute(notes_stmt)
+    notes = notes_result.scalars().all()
+
+    note_contexts = []
+    for note in notes:
+        note_matches = matches_by_note.get(note.id, [])
+        all_tokens = []
+        all_positions = []
+        for m in note_matches:
+            all_tokens.extend(m.matched_tokens or [])
+            all_positions.extend(m.match_positions or [])
+
+        note_contexts.append({
+            "note_id": note.id,
+            "text_id": note.text_id,
+            "text": note.text,
+            "note_date": note.note_date.isoformat() if note.note_date else None,
+            "note_tags": note.metadata_ or {},
+            "matched_tokens": list(set(all_tokens)),
+            "match_positions": all_positions,
+            "is_evidence": note.id in evidence_note_ids,
+        })
+
+    return {
+        "patient_id": pr.patient_id,
+        "patient_id_ext": patient.patient_id_ext if patient else None,
+        "notes": note_contexts,
+        "search_keywords": search_keywords,
+    }

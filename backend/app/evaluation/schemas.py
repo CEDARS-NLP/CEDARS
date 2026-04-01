@@ -207,3 +207,21 @@ class PipelineStatsResponse(BaseModel):
     failed: int
     no_match: int
     is_cancelled: bool
+
+
+class ResultNoteContext(BaseModel):
+    note_id: str
+    text_id: str
+    text: str
+    note_date: str | None
+    note_tags: dict
+    matched_tokens: list[str]
+    match_positions: list[dict]
+    is_evidence: bool
+
+
+class ResultNotesResponse(BaseModel):
+    patient_id: str
+    patient_id_ext: str | None
+    notes: list[ResultNoteContext]
+    search_keywords: list[str]

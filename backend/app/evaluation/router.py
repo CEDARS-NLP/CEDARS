@@ -16,6 +16,7 @@ from app.evaluation.schemas import (
     NextResultResponse,
     PipelineStatsResponse,
     QueryMatchesResponse,
+    ResultNotesResponse,
     SessionListResponse,
     SessionResponse,
     SubmitJudgmentRequest,
@@ -32,6 +33,7 @@ from app.evaluation.service import (
     get_funnel_stats,
     get_next_unreviewed_result,
     get_query_matches,
+    get_result_note_context,
     get_session as get_eval_session,
     list_patient_results,
     list_sessions,
@@ -348,6 +350,22 @@ async def list_results_endpoint(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/sessions/{session_id}/results/{result_id}/notes", response_model=ResultNotesResponse)
+async def result_notes_endpoint(
+    project_id: str,
+    session_id: str,
+    result_id: int,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get full note context for a patient result (for clinical review)."""
+    await _get_session_or_404(db, project_id, session_id)
+    context = await get_result_note_context(db, session_id, result_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    return context
 
 
 @router.post("/sessions/{session_id}/results/{result_id}/judge")
