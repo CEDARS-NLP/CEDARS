@@ -170,9 +170,6 @@ export interface UnifiedSession {
   event_description: string | null;
   include_criteria: string | null;
   exclude_criteria: string | null;
-  llm_provider: string | null;
-  llm_model: string | null;
-  llm_api_base: string | null;
   sample_size: number;
   metrics: UnifiedMetrics | null;
   committed_config: Record<string, unknown> | null;
@@ -206,6 +203,11 @@ export interface UnifiedMetrics {
   fn: number;
   total_reviewed: number;
   total_pending: number;
+  llm_status?: "running" | "completed" | "failed";
+  llm_total?: number;
+  llm_completed?: number;
+  llm_failed?: number;
+  llm_no_match?: number;
 }
 
 export interface FunnelStats {
@@ -301,4 +303,40 @@ export interface CommitResult {
   pipeline_run_id: string;
   total_patients: number;
   estimated_cost: number | null;
+}
+
+export interface NextEvalResult {
+  id: number;
+  patient_id: string;
+  status: string;
+  finding_label: string | null;
+  finding_reasoning: string | null;
+  finding_evidence: { note_id: string; text: string; note_date: string }[] | null;
+  event_date: string | null;
+  predicted_score: number | null;
+  review_judgment: string | null;
+  reviewer_date_override: string | null;
+  notes_searched: number;
+  notes_matched: number;
+  position: number;
+  total_unreviewed: number;
+  total_results: number;
+}
+
+export interface ResultNoteContext {
+  note_id: string;
+  text_id: string;
+  text: string;
+  note_date: string | null;
+  note_tags: Record<string, string>;
+  matched_tokens: string[];
+  match_positions: MatchPosition[];
+  is_evidence: boolean;
+}
+
+export interface ResultNotesContext {
+  patient_id: string;
+  patient_id_ext: string | null;
+  notes: ResultNoteContext[];
+  search_keywords: string[];
 }
