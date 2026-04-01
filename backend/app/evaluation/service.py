@@ -20,7 +20,21 @@ from app.evaluation.models import (
 from app.nlp.engine import parse_query, process_note
 from app.pipeline.classifier import classify_patient
 from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
-from app.pipeline.orchestrator import _enqueue_pipeline_run
+
+
+async def _enqueue_eval_pipeline_run(run_id: str) -> None:
+    """Enqueue the eval-specific pipeline job (processes PatientResult rows)."""
+    try:
+        from arq import create_pool
+
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+        await redis.enqueue_job("run_eval_pipeline_job", run_id)
+        await redis.aclose()
+        logger.info("Enqueued eval pipeline run %s to ARQ", run_id)
+    except Exception:
+        logger.exception("Failed to enqueue eval pipeline run %s", run_id)
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +79,6 @@ async def create_session(
     event_description = None
     include_criteria = None
     exclude_criteria = None
-    llm_provider = None
-    llm_model = None
-    llm_api_base = None
 
     if cloned_from_id:
         clone_source = (
@@ -81,9 +92,6 @@ async def create_session(
             event_description = clone_source.event_description
             include_criteria = clone_source.include_criteria
             exclude_criteria = clone_source.exclude_criteria
-            llm_provider = clone_source.llm_provider
-            llm_model = clone_source.llm_model
-            llm_api_base = clone_source.llm_api_base
 
     # Sample patients
     patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
@@ -105,9 +113,6 @@ async def create_session(
         event_description=event_description,
         include_criteria=include_criteria,
         exclude_criteria=exclude_criteria,
-        llm_provider=llm_provider,
-        llm_model=llm_model,
-        llm_api_base=llm_api_base,
     )
     db.add(session)
     await db.flush()
@@ -205,8 +210,7 @@ async def update_llm_config(
     ).scalar_one()
 
     allowed_fields = {
-        "event_name", "event_description", "include_criteria",
-        "exclude_criteria", "llm_provider", "llm_model", "llm_api_base",
+        "event_name", "event_description", "include_criteria", "exclude_criteria",
     }
     for key, value in kwargs.items():
         if key in allowed_fields:
@@ -468,21 +472,32 @@ async def get_query_matches(
 async def run_llm_on_sample(
     db: AsyncSession,
     session_id: str,
+    project_id: str,
 ) -> dict:
-    """Run LLM classification on all matched patients in the evaluation sample.
+    """Enqueue background LLM classification on matched patients in the sample.
 
-    Clears previous sample PatientResult rows (pipeline_run_id IS NULL),
-    classifies each matched patient, creates NO_MATCH results for unmatched
-    sample patients, and sets session status to REVIEWING.
-
-    Returns:
-        Dict with patients_classified, patients_no_match, patients_failed, token_usage.
+    Validates config, clears previous sample results, marks session as
+    classifying, and enqueues an ARQ job. Returns immediately with status.
     """
     session = (
         await db.execute(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
         )
     ).scalar_one()
+
+    # Check if already running
+    metrics = session.metrics or {}
+    if metrics.get("llm_status") == "running":
+        raise ValueError("LLM classification is already running for this session.")
+
+    # Validate LLM config
+    from app.projects.models import Project
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
+
+    if not project.llm_provider or not project.llm_model:
+        raise ValueError(
+            "Project LLM configuration is required. Set the LLM provider and model in project settings."
+        )
 
     # Clear previous sample results (pipeline_run_id IS NULL)
     await db.execute(
@@ -491,6 +506,83 @@ async def run_llm_on_sample(
             PatientResult.pipeline_run_id.is_(None),
         )
     )
+
+    # Count matched patients for progress tracking
+    matched_stmt = select(func.count(func.distinct(SearchMatch.patient_id))).where(
+        SearchMatch.session_id == session_id,
+        SearchMatch.is_negated.is_(False),
+    )
+    matched_count = (await db.execute(matched_stmt)).scalar() or 0
+
+    # Mark session as classifying
+    session.metrics = {
+        **(session.metrics or {}),
+        "llm_status": "running",
+        "llm_total": matched_count,
+        "llm_completed": 0,
+        "llm_failed": 0,
+    }
+    session.updated_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+
+    # Enqueue background job
+    try:
+        from arq import create_pool
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+        await redis.enqueue_job("run_sample_llm_job", session_id, project_id)
+        await redis.aclose()
+    except Exception:
+        logger.exception("Failed to enqueue sample LLM job for session %s", session_id)
+        # Roll back the running status
+        session.metrics = {
+            **(session.metrics or {}),
+            "llm_status": "failed",
+        }
+        db.add(session)
+        await db.commit()
+        raise ValueError("Failed to enqueue LLM classification job. Check worker status.")
+
+    return {
+        "status": "started",
+        "matched_patients": matched_count,
+    }
+
+
+async def execute_sample_llm(
+    session_id: str,
+    project_id: str,
+    db_session: AsyncSession | None = None,
+) -> dict:
+    """Background job: classify all matched patients in the evaluation sample.
+
+    Uses its own database session unless db_session is provided (for testing).
+    Updates session metrics with progress. Sets session status to REVIEWING on completion.
+    """
+    from app.projects.models import Project
+
+    if db_session is not None:
+        return await _execute_sample_llm_impl(db_session, session_id, project_id)
+
+    from app.common.database import async_session
+    async with async_session() as db:
+        return await _execute_sample_llm_impl(db, session_id, project_id)
+
+
+async def _execute_sample_llm_impl(
+    db: AsyncSession,
+    session_id: str,
+    project_id: str,
+) -> dict:
+    from app.projects.models import Project
+
+    session = (
+        await db.execute(
+            select(EvaluationSession).where(EvaluationSession.id == session_id)
+        )
+    ).scalar_one()
 
     sample_patient_ids = set(session.sample_patient_ids or [])
 
@@ -502,15 +594,17 @@ async def run_llm_on_sample(
     result = await db.execute(matched_stmt)
     matched_patient_ids = {r[0] for r in result.all()}
 
-    # Build config object for classify_patient
+    # Read LLM config from project
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
+
     config = SimpleNamespace(
         name=session.event_name or "",
         description=session.event_description or "",
         include_criteria=session.include_criteria or "",
         exclude_criteria=session.exclude_criteria or "",
-        llm_provider=session.llm_provider or "",
-        llm_model=session.llm_model or "",
-        llm_api_base=session.llm_api_base,
+        llm_provider=project.llm_provider,
+        llm_model=project.llm_model,
+        llm_api_base=project.llm_api_base,
     )
 
     patients_classified = 0
@@ -518,7 +612,6 @@ async def run_llm_on_sample(
     total_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     for patient_id in matched_patient_ids:
-        # Get matched notes for this patient, sorted by note_date
         notes_stmt = (
             select(Note)
             .where(
@@ -582,6 +675,18 @@ async def run_llm_on_sample(
             db.add(pr)
             patients_failed += 1
 
+        # Update progress in session metrics
+        session.metrics = {
+            **(session.metrics or {}),
+            "llm_status": "running",
+            "llm_total": len(matched_patient_ids),
+            "llm_completed": patients_classified,
+            "llm_failed": patients_failed,
+        }
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
+
     # Create NO_MATCH results for unmatched sample patients
     unmatched_ids = sample_patient_ids - matched_patient_ids
     for patient_id in unmatched_ids:
@@ -593,8 +698,17 @@ async def run_llm_on_sample(
         )
         db.add(pr)
 
-    # Update session status
+    # Finalize session
     session.status = SessionStatus.REVIEWING
+    session.metrics = {
+        **(session.metrics or {}),
+        "llm_status": "completed",
+        "llm_total": len(matched_patient_ids),
+        "llm_completed": patients_classified,
+        "llm_failed": patients_failed,
+        "llm_no_match": len(unmatched_ids),
+        "token_usage": total_token_usage,
+    }
     session.updated_at = datetime.now(UTC)
     db.add(session)
     await db.commit()
@@ -695,6 +809,79 @@ async def submit_judgment(
     await db.commit()
     await db.refresh(pr)
     return pr
+
+
+async def get_next_unreviewed_result(
+    db: AsyncSession,
+    session_id: str,
+    after_id: int | None = None,
+) -> dict | None:
+    """Get the next unreviewed patient result for sequential review."""
+    total_stmt = select(func.count()).where(
+        PatientResult.session_id == session_id,
+        PatientResult.status == PatientResultStatus.COMPLETED,
+    )
+    total_results = (await db.execute(total_stmt)).scalar() or 0
+
+    unreviewed_stmt = select(func.count()).where(
+        PatientResult.session_id == session_id,
+        PatientResult.status == PatientResultStatus.COMPLETED,
+        PatientResult.review_judgment.is_(None),
+    )
+    total_unreviewed = (await db.execute(unreviewed_stmt)).scalar() or 0
+
+    if total_unreviewed == 0:
+        return None
+
+    next_stmt = (
+        select(PatientResult)
+        .where(
+            PatientResult.session_id == session_id,
+            PatientResult.status == PatientResultStatus.COMPLETED,
+            PatientResult.review_judgment.is_(None),
+        )
+        .order_by(PatientResult.predicted_score.desc().nullslast(), PatientResult.id)
+    )
+    if after_id is not None:
+        next_stmt = next_stmt.where(PatientResult.id > after_id)
+    next_stmt = next_stmt.limit(1)
+    result = (await db.execute(next_stmt)).scalar_one_or_none()
+
+    if result is None and after_id is not None:
+        next_stmt = (
+            select(PatientResult)
+            .where(
+                PatientResult.session_id == session_id,
+                PatientResult.status == PatientResultStatus.COMPLETED,
+                PatientResult.review_judgment.is_(None),
+            )
+            .order_by(PatientResult.predicted_score.desc().nullslast(), PatientResult.id)
+            .limit(1)
+        )
+        result = (await db.execute(next_stmt)).scalar_one_or_none()
+
+    if result is None:
+        return None
+
+    position = total_results - total_unreviewed + 1
+
+    return {
+        "id": result.id,
+        "patient_id": result.patient_id,
+        "status": result.status.value if hasattr(result.status, "value") else result.status,
+        "finding_label": result.finding_label,
+        "finding_reasoning": result.finding_reasoning,
+        "finding_evidence": result.finding_evidence,
+        "event_date": result.event_date,
+        "predicted_score": result.predicted_score,
+        "review_judgment": result.review_judgment,
+        "reviewer_date_override": result.reviewer_date_override,
+        "notes_searched": result.notes_searched,
+        "notes_matched": result.notes_matched,
+        "position": position,
+        "total_unreviewed": total_unreviewed,
+        "total_results": total_results,
+    }
 
 
 # ── Metrics ──────────────────────────────────────────────────────
@@ -803,15 +990,26 @@ async def commit_session(
             "only REVIEWING sessions can be committed"
         )
 
+    # Read LLM config from project
+    from app.projects.models import Project
+    project = (
+        await db.execute(select(Project).where(Project.id == session.project_id))
+    ).scalar_one()
+
+    if not project.llm_provider or not project.llm_model:
+        raise ValueError(
+            "Project LLM configuration is required. Set the LLM provider and model in project settings before committing."
+        )
+
     committed_config = {
         "search_queries": session.search_queries,
         "event_name": session.event_name,
         "event_description": session.event_description,
         "include_criteria": session.include_criteria,
         "exclude_criteria": session.exclude_criteria,
-        "llm_provider": session.llm_provider,
-        "llm_model": session.llm_model,
-        "llm_api_base": session.llm_api_base,
+        "llm_provider": project.llm_provider,
+        "llm_model": project.llm_model,
+        "llm_api_base": project.llm_api_base,
         "sample_size": session.sample_size,
         "metrics": session.metrics,
     }
@@ -840,6 +1038,12 @@ async def _get_or_create_event_config_for_session(
     This bridges the new evaluation session model with the existing pipeline
     infrastructure which requires an EventConfig.
     """
+    # Read LLM config from project
+    from app.projects.models import Project
+    project = (
+        await db.execute(select(Project).where(Project.id == eval_session.project_id))
+    ).scalar_one()
+
     ec = EventConfig(
         project_id=eval_session.project_id,
         name=eval_session.event_name or "Evaluation Session",
@@ -847,9 +1051,9 @@ async def _get_or_create_event_config_for_session(
         include_criteria=eval_session.include_criteria or "",
         exclude_criteria=eval_session.exclude_criteria or "",
         search_patterns={"queries": eval_session.search_queries or []},
-        llm_provider=eval_session.llm_provider or "",
-        llm_model=eval_session.llm_model or "",
-        llm_api_base=eval_session.llm_api_base,
+        llm_provider=project.llm_provider or "",
+        llm_model=project.llm_model or "",
+        llm_api_base=project.llm_api_base,
         is_committed=True,
     )
     db.add(ec)
@@ -932,7 +1136,7 @@ async def dispatch_full_pipeline_run(
 
     await db.commit()
     await db.refresh(run)
-    await _enqueue_pipeline_run(run.id)
+    await _enqueue_eval_pipeline_run(run.id)
     return run
 
 
@@ -967,7 +1171,7 @@ async def get_pipeline_stats(db: AsyncSession, session_id: str) -> dict:
         .group_by(PatientResult.status)
     )
     result = await db.execute(stmt)
-    counts = {s.value: c for s, c in result.all()}
+    counts = {(s.value if hasattr(s, "value") else s): c for s, c in result.all()}
 
     return {
         "total": sum(counts.values()),
@@ -1044,5 +1248,28 @@ async def retry_failed_pipeline(db: AsyncSession, session_id: str, project_id: s
         db.add(pr)
 
     await db.commit()
-    await _enqueue_pipeline_run(run_id)
+    await _enqueue_eval_pipeline_run(run_id)
     return {"requeued": len(failed), "run_id": run_id}
+
+
+async def rerun_pipeline(
+    db: AsyncSession, session_id: str, project_id: str, user_id: str
+) -> dict:
+    """Re-run the pipeline for a committed session after cancel or completion.
+
+    Creates a fresh PipelineRun. Copies already-completed PatientResults,
+    re-queues the rest.
+    """
+    session = await db.get(EvaluationSession, session_id)
+    if not session or session.project_id != project_id:
+        raise ValueError("Session not found")
+    if session.status not in (SessionStatus.COMMITTED, SessionStatus.COMPLETED):
+        raise ValueError("Session must be in committed or completed state to re-run")
+
+    # Reset session to COMMITTED if it was COMPLETED
+    if session.status == SessionStatus.COMPLETED:
+        session.status = SessionStatus.COMMITTED
+        db.add(session)
+
+    run = await dispatch_full_pipeline_run(db, session)
+    return {"run_id": run.id, "total_patients": run.total_patients}

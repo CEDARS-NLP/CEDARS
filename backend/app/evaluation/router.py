@@ -10,9 +10,10 @@ from app.evaluation.schemas import (
     CommitRequest,
     CommitResponse,
     CreateSessionRequest,
+    EventConfigRequest,
     FunnelResponse,
-    LlmConfigRequest,
     MetricsResponse,
+    NextResultResponse,
     PipelineStatsResponse,
     QueryMatchesResponse,
     SessionListResponse,
@@ -29,6 +30,7 @@ from app.evaluation.service import (
     discard_session,
     execute_search_queries,
     get_funnel_stats,
+    get_next_unreviewed_result,
     get_query_matches,
     get_session as get_eval_session,
     list_patient_results,
@@ -173,16 +175,23 @@ async def suggest_queries_endpoint(
     await _get_session_or_404(db, project_id, session_id)
 
     from app.evaluation.query_suggest import suggest_queries
+    from app.projects.service import get_project
+
+    project = await get_project(db, project_id)
+    if not project or not project.llm_provider or not project.llm_model:
+        raise HTTPException(status_code=400, detail="Project LLM configuration is required. Set it in project settings.")
 
     try:
         suggestions = await suggest_queries(
             description=body.description,
-            llm_provider=body.llm_provider,
-            llm_model=body.llm_model,
-            llm_api_base=body.llm_api_base,
+            llm_provider=project.llm_provider,
+            llm_model=project.llm_model,
+            llm_api_base=project.llm_api_base,
         )
         return SuggestQueriesResponse(suggestions=suggestions)
     except ValueError as e:
+        import logging
+        logging.getLogger(__name__).error("Query suggestion failed: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -264,15 +273,15 @@ async def get_query_matches_endpoint(
 # ── LLM configuration & run ─────────────────────────────────────
 
 
-@router.put("/sessions/{session_id}/llm-config", response_model=SessionResponse)
-async def update_llm_config_endpoint(
+@router.put("/sessions/{session_id}/event-config", response_model=SessionResponse)
+async def update_event_config_endpoint(
     project_id: str,
     session_id: str,
-    body: LlmConfigRequest,
+    body: EventConfigRequest,
     db: AsyncSession = Depends(get_session),
     _user: User = Depends(require_project_role("admin")),
 ):
-    """Update LLM configuration on a session."""
+    """Update event definition on a session."""
     await _get_session_or_404(db, project_id, session_id)
     return await update_llm_config(
         db,
@@ -281,25 +290,41 @@ async def update_llm_config_endpoint(
         event_description=body.event_description,
         include_criteria=body.include_criteria,
         exclude_criteria=body.exclude_criteria,
-        llm_provider=body.llm_provider,
-        llm_model=body.llm_model,
-        llm_api_base=body.llm_api_base,
     )
 
 
-@router.post("/sessions/{session_id}/run-llm")
+@router.post("/sessions/{session_id}/run-llm", status_code=status.HTTP_202_ACCEPTED)
 async def run_llm_endpoint(
     project_id: str,
     session_id: str,
     db: AsyncSession = Depends(get_session),
     _user: User = Depends(require_project_role("admin")),
 ):
-    """Run LLM classification on matched patients in the sample."""
+    """Enqueue LLM classification on matched patients in the sample."""
     await _get_session_or_404(db, project_id, session_id)
-    return await run_llm_on_sample(db, session_id)
+    try:
+        return await run_llm_on_sample(db, session_id, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Results & review ─────────────────────────────────────────────
+
+
+@router.get("/sessions/{session_id}/results/next", response_model=NextResultResponse)
+async def next_unreviewed_endpoint(
+    project_id: str,
+    session_id: str,
+    after_id: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "annotator")),
+):
+    """Get the next unreviewed patient result for sequential review."""
+    await _get_session_or_404(db, project_id, session_id)
+    result = await get_next_unreviewed_result(db, session_id, after_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No unreviewed results")
+    return result
 
 
 @router.get("/sessions/{session_id}/results")
@@ -459,5 +484,21 @@ async def retry_failed_endpoint(
     from app.evaluation.service import retry_failed_pipeline
     try:
         return await retry_failed_pipeline(db, session_id, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/pipeline/rerun")
+async def rerun_pipeline_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    """Re-run the pipeline for a committed session (after cancel/completion)."""
+    await _get_session_or_404(db, project_id, session_id)
+    from app.evaluation.service import rerun_pipeline
+    try:
+        return await rerun_pipeline(db, session_id, project_id, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

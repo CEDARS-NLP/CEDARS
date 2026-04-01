@@ -22,14 +22,11 @@ class UpdateQueriesRequest(BaseModel):
     search_queries: list[SearchQueryItem]
 
 
-class LlmConfigRequest(BaseModel):
+class EventConfigRequest(BaseModel):
     event_name: str = Field(max_length=200)
     event_description: str = Field(max_length=5000)
     include_criteria: str = Field(max_length=2000)
     exclude_criteria: str = Field(default="", max_length=2000)
-    llm_provider: str = Field(max_length=50)
-    llm_model: str = Field(max_length=200)
-    llm_api_base: str | None = Field(default=None, max_length=500)
 
 
 class SessionResponse(BaseModel):
@@ -41,9 +38,6 @@ class SessionResponse(BaseModel):
     event_description: str | None
     include_criteria: str | None
     exclude_criteria: str | None
-    llm_provider: str | None
-    llm_model: str | None
-    llm_api_base: str | None
     sample_size: int
     metrics: dict | None
     committed_config: dict | None
@@ -122,9 +116,6 @@ class QueryMatchesResponse(BaseModel):
 
 class SuggestQueriesRequest(BaseModel):
     description: str = Field(max_length=5000)
-    llm_provider: str = Field(max_length=50)
-    llm_model: str = Field(max_length=200)
-    llm_api_base: str | None = Field(default=None, max_length=500)
 
 
 class SuggestedQuery(BaseModel):
@@ -153,6 +144,24 @@ class PatientResultResponse(BaseModel):
     reviewed_at: datetime | None
     notes_searched: int
     notes_matched: int
+
+
+class NextResultResponse(BaseModel):
+    id: int
+    patient_id: str
+    status: str
+    finding_label: str | None
+    finding_reasoning: str | None
+    finding_evidence: list[dict] | None
+    event_date: str | None
+    predicted_score: float | None
+    review_judgment: str | None
+    reviewer_date_override: str | None
+    notes_searched: int
+    notes_matched: int
+    position: int
+    total_unreviewed: int
+    total_results: int
 
 
 class SubmitJudgmentRequest(BaseModel):
