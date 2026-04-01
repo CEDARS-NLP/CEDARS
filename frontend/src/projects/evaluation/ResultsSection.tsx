@@ -12,6 +12,8 @@ interface ResultsSectionProps {
   sessionId: string;
   sessionStatus: string;
   onRefresh: () => void;
+  reviewMode: boolean;
+  onToggleReviewMode: () => void;
 }
 
 const LABEL_COLORS: Record<string, string> = {
@@ -152,7 +154,7 @@ function PatientCard({
   );
 }
 
-export default function ResultsSection({ projectId, sessionId, sessionStatus, onRefresh }: ResultsSectionProps) {
+export default function ResultsSection({ projectId, sessionId, sessionStatus, onRefresh, reviewMode, onToggleReviewMode }: ResultsSectionProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<string>("all");
   const [page, setPage] = useState(1);
@@ -184,22 +186,35 @@ export default function ResultsSection({ projectId, sessionId, sessionStatus, on
     <div className="space-y-4 rounded-lg border p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Patient Results</h2>
-        <div className="flex gap-1 rounded-md bg-muted p-0.5">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => { setActiveTab(tab); setPage(1); }}
-              className={`rounded-sm px-3 py-1 text-xs capitalize ${
-                activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-              }`}
+        <div className="flex items-center gap-3">
+          {sessionStatus === "reviewing" && (
+            <Button
+              variant={reviewMode ? "default" : "outline"}
+              size="sm"
+              onClick={onToggleReviewMode}
             >
-              {tab}
-            </button>
-          ))}
+              {reviewMode ? "Show List" : "Start Review"}
+            </Button>
+          )}
+          {!reviewMode && (
+            <div className="flex gap-1 rounded-md bg-muted p-0.5">
+              {TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => { setActiveTab(tab); setPage(1); }}
+                  className={`rounded-sm px-3 py-1 text-xs capitalize ${
+                    activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {isLoading ? (
+      {!reviewMode && (isLoading ? (
         <p className="text-sm text-muted-foreground">Loading results...</p>
       ) : !data || data.results.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -233,7 +248,7 @@ export default function ResultsSection({ projectId, sessionId, sessionStatus, on
             </div>
           )}
         </>
-      )}
+      ))}
     </div>
   );
 }

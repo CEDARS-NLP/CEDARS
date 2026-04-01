@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -5,10 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import type { UnifiedSession, FunnelStats } from "@/projects/types";
 import FunnelBar from "./FunnelBar";
 import SearchQueriesSection from "./SearchQueriesSection";
-import LlmConfigSection from "./LlmConfigSection";
+import EventConfigSection from "./EventConfigSection";
 import ResultsSection from "./ResultsSection";
 import MetricsPanel from "./MetricsPanel";
 import CommitSection from "./CommitSection";
+import PipelineSection from "./PipelineSection";
+import EvalReviewPanel from "./EvalReviewPanel";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-yellow-500/20 text-yellow-400",
@@ -21,6 +24,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function EvaluationSessionPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const qc = useQueryClient();
+  const [reviewMode, setReviewMode] = useState(false);
 
   const { data: session, isLoading: sessionLoading } = useQuery({
     queryKey: ["eval-session", projectId, sessionId],
@@ -42,6 +46,7 @@ export default function EvaluationSessionPage() {
   function refresh() {
     qc.invalidateQueries({ queryKey: ["eval-session", projectId, sessionId] });
     qc.invalidateQueries({ queryKey: ["funnel", projectId, sessionId] });
+    qc.invalidateQueries({ queryKey: ["eval-sessions", projectId] });
   }
 
   if (sessionLoading || !session) {
@@ -78,7 +83,7 @@ export default function EvaluationSessionPage() {
           onRefresh={refresh}
         />
 
-        <LlmConfigSection
+        <EventConfigSection
           projectId={projectId!}
           session={session}
           onRefresh={refresh}
@@ -91,7 +96,17 @@ export default function EvaluationSessionPage() {
               sessionId={session.id}
               sessionStatus={session.status}
               onRefresh={refresh}
+              reviewMode={reviewMode}
+              onToggleReviewMode={() => setReviewMode((v) => !v)}
             />
+
+            {reviewMode && session.status === "reviewing" && (
+              <EvalReviewPanel
+                projectId={projectId!}
+                sessionId={session.id}
+                onRefresh={refresh}
+              />
+            )}
 
             <MetricsPanel
               projectId={projectId!}
@@ -103,6 +118,13 @@ export default function EvaluationSessionPage() {
         <CommitSection
           projectId={projectId!}
           session={session}
+          onRefresh={refresh}
+        />
+
+        <PipelineSection
+          projectId={projectId!}
+          sessionId={session.id}
+          sessionStatus={session.status}
           onRefresh={refresh}
         />
       </div>
