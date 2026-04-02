@@ -254,9 +254,9 @@ def run_predictions(project_id: str, session_id: str):
             job_id=f"eval-predictions-{session_id}",
         )
 
-        flash(f"Prediction job started. Job ID: {job.get_id()}")
+        flash(f"Prediction job started. Job ID: {job.id}")
         logger.info(
-            f"Started prediction job {job.get_id()} for session {session_id}"
+            f"Started prediction job {job.id} for session {session_id}"
         )
 
     except Exception as e:

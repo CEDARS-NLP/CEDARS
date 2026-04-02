@@ -2506,7 +2506,7 @@ def report_success(job):
     job.meta['progress'] = 100
     job.save_meta()
 
-    update_db_task_progress(job.get_id(), 100)
+    update_db_task_progress(job.id, 100)
 
 @log_function_call
 def report_failure(job):
@@ -2518,7 +2518,7 @@ def report_failure(job):
     """
     job.meta['progress'] = 0
     job.save_meta()
-    update_db_task_progress(job.get_id(), 0)
+    update_db_task_progress(job.id, 0)
 
 @log_function_call
 def get_patient_reviewer(patient_id: str):

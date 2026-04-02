@@ -1272,7 +1272,7 @@ def create_download():
     job = flask.current_app.ops_queue.enqueue(
         db.download_annotations, download_filename,
     )
-    return flask.jsonify({'job_id': job.get_id()}), 202
+    return flask.jsonify({'job_id': job.id}), 202
 
 
 @bp.route('/create_download_task_full', methods=["GET"])
@@ -1288,7 +1288,7 @@ def create_download_full():
         db.download_annotations, download_filename, True
     )
 
-    return flask.jsonify({'job_id': job.get_id()}), 202
+    return flask.jsonify({'job_id': job.id}), 202
 
 @bp.route('/delete_download_file', methods=["POST"])
 @auth.admin_required
@@ -1316,7 +1316,7 @@ def update_results_collection():
     job = flask.current_app.ops_queue.enqueue(db.update_patient_results,
                                                 True)
 
-    return flask.jsonify({'job_id': job.get_id()}), 202
+    return flask.jsonify({'job_id': job.id}), 202
 
 @bp.route('/unlock_all_patients', methods=["GET"])
 @auth.admin_required
@@ -1330,7 +1330,7 @@ def run_unlock_all_patients():
     logger.info("Creating job to unlock all patients in the PATIENTS collection.")
     job = flask.current_app.ops_queue.enqueue(db.remove_all_locked)
 
-    return flask.jsonify({'unlock_job_id': job.get_id()}), 202
+    return flask.jsonify({'unlock_job_id': job.id}), 202
 
 @bp.route('/check_job/<job_id>')
 @auth.admin_required
