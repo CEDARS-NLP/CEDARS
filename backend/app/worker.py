@@ -61,10 +61,24 @@ async def run_export_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
 
 
 async def run_pipeline_job(ctx: dict, pipeline_run_id: str) -> dict:
-    """ARQ task: execute a pipeline run (search + classify per patient)."""
+    """ARQ task: orchestrate a pipeline run — enqueues per-patient jobs, monitors, circuit-breaks."""
     from app.jobs.pipeline import execute_pipeline_run
 
     return await execute_pipeline_run(pipeline_run_id)
+
+
+async def run_patient_task(ctx: dict, pipeline_run_id: str, patient_task_id: int) -> dict:
+    """ARQ task: process a single patient (search + classify). One message per patient."""
+    from app.jobs.pipeline import process_single_patient
+
+    return await process_single_patient(pipeline_run_id, patient_task_id)
+
+
+async def run_sample_llm_job(ctx: dict, session_id: str, project_id: str) -> dict:
+    """ARQ task: run LLM classification on matched patients in an evaluation sample."""
+    from app.evaluation.service import execute_sample_llm
+
+    return await execute_sample_llm(session_id, project_id)
 
 
 async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
@@ -175,16 +189,21 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
 
                 pr.notes_searched = len(notes)
 
-                # Run search queries on notes
+                # Run search queries on notes — collect matched sentences
                 matched_notes = []
+                matched_sentences = []  # (note, sentence_text, tokens)
                 for note in notes:
                     is_matched = False
+                    note_matched_sents = []
                     for query_str in include_queries:
                         query_groups = parse_query(query_str)
                         sentences = process_note(note.text, query_groups)
-                        if any(s.get("is_target") or s.get("matched_tokens") for s in sentences):
-                            is_matched = True
-                            break
+                        for s in sentences:
+                            if s.get("is_target") or s.get("matched_tokens"):
+                                is_matched = True
+                                note_matched_sents.append(
+                                    (s.get("text", ""), s.get("matched_tokens", []))
+                                )
 
                     # Check exclude queries
                     if is_matched:
@@ -197,6 +216,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
 
                     if is_matched:
                         matched_notes.append(note)
+                        matched_sentences.extend(note_matched_sents)
 
                 pr.notes_matched = len(matched_notes)
 
@@ -225,6 +245,39 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                     pr.status = PatientResultStatus.COMPLETED
                     pr.completed_at = datetime.now(UTC)
 
+                    # Create annotation with matched keyword sentences (not LLM evidence)
+                    from app.annotations.models import Annotation, ReviewStatus
+                    note_id = matched_notes[0].id if matched_notes else None
+
+                    # Build sentence_text from search-matched sentences
+                    keyword_text = "; ".join(
+                        sent_text for sent_text, _ in matched_sentences[:5] if sent_text
+                    )
+                    if not keyword_text and matched_notes:
+                        keyword_text = matched_notes[0].text[:500]
+
+                    # Collect matched tokens
+                    all_tokens = []
+                    for _, tokens in matched_sentences[:5]:
+                        all_tokens.extend(tokens)
+
+                    if note_id:
+                        annotation = Annotation(
+                            project_id=run.project_id,
+                            patient_id=pr.patient_id,
+                            note_id=note_id,
+                            sentence_text=keyword_text,
+                            matched_tokens=",".join(set(all_tokens)),
+                            predicted_score=classification.confidence,
+                            predicted_label=1 if classification.label == "positive" else 0,
+                            predictor_model=config.get("llm_model", ""),
+                            reasoning=classification.reasoning or "",
+                            review_status=ReviewStatus.UNREVIEWED,
+                            pipeline_run_id=run.id,
+                            predicted_reasoning=classification.reasoning,
+                        )
+                        db.add(annotation)
+
                 processed += 1
 
             except Exception as e:
@@ -245,6 +298,60 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
             # Re-check cancellation
             await db.refresh(run)
 
+        # Create annotations for sample-copied results (already completed before loop)
+        from app.annotations.models import Annotation, ReviewStatus
+        copied_stmt = select(PatientResult).where(
+            PatientResult.pipeline_run_id == run_id,
+            PatientResult.status == PatientResultStatus.COMPLETED,
+            PatientResult.finding_label.isnot(None),
+            PatientResult.started_at.is_(None),  # copied results have no started_at
+        )
+        copied_result = await db.execute(copied_stmt)
+        for pr in copied_result.scalars().all():
+            # Re-run search on patient notes to get matched sentences
+            p_notes_stmt = select(Note).where(
+                Note.patient_id == pr.patient_id,
+                Note.text.isnot(None),
+            ).order_by(Note.note_date)
+            p_notes = list((await db.execute(p_notes_stmt)).scalars().all())
+
+            note_id = p_notes[0].id if p_notes else None
+            keyword_text = ""
+            all_tokens = []
+
+            for note in p_notes:
+                for query_str in include_queries:
+                    query_groups = parse_query(query_str)
+                    sentences = process_note(note.text, query_groups)
+                    for s in sentences:
+                        if s.get("is_target") or s.get("matched_tokens"):
+                            if not note_id:
+                                note_id = note.id
+                            sent = s.get("text", "")
+                            if sent:
+                                keyword_text += ("; " if keyword_text else "") + sent
+                            all_tokens.extend(s.get("matched_tokens", []))
+
+            if not keyword_text and p_notes:
+                keyword_text = p_notes[0].text[:500]
+
+            if note_id:
+                db.add(Annotation(
+                    project_id=run.project_id,
+                    patient_id=pr.patient_id,
+                    note_id=note_id,
+                    sentence_text=keyword_text,
+                    matched_tokens=",".join(set(all_tokens)),
+                    predicted_score=pr.predicted_score,
+                    predicted_label=1 if pr.finding_label == "positive" else 0,
+                    predictor_model=config.get("llm_model", ""),
+                    reasoning=pr.finding_reasoning or "",
+                    review_status=ReviewStatus.UNREVIEWED,
+                    pipeline_run_id=run.id,
+                    predicted_reasoning=pr.finding_reasoning,
+                ))
+        await db.commit()
+
         # Finalize
         from app.evaluation.models import SessionStatus
         if run.is_cancelled:
@@ -261,8 +368,75 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
     return {"processed": processed, "failed": failed}
 
 
+async def on_worker_startup(ctx: dict) -> None:
+    """Auto-recover orphaned RUNNING pipeline runs on worker startup.
+
+    If the worker crashed mid-run, PipelineRun stays RUNNING but the ARQ job
+    is gone. This detects those runs, resets stuck 'processing' PatientResults
+    to 'queued', and re-enqueues them.
+    """
+    import logging
+    log = logging.getLogger("arq.worker.startup")
+    try:
+        from app.common.database import async_session
+        from app.evaluation.models import PatientResult, PatientResultStatus
+        from app.pipeline.models import PipelineRun, PipelineRunStatus
+
+        async with async_session() as db:
+            # Find RUNNING pipeline runs
+            stmt = select(PipelineRun).where(
+                PipelineRun.status == PipelineRunStatus.RUNNING,
+            )
+            result = await db.execute(stmt)
+            orphaned_runs = list(result.scalars().all())
+
+            for run in orphaned_runs:
+                # Reset stuck 'processing' rows
+                stuck_stmt = select(PatientResult).where(
+                    PatientResult.pipeline_run_id == run.id,
+                    PatientResult.status == PatientResultStatus.PROCESSING,
+                )
+                stuck = list((await db.execute(stuck_stmt)).scalars().all())
+                for pr in stuck:
+                    pr.status = PatientResultStatus.QUEUED
+                    pr.started_at = None
+                    db.add(pr)
+
+                # Reset the run itself to QUEUED so the worker picks it up cleanly
+                run.status = PipelineRunStatus.QUEUED
+                db.add(run)
+
+                await db.commit()
+
+                # Re-enqueue
+                from app.evaluation.service import _enqueue_eval_pipeline_run
+                await _enqueue_eval_pipeline_run(run.id)
+                log.info(
+                    "Auto-recovered orphaned pipeline run %s (%d stuck rows reset)",
+                    run.id, len(stuck),
+                )
+
+            if not orphaned_runs:
+                log.info("No orphaned pipeline runs to recover")
+    except Exception:
+        log.exception("Failed to auto-recover orphaned pipeline runs")
+
+
 class WorkerSettings:
-    functions = [run_nlp_job, run_prediction_job, run_ingestion_job, run_export_job, run_pipeline_job, run_eval_pipeline_job]
+    functions = [
+        run_nlp_job,
+        run_prediction_job,
+        run_ingestion_job,
+        run_export_job,
+        run_pipeline_job,
+        run_patient_task,
+        run_sample_llm_job,
+        run_eval_pipeline_job,
+    ]
+    on_startup = on_worker_startup
     redis_settings = parse_redis_settings()
     max_jobs = 10
     job_timeout = 3600
+    # We handle retries ourselves (litellm for LLM, circuit breaker for runs).
+    # ARQ-level retry would re-run jobs whose DB state is already marked FAILED.
+    max_tries = 1

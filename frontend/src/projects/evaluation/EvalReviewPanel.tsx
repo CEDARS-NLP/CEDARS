@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -8,6 +8,8 @@ import {
   SkipForward,
   CalendarDays,
   HelpCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -98,6 +100,7 @@ export default function EvalReviewPanel({
   const [dateValue, setDateValue] = useState("");
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
+  const [noteIndex, setNoteIndex] = useState(0);
 
   const {
     data: current,
@@ -122,6 +125,24 @@ export default function EvalReviewPanel({
       ),
     enabled: !!current,
   });
+
+  // Sort notes: evidence notes first (positive signal), then chronologically
+  const sortedNotes = useMemo(() => {
+    if (!noteContext?.notes) return [];
+    const notes = [...noteContext.notes];
+    // If there are evidence notes, put them first; otherwise keep chrono order
+    const evidenceNotes = notes.filter((n) => n.is_evidence);
+    const otherNotes = notes.filter((n) => !n.is_evidence);
+    if (evidenceNotes.length > 0) {
+      return [...evidenceNotes, ...otherNotes];
+    }
+    return notes; // already chronologically ordered from backend
+  }, [noteContext?.notes]);
+
+  // Reset note index when patient changes
+  useEffect(() => {
+    setNoteIndex(0);
+  }, [current?.id]);
 
   useEffect(() => {
     if (showDateOverride && !dateValue && current?.event_date) {
@@ -468,33 +489,65 @@ export default function EvalReviewPanel({
             </div>
           </div>
 
-          {/* RIGHT PANEL — Note viewer */}
+          {/* RIGHT PANEL — Note viewer (one note at a time) */}
           <div className="rounded-lg border border-border bg-card">
             <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
               <span className="text-sm font-medium text-foreground">
                 Matched Notes
               </span>
-              {noteContext && (
-                <span className="text-xs text-muted-foreground">
-                  {noteContext.notes.length} note
-                  {noteContext.notes.length !== 1 ? "s" : ""}
-                </span>
+              {sortedNotes.length > 0 && (
+                <>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => setNoteIndex((i) => Math.max(0, i - 1))}
+                      disabled={noteIndex === 0}
+                      aria-label="Previous note"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {noteIndex + 1} / {sortedNotes.length}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() =>
+                        setNoteIndex((i) =>
+                          Math.min(sortedNotes.length - 1, i + 1)
+                        )
+                      }
+                      disabled={noteIndex >= sortedNotes.length - 1}
+                      aria-label="Next note"
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {sortedNotes[noteIndex]?.is_evidence && (
+                    <Badge className="bg-primary/20 text-primary text-[10px] px-1.5 py-0">
+                      Evidence
+                    </Badge>
+                  )}
+                </>
               )}
             </div>
-            <div className="h-[560px] overflow-y-auto p-4">
+            <div className="h-[560px] overflow-y-auto">
               {notesLoading ? (
-                <div className="space-y-2">
+                <div className="space-y-2 p-4">
                   <Skeleton className="h-4 w-full" />
                   <Skeleton className="h-4 w-5/6" />
                   <Skeleton className="h-4 w-4/6" />
                 </div>
-              ) : noteContext ? (
+              ) : sortedNotes.length > 0 ? (
                 <EvalNoteViewer
-                  notes={noteContext.notes}
-                  keywords={noteContext.search_keywords}
+                  note={sortedNotes[noteIndex]}
+                  keywords={noteContext?.search_keywords ?? []}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">
+                <p className="p-4 text-sm text-muted-foreground">
                   Note context unavailable.
                 </p>
               )}

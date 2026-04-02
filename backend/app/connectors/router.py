@@ -86,6 +86,66 @@ async def delete_data_source_endpoint(
 # ── File Upload ───────────────────────────────────────────────────
 
 
+@router.post("/upload/preview", response_model=PreviewResponse)
+async def preview_upload_endpoint(
+    project_id: str,
+    file: UploadFile,
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    """Parse an uploaded CSV/JSON file and return columns + first 3 rows.
+
+    Only reads enough data to extract headers and a few rows — safe for
+    large files.  Does NOT persist anything.
+    """
+    import csv
+    import io
+    import json
+
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ("csv", "json"):
+        raise HTTPException(status_code=400, detail="Only CSV and JSON files are supported")
+
+    # Read at most 256 KB — enough for headers + a few rows of even wide CSVs,
+    # but won't blow up memory on multi-GB files.
+    PEEK_BYTES = 256 * 1024
+    chunk = await file.read(PEEK_BYTES)
+
+    try:
+        text = chunk.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File is not valid UTF-8")
+
+    columns: list[str] = []
+    rows: list[dict] = []
+
+    if ext == "csv":
+        reader = csv.DictReader(io.StringIO(text))
+        columns = list(reader.fieldnames or [])
+        for i, row in enumerate(reader):
+            if i >= 3:
+                break
+            rows.append(dict(row))
+    else:
+        # JSON: the chunk may be truncated, but try parsing.
+        # For array-of-objects, extract first few complete objects.
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not parse JSON. For large files, ensure the file is valid JSON.",
+            )
+        records = data if isinstance(data, list) else data.get("records", [])
+        if records:
+            columns = list(records[0].keys())
+            rows = [
+                {k: str(v) if v is not None else "" for k, v in r.items()}
+                for r in records[:3]
+            ]
+
+    return PreviewResponse(columns=columns, rows=rows, total_available=None)
+
+
 @router.post("/upload", response_model=DataSourceResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file_endpoint(
     project_id: str,
@@ -250,7 +310,10 @@ async def list_patients_endpoint(
                 patient_id_ext=r["patient"].patient_id_ext,
                 status=r["patient"].status.value,
                 note_count=r["note_count"],
+                annotation_count=r["annotation_count"],
+                reviewed_count=r["reviewed_count"],
                 created_at=r["patient"].created_at,
+                updated_at=r["patient"].updated_at,
             )
             for r in result["items"]
         ],

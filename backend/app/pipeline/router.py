@@ -12,6 +12,7 @@ from app.pipeline.schemas import (
     EventConfigResponse,
     PatientTaskResponse,
     PipelineRunResponse,
+    QueueOverviewResponse,
     RunSampleRequest,
     RunMetricsResponse,
     RunStatsResponse,
@@ -212,6 +213,17 @@ async def run_full_endpoint(
     return run
 
 
+@router.get("/queue", response_model=QueueOverviewResponse)
+async def queue_overview_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    from app.pipeline.orchestrator import get_queue_overview
+
+    return await get_queue_overview(session, project_id)
+
+
 @router.get("/runs", response_model=list[PipelineRunResponse])
 async def list_runs_endpoint(
     project_id: str,
@@ -303,6 +315,22 @@ async def cancel_run_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
+    return run
+
+
+@router.post("/runs/{run_id}/rerun", response_model=PipelineRunResponse)
+async def rerun_endpoint(
+    project_id: str,
+    run_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    from app.pipeline.orchestrator import rerun
+
+    try:
+        run = await rerun(session, project_id, run_id, user_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return run
 
 

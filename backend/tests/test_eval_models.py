@@ -69,14 +69,11 @@ class TestEvaluationSession:
             event_description="Confirmed MI",
             include_criteria="Troponin elevation",
             exclude_criteria="Rule-out",
-            llm_provider="openai",
-            llm_model="gpt-4o-mini",
         )
         session.add(es)
         await session.commit()
         await session.refresh(es)
         assert es.event_name == "Myocardial Infarction"
-        assert es.llm_provider == "openai"
 
 
 class TestSearchMatch:

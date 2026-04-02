@@ -50,11 +50,7 @@ export default function SearchQueriesSection({ projectId, session, onRefresh }: 
     mutationFn: (description: string) =>
       api.post<{ suggestions: SuggestedQuery[] }>(
         `/projects/${projectId}/evaluation/sessions/${session.id}/queries/suggest`,
-        {
-          description,
-          llm_provider: session.llm_provider || "openai",
-          llm_model: session.llm_model || "gpt-4o-mini",
-        }
+        { description }
       ),
     onSuccess: (data) => setSuggestions(data.suggestions),
   });

@@ -4,7 +4,7 @@ import enum
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Text
+from sqlalchemy import Column, DateTime, String, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -32,7 +32,7 @@ class Annotation(SQLModel, table=True):
     project_id: str = Field(foreign_key="projects.id", index=True)
     patient_id: str = Field(foreign_key="patients.id", index=True)
     note_id: str = Field(foreign_key="notes.id", index=True)
-    sentence_id: str = Field(foreign_key="sentences.id", index=True)
+    sentence_id: str | None = Field(default=None, foreign_key="sentences.id", index=True)
 
     # Denormalized from sentence for fast access during review
     sentence_text: str = Field(sa_column=Column(Text, nullable=False))
@@ -45,8 +45,11 @@ class Annotation(SQLModel, table=True):
     predictor_model: str = Field(default="")
     reasoning: str = Field(sa_column=Column(Text, nullable=False, server_default=""))
 
-    # Review state
-    review_status: ReviewStatus = Field(default=ReviewStatus.UNREVIEWED)
+    # Review state — stored as VARCHAR to avoid PG enum conflicts
+    review_status: ReviewStatus = Field(
+        default=ReviewStatus.UNREVIEWED,
+        sa_column=Column(String(20), nullable=False, default=ReviewStatus.UNREVIEWED.value),
+    )
     reviewed_by: str | None = Field(default=None, foreign_key="users.id")
     reviewed_at: datetime | None = Field(
         default=None,

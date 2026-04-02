@@ -506,6 +506,22 @@ async def retry_failed_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/sessions/{session_id}/pipeline/resume")
+async def resume_pipeline_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin")),
+):
+    """Resume a stuck pipeline run (resets processing rows and re-enqueues)."""
+    await _get_session_or_404(db, project_id, session_id)
+    from app.evaluation.service import resume_pipeline
+    try:
+        return await resume_pipeline(db, session_id, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/sessions/{session_id}/pipeline/rerun")
 async def rerun_pipeline_endpoint(
     project_id: str,

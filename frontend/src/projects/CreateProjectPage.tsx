@@ -24,10 +24,13 @@ export default function CreateProjectPage() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [llmProvider, setLlmProvider] = useState("openai");
+  const [llmModel, setLlmModel] = useState("gpt-4o-mini");
+  const [llmApiBase, setLlmApiBase] = useState("");
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: (data: { name: string; description: string }) =>
+    mutationFn: (data: { name: string; description: string; llm_provider: string; llm_model: string; llm_api_base: string | null }) =>
       api.post<CreateProjectResponse>("/projects", data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -41,7 +44,13 @@ export default function CreateProjectPage() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    mutation.mutate({ name, description });
+    mutation.mutate({
+      name,
+      description,
+      llm_provider: llmProvider,
+      llm_model: llmModel,
+      llm_api_base: llmApiBase || null,
+    });
   }
 
   return (
@@ -77,6 +86,47 @@ export default function CreateProjectPage() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
+            </div>
+
+            <div className="border-t pt-4 mt-2">
+              <p className="text-sm font-medium mb-3">LLM Configuration</p>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="llmProvider">Provider</Label>
+                  <select
+                    id="llmProvider"
+                    value={llmProvider}
+                    onChange={(e) => setLlmProvider(e.target.value)}
+                    className="flex w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="vllm">vLLM</option>
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="bedrock">AWS Bedrock</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="llmModel">Model</Label>
+                  <Input
+                    id="llmModel"
+                    type="text"
+                    placeholder="gpt-4o-mini"
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="llmApiBase">API Base URL (optional)</Label>
+                  <Input
+                    id="llmApiBase"
+                    type="text"
+                    placeholder="http://localhost:11434"
+                    value={llmApiBase}
+                    onChange={(e) => setLlmApiBase(e.target.value)}
+                  />
+                </div>
+              </div>
             </div>
           </CardContent>
           <CardFooter className="flex gap-3">

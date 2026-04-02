@@ -1,0 +1,87 @@
+<h2>Section 1: Session Lifecycle</h2>
+<p class="subtitle">How evaluation sessions are created, iterated, and committed</p>
+
+<div class="mockup">
+  <div class="mockup-header">Evaluation Sessions List (Landing Page)</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <div>
+        <div style="font-size: 1.1rem; font-weight: 600; color: #e0e0e0;">Evaluation Sessions</div>
+        <div style="font-size: 0.85rem; color: #888;">Project: Myocardial Infarction Study</div>
+      </div>
+      <button class="mock-button" style="background: #4f8ff7; color: white; font-weight: 600;">+ New Session</button>
+    </div>
+
+    <!-- Active session -->
+    <div style="border: 1px solid #4f8ff7; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; background: rgba(79,143,247,0.08);">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <span style="font-weight: 600; color: #e0e0e0;">Session #3</span>
+          <span style="background: #2d5a3d; color: #6ee7b7; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-left: 8px;">ACTIVE</span>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">Created 10 min ago &middot; 5 regex patterns &middot; 120 patients sampled</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="mock-button" style="background: #4f8ff7; color: white; font-size: 0.85rem;">Open</button>
+          <button class="mock-button" style="background: transparent; border: 1px solid #555; color: #aaa; font-size: 0.85rem;">Discard</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Committed session -->
+    <div style="border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <span style="font-weight: 600; color: #e0e0e0;">Session #2</span>
+          <span style="background: #1a3a2a; color: #34d399; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-left: 8px;">COMMITTED</span>
+          <span style="font-size: 0.75rem; color: #888; margin-left: 8px;">Running on full corpus (45% complete)</span>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">3 regex patterns &middot; F1: 0.87 &middot; Committed 2 hours ago</div>
+        </div>
+        <button class="mock-button" style="background: transparent; border: 1px solid #555; color: #aaa; font-size: 0.85rem;">View</button>
+      </div>
+    </div>
+
+    <!-- Discarded session -->
+    <div style="border: 1px solid #333; border-radius: 8px; padding: 1rem; opacity: 0.5;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <span style="font-weight: 600; color: #e0e0e0;">Session #1</span>
+          <span style="background: #3a2020; color: #f87171; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-left: 8px;">DISCARDED</span>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">1 regex pattern &middot; No LLM run &middot; Discarded 3 hours ago</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2rem;">
+  <h3>Session States</h3>
+  <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 200px; padding: 1rem; border: 1px solid #333; border-radius: 8px;">
+      <div style="font-weight: 600; color: #4f8ff7; margin-bottom: 0.5rem;">DRAFT</div>
+      <p style="font-size: 0.85rem; color: #aaa;">Working on regex and/or LLM config. Not yet reviewed. Can edit freely.</p>
+    </div>
+    <div style="flex: 1; min-width: 200px; padding: 1rem; border: 1px solid #333; border-radius: 8px;">
+      <div style="font-weight: 600; color: #fbbf24; margin-bottom: 0.5rem;">REVIEWING</div>
+      <p style="font-size: 0.85rem; color: #aaa;">LLM has run on sample. Clinician is judging results. Can still tweak and re-run.</p>
+    </div>
+    <div style="flex: 1; min-width: 200px; padding: 1rem; border: 1px solid #333; border-radius: 8px;">
+      <div style="font-weight: 600; color: #34d399; margin-bottom: 0.5rem;">COMMITTED</div>
+      <p style="font-size: 0.85rem; color: #aaa;">Locked. Full pipeline running on corpus. Regex + prompt frozen.</p>
+    </div>
+    <div style="flex: 1; min-width: 200px; padding: 1rem; border: 1px solid #333; border-radius: 8px;">
+      <div style="font-weight: 600; color: #f87171; margin-bottom: 0.5rem;">DISCARDED</div>
+      <p style="font-size: 0.85rem; color: #aaa;">Thrown away. Kept for history only. One click to discard, no confirmation.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>Key Rules</h3>
+  <ul style="color: #ccc; line-height: 1.8;">
+    <li>Only <strong>one active (DRAFT/REVIEWING) session</strong> at a time per project</li>
+    <li><strong>"+ New Session"</strong> discards any current draft automatically (or prompts if it has LLM results)</li>
+    <li><strong>Discard</strong> is instant &mdash; no "are you sure?" modal</li>
+    <li><strong>Commit</strong> locks the session and triggers the full corpus run</li>
+    <li>A new session can optionally <strong>clone regex + prompt from a previous session</strong> as starting point</li>
+  </ul>
+</div>

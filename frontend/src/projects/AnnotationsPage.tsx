@@ -10,10 +10,12 @@ import {
   BarChart3,
   AlertTriangle,
   Trash2,
-  MoreHorizontal,
   HelpCircle,
   X,
-  Play,
+  User,
+  FileText,
+  Brain,
+  ArrowRight,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -21,22 +23,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { PredictionJobStatus, BulkEstimate } from "./types";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -77,6 +69,7 @@ interface PatientInfo {
 interface ReviewResult {
   annotation: Annotation;
   skipped_count: number;
+  earlier_count: number;
 }
 
 interface DeleteEventDateResult {
@@ -100,6 +93,8 @@ interface NoteContext {
   text: string;
   text_id: string;
   note_date: string | null;
+  note_tags: Record<string, string>;
+  search_keywords: string[];
   sentences: {
     id: string;
     text: string;
@@ -109,6 +104,17 @@ interface NoteContext {
     is_negated: boolean;
     matched_tokens: string[];
   }[];
+}
+
+interface MatchedNote {
+  note_id: string;
+  text_id: string;
+  text: string;
+  note_date: string | null;
+  note_tags: Record<string, string>;
+  matched_sentences: string[];
+  match_positions: { start: number; end: number; text?: string; sentence_number?: number }[];
+  search_keywords: string[];
 }
 
 interface AnnotationStats {
@@ -149,34 +155,96 @@ function highlightMatches(text: string, tokens: string): React.ReactNode {
 
 function formatScore(score: number | null): string {
   if (score === null) return "--";
-  return (score * 100).toFixed(1) + "%";
+  return (score * 100).toFixed(0) + "%";
 }
 
-// ── Collapsible Section ────────────────────────────────────────
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return "Unknown";
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
-function CollapsibleSection({
-  summary,
-  children,
-  defaultOpen = false,
+// ── Sequence Markers ─────────────────────────────────────────────
+
+function SequenceMarkers({
+  annotations,
+  currentIndex,
+  onNavigate,
 }: {
-  summary: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
+  annotations: PatientAnnotation[];
+  currentIndex: number;
+  onNavigate: (index: number) => void;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronRight
-          className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        {summary}
-      </button>
-      {open && <div className="mt-2 pl-5">{children}</div>}
+    <div
+      className="flex items-center gap-1 px-1"
+      role="navigation"
+      aria-label="Annotation sequence"
+    >
+      {annotations.map((ann, i) => {
+        const isCurrent = i === currentIndex;
+        const status = ann.review_status;
+        const bg =
+          status === "reviewed"
+            ? "bg-emerald-500"
+            : status === "skipped"
+              ? "bg-zinc-400 dark:bg-zinc-600"
+              : "bg-amber-400 dark:bg-amber-500";
+
+        return (
+          <Tooltip key={ann.id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onNavigate(i)}
+                className={`h-2.5 rounded-full transition-all ${bg} ${
+                  isCurrent
+                    ? "w-6 ring-2 ring-primary ring-offset-1 ring-offset-background"
+                    : "w-2.5 hover:w-4 hover:ring-1 hover:ring-border"
+                }`}
+                aria-label={`Annotation ${i + 1}: ${status}`}
+                aria-current={isCurrent ? "true" : undefined}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              #{i + 1} &middot; {status}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
+  );
+}
+
+// ── Keyword highlighter for note text ────────────────────────────
+
+function highlightKeywords(
+  text: string,
+  keywords: string[]
+): React.ReactNode {
+  if (!keywords || keywords.length === 0) return text;
+
+  // Build a regex that matches any keyword (with optional wildcard suffix)
+  const escaped = keywords.map((k) =>
+    k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+  const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(pattern);
+
+  const lowerKeywords = keywords.map((k) => k.toLowerCase());
+  return parts.map((part, i) =>
+    lowerKeywords.some((k) => part.toLowerCase().startsWith(k)) ? (
+      <mark
+        key={i}
+        className="rounded-sm bg-amber-200/70 px-0.5 text-amber-950 dark:bg-amber-500/30 dark:text-amber-100"
+      >
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    )
   );
 }
 
@@ -185,9 +253,13 @@ function CollapsibleSection({
 function NoteViewer({
   context,
   targetSentenceId,
+  sentenceText,
+  keywords,
 }: {
   context: NoteContext;
   targetSentenceId: string;
+  sentenceText: string;
+  keywords: string[];
 }) {
   const targetRef = useRef<HTMLSpanElement>(null);
 
@@ -195,10 +267,62 @@ function NoteViewer({
     targetRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [targetSentenceId]);
 
+  const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
+
+  if (context.sentences.length === 0) {
+    // Pipeline annotations without NLP sentences — show raw note text
+    // Try to find and highlight the sentence text within the note
+    const noteText = context.text || "";
+    const sentIdx = sentenceText
+      ? noteText.toLowerCase().indexOf(sentenceText.slice(0, 60).toLowerCase())
+      : -1;
+
+    if (sentIdx === -1) {
+      // Can't locate sentence — just highlight keywords
+      return (
+        <div
+          className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60"
+          style={noteFont}
+        >
+          {highlightKeywords(noteText, keywords)}
+        </div>
+      );
+    }
+
+    // Split into before / sentence region / after and highlight the sentence
+    // Find the end by searching for the sentence text (use first 200 chars for matching)
+    const matchLen = Math.min(sentenceText.length, 200);
+    const before = noteText.slice(0, sentIdx);
+    const matched = noteText.slice(sentIdx, sentIdx + matchLen);
+    const after = noteText.slice(sentIdx + matchLen);
+
+    return (
+      <div
+        className="whitespace-pre-wrap text-[14px] leading-relaxed"
+        style={noteFont}
+        role="region"
+        aria-label="Clinical note context"
+      >
+        <span className="text-foreground/50">
+          {highlightKeywords(before, keywords)}
+        </span>
+        <span
+          ref={targetRef}
+          className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
+        >
+          {highlightKeywords(matched, keywords)}
+        </span>
+        <span className="text-foreground/50">
+          {highlightKeywords(after, keywords)}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="max-h-72 overflow-y-auto text-[15px] leading-relaxed"
-      style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+      className="text-[14px] leading-relaxed"
+      style={noteFont}
       role="region"
       aria-label="Clinical note context"
     >
@@ -212,14 +336,14 @@ function NoteViewer({
             ref={isTarget ? targetRef : undefined}
             className={
               isTarget
-                ? "rounded-sm bg-accent/20 px-0.5 font-medium text-foreground outline outline-2 outline-accent/50"
+                ? "rounded bg-primary/15 px-0.5 font-medium text-foreground ring-1 ring-primary/30"
                 : isOtherTarget
-                  ? "text-foreground/60 underline decoration-accent/40 decoration-1 underline-offset-2"
-                  : "text-foreground/40"
+                  ? "text-foreground/60 underline decoration-primary/30 decoration-1 underline-offset-2"
+                  : "text-foreground/50"
             }
             aria-current={isTarget ? "true" : undefined}
           >
-            {sent.text}{" "}
+            {highlightKeywords(sent.text, keywords)}{" "}
           </span>
         );
       })}
@@ -227,39 +351,26 @@ function NoteViewer({
   );
 }
 
-// ── Loading Skeleton ────────────────────────────────────────────
-
-function ReviewSkeleton() {
-  return (
-    <div className="space-y-4" aria-busy="true" aria-label="Loading annotations">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-5 w-64" />
-        <Skeleton className="h-8 w-24" />
-      </div>
-      <Skeleton className="h-px w-full" />
-      <Skeleton className="h-6 w-48" />
-      <Skeleton className="h-40 w-full" />
-      <Skeleton className="h-5 w-32" />
-      <div className="flex justify-between">
-        <Skeleton className="h-9 w-28" />
-        <Skeleton className="h-9 w-28" />
-      </div>
-    </div>
-  );
-}
-
-// ── Keyboard Shortcuts Help Overlay ─────────────────────────────
+// ── Keyboard Shortcuts Overlay ───────────────────────────────────
 
 function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
       <div
         className="w-80 rounded-lg border border-border bg-card p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h4 className="text-sm font-semibold text-foreground">Keyboard Shortcuts</h4>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <h4 className="text-sm font-semibold text-foreground">
+            Keyboard Shortcuts
+          </h4>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -289,115 +400,109 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── Annotation Status Strip ─────────────────────────────────────
+// ── Loading Skeleton ────────────────────────────────────────────
 
-function AnnotationStatusStrip({
-  annotations,
-  currentIndex,
-  onNavigate,
-}: {
-  annotations: PatientAnnotation[];
-  currentIndex: number;
-  onNavigate: (index: number) => void;
-}) {
+function ReviewSkeleton() {
   return (
-    <div
-      className="flex flex-wrap gap-1 rounded-md border border-border bg-muted/50 px-3 py-2"
-      role="navigation"
-      aria-label="Annotation status overview"
-    >
-      {annotations.map((ann, i) => {
-        const isCurrent = i === currentIndex;
-        const colorClass =
-          ann.review_status === "reviewed"
-            ? "bg-emerald-500"
-            : ann.review_status === "skipped"
-              ? "bg-muted-foreground/40"
-              : "bg-amber-400";
-
-        return (
-          <button
-            key={ann.id}
-            onClick={() => onNavigate(i)}
-            className={`h-3 w-3 rounded-full transition-all ${colorClass} ${
-              isCurrent ? "ring-2 ring-accent ring-offset-1 ring-offset-background" : "hover:ring-1 hover:ring-border"
-            }`}
-            aria-label={`Annotation ${i + 1}: ${ann.review_status}`}
-            aria-current={isCurrent ? "true" : undefined}
-          />
-        );
-      })}
+    <div className="space-y-4" aria-busy="true" aria-label="Loading annotations">
+      <Skeleton className="h-10 w-full" />
+      <div className="grid grid-cols-3 gap-6">
+        <Skeleton className="h-64" />
+        <Skeleton className="col-span-2 h-64" />
+      </div>
     </div>
   );
 }
 
-// ── Prediction Summary (collapsible) ────────────────────────────
+// ── Pipeline Note Viewer (full note with matched regions highlighted) ────
 
-function PredictionSummary({ annotation }: { annotation: PatientAnnotation }) {
-  const hasLabel = annotation.predicted_label !== null;
-  const labelText = annotation.predicted_label === 1 ? "Event Detected" : "No Event";
+function PipelineNoteViewer({
+  noteText,
+  matchPositions,
+  keywords,
+}: {
+  noteText: string;
+  matchPositions: { start: number; end: number; text?: string }[];
+  keywords: string[];
+}) {
+  const firstMatchRef = useRef<HTMLSpanElement>(null);
 
-  const summaryLine = hasLabel
-    ? `${labelText} \u00b7 ${formatScore(annotation.predicted_score)}`
-    : `Score: ${formatScore(annotation.predicted_score)}`;
+  useEffect(() => {
+    firstMatchRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [noteText]);
+
+  const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
+
+  // Build sorted, non-overlapping match ranges
+  const ranges = matchPositions
+    .filter((p) => p.start < p.end)
+    .sort((a, b) => a.start - b.start);
+
+  if (ranges.length === 0) {
+    return (
+      <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60" style={noteFont}>
+        {highlightKeywords(noteText, keywords)}
+      </div>
+    );
+  }
+
+  const segments: React.ReactNode[] = [];
+  let cursor = 0;
+  let isFirst = true;
+
+  for (const range of ranges) {
+    if (range.start < cursor) continue;
+    if (range.start > cursor) {
+      segments.push(
+        <span key={`pre-${cursor}`} className="text-foreground/50">
+          {highlightKeywords(noteText.slice(cursor, range.start), keywords)}
+        </span>
+      );
+    }
+    const refProp = isFirst ? { ref: firstMatchRef } : {};
+    segments.push(
+      <span
+        key={`match-${range.start}`}
+        {...refProp}
+        className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
+      >
+        {highlightKeywords(noteText.slice(range.start, range.end), keywords)}
+      </span>
+    );
+    isFirst = false;
+    cursor = range.end;
+  }
+
+  if (cursor < noteText.length) {
+    segments.push(
+      <span key={`post-${cursor}`} className="text-foreground/50">
+        {highlightKeywords(noteText.slice(cursor), keywords)}
+      </span>
+    );
+  }
 
   return (
-    <CollapsibleSection summary={summaryLine} defaultOpen>
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2.5">
-          {hasLabel && (
-            <Badge
-              variant={annotation.predicted_label === 1 ? "default" : "secondary"}
-              className={
-                annotation.predicted_label === 1
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600"
-                  : ""
-              }
-            >
-              {labelText}
-            </Badge>
-          )}
-          <span className="text-sm text-foreground/70">
-            Confidence:{" "}
-            <span className="font-medium tabular-nums">
-              {formatScore(annotation.predicted_score)}
-            </span>
-          </span>
-          {annotation.is_negated && (
-            <Badge
-              variant="outline"
-              className="gap-1 border-amber-400 text-amber-700 dark:border-amber-500 dark:text-amber-300"
-            >
-              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-              Negated
-            </Badge>
-          )}
-          {annotation.predictor_model && (
-            <span className="font-mono text-xs text-muted-foreground">
-              {annotation.predictor_model}
-            </span>
-          )}
-        </div>
-        {annotation.reasoning && (
-          <p className="rounded-md bg-muted/50 px-3 py-2 text-sm italic text-foreground/70">
-            {annotation.reasoning}
-          </p>
-        )}
-      </div>
-    </CollapsibleSection>
+    <div className="whitespace-pre-wrap text-[14px] leading-relaxed" style={noteFont}>
+      {segments}
+    </div>
   );
 }
 
-// ── Patient Review Panel ────────────────────────────────────────
+// ── Patient Review Panel (two-column layout) ─────────────────────
 
 function PatientReviewPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showEventDateInput, setShowEventDateInput] = useState(false);
   const [eventDateValue, setEventDateValue] = useState("");
-  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
-  const [showStatusStrip, setShowStatusStrip] = useState(false);
+  const [completionMessage, setCompletionMessage] = useState<string | null>(
+    null
+  );
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [earlierNotesBanner, setEarlierNotesBanner] = useState<string | null>(
+    null
+  );
+  const [noteIndex, setNoteIndex] = useState(0);
 
   // 1. Get next patient
   const {
@@ -406,7 +511,10 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     refetch: refetchPatient,
   } = useQuery<PatientInfo>({
     queryKey: ["patient-next", projectId],
-    queryFn: () => api.get<PatientInfo>(`/projects/${projectId}/annotations/patient/next`),
+    queryFn: () =>
+      api.get<PatientInfo>(
+        `/projects/${projectId}/annotations/patient/next`
+      ),
   });
 
   const patientId = patientInfo?.patient_id;
@@ -426,28 +534,47 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   });
 
   // 3. Get patient stats
-  const { data: patientStats, refetch: refetchStats } = useQuery<PatientReviewStats>({
-    queryKey: ["patient-stats", projectId, patientId],
-    queryFn: () =>
-      api.get<PatientReviewStats>(
-        `/projects/${projectId}/annotations/patient/${patientId}/stats`
-      ),
-    enabled: !!patientId,
-  });
+  const { data: patientStats, refetch: refetchStats } =
+    useQuery<PatientReviewStats>({
+      queryKey: ["patient-stats", projectId, patientId],
+      queryFn: () =>
+        api.get<PatientReviewStats>(
+          `/projects/${projectId}/annotations/patient/${patientId}/stats`
+        ),
+      enabled: !!patientId,
+    });
 
   const current = annotations?.[currentIndex] ?? null;
 
   // 4. Get note context for current annotation
+  const isPipelineAnnotation = !!current && !current.sentence_id;
+
+  // 4a. Get note context for NLP sentence-level annotations
   const { data: context, isLoading: contextLoading } = useQuery<NoteContext>({
     queryKey: ["annotation-context", current?.id],
     queryFn: () =>
       api.get<NoteContext>(
         `/projects/${current!.project_id}/annotations/${current!.id}/context`
       ),
-    enabled: !!current,
+    enabled: !!current && !isPipelineAnnotation,
   });
 
-  // Navigate to first unreviewed when annotations load or change
+  // 4b. Get all matched notes for pipeline annotations
+  const { data: matchedNotes, isLoading: matchedNotesLoading } = useQuery<MatchedNote[]>({
+    queryKey: ["patient-matched-notes", projectId, patientId, current?.id],
+    queryFn: () =>
+      api.get<MatchedNote[]>(
+        `/projects/${projectId}/annotations/patient/${patientId}/matched-notes?annotation_id=${current!.id}`
+      ),
+    enabled: !!current && isPipelineAnnotation && !!patientId,
+  });
+
+  // Reset note index when patient changes
+  useEffect(() => {
+    setNoteIndex(0);
+  }, [patientId]);
+
+  // Navigate to first unreviewed when annotations load
   useEffect(() => {
     if (annotations && annotations.length > 0) {
       const firstUnreviewed = annotations.findIndex(
@@ -459,7 +586,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     }
   }, [annotations]);
 
-  // Prefetch next annotation's note context for snappier navigation
+  // Prefetch next annotation context
   useEffect(() => {
     if (!annotations || annotations.length <= 1) return;
     const nextAnno = annotations.find(
@@ -480,7 +607,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   const handlePostAction = useCallback(async () => {
     const { data: freshAnnotations } = await refetchAnnotations();
     await refetchStats();
-    queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+    queryClient.invalidateQueries({
+      queryKey: ["annotation-stats", projectId],
+    });
 
     if (!freshAnnotations) return;
 
@@ -488,22 +617,33 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       (a) => a.review_status === "unreviewed"
     );
     if (!hasUnreviewed) {
-      const reviewed = freshAnnotations.filter((a) => a.review_status === "reviewed").length;
-      const skipped = freshAnnotations.filter((a) => a.review_status === "skipped").length;
+      const reviewed = freshAnnotations.filter(
+        (a) => a.review_status === "reviewed"
+      ).length;
+      const skipped = freshAnnotations.filter(
+        (a) => a.review_status === "skipped"
+      ).length;
       const events = freshAnnotations.filter((a) => a.event_date).length;
       setCompletionMessage(
         `Patient ${patientInfo?.patient_id_ext} complete \u2014 ${reviewed} reviewed, ${skipped} skipped, ${events} event${events !== 1 ? "s" : ""}`
       );
-      // Prefetch next patient immediately so it loads faster after the delay
       queryClient.prefetchQuery({
         queryKey: ["patient-next", projectId],
-        queryFn: () => api.get<PatientInfo>(`/projects/${projectId}/annotations/patient/next`),
+        queryFn: () =>
+          api.get<PatientInfo>(
+            `/projects/${projectId}/annotations/patient/next`
+          ),
       });
       setTimeout(() => {
         setCompletionMessage(null);
+        setEarlierNotesBanner(null);
         setCurrentIndex(0);
-        queryClient.removeQueries({ queryKey: ["patient-annotations", projectId, patientId] });
-        queryClient.removeQueries({ queryKey: ["patient-stats", projectId, patientId] });
+        queryClient.removeQueries({
+          queryKey: ["patient-annotations", projectId, patientId],
+        });
+        queryClient.removeQueries({
+          queryKey: ["patient-stats", projectId, patientId],
+        });
         refetchPatient();
       }, 2000);
     } else {
@@ -530,26 +670,30 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     refetchPatient,
   ]);
 
-  // Adjudicate mutation
+  // Mutations
   const reviewMutation = useMutation({
-    mutationFn: ({
-      id,
-      event_date,
-    }: {
-      id: string;
-      event_date?: string;
-    }) =>
-      api.post<ReviewResult>(`/projects/${projectId}/annotations/${id}/review`, {
-        event_date: event_date || null,
-      }),
-    onSuccess: () => {
+    mutationFn: ({ id, event_date }: { id: string; event_date?: string }) =>
+      api.post<ReviewResult>(
+        `/projects/${projectId}/annotations/${id}/review`,
+        { event_date: event_date || null }
+      ),
+    onSuccess: (data) => {
+      const hadEventDate = showEventDateInput && eventDateValue;
       setShowEventDateInput(false);
       setEventDateValue("");
+
+      if (hadEventDate && data.earlier_count > 0) {
+        setEarlierNotesBanner(
+          `${data.earlier_count} earlier note${data.earlier_count > 1 ? "s" : ""} found before the event date \u2014 verify the earliest occurrence.`
+        );
+      } else if (hadEventDate && data.earlier_count === 0) {
+        setEarlierNotesBanner(null);
+      }
+
       handlePostAction();
     },
   });
 
-  // Delete event date mutation
   const deleteEventDateMutation = useMutation({
     mutationFn: (annotationId: string) =>
       api.post<DeleteEventDateResult>(
@@ -559,7 +703,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     onSuccess: async () => {
       await refetchAnnotations();
       await refetchStats();
-      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      queryClient.invalidateQueries({
+        queryKey: ["annotation-stats", projectId],
+      });
       if (annotations) {
         const firstUnreviewed = annotations.findIndex(
           (a) => a.review_status === "unreviewed"
@@ -585,7 +731,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   }, [current, eventDateValue, reviewMutation]);
 
   const handleDeleteEventDate = useCallback(() => {
-    if (!patientStats?.event_annotation_id || deleteEventDateMutation.isPending) return;
+    if (
+      !patientStats?.event_annotation_id ||
+      deleteEventDateMutation.isPending
+    )
+      return;
     deleteEventDateMutation.mutate(patientStats.event_annotation_id);
   }, [patientStats, deleteEventDateMutation]);
 
@@ -613,7 +763,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     if (total > 0) setCurrentIndex(total - 1);
   }, [total]);
 
-  // Default event date to note date when input is shown
+  // Default event date to note date
   useEffect(() => {
     if (showEventDateInput && !eventDateValue && current) {
       const noteDate = current.note_date?.slice(0, 10);
@@ -694,7 +844,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     };
   }, [patientId, projectId]);
 
-  // Loading state
+  // Loading
   if (patientLoading || annotationsLoading) {
     return <ReviewSkeleton />;
   }
@@ -703,12 +853,19 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   if (completionMessage) {
     return (
       <div
-        className="flex flex-col items-center justify-center rounded-lg border-2 border-emerald-300 bg-emerald-50/50 py-12 dark:border-emerald-700 dark:bg-emerald-950/20"
+        className="flex flex-col items-center justify-center rounded-lg border-2 border-emerald-300 bg-emerald-50/50 py-16 dark:border-emerald-700 dark:bg-emerald-950/20"
         role="status"
       >
-        <CheckCircle2 className="mb-3 h-8 w-8 text-emerald-500" aria-hidden="true" />
-        <p className="font-medium text-foreground">{completionMessage}</p>
-        <p className="mt-1 text-sm text-muted-foreground">Loading next patient...</p>
+        <CheckCircle2
+          className="mb-3 h-10 w-10 text-emerald-500"
+          aria-hidden="true"
+        />
+        <p className="text-lg font-medium text-foreground">
+          {completionMessage}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Loading next patient...
+        </p>
       </div>
     );
   }
@@ -717,11 +874,16 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   if (patientInfo?.all_complete) {
     return (
       <div
-        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-12"
+        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-16"
         role="status"
       >
-        <CheckCircle2 className="mb-3 h-8 w-8 text-emerald-500" aria-hidden="true" />
-        <p className="font-medium text-foreground">All patients reviewed</p>
+        <CheckCircle2
+          className="mb-3 h-10 w-10 text-emerald-500"
+          aria-hidden="true"
+        />
+        <p className="text-lg font-medium text-foreground">
+          All patients reviewed
+        </p>
         <p className="mt-1 text-sm text-muted-foreground">
           Every patient has been fully annotated.
         </p>
@@ -729,17 +891,23 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     );
   }
 
-  // No patient available
+  // No patient
   if (!patientId || !annotations || annotations.length === 0) {
     return (
       <div
-        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-12"
+        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-16"
         role="status"
       >
-        <BarChart3 className="mb-3 h-8 w-8 text-muted-foreground" aria-hidden="true" />
-        <p className="font-medium text-foreground">No patients available</p>
+        <BarChart3
+          className="mb-3 h-10 w-10 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <p className="text-lg font-medium text-foreground">
+          No patients available
+        </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          All patients may be locked by other reviewers, or no annotations exist yet.
+          All patients may be locked by other reviewers, or no annotations exist
+          yet.
         </p>
       </div>
     );
@@ -747,97 +915,83 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
   if (!current) return null;
 
-  const isPending = reviewMutation.isPending || deleteEventDateMutation.isPending;
-  const reviewed = patientStats ? patientStats.reviewed + patientStats.skipped : 0;
+  const isPending =
+    reviewMutation.isPending || deleteEventDateMutation.isPending;
+  const reviewedCount = patientStats
+    ? patientStats.reviewed + patientStats.skipped
+    : 0;
   const patientTotal = patientStats?.total ?? total;
+  const progressPct =
+    patientTotal > 0 ? Math.round((reviewedCount / patientTotal) * 100) : 0;
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="space-y-0" role="region" aria-label="Patient annotation review">
-        {/* Shortcuts overlay */}
-        {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
+    <TooltipProvider delayDuration={200}>
+      <div
+        className="space-y-4"
+        role="region"
+        aria-label="Patient annotation review"
+      >
+        {showShortcuts && (
+          <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />
+        )}
 
-        {/* Compact nav line: Patient + progress counter + nav + event date + overflow */}
-        <div className="flex items-center gap-3 text-sm">
-          <span className="font-medium text-foreground">
-            Patient <span className="font-mono">{patientInfo?.patient_id_ext ?? patientId.slice(0, 8)}</span>
-          </span>
-          <span className="text-muted-foreground">&middot;</span>
-          <span className="text-muted-foreground">
-            {reviewed}/{patientTotal} reviewed
-          </span>
-          <span className="text-muted-foreground">&middot;</span>
+        {/* ── Top Bar: Navigation + Sequence ─────────────────────── */}
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+          {/* Navigation arrows */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            onClick={handlePrev}
+            disabled={currentIndex === 0}
+            aria-label="Previous annotation"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
 
-          {/* Compact navigation: < [5/12] > */}
-          <div className="flex items-center gap-1" role="navigation" aria-label="Annotation navigation">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handlePrev}
-              disabled={currentIndex === 0}
-              aria-label="Previous annotation (\u2190)"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="min-w-14 text-center font-medium tabular-nums text-foreground">
-              {currentIndex + 1}/{total}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleNext}
-              disabled={currentIndex >= total - 1}
-              aria-label="Next annotation (\u2192)"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+          <span className="min-w-[4rem] text-center text-sm font-medium tabular-nums text-foreground">
+            {currentIndex + 1} of {total}
+          </span>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            onClick={handleNext}
+            disabled={currentIndex >= total - 1}
+            aria-label="Next annotation"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+
+          {/* Divider */}
+          <div className="mx-1 h-5 w-px bg-border" />
+
+          {/* Sequence markers */}
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <SequenceMarkers
+              annotations={annotations}
+              currentIndex={currentIndex}
+              onNavigate={setCurrentIndex}
+            />
           </div>
 
-          {/* Event date badge (if set) */}
-          {patientStats?.current_event_date && (
-            <>
-              <span className="text-muted-foreground">&middot;</span>
-              <div className="flex items-center gap-1.5">
-                <Badge className="gap-1 bg-rose-600 text-white hover:bg-rose-700">
-                  <CalendarDays className="h-3 w-3" aria-hidden="true" />
-                  Event: {new Date(patientStats.current_event_date).toLocaleDateString()}
-                </Badge>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={handleDeleteEventDate}
-                      disabled={deleteEventDateMutation.isPending}
-                      aria-label="Delete event date (D)"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Delete event date (D)</TooltipContent>
-                </Tooltip>
-              </div>
-            </>
-          )}
+          {/* Divider */}
+          <div className="mx-1 h-5 w-px bg-border" />
 
-          <div className="flex-1" />
-
-          {/* Toggle status strip */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setShowStatusStrip((v) => !v)}
-                aria-label="Toggle annotation status strip"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Status overview</TooltipContent>
-          </Tooltip>
+          {/* Status badge */}
+          <Badge
+            variant="outline"
+            className={
+              current.review_status === "reviewed"
+                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : current.review_status === "skipped"
+                  ? "border-zinc-500/50 bg-zinc-500/10 text-zinc-500"
+                  : "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            }
+          >
+            {current.review_status}
+          </Badge>
 
           {/* Shortcuts help */}
           <Tooltip>
@@ -845,435 +999,479 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="h-7 w-7 shrink-0"
                 onClick={() => setShowShortcuts((v) => !v)}
-                aria-label="Keyboard shortcuts (?)"
+                aria-label="Keyboard shortcuts"
               >
                 <HelpCircle className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Shortcuts (?)</TooltipContent>
+            <TooltipContent>Keyboard shortcuts (?)</TooltipContent>
           </Tooltip>
         </div>
 
-        {/* Status strip (hidden by default) */}
-        {showStatusStrip && (
-          <div className="mt-2">
-            <AnnotationStatusStrip
-              annotations={annotations}
-              currentIndex={currentIndex}
-              onNavigate={setCurrentIndex}
-            />
+        {/* Earlier notes banner */}
+        {earlierNotesBanner && (
+          <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <CalendarDays className="h-5 w-5 shrink-0 text-amber-500" />
+            <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+              {earlierNotesBanner}
+            </span>
           </div>
         )}
 
-        {/* Divider */}
-        <div className="mt-3 border-t border-border" />
+        {/* ── Two-Column Layout ───────────────────────────────── */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
+          {/* ── LEFT PANEL: Patient Details ───────────────────── */}
+          <div className="space-y-4">
+            {/* Patient card */}
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <User className="h-4 w-4" />
+                Patient
+              </div>
 
-        {/* Note metadata */}
-        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <span>
-            Note{" "}
-            <span className="font-mono font-medium text-foreground/70">
-              {current.note_text_id}
-            </span>
-          </span>
-          {current.note_date && (
-            <>
-              <span>&mdash;</span>
-              <span>{new Date(current.note_date).toLocaleDateString()}</span>
-            </>
-          )}
-          <span>&mdash;</span>
-          <Badge
-            variant="outline"
-            className={
-              current.review_status === "reviewed"
-                ? "border-emerald-400 text-emerald-700 dark:border-emerald-600 dark:text-emerald-300"
-                : current.review_status === "skipped"
-                  ? "border-muted-foreground/40 text-muted-foreground"
-                  : "border-amber-400 text-amber-700 dark:border-amber-600 dark:text-amber-300"
-            }
-          >
-            {current.review_status}
-          </Badge>
-        </div>
+              <div className="space-y-3">
+                <div>
+                  <div className="font-mono text-lg font-semibold text-foreground">
+                    {patientInfo?.patient_id_ext ?? patientId.slice(0, 8)}
+                  </div>
+                </div>
 
-        {/* Sentence under review */}
-        <div className="mt-3">
-          <p
-            className="text-[17px] leading-relaxed text-foreground"
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
-          >
-            {highlightMatches(current.sentence_text, current.matched_tokens)}
-          </p>
-        </div>
+                {/* Progress bar */}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Review progress</span>
+                    <span className="tabular-nums">
+                      {reviewedCount}/{patientTotal}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+                </div>
 
-        {/* Prediction summary (collapsed) */}
-        <div className="mt-3">
-          <PredictionSummary annotation={current} />
-        </div>
+                {/* Stats row */}
+                {patientStats && (
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    <div className="rounded-md bg-muted/50 px-2 py-1.5 text-center">
+                      <div className="text-xs text-muted-foreground">
+                        Pending
+                      </div>
+                      <div className="text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                        {patientStats.unreviewed}
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-muted/50 px-2 py-1.5 text-center">
+                      <div className="text-xs text-muted-foreground">Done</div>
+                      <div className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {patientStats.reviewed}
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-muted/50 px-2 py-1.5 text-center">
+                      <div className="text-xs text-muted-foreground">
+                        Skipped
+                      </div>
+                      <div className="text-sm font-semibold tabular-nums text-zinc-500">
+                        {patientStats.skipped}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-        {/* Note context (collapsed) */}
-        <div className="mt-4">
-          {contextLoading ? (
-            <Skeleton className="h-6 w-48 rounded-md" />
-          ) : context ? (
-            <CollapsibleSection summary="Full note context" defaultOpen>
-              <NoteViewer context={context} targetSentenceId={current.sentence_id} />
-            </CollapsibleSection>
-          ) : (
-            <p className="text-sm text-muted-foreground">Note context unavailable.</p>
-          )}
-        </div>
-
-        {/* Action buttons */}
-        <div className="mt-6 flex items-center gap-3">
-          <Button
-            onClick={handleAdjudicate}
-            disabled={isPending || current.review_status !== "unreviewed"}
-            className="gap-1.5"
-            aria-busy={reviewMutation.isPending}
-          >
-            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-            {reviewMutation.isPending && !showEventDateInput
-              ? "Saving\u2026"
-              : "No Event (A)"}
-          </Button>
-
-          <div className="flex-1" />
-
-          {!showEventDateInput ? (
-            <Button
-              variant="outline"
-              onClick={() => setShowEventDateInput(true)}
-              disabled={isPending || current.review_status !== "unreviewed"}
-              className="gap-1.5"
-            >
-              <CalendarDays className="h-4 w-4" aria-hidden="true" />
-              Event Date (E)
-            </Button>
-          ) : (
-            <div
-              className="flex items-center gap-2"
-              role="group"
-              aria-label="Event date input"
-            >
-              <Label
-                htmlFor="event-date-input"
-                className="text-sm text-foreground/70"
-              >
-                Event date:
-              </Label>
-              <Input
-                id="event-date-input"
-                type="date"
-                className="h-8 w-40 text-sm"
-                value={eventDateValue}
-                onChange={(e) => setEventDateValue(e.target.value)}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleEventDate();
-                  if (e.key === "Escape") {
-                    setShowEventDateInput(false);
-                    setEventDateValue("");
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                onClick={handleEventDate}
-                disabled={!eventDateValue || isPending}
-              >
-                Confirm
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setShowEventDateInput(false);
-                  setEventDateValue("");
-                }}
-              >
-                Cancel
-              </Button>
+                {/* Event date (if set) */}
+                {patientStats?.current_event_date && (
+                  <div className="flex items-center justify-between rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className="h-4 w-4 text-rose-500" />
+                      <span className="text-sm font-medium text-rose-600 dark:text-rose-400">
+                        Event:{" "}
+                        {formatDate(patientStats.current_event_date)}
+                      </span>
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="text-rose-400 hover:text-rose-600"
+                          onClick={handleDeleteEventDate}
+                          disabled={deleteEventDateMutation.isPending}
+                          aria-label="Delete event date"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Delete event date (D)</TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
 
-          {/* Live region for mutation feedback */}
-          <div className="sr-only" aria-live="assertive" aria-atomic="true">
-            {reviewMutation.isSuccess && "Annotation adjudicated"}
-            {deleteEventDateMutation.isSuccess && "Event date deleted, skips reverted"}
-            {(reviewMutation.isError || deleteEventDateMutation.isError) &&
-              "Action failed, please try again"}
+            {/* AI Prediction card */}
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Brain className="h-4 w-4" />
+                AI Prediction
+              </div>
+
+              <div className="space-y-3">
+                {/* Label + confidence */}
+                <div className="flex items-center gap-2">
+                  {current.predicted_label !== null && (
+                    <Badge
+                      className={
+                        current.predicted_label === 1
+                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                          : "bg-zinc-500 text-white hover:bg-zinc-600"
+                      }
+                    >
+                      {current.predicted_label === 1
+                        ? "Event Detected"
+                        : "No Event"}
+                    </Badge>
+                  )}
+                  <span className="text-sm tabular-nums text-muted-foreground">
+                    {formatScore(current.predicted_score)} confidence
+                  </span>
+                </div>
+
+                {current.is_negated && (
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400"
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                    Negated mention
+                  </Badge>
+                )}
+
+                {/* Reasoning */}
+                {current.reasoning && (
+                  <div className="rounded-md bg-muted/50 p-3">
+                    <div className="mb-1 text-xs font-medium text-muted-foreground">
+                      Reasoning
+                    </div>
+                    <p className="text-sm leading-relaxed text-foreground/80">
+                      {current.reasoning}
+                    </p>
+                  </div>
+                )}
+
+                {/* Model tag */}
+                {current.predictor_model && (
+                  <div className="text-xs text-muted-foreground">
+                    Model:{" "}
+                    <span className="font-mono">
+                      {current.predictor_model}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Actions ─────────────────────────────────────── */}
+            <div className="space-y-2">
+              <Button
+                onClick={handleAdjudicate}
+                disabled={
+                  isPending || current.review_status !== "unreviewed"
+                }
+                className="w-full gap-2"
+                size="lg"
+                aria-busy={reviewMutation.isPending}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {reviewMutation.isPending && !showEventDateInput
+                  ? "Saving\u2026"
+                  : "No Event"}
+                <kbd className="ml-auto rounded border border-white/20 bg-white/10 px-1.5 py-0.5 text-xs">
+                  A
+                </kbd>
+              </Button>
+
+              {!showEventDateInput ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowEventDateInput(true)}
+                  disabled={
+                    isPending || current.review_status !== "unreviewed"
+                  }
+                  className="w-full gap-2"
+                  size="lg"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  Set Event Date
+                  <kbd className="ml-auto rounded border border-border bg-muted px-1.5 py-0.5 text-xs">
+                    E
+                  </kbd>
+                </Button>
+              ) : (
+                <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+                  <Label
+                    htmlFor="event-date-input"
+                    className="text-sm text-foreground/70"
+                  >
+                    Event date
+                  </Label>
+                  <Input
+                    id="event-date-input"
+                    type="date"
+                    className="text-sm"
+                    value={eventDateValue}
+                    onChange={(e) => setEventDateValue(e.target.value)}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleEventDate();
+                      if (e.key === "Escape") {
+                        setShowEventDateInput(false);
+                        setEventDateValue("");
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={handleEventDate}
+                      disabled={!eventDateValue || isPending}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="flex-1"
+                      onClick={() => {
+                        setShowEventDateInput(false);
+                        setEventDateValue("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* ── RIGHT PANEL: Sentence + Full Note ─────────────── */}
+          <div className="space-y-4">
+            {isPipelineAnnotation ? (
+              /* Pipeline annotation: show all matched notes, one at a time */
+              matchedNotesLoading ? (
+                <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-4/6" />
+                </div>
+              ) : matchedNotes && matchedNotes.length > 0 ? (
+                <>
+                  {/* Matched sentence excerpt */}
+                  <div className="rounded-lg border border-border bg-card">
+                    <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+                      <ArrowRight className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium text-foreground">
+                        Matched Sentence
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => setNoteIndex((i) => Math.max(0, i - 1))}
+                          disabled={noteIndex === 0}
+                        >
+                          <ChevronLeft className="h-3.5 w-3.5" />
+                        </Button>
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          Note {noteIndex + 1} / {matchedNotes.length}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => setNoteIndex((i) => Math.min(matchedNotes.length - 1, i + 1))}
+                          disabled={noteIndex >= matchedNotes.length - 1}
+                        >
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <span className="text-muted-foreground">&middot;</span>
+                      <span className="text-xs text-muted-foreground">
+                        {matchedNotes[noteIndex].text_id}
+                        {matchedNotes[noteIndex].note_date && ` \u2014 ${formatDate(matchedNotes[noteIndex].note_date)}`}
+                      </span>
+                      {matchedNotes[noteIndex].note_tags &&
+                        Object.entries(matchedNotes[noteIndex].note_tags)
+                          .filter(([k]) => k.startsWith("text_tag"))
+                          .map(([key, val]) => (
+                            <Badge
+                              key={key}
+                              variant="outline"
+                              className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
+                            >
+                              {String(val)}
+                            </Badge>
+                          ))}
+                    </div>
+                    <div className="max-h-48 overflow-y-auto px-5 py-4">
+                      {matchedNotes[noteIndex].matched_sentences.length > 0 ? (
+                        <div className="space-y-2">
+                          {matchedNotes[noteIndex].matched_sentences.map((sent, i) => (
+                            <p
+                              key={i}
+                              className="text-[16px] leading-[1.8] text-foreground"
+                              style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+                            >
+                              {highlightKeywords(sent, matchedNotes[noteIndex].search_keywords)}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm italic text-muted-foreground">
+                          No sentence-level matches for this note.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Full note */}
+                  <div className="rounded-lg border border-border bg-card">
+                    <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">
+                        Full Note
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {matchedNotes[noteIndex].text_id}
+                        {matchedNotes[noteIndex].note_date && ` \u2014 ${formatDate(matchedNotes[noteIndex].note_date)}`}
+                      </span>
+                    </div>
+                    <div className="h-[420px] overflow-y-auto px-5 py-4">
+                      <PipelineNoteViewer
+                        noteText={matchedNotes[noteIndex].text}
+                        matchPositions={matchedNotes[noteIndex].match_positions}
+                        keywords={matchedNotes[noteIndex].search_keywords}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <p className="text-sm text-muted-foreground">
+                    No matched notes found for this patient.
+                  </p>
+                </div>
+              )
+            ) : (
+              /* NLP sentence-level annotation: original layout */
+              <>
+                {/* Sentence under review */}
+                <div className="rounded-lg border border-border bg-card">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+                    <ArrowRight className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium text-foreground">
+                      Sentence Under Review
+                    </span>
+                    {current.note_date && (
+                      <>
+                        <span className="text-muted-foreground">&middot;</span>
+                        <span className="text-xs text-muted-foreground">
+                          Note {current.note_text_id} &mdash;{" "}
+                          {formatDate(current.note_date)}
+                        </span>
+                      </>
+                    )}
+                    {context?.note_tags && Object.keys(context.note_tags).length > 0 && (
+                      <>
+                        <span className="text-muted-foreground">&middot;</span>
+                        {Object.entries(context.note_tags)
+                          .filter(([k]) => k.startsWith("text_tag"))
+                          .sort(([a], [b]) => a.localeCompare(b))
+                          .map(([key, val]) => (
+                            <Badge
+                              key={key}
+                              variant="outline"
+                              className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
+                            >
+                              {String(val)}
+                            </Badge>
+                          ))}
+                      </>
+                    )}
+                  </div>
+                  <div className="max-h-48 overflow-y-auto px-5 py-4">
+                    <p
+                      className="text-[16px] leading-[1.8] text-foreground"
+                      style={{
+                        fontFamily: "Georgia, 'Times New Roman', serif",
+                      }}
+                    >
+                      {current.matched_tokens
+                        ? highlightMatches(current.sentence_text, current.matched_tokens)
+                        : highlightKeywords(
+                            current.sentence_text,
+                            context?.search_keywords ?? []
+                          )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Full note context */}
+                <div className="rounded-lg border border-border bg-card">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">
+                      Full Note
+                    </span>
+                    {context && (
+                      <span className="text-xs text-muted-foreground">
+                        {context.text_id}
+                        {context.note_date && ` \u2014 ${formatDate(context.note_date)}`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="h-[420px] overflow-y-auto px-5 py-4">
+                    {contextLoading ? (
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-5/6" />
+                        <Skeleton className="h-4 w-4/6" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-3/6" />
+                      </div>
+                    ) : context ? (
+                      <NoteViewer
+                        context={context}
+                        targetSentenceId={current.sentence_id}
+                        sentenceText={current.sentence_text}
+                        keywords={context.search_keywords ?? []}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Note context unavailable.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Live region for screen readers */}
+        <div className="sr-only" aria-live="assertive" aria-atomic="true">
+          {reviewMutation.isSuccess && "Annotation adjudicated"}
+          {deleteEventDateMutation.isSuccess &&
+            "Event date deleted, skips reverted"}
+          {(reviewMutation.isError || deleteEventDateMutation.isError) &&
+            "Action failed, please try again"}
         </div>
       </div>
     </TooltipProvider>
-  );
-}
-
-// ── Prediction Job Banner ────────────────────────────────────────
-
-function PredictionJobBanner({ projectId }: { projectId: string }) {
-  const queryClient = useQueryClient();
-  const [showConfirm, setShowConfirm] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-
-  // Fetch latest job status
-  const { data: jobStatus, refetch: refetchStatus } = useQuery<PredictionJobStatus | null>({
-    queryKey: ["prediction-job", projectId],
-    queryFn: () => api.get<PredictionJobStatus | null>(`/projects/${projectId}/annotations/predictions/status`),
-  });
-
-  // Fetch estimate for confirmation dialog
-  const { data: estimate } = useQuery<BulkEstimate>({
-    queryKey: ["bulk-estimate", projectId],
-    queryFn: () => api.get<BulkEstimate>(`/projects/${projectId}/annotations/estimate`),
-    enabled: showConfirm,
-  });
-
-  // Run predictions mutation
-  const runMutation = useMutation({
-    mutationFn: () => api.post<PredictionJobStatus>(`/projects/${projectId}/annotations/predictions/run`, {}),
-    onSuccess: () => {
-      setShowConfirm(false);
-      refetchStatus();
-    },
-  });
-
-  // Cancel mutation
-  const cancelMutation = useMutation({
-    mutationFn: () => api.post(`/projects/${projectId}/annotations/predictions/cancel`, {}),
-    onSuccess: () => refetchStatus(),
-  });
-
-  const isActive = jobStatus?.status === "running" || jobStatus?.status === "pending";
-
-  // WebSocket connection for live progress
-  useEffect(() => {
-    if (!isActive || !jobStatus?.job_id) return;
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/projects/${projectId}/jobs/${jobStatus.job_id}`);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      // Update job status in React Query cache
-      queryClient.setQueryData<PredictionJobStatus | null>(
-        ["prediction-job", projectId],
-        (old) => old ? { ...old, ...msg } : null,
-      );
-      // Invalidate annotation data as patients complete
-      if (msg.result_summary?.patients_processed) {
-        queryClient.invalidateQueries({ queryKey: ["patient-next", projectId] });
-        queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
-      }
-      // Terminal state — refetch to get final status
-      if (["completed", "cancelled", "failed"].includes(msg.type)) {
-        refetchStatus();
-      }
-    };
-
-    ws.onerror = () => { /* WebSocket errors are non-fatal, fall back to polling */ };
-
-    return () => { ws.close(); wsRef.current = null; };
-  }, [isActive, jobStatus?.job_id, projectId, queryClient, refetchStatus]);
-
-  const summary = jobStatus?.result_summary;
-
-  // No job or unknown status — show run button
-  if (!jobStatus || !["pending", "running", "completed", "cancelled", "failed"].includes(jobStatus.status)) {
-    return (
-      <>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
-          <Play className="h-3.5 w-3.5" aria-hidden="true" />
-          Run Predictions
-        </Button>
-        <PredictionConfirmDialog
-          open={showConfirm}
-          onOpenChange={setShowConfirm}
-          estimate={estimate ?? null}
-          isPending={runMutation.isPending}
-          onConfirm={() => runMutation.mutate()}
-        />
-      </>
-    );
-  }
-
-  // Active job (pending/running)
-  if (isActive) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-              Predictions running{summary?.patients_processed != null && summary?.total_patients
-                ? ` \u2014 ${summary.patients_processed}/${summary.total_patients} patients`
-                : "\u2026"}
-            </p>
-            {summary?.predictions_made != null && (
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                {summary.predictions_made} predictions made
-                {summary.errors ? ` \u00b7 ${summary.errors} errors` : ""}
-              </p>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => cancelMutation.mutate()}
-            disabled={cancelMutation.isPending}
-            className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-500/50 dark:text-amber-200 dark:hover:bg-amber-500/20"
-          >
-            {cancelMutation.isPending ? "Cancelling\u2026" : "Cancel"}
-          </Button>
-        </div>
-        <Progress value={jobStatus.progress} className="mt-2 h-1.5" />
-      </div>
-    );
-  }
-
-  // Completed
-  if (jobStatus.status === "completed") {
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-              Predictions complete
-            </p>
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
-              {summary?.annotations_created ?? 0} annotations created
-              {summary?.predictions_made != null ? ` from ${summary.predictions_made} predictions` : ""}
-              {summary?.token_usage ? ` \u00b7 ${summary.token_usage.total_tokens.toLocaleString()} tokens` : ""}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
-            <Play className="h-3.5 w-3.5" aria-hidden="true" />
-            Run Again
-          </Button>
-        </div>
-        <PredictionConfirmDialog
-          open={showConfirm}
-          onOpenChange={setShowConfirm}
-          estimate={estimate ?? null}
-          isPending={runMutation.isPending}
-          onConfirm={() => runMutation.mutate()}
-        />
-      </div>
-    );
-  }
-
-  // Cancelled
-  if (jobStatus.status === "cancelled") {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-              Predictions cancelled
-            </p>
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              {summary?.predictions_made ?? 0} predictions made before cancellation
-              {summary?.patients_processed != null && summary?.total_patients
-                ? ` \u00b7 ${summary.patients_processed}/${summary.total_patients} patients`
-                : ""}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
-            <Play className="h-3.5 w-3.5" aria-hidden="true" />
-            Run Again
-          </Button>
-        </div>
-        <PredictionConfirmDialog
-          open={showConfirm}
-          onOpenChange={setShowConfirm}
-          estimate={estimate ?? null}
-          isPending={runMutation.isPending}
-          onConfirm={() => runMutation.mutate()}
-        />
-      </div>
-    );
-  }
-
-  // Failed
-  return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-500/30 dark:bg-red-500/10">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-red-900 dark:text-red-200">
-            Prediction run failed
-          </p>
-          <p className="text-xs text-red-700 dark:text-red-300">
-            {summary?.errors ? `${summary.errors} errors` : "An error occurred during prediction"}
-            {summary?.predictions_made ? ` \u00b7 ${summary.predictions_made} predictions completed` : ""}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowConfirm(true)}>
-          <Play className="h-3.5 w-3.5" aria-hidden="true" />
-          Retry
-        </Button>
-      </div>
-      <PredictionConfirmDialog
-        open={showConfirm}
-        onOpenChange={setShowConfirm}
-        estimate={estimate ?? null}
-        isPending={runMutation.isPending}
-        onConfirm={() => runMutation.mutate()}
-      />
-    </div>
-  );
-}
-
-function PredictionConfirmDialog({
-  open,
-  onOpenChange,
-  estimate,
-  isPending,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  estimate: BulkEstimate | null;
-  isPending: boolean;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Run Predictions</DialogTitle>
-          <DialogDescription>
-            This will run the active predictor on all unprocessed sentences.
-          </DialogDescription>
-        </DialogHeader>
-        {estimate ? (
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Sentences to process</span>
-              <span className="font-medium tabular-nums">{estimate.sentence_count.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Estimated tokens</span>
-              <span className="font-medium tabular-nums">{estimate.estimated_total_tokens.toLocaleString()}</span>
-            </div>
-          </div>
-        ) : (
-          <Skeleton className="h-16 w-full" />
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-            Cancel
-          </Button>
-          <Button onClick={onConfirm} disabled={isPending || !estimate} className="gap-1.5">
-            <Play className="h-3.5 w-3.5" aria-hidden="true" />
-            {isPending ? "Starting\u2026" : "Confirm"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1291,37 +1489,43 @@ export default function AnnotationsPage() {
   const hasAnnotations = stats && stats.total > 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <WorkflowBreadcrumb currentStep="annotations" projectId={projectId!} />
 
-      {/* Header + project progress */}
+      {/* Header + stats */}
       <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Annotations</h2>
-        <div className="flex items-center gap-3">
-          {stats && stats.total > 0 && (
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <span>
-                <span className="font-medium tabular-nums text-foreground">{stats.reviewed}</span>/{stats.total} reviewed
+        <h2 className="text-lg font-semibold text-foreground">
+          Annotation Review
+        </h2>
+        {stats && stats.total > 0 && (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span>
+              <span className="font-semibold tabular-nums text-foreground">
+                {stats.reviewed}
               </span>
-              <span className="text-border">|</span>
-              <span>
-                <span className="font-medium tabular-nums text-foreground">{stats.unreviewed}</span> remaining
-              </span>
-              {stats.events_found > 0 && (
-                <>
-                  <span className="text-border">|</span>
-                  <span>
-                    <span className="font-medium tabular-nums text-foreground">{stats.events_found}</span> event{stats.events_found !== 1 ? "s" : ""}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+              /{stats.total} reviewed
+            </span>
+            <span className="text-border">|</span>
+            <span>
+              <span className="font-semibold tabular-nums text-foreground">
+                {stats.unreviewed}
+              </span>{" "}
+              remaining
+            </span>
+            {stats.events_found > 0 && (
+              <>
+                <span className="text-border">|</span>
+                <span>
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {stats.events_found}
+                  </span>{" "}
+                  event{stats.events_found !== 1 ? "s" : ""}
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Prediction job banner */}
-      <PredictionJobBanner projectId={projectId!} />
 
       {/* Review panel */}
       {statsLoading ? (
@@ -1330,19 +1534,21 @@ export default function AnnotationsPage() {
         <PatientReviewPanel projectId={projectId!} />
       ) : (
         <div
-          className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-12"
+          className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border py-16"
           role="status"
         >
           <BarChart3
-            className="mb-3 h-8 w-8 text-muted-foreground"
+            className="mb-3 h-10 w-10 text-muted-foreground"
             aria-hidden="true"
           />
-          <p className="font-medium text-foreground">No annotations yet</p>
+          <p className="text-lg font-medium text-foreground">
+            No annotations yet
+          </p>
           <p className="mt-1 text-sm text-muted-foreground">
             Validate and activate a predictor in{" "}
             <Link
               to={`/projects/${projectId}/evaluation`}
-              className="text-accent underline hover:text-foreground"
+              className="text-primary underline hover:text-foreground"
             >
               Evaluation
             </Link>{" "}

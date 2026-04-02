@@ -66,6 +66,8 @@ async def seeded_db(db):
         id="proj-1",
         name="Test Project",
         owner_id="user-1",
+        llm_provider="openai",
+        llm_model="gpt-4o",
     )
     db.add(project)
 
@@ -188,8 +190,6 @@ class TestCreateSession:
             seeded_db,
             source.id,
             event_name="MI",
-            llm_provider="openai",
-            llm_model="gpt-4o",
         )
         # Discard so we can create a new one
         await eval_service.discard_session(seeded_db, source.id)
@@ -204,8 +204,6 @@ class TestCreateSession:
         assert cloned.cloned_from_id == source.id
         assert cloned.search_queries == [{"query": "troponin", "type": "include"}]
         assert cloned.event_name == "MI"
-        assert cloned.llm_provider == "openai"
-        assert cloned.llm_model == "gpt-4o"
 
 
 class TestDiscardSession:
@@ -537,15 +535,11 @@ class TestUpdateLlmConfig:
             seeded_db,
             session.id,
             event_name="MI Detection",
-            llm_provider="openai",
-            llm_model="gpt-4o",
             include_criteria="Troponin elevation",
             exclude_criteria="Rule-out MI",
         )
 
         assert updated.event_name == "MI Detection"
-        assert updated.llm_provider == "openai"
-        assert updated.llm_model == "gpt-4o"
         assert updated.include_criteria == "Troponin elevation"
         assert updated.exclude_criteria == "Rule-out MI"
 
@@ -615,8 +609,6 @@ async def _create_session_with_search(seeded_db):
         event_description="Myocardial infarction",
         include_criteria="Troponin elevation",
         exclude_criteria="Rule-out MI",
-        llm_provider="openai",
-        llm_model="gpt-4o",
     )
     with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
          patch.object(eval_service, "process_note", side_effect=_mock_process_note):
@@ -641,7 +633,7 @@ class TestLlmRun:
         )
 
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+            stats = await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         assert stats["patients_classified"] == 5  # all 5 patients matched troponin
         assert stats["patients_no_match"] == 0
@@ -659,7 +651,7 @@ class TestLlmRun:
             raise ValueError("LLM API error")
 
         with patch.object(eval_service, "classify_patient", side_effect=failing_classify):
-            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+            stats = await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         assert stats["patients_classified"] == 0
         assert stats["patients_failed"] == 5
@@ -686,11 +678,11 @@ class TestLlmRun:
 
         await eval_service.update_llm_config(
             seeded_db, session.id,
-            event_name="Test", llm_provider="openai", llm_model="gpt-4o",
+            event_name="Test",
         )
 
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock):
-            stats = await eval_service.run_llm_on_sample(seeded_db, session.id)
+            stats = await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         assert stats["patients_classified"] == 0
         assert stats["patients_no_match"] == 5
@@ -705,7 +697,7 @@ class TestListPatientResults:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         result = await eval_service.list_patient_results(
             seeded_db, session.id, page=1, page_size=3,
@@ -729,7 +721,7 @@ class TestListPatientResults:
             )
 
         with patch.object(eval_service, "classify_patient", side_effect=alternating_classify):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         pos = await eval_service.list_patient_results(
             seeded_db, session.id, label_filter="positive",
@@ -749,7 +741,7 @@ class TestReview:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         # Get the first result
         listing = await eval_service.list_patient_results(seeded_db, session.id)
@@ -773,7 +765,7 @@ class TestReview:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         listing = await eval_service.list_patient_results(seeded_db, session.id)
         first_result = listing["results"][0]
@@ -795,7 +787,7 @@ class TestReview:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         # Judge all results as correct
         listing = await eval_service.list_patient_results(seeded_db, session.id)
@@ -822,7 +814,7 @@ class TestReview:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         listing = await eval_service.list_patient_results(seeded_db, session.id)
         results = listing["results"]
@@ -852,7 +844,7 @@ class TestCommit:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         committed = await eval_service.commit_session(
             seeded_db, session.id, user_id="user-1",
@@ -872,7 +864,7 @@ class TestCommit:
             token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         )
         with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
-            await eval_service.run_llm_on_sample(seeded_db, session.id)
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
 
         committed = await eval_service.commit_session(
             seeded_db, session.id, user_id="user-1", confidence_threshold=0.8,

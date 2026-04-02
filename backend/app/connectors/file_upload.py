@@ -3,9 +3,13 @@
 import csv
 import io
 import json
+import sys
 
 from app.common.s3 import download_file
 from app.connectors.base import ConnectorBase, FetchResult, PreviewResult
+
+# Clinical notes can be very large — raise the default 128KB field size limit
+csv.field_size_limit(sys.maxsize)
 
 
 class FileUploadConnector(ConnectorBase):
@@ -64,6 +68,7 @@ class FileUploadConnector(ConnectorBase):
             rows=batch,
             has_more=(offset + batch_size) < len(rows),
             offset=offset,
+            total_rows=len(rows),
         )
 
     def required_columns(self) -> list[str]:

@@ -1,0 +1,188 @@
+<h2>Section 4: Review & Commit</h2>
+<p class="subtitle">Clinician reviews LLM classifications, judges correctness, then commits to full run</p>
+
+<!-- Results overview -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">LLM Results (below LLM config on same page)</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+
+    <!-- Header with filter tabs -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <div style="font-weight: 600; color: #e0e0e0; font-size: 1.1rem;">Patient Results</div>
+      <div style="display: flex; gap: 0.25rem; background: #1e293b; border-radius: 6px; padding: 3px;">
+        <button style="background: #4f8ff7; color: white; border: none; border-radius: 4px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">All (183)</button>
+        <button style="background: transparent; color: #94a3b8; border: none; border-radius: 4px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">Positive (43)</button>
+        <button style="background: transparent; color: #94a3b8; border: none; border-radius: 4px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">Negative (132)</button>
+        <button style="background: transparent; color: #94a3b8; border: none; border-radius: 4px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">Inconclusive (8)</button>
+        <button style="background: transparent; color: #94a3b8; border: none; border-radius: 4px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">Unreviewed</button>
+      </div>
+    </div>
+
+    <!-- Patient card 1: Positive -->
+    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; margin-bottom: 0.75rem; overflow: hidden;">
+      <div style="padding: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <span style="font-weight: 600; color: #e0e0e0;">Patient P-00142</span>
+            <span style="background: #0f2918; color: #34d399; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">POSITIVE</span>
+            <span style="font-size: 0.8rem; color: #fbbf24;">Score: 0.94</span>
+          </div>
+          <span style="font-size: 0.85rem; color: #60a5fa;">Event date: 2024-01-15</span>
+        </div>
+
+        <!-- Reasoning -->
+        <div style="background: #0f172a; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem;">
+          <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-bottom: 0.3rem;">LLM Reasoning</div>
+          <div style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.6;">
+            Patient presents with classic STEMI: troponin I elevated at 2.4 ng/mL with rising trend, ST elevation in leads II, III, aVF on ECG, and emergent catheterization with PCI performed. Diagnosis confirmed by cardiology on 2024-01-15.
+          </div>
+        </div>
+
+        <!-- Evidence excerpts -->
+        <div style="margin-bottom: 0.75rem;">
+          <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-bottom: 0.3rem;">Evidence (3 notes)</div>
+          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+            <div style="background: #172234; border-left: 3px solid #4f8ff7; padding: 0.5rem 0.75rem; border-radius: 0 4px 4px 0; font-size: 0.83rem; color: #cbd5e1;">
+              <span style="color: #64748b; font-size: 0.75rem;">Cardiology Consult &middot; 2024-01-15</span><br>
+              "...troponin I elevated at <span style="color: #93c5fd; font-weight: 500;">2.4 ng/mL</span>. Serial troponin trending upward. 12-lead ECG shows <span style="color: #93c5fd; font-weight: 500;">ST elevation in leads II, III, aVF</span> consistent with inferior STEMI..."
+            </div>
+            <div style="background: #172234; border-left: 3px solid #4f8ff7; padding: 0.5rem 0.75rem; border-radius: 0 4px 4px 0; font-size: 0.83rem; color: #cbd5e1;">
+              <span style="color: #64748b; font-size: 0.75rem;">Cath Lab Report &middot; 2024-01-15</span><br>
+              "...100% occlusion of RCA. Successful PCI with drug-eluting stent placement..."
+            </div>
+            <button style="background: none; border: none; color: #4f8ff7; font-size: 0.8rem; cursor: pointer; text-align: left; padding: 0.25rem 0;">+ 1 more note &mdash; click to expand</button>
+          </div>
+        </div>
+
+        <!-- Judgment buttons -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.75rem; border-top: 1px solid #334155;">
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <span style="font-size: 0.85rem; color: #94a3b8;">Is the classification correct?</span>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <!-- Event date override -->
+            <div style="display: flex; align-items: center; gap: 0.4rem; margin-right: 1rem;">
+              <span style="font-size: 0.8rem; color: #64748b;">Event date:</span>
+              <input type="date" value="2024-01-15" style="background: #0f172a; border: 1px solid #334155; color: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem;">
+            </div>
+            <button class="mock-button" style="background: #166534; color: #34d399; font-weight: 600; font-size: 0.85rem; padding: 6px 16px;">&#10003; Correct</button>
+            <button class="mock-button" style="background: #7f1d1d; color: #fca5a5; font-weight: 600; font-size: 0.85rem; padding: 6px 16px;">&#10005; Wrong</button>
+            <button class="mock-button" style="background: transparent; border: 1px solid #334155; color: #64748b; font-size: 0.85rem; padding: 6px 16px;">Skip</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Patient card 2: Negative (collapsed) -->
+    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; margin-bottom: 0.75rem; padding: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          <span style="font-weight: 600; color: #e0e0e0;">Patient P-00331</span>
+          <span style="background: #2a1515; color: #f87171; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">NEGATIVE</span>
+          <span style="font-size: 0.8rem; color: #fbbf24;">Score: 0.12</span>
+          <span style="font-size: 0.8rem; color: #64748b; font-style: italic;">"Historical MI in 2019, no current event"</span>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <span style="font-size: 0.8rem; color: #4f8ff7; cursor: pointer;">Expand &#9660;</span>
+          <button class="mock-button" style="background: #166534; color: #34d399; font-size: 0.8rem; padding: 4px 12px;">&#10003;</button>
+          <button class="mock-button" style="background: #7f1d1d; color: #fca5a5; font-size: 0.8rem; padding: 4px 12px;">&#10005;</button>
+          <button class="mock-button" style="background: transparent; border: 1px solid #334155; color: #64748b; font-size: 0.8rem; padding: 4px 12px;">Skip</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Patient card 3: Already reviewed -->
+    <div style="background: #1e293b; border: 1px solid #166534; border-radius: 8px; margin-bottom: 0.75rem; padding: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          <span style="font-weight: 600; color: #e0e0e0;">Patient P-00089</span>
+          <span style="background: #0f2918; color: #34d399; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">POSITIVE</span>
+          <span style="font-size: 0.8rem; color: #fbbf24;">Score: 0.88</span>
+          <span style="font-size: 0.8rem; color: #34d399;">&#10003; Reviewed: Correct &middot; Date: 2024-01-12</span>
+        </div>
+        <span style="font-size: 0.8rem; color: #4f8ff7; cursor: pointer;">Expand &#9660;</span>
+      </div>
+    </div>
+
+    <!-- Review progress -->
+    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+      <div style="font-size: 0.85rem; color: #94a3b8;">
+        Reviewed: <strong style="color: #e0e0e0;">12 / 183</strong> patients
+        &middot; 8 correct &middot; 3 wrong &middot; 1 skipped
+      </div>
+      <div style="display: flex; gap: 0.5rem;">
+        <button class="mock-button" style="font-size: 0.8rem; background: transparent; border: 1px solid #334155; color: #94a3b8;">Previous</button>
+        <button class="mock-button" style="font-size: 0.8rem; background: transparent; border: 1px solid #334155; color: #94a3b8;">Next Unreviewed</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Metrics panel -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Live Metrics (updates as clinician reviews)</div>
+  <div class="mockup-body" style="padding: 1.25rem;">
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+      <div style="flex: 1; min-width: 100px; text-align: center; padding: 0.75rem; background: #0f172a; border-radius: 8px;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Accuracy</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: #34d399;">85.4%</div>
+      </div>
+      <div style="flex: 1; min-width: 100px; text-align: center; padding: 0.75rem; background: #0f172a; border-radius: 8px;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Precision</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: #60a5fa;">88.2%</div>
+      </div>
+      <div style="flex: 1; min-width: 100px; text-align: center; padding: 0.75rem; background: #0f172a; border-radius: 8px;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Recall</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: #60a5fa;">81.0%</div>
+      </div>
+      <div style="flex: 1; min-width: 100px; text-align: center; padding: 0.75rem; background: #0f172a; border-radius: 8px;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">F1 Score</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: #fbbf24;">84.4%</div>
+      </div>
+    </div>
+    <div style="font-size: 0.8rem; color: #64748b; text-align: center;">
+      Based on 48 reviewed patients (35 remaining)
+    </div>
+  </div>
+</div>
+
+<!-- Commit section -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Commit (bottom of page)</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+      <div>
+        <div style="font-weight: 600; color: #e0e0e0; font-size: 1.1rem; margin-bottom: 0.5rem;">Ready to commit?</div>
+        <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.6;">
+          This will lock the search queries and LLM prompt, then run the pipeline<br>
+          on <strong style="color: #e0e0e0;">all 12,400 patients</strong> in the project.<br>
+          <br>
+          <span style="color: #64748b;">Estimated: ~8,500 patients with no match (free), ~3,900 LLM calls, ~$18 cost</span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+        <button class="mock-button" style="background: #34d399; color: #0f172a; font-weight: 700; font-size: 1rem; padding: 0.75rem 2rem;">
+          Commit & Run Full Pipeline
+        </button>
+        <div style="display: flex; gap: 1rem;">
+          <button style="background: none; border: none; color: #4f8ff7; cursor: pointer; font-size: 0.85rem;">Edit search queries</button>
+          <button style="background: none; border: none; color: #4f8ff7; cursor: pointer; font-size: 0.85rem;">Edit LLM prompt</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>Review & Commit Flow</h3>
+  <ul style="color: #ccc; line-height: 1.8; font-size: 0.9rem;">
+    <li><strong>Patient cards</strong>: expanded for positives (show reasoning + evidence), collapsed for negatives (one-line summary)</li>
+    <li>Clinician judges: <strong>Correct / Wrong / Skip</strong> + can override the event date</li>
+    <li><strong>Live metrics</strong> update as reviews come in &mdash; no need to review all patients</li>
+    <li>Clinician can <strong>go back</strong> to edit search queries or LLM prompt and re-run at any point</li>
+    <li>Re-running LLM clears previous results but preserves search matches and reviews</li>
+    <li><strong>Commit</strong>: locks everything, shows full corpus cost estimate, triggers pipeline on all patients</li>
+    <li>No new evaluation sessions allowed while a committed pipeline is running</li>
+  </ul>
+</div>

@@ -15,7 +15,10 @@ interface Patient {
   patient_id_ext: string;
   status: string;
   note_count: number;
+  annotation_count: number;
+  reviewed_count: number;
   created_at: string;
+  updated_at: string;
 }
 
 interface PatientListResponse {
@@ -94,7 +97,7 @@ export default function PatientsPage() {
 
   return (
     <div className="space-y-6">
-      <WorkflowBreadcrumb current="Patients" />
+      <WorkflowBreadcrumb currentStep="data" projectId={projectId!} />
 
       <div>
         <h1 className="text-2xl font-semibold">Patients</h1>
@@ -143,19 +146,20 @@ export default function PatientsPage() {
               <th className="px-4 py-3 text-left font-medium">Patient ID</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-right font-medium">Notes</th>
-              <th className="px-4 py-3 text-left font-medium">Created</th>
+              <th className="px-4 py-3 text-right font-medium">Reviewed</th>
+              <th className="px-4 py-3 text-left font-medium">Last Updated</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                   Loading...
                 </td>
               </tr>
             ) : !data?.items.length ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                   {search || status ? "No patients match your filters." : "No patients yet."}
                 </td>
               </tr>
@@ -179,8 +183,13 @@ export default function PatientsPage() {
                   <td className="px-4 py-3 text-right tabular-nums">
                     {patient.note_count}
                   </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {patient.annotation_count > 0
+                      ? `${patient.reviewed_count}/${patient.annotation_count}`
+                      : "—"}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(patient.created_at).toLocaleDateString()}
+                    {new Date(patient.updated_at).toLocaleDateString()}
                   </td>
                 </tr>
               ))

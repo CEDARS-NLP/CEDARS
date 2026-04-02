@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.connectors.models import Patient
+from app.evaluation.models import EvaluationSession, PatientResult, SessionStatus
 from app.pipeline.models import (
     EventConfig,
     PatientTask,
@@ -17,14 +19,23 @@ from app.pipeline.models import (
 
 logger = logging.getLogger(__name__)
 
+# True when running against PostgreSQL (supports SELECT FOR UPDATE).
+_USE_DB_LOCKING = "sqlite" not in settings.database_url
+
 
 async def _check_no_active_run(session: AsyncSession, event_config_id: str) -> None:
-    """Reject if there's already an active run for this event config (Decision #35)."""
+    """Reject if there's already an active run for this event config (Decision #35).
+
+    Uses SELECT FOR UPDATE on PostgreSQL to close the TOCTOU race window between
+    the existence check and the new run insert.
+    """
     stmt = select(PipelineRun).where(
         PipelineRun.event_config_id == event_config_id,
         PipelineRun.status.in_([PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING]),
         PipelineRun.is_cancelled == False,  # noqa: E712
     )
+    if _USE_DB_LOCKING:
+        stmt = stmt.with_for_update()
     result = await session.execute(stmt)
     if result.scalar_one_or_none():
         raise ValueError("An active pipeline run already exists for this event config")
@@ -200,8 +211,97 @@ async def cancel_run(
     run.updated_at = datetime.now(UTC)
     session.add(run)
     await session.commit()
+
+    # Sync evaluation session status if this run is linked to one
+    stmt = (
+        select(PatientResult.session_id)
+        .where(PatientResult.pipeline_run_id == run_id)
+        .distinct()
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.first()
+    if row and row[0]:
+        eval_session = await session.get(EvaluationSession, row[0])
+        if eval_session and eval_session.status == SessionStatus.COMMITTED:
+            eval_session.status = SessionStatus.DISCARDED
+            eval_session.updated_at = datetime.now(UTC)
+            session.add(eval_session)
+            await session.commit()
+
     await session.refresh(run)
     return run
+
+
+async def rerun(
+    session: AsyncSession, project_id: str, run_id: str, user_id: str,
+) -> PipelineRun:
+    """Clone a terminal pipeline run and re-dispatch with the same config and patients.
+
+    Detects whether this is a standard pipeline run (PatientTask) or an eval
+    pipeline run (PatientResult) and dispatches accordingly.
+    """
+    old_run = await session.get(PipelineRun, run_id)
+    if not old_run or old_run.project_id != project_id:
+        raise ValueError("Pipeline run not found")
+    if old_run.status in (PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING):
+        raise ValueError("Cannot rerun an active pipeline run")
+
+    await _check_no_active_run(session, old_run.event_config_id)
+
+    # Check if this is an eval pipeline run (has PatientResult rows)
+    eval_check = await session.execute(
+        select(PatientResult.session_id)
+        .where(PatientResult.pipeline_run_id == run_id)
+        .limit(1)
+    )
+    eval_row = eval_check.first()
+
+    if eval_row:
+        # Delegate to eval service rerun
+        from app.evaluation.service import rerun_pipeline
+
+        result = await rerun_pipeline(session, eval_row[0], project_id, user_id)
+        new_run = await session.get(PipelineRun, result["run_id"])
+        if not new_run:
+            raise ValueError("Failed to create rerun")
+        return new_run
+
+    # Standard pipeline run — clone with PatientTask rows
+    stmt = select(PatientTask.patient_id).where(
+        PatientTask.pipeline_run_id == run_id
+    )
+    result = await session.execute(stmt)
+    patient_ids = [row[0] for row in result.all()]
+
+    if not patient_ids:
+        raise ValueError("Original run has no patient tasks to rerun")
+
+    new_run = PipelineRun(
+        project_id=project_id,
+        event_config_id=old_run.event_config_id,
+        run_type=old_run.run_type,
+        status=PipelineRunStatus.QUEUED,
+        config_snapshot=old_run.config_snapshot,
+        sample_size=old_run.sample_size,
+        total_patients=len(patient_ids),
+        created_by=user_id,
+        snapshot_version=old_run.snapshot_version,
+    )
+    session.add(new_run)
+    await session.flush()
+
+    for pid in patient_ids:
+        session.add(PatientTask(
+            pipeline_run_id=new_run.id,
+            patient_id=pid,
+            status=PatientTaskStatus.QUEUED,
+        ))
+
+    await session.commit()
+    await session.refresh(new_run)
+    await _enqueue_pipeline_run(new_run.id)
+    return new_run
 
 
 async def retry_failed(
@@ -263,7 +363,11 @@ async def list_runs(
 
 
 async def get_run_stats(session: AsyncSession, run_id: str) -> dict:
-    """Get aggregated PatientTask status counts for a run."""
+    """Get aggregated status counts for a run.
+
+    Checks PatientTask first (standard pipeline runs), then falls back to
+    PatientResult (evaluation-session pipeline runs).
+    """
     stmt = (
         select(PatientTask.status, func.count())
         .where(PatientTask.pipeline_run_id == run_id)
@@ -271,6 +375,19 @@ async def get_run_stats(session: AsyncSession, run_id: str) -> dict:
     )
     result = await session.execute(stmt)
     counts = {status.value: count for status, count in result.all()}
+
+    # Eval-session runs use PatientResult instead of PatientTask
+    if not counts:
+        from app.evaluation.models import PatientResult
+
+        stmt = (
+            select(PatientResult.status, func.count())
+            .where(PatientResult.pipeline_run_id == run_id)
+            .group_by(PatientResult.status)
+        )
+        result = await session.execute(stmt)
+        counts = {status.value: count for status, count in result.all()}
+
     return {
         "total": sum(counts.values()),
         "queued": counts.get("queued", 0),
@@ -315,7 +432,7 @@ async def list_tasks(
     status_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[PatientTask]:
+) -> list:
     stmt = (
         select(PatientTask)
         .where(PatientTask.pipeline_run_id == run_id)
@@ -326,4 +443,84 @@ async def list_tasks(
     if status_filter:
         stmt = stmt.where(PatientTask.status == status_filter)
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    tasks = list(result.scalars().all())
+
+    # Eval-session runs use PatientResult instead of PatientTask
+    if not tasks:
+        from app.evaluation.models import PatientResult
+
+        stmt = (
+            select(PatientResult)
+            .where(PatientResult.pipeline_run_id == run_id)
+            .order_by(PatientResult.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        if status_filter:
+            stmt = stmt.where(PatientResult.status == status_filter)
+        result = await session.execute(stmt)
+        tasks = list(result.scalars().all())
+
+    return tasks
+
+
+async def get_queue_overview(session: AsyncSession, project_id: str) -> dict:
+    """Get queue overview: pipeline run counts + background job counts + worker status."""
+    from app.jobs.models import BackgroundJob
+
+    # Pipeline run status counts
+    stmt = (
+        select(PipelineRun.status, func.count())
+        .where(PipelineRun.project_id == project_id)
+        .group_by(PipelineRun.status)
+    )
+    result = await session.execute(stmt)
+    run_counts = {
+        (s.value if hasattr(s, "value") else s): c for s, c in result.all()
+    }
+
+    # Background job status counts
+    stmt = (
+        select(BackgroundJob.status, func.count())
+        .where(BackgroundJob.project_id == project_id)
+        .group_by(BackgroundJob.status)
+    )
+    result = await session.execute(stmt)
+    job_counts = {
+        (s.value if hasattr(s, "value") else s): c for s, c in result.all()
+    }
+
+    # Worker health — ARQ stores a health-check key that expires after
+    # health_check_interval + 1 seconds (default key: "arq:queue:health-check")
+    worker_active = False
+    arq_queued = 0
+    try:
+        from arq import create_pool
+        from app.worker import parse_redis_settings
+
+        redis = await create_pool(parse_redis_settings())
+        health = await redis.get("arq:queue:health-check")
+        worker_active = health is not None
+        # Count queued ARQ jobs
+        arq_queued = await redis.zcard(redis.default_queue_name)
+        await redis.aclose()
+    except Exception:
+        pass
+
+    return {
+        "pipeline_runs": {
+            "queued": run_counts.get("queued", 0),
+            "running": run_counts.get("running", 0),
+            "completed": run_counts.get("completed", 0),
+            "failed": run_counts.get("failed", 0),
+            "cancelled": run_counts.get("cancelled", 0),
+        },
+        "background_jobs": {
+            "pending": job_counts.get("pending", 0),
+            "running": job_counts.get("running", 0),
+            "completed": job_counts.get("completed", 0),
+            "failed": job_counts.get("failed", 0),
+        },
+        "worker_active": worker_active,
+        "arq_queued": arq_queued,
+    }

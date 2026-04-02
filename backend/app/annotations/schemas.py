@@ -10,14 +10,14 @@ class AnnotationResponse(BaseModel):
     project_id: str
     patient_id: str
     note_id: str
-    sentence_id: str
+    sentence_id: str | None = None
     sentence_text: str
-    matched_tokens: str
-    is_negated: bool
+    matched_tokens: str | None = None
+    is_negated: bool = False
     predicted_score: float | None
     predicted_label: int | None
     predictor_model: str
-    reasoning: str
+    reasoning: str | None = None
     review_status: str
     reviewed_by: str | None
     reviewed_at: datetime | None
@@ -68,7 +68,7 @@ class PatientAnnotationResponse(AnnotationResponse):
 
     note_date: datetime | None = None
     note_text_id: str = ""
-    sentence_number: int = 0
+    sentence_number: int | None = None
 
 
 class NextPatientResponse(BaseModel):
@@ -82,6 +82,7 @@ class NextPatientResponse(BaseModel):
 class ReviewResultResponse(BaseModel):
     annotation: AnnotationResponse
     skipped_count: int = 0
+    earlier_count: int = 0
 
 
 class DeleteEventDateResponse(BaseModel):

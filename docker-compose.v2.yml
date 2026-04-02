@@ -44,17 +44,53 @@ services:
       timeout: 5s
       retries: 5
 
-  worker:
+  backend:
     build: ./backend
-    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
       CEDARS_REDIS_URL: redis://redis:6379
+      CEDARS_S3_ENDPOINT: http://minio:9000
+      CEDARS_S3_BUCKET: cedars
+      CEDARS_S3_ACCESS_KEY: rootuser
+      CEDARS_S3_SECRET_KEY: rootpassword
+      CEDARS_SECRET_KEY: dev-secret-key
+
+  worker:
+    build: ./backend
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    extra_hosts:
+      - "plmimskbia4:10.254.130.44"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
+      CEDARS_REDIS_URL: redis://redis:6379
+      CEDARS_S3_ENDPOINT: http://minio:9000
+      CEDARS_S3_BUCKET: cedars
+      CEDARS_S3_ACCESS_KEY: rootuser
+      CEDARS_S3_SECRET_KEY: rootpassword
+      CEDARS_SECRET_KEY: dev-secret-key
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
 
   prometheus:
     image: prom/prometheus:v2.51.0

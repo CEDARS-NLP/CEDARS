@@ -192,7 +192,7 @@ export default function PatientDetailPage() {
 
   return (
     <div className="space-y-6">
-      <WorkflowBreadcrumb current="Patient Detail" />
+      <WorkflowBreadcrumb currentStep="data" projectId={projectId!} />
 
       {/* Back link */}
       <Link

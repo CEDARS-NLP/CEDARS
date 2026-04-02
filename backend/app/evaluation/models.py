@@ -59,14 +59,11 @@ class EvaluationSession(SQLModel, table=True):
     # Search queries
     search_queries: list = Field(default=[], sa_column=Column(JSON, default=[]))
 
-    # LLM configuration
+    # Event definition (what to look for)
     event_name: str | None = Field(default=None, max_length=200)
     event_description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     include_criteria: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     exclude_criteria: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    llm_provider: str | None = Field(default=None, max_length=50)
-    llm_model: str | None = Field(default=None, max_length=200)
-    llm_api_base: str | None = Field(default=None, max_length=500)
 
     # Sample
     sample_patient_ids: list = Field(default=[], sa_column=Column(JSON, default=[]))

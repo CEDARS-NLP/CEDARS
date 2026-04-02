@@ -1,0 +1,234 @@
+<h2>Section 2: Search Filters (Revised)</h2>
+<p class="subtitle">Clinician-friendly query syntax instead of raw regex &mdash; powered by spaCy Matcher under the hood</p>
+
+<!-- Funnel Bar -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Pinned Funnel Bar (always visible)</div>
+  <div class="mockup-body" style="padding: 1rem 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 0; width: 100%;">
+      <div style="flex: 3; background: #1e293b; padding: 0.75rem 1rem; border-radius: 8px 0 0 8px; border: 1px solid #334155;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Sample</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #e2e8f0;">1,240 patients</div>
+        <div style="font-size: 0.75rem; color: #64748b;">12,400 notes</div>
+      </div>
+      <div style="color: #4f8ff7; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <div style="flex: 3; background: #172234; padding: 0.75rem 1rem; border: 1px solid #1e3a5f;">
+        <div style="font-size: 0.7rem; color: #4f8ff7; text-transform: uppercase; letter-spacing: 0.05em;">Search Match</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #60a5fa;">187 patients</div>
+        <div style="font-size: 0.75rem; color: #4f8ff7;">342 notes &middot; <strong>97% filtered out</strong></div>
+      </div>
+      <div style="color: #888; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <div style="flex: 3; background: #1a1a2e; padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; border: 1px solid #333; opacity: 0.4;">
+        <div style="font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">LLM Classification</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #888;">&mdash;</div>
+        <div style="font-size: 0.75rem; color: #666;">Run LLM to see results</div>
+      </div>
+    </div>
+    <div style="margin-top: 0.75rem; background: #1e293b; border-radius: 4px; height: 6px; overflow: hidden;">
+      <div style="width: 97%; height: 100%; background: linear-gradient(90deg, #4f8ff7, #34d399); border-radius: 4px;"></div>
+    </div>
+    <div style="font-size: 0.75rem; color: #34d399; margin-top: 4px; text-align: right;">97% of notes filtered by search &mdash; est. LLM cost: ~$0.85</div>
+  </div>
+</div>
+
+<!-- Query Editor -->
+<div class="mockup">
+  <div class="mockup-header">Search Query Editor</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+
+    <!-- Header + Suggest -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <div style="font-weight: 600; color: #e0e0e0; font-size: 1rem;">Search Queries</div>
+      <button class="mock-button" style="background: linear-gradient(135deg, #7c3aed, #4f8ff7); color: white; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 1rem;">&#9733;</span> Suggest Queries (LLM)
+      </button>
+    </div>
+
+    <!-- Syntax help -->
+    <div style="background: #0f172a; border: 1px solid #1e3a5f; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.8rem; color: #94a3b8;">
+      <strong style="color: #60a5fa;">Syntax:</strong>
+      Terms joined by <code style="color: #fbbf24;">OR</code> (any match) or <code style="color: #fbbf24;">AND</code> (all must match).
+      Prefix with <code style="color: #f87171;">!</code> to exclude.
+      Use <code style="color: #a78bfa;">*</code> for wildcards (e.g. <code>embol*</code>).
+      Parentheses for grouping: <code>(DVT OR PE) AND !suspected</code>
+    </div>
+
+    <!-- Query list -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
+
+      <!-- Query 1 -->
+      <div style="background: #1e293b; padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #334155;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+          <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.95rem;">troponin OR myocardial infarction OR MI OR STEMI OR NSTEMI</code>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;" title="Edit">&#9998;</button>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;" title="Delete">&times;</button>
+        </div>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; padding-left: 2.25rem;">
+          <span style="font-size: 0.8rem; color: #60a5fa;">248 notes matched</span>
+          <span style="font-size: 0.8rem; color: #94a3b8;">across 156 patients</span>
+          <span style="font-size: 0.8rem; color: #34d399;">top term: "troponin" (189 notes)</span>
+        </div>
+      </div>
+
+      <!-- Query 2 -->
+      <div style="background: #1e293b; padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #334155;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+          <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.95rem;">(ECG OR EKG) AND (elevation OR changes)</code>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&#9998;</button>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&times;</button>
+        </div>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; padding-left: 2.25rem;">
+          <span style="font-size: 0.8rem; color: #60a5fa;">98 notes matched</span>
+          <span style="font-size: 0.8rem; color: #94a3b8;">across 71 patients</span>
+          <span style="font-size: 0.8rem; color: #34d399;">top term: "ECG" (82 notes)</span>
+        </div>
+      </div>
+
+      <!-- Query 3 - exclusion -->
+      <div style="background: #1e293b; padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #5a2020;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div style="width: 18px; height: 18px; background: #ef4444; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&minus;</div>
+          <code style="flex: 1; font-family: monospace; color: #fca5a5; font-size: 0.95rem;">rule out OR rule-out OR family history OR suspected</code>
+          <span style="font-size: 0.7rem; color: #888; background: #2a1a1a; padding: 2px 6px; border-radius: 3px;">EXCLUDE</span>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&#9998;</button>
+          <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&times;</button>
+        </div>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; padding-left: 2.25rem;">
+          <span style="font-size: 0.8rem; color: #f87171;">-45 notes excluded</span>
+          <span style="font-size: 0.8rem; color: #94a3b8;">from 12 patients</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add query input -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+      <input class="mock-input" placeholder="e.g. troponin OR cardiac enzyme*" style="flex: 1; font-family: monospace;">
+      <select style="background: #1e293b; border: 1px solid #334155; color: #e0e0e0; padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.85rem;">
+        <option>Include</option>
+        <option>Exclude</option>
+      </select>
+      <button class="mock-button" style="font-size: 0.85rem;">Add</button>
+    </div>
+
+    <!-- Aggregate stats -->
+    <div style="background: #0f172a; border: 1px solid #1e3a5f; border-radius: 8px; padding: 1rem;">
+      <div style="font-size: 0.8rem; color: #64748b; text-transform: uppercase; margin-bottom: 0.5rem;">Combined Filter Impact</div>
+      <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">Include matches</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #60a5fa;">199 patients / 346 notes</div>
+        </div>
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">After exclusions</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #34d399;">187 patients / 301 notes</div>
+        </div>
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">Filtered out</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #f87171;">1,053 patients (85%)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LLM Suggest Flow -->
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">"Suggest Queries" LLM Flow</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+
+      <!-- Step 1: User describes -->
+      <div style="display: flex; gap: 1rem; align-items: flex-start;">
+        <div style="min-width: 24px; height: 24px; background: #7c3aed; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: white; font-weight: 600;">1</div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; color: #e0e0e0; margin-bottom: 4px;">Clinician describes the event</div>
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.75rem;">
+            <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 4px;">Event description:</div>
+            <div style="color: #e2e8f0; font-style: italic;">"I'm looking for patients with confirmed myocardial infarction. Key indicators are elevated troponin, ST changes on ECG, and cardiology consult notes. Exclude rule-outs and family history mentions."</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: LLM suggests -->
+      <div style="display: flex; gap: 1rem; align-items: flex-start;">
+        <div style="min-width: 24px; height: 24px; background: #7c3aed; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: white; font-weight: 600;">2</div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; color: #e0e0e0; margin-bottom: 4px;">LLM returns suggested queries</div>
+          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+
+            <div style="display: flex; align-items: center; gap: 0.5rem; background: #1a2332; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px dashed #4f8ff7;">
+              <code style="flex: 1; color: #93c5fd; font-size: 0.85rem;">troponin OR myocardial infarction OR MI OR STEMI OR NSTEMI</code>
+              <button class="mock-button" style="font-size: 0.75rem; background: #1e3a5f; color: #60a5fa; padding: 2px 8px;">Accept</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Edit</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Skip</button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.5rem; background: #1a2332; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px dashed #4f8ff7;">
+              <code style="flex: 1; color: #93c5fd; font-size: 0.85rem;">(ECG OR EKG OR electrocardiogra*) AND (elevation OR changes OR abnormal*)</code>
+              <button class="mock-button" style="font-size: 0.75rem; background: #1e3a5f; color: #60a5fa; padding: 2px 8px;">Accept</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Edit</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Skip</button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.5rem; background: #2a1a1e; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px dashed #ef4444;">
+              <span style="font-size: 0.7rem; color: #f87171; background: #3a1515; padding: 1px 5px; border-radius: 3px;">EXCLUDE</span>
+              <code style="flex: 1; color: #fca5a5; font-size: 0.85rem;">rule out OR rule-out OR family history OR suspected OR negative for</code>
+              <button class="mock-button" style="font-size: 0.75rem; background: #3a1515; color: #f87171; padding: 2px 8px;">Accept</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Edit</button>
+              <button class="mock-button" style="font-size: 0.75rem; background: transparent; border: 1px solid #334155; color: #888; padding: 2px 8px;">Skip</button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Accept/Edit -->
+      <div style="display: flex; gap: 1rem; align-items: flex-start;">
+        <div style="min-width: 24px; height: 24px; background: #7c3aed; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: white; font-weight: 600;">3</div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; color: #e0e0e0;">Clinician accepts, edits, or skips each suggestion &rarr; accepted queries appear in the editor above with live stats</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>Query Syntax (What Clinicians Write)</h3>
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 0.5rem; color: #fbbf24; font-family: monospace;">troponin OR MI</td>
+      <td style="padding: 0.5rem; color: #94a3b8;">Match notes containing either term</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 0.5rem; color: #fbbf24; font-family: monospace;">(ECG OR EKG) AND elevation</td>
+      <td style="padding: 0.5rem; color: #94a3b8;">Both conditions must match in the same note</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 0.5rem; color: #fbbf24; font-family: monospace;">embol*</td>
+      <td style="padding: 0.5rem; color: #94a3b8;">Wildcard: matches embolism, emboli, embolus, etc.</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 0.5rem; color: #fbbf24; font-family: monospace;">!suspected</td>
+      <td style="padding: 0.5rem; color: #94a3b8;">Exclude notes containing this term</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; color: #fbbf24; font-family: monospace;">(DVT OR PE) AND !suspected</td>
+      <td style="padding: 0.5rem; color: #94a3b8;">Combined: match DVT/PE but exclude if suspected</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section" style="margin-top: 1rem;">
+  <h3>Under the Hood</h3>
+  <ul style="color: #ccc; line-height: 1.8; font-size: 0.9rem;">
+    <li>Queries are parsed into <strong>spaCy Matcher</strong> patterns (case-insensitive token matching)</li>
+    <li>Wildcards (<code>*</code>, <code>?</code>) converted to regex patterns internally</li>
+    <li>Built-in <strong>negation detection</strong>: even without <code>!</code> exclusions, spaCy detects negated contexts ("no troponin elevation" won't match)</li>
+    <li>Multiple queries are OR'd together &mdash; a note matching <em>any</em> query is included</li>
+    <li>Exclude queries subtract from the result set</li>
+  </ul>
+</div>

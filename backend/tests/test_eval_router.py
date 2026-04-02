@@ -139,31 +139,26 @@ class TestQueries:
         assert "matched_patients" in data
 
 
-class TestLlmConfig:
-    """LLM configuration update."""
+class TestEventConfig:
+    """Event configuration update."""
 
-    async def test_update_llm_config(self, client):
+    async def test_update_event_config(self, client):
         await register_and_login(client)
         pid = await create_project(client)
         session = await create_eval_session(client, pid)
 
         resp = await client.put(
-            f"/api/v1/projects/{pid}/evaluation/sessions/{session['id']}/llm-config",
+            f"/api/v1/projects/{pid}/evaluation/sessions/{session['id']}/event-config",
             json={
                 "event_name": "Myocardial Infarction",
                 "event_description": "A heart attack event",
                 "include_criteria": "troponin elevation, ST changes",
                 "exclude_criteria": "ruled out",
-                "llm_provider": "ollama",
-                "llm_model": "llama3",
-                "llm_api_base": "http://localhost:11434",
             },
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["event_name"] == "Myocardial Infarction"
-        assert data["llm_provider"] == "ollama"
-        assert data["llm_model"] == "llama3"
 
 
 class TestResultsAndMetrics:

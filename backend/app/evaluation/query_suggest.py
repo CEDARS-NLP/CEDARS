@@ -12,19 +12,21 @@ import litellm
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clinical NLP expert. Given a clinical event description, generate search queries to find relevant mentions in clinical notes.
+SYSTEM_PROMPT = """You are a clinical NLP expert. Given a clinical event description, generate broad search queries to find relevant mentions in clinical notes.
 
 Use this query syntax:
-- `term1 OR term2` — match notes containing either term
-- `(term1 OR term2) AND term3` — both conditions in same note
+- `term1 OR term2` — match notes containing either term in a sentence
+- `(term1 OR term2) AND term3` — both conditions in same sentence
 - `embol*` — wildcard: matches embolism, emboli, embolus, etc.
 - `!term` — exclude notes containing this term
 
 Rules:
 - Generate include queries (to find relevant notes) and exclude queries (to filter noise)
+- Start with more general queries, then add specific ones if needed to improve precision
 - Use terms clinicians actually write in notes, including abbreviations
 - Include common misspellings and variations
 - Keep queries simple and focused — one concept per query
+- Only give exclusion queries if there are common sources of false positives
 - Prefer wildcards for word stems (e.g., `thromb*` instead of listing all variants)
 
 Respond ONLY with a JSON array:

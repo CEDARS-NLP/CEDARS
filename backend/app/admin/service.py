@@ -46,13 +46,13 @@ async def get_worker_info() -> list[dict]:
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
-        health_key = await redis.exists(b"arq:queue:health-check")
+        health_val = await redis.get("arq:queue:health-check")
         workers = []
-        if health_key:
+        if health_val is not None:
             workers.append({
                 "name": "arq-worker",
-                "queue": "default",
-                "current_job": None,
+                "queue": "arq:queue",
+                "current_job": health_val.decode() if isinstance(health_val, bytes) else str(health_val),
             })
         await redis.aclose()
         return workers

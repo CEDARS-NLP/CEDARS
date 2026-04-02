@@ -21,6 +21,7 @@ class FetchResult:
     rows: list[dict[str, Any]]
     has_more: bool = False
     offset: int = 0
+    total_rows: int | None = None
 
 
 class ConnectorBase(ABC):

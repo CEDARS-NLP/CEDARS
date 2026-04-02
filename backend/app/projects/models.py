@@ -25,6 +25,12 @@ class Project(SQLModel, table=True):
     name: str = Field(index=True)
     description: str = Field(default="")
     owner_id: str = Field(foreign_key="users.id")
+
+    # LLM configuration (project-wide)
+    llm_provider: str | None = Field(default=None, max_length=50)
+    llm_model: str | None = Field(default=None, max_length=200)
+    llm_api_base: str | None = Field(default=None, max_length=500)
+
     settings: dict = Field(
         default_factory=dict,
         sa_column=Column(JSON, nullable=False, server_default="{}"),

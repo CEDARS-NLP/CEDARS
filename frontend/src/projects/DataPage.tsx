@@ -6,7 +6,6 @@ import {
   FileText,
   Database,
   Trash2,
-  Play,
   CheckCircle2,
   XCircle,
   Loader2,
@@ -48,26 +47,6 @@ const REQUIRED_FIELDS = [
 const OPTIONAL_FIELDS = [
   { key: "source_ref", label: "Source Ref", description: "Source reference / accession number" },
 ] as const;
-
-/** Parse first line of CSV to get column headers */
-function parseCSVHeaders(text: string): string[] {
-  const firstLine = text.split(/\r?\n/)[0] || "";
-  return firstLine.split(",").map((h) => h.trim().replace(/^["']|["']$/g, ""));
-}
-
-/** Parse JSON to get column headers from first record */
-function parseJSONHeaders(text: string): string[] {
-  try {
-    const data = JSON.parse(text);
-    const records = Array.isArray(data) ? data : data?.records;
-    if (Array.isArray(records) && records.length > 0) {
-      return Object.keys(records[0]);
-    }
-  } catch {
-    // handled by caller
-  }
-  return [];
-}
 
 /** Normalize a column name for matching: lowercase, trim, collapse spaces/underscores */
 function normalizeCol(name: string): string {
@@ -310,7 +289,7 @@ export default function DataPage() {
 
   const databricksRequiredMissing = !databricksForm.name || !databricksForm.host || !databricksForm.http_path || !databricksForm.token || !databricksForm.schema || !databricksForm.table || REQUIRED_FIELDS.some((f) => !databricksForm[f.key as keyof typeof databricksForm]);
 
-  /** Read file headers and set up column mapping UI */
+  /** Upload file to backend preview endpoint for column detection + preview rows */
   async function handleFileSelected(file: File) {
     setUploadError("");
     setParseError("");
@@ -321,61 +300,40 @@ export default function DataPage() {
       return;
     }
 
+    setPendingFile(file);
+
     try {
-      // Only read the first 64KB for column detection and preview —
-      // reading the entire file would hang the browser on large files.
-      const PEEK_SIZE = 64 * 1024;
-      const slice = file.slice(0, PEEK_SIZE);
-      const text = await slice.text();
+      const formData = new FormData();
+      formData.append("file", file);
+      const resp = await fetch(`/api/v1/projects/${projectId}/data/upload/preview`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: "Preview failed" }));
+        setParseError(err.detail || "Failed to parse file");
+        return;
+      }
 
-      const columns = ext === "csv" ? parseCSVHeaders(text) : parseJSONHeaders(text);
+      const data: { columns: string[]; rows: Record<string, string>[] } = await resp.json();
 
-      if (columns.length === 0) {
+      if (data.columns.length === 0) {
         setParseError("Could not detect any columns in this file. Check the file format.");
-        setPendingFile(file);
         return;
       }
 
       // Auto-match columns
       const mapping: Record<string, string> = {};
       for (const field of [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]) {
-        mapping[field.key] = autoMatch(field.key, columns);
+        mapping[field.key] = autoMatch(field.key, data.columns);
       }
 
-      // Parse a few preview rows
-      let preview: Record<string, string>[] = [];
-      if (ext === "csv") {
-        // Drop the last line of the slice — it may be truncated
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        if (text.length >= PEEK_SIZE) lines.pop();
-        const headers = parseCSVHeaders(text);
-        preview = lines.slice(1, 4).map((line) => {
-          const values = line.split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
-          const row: Record<string, string> = {};
-          headers.forEach((h, i) => { row[h] = values[i] || ""; });
-          return row;
-        });
-      } else {
-        // For JSON, the 64KB slice likely won't be valid JSON for large files.
-        // Try to parse; if it fails, at least headers were detected above.
-        try {
-          const data = JSON.parse(text);
-          const records = Array.isArray(data) ? data : data?.records || [];
-          preview = records.slice(0, 3).map((r: Record<string, unknown>) => {
-            const row: Record<string, string> = {};
-            for (const [k, v] of Object.entries(r)) row[k] = String(v ?? "");
-            return row;
-          });
-        } catch { /* truncated JSON — skip preview */ }
-      }
-
-      setPendingFile(file);
-      setDetectedColumns(columns);
+      setDetectedColumns(data.columns);
       setColumnMapping(mapping);
-      setPreviewRows(preview);
+      setPreviewRows(data.rows);
     } catch {
-      setParseError("Failed to read the file. Check that it is a valid CSV or JSON.");
-      setPendingFile(file);
+      setParseError("Failed to preview the file. Check that it is a valid CSV or JSON.");
     }
   }
 
@@ -846,11 +804,19 @@ function DataSourceCard({
 
   const renderIngestionSummary = useCallback((summary: Record<string, unknown>) => {
     const totalRows = summary.total_rows as number | undefined;
-    const batches = summary.batches as number | undefined;
-    if (totalRows != null) {
-      return `${totalRows} rows ingested${batches != null ? ` in ${batches} batch${batches !== 1 ? "es" : ""}` : ""}`;
+    const insertedRows = summary.inserted_rows as number | undefined;
+    const skippedRows = summary.skipped_rows as number | undefined;
+    // Use inserted_rows if available (new format), fall back to total_rows (old format)
+    const ingested = insertedRows ?? totalRows;
+    if (ingested == null) return null;
+    const parts = [`${ingested.toLocaleString()} rows ingested`];
+    if (totalRows != null && insertedRows != null && totalRows !== insertedRows) {
+      parts.push(`of ${totalRows.toLocaleString()}`);
     }
-    return null;
+    if (skippedRows != null && skippedRows > 0) {
+      parts.push(`(${skippedRows.toLocaleString()} skipped)`);
+    }
+    return parts.join(" ");
   }, []);
 
   return (

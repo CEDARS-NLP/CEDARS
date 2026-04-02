@@ -68,10 +68,19 @@ async def execute_ingestion_job(
             session.add(ds)
             await session.commit()
 
-            total_rows = 0
+            inserted_rows = 0
+            file_rows = 0
             offset = 0
             batch_size = 1000
             batch_num = 0
+
+            def _summary() -> dict:
+                return {
+                    "total_rows": file_rows,
+                    "inserted_rows": inserted_rows,
+                    "skipped_rows": file_rows - inserted_rows,
+                    "batches": batch_num,
+                }
 
             while True:
                 # Check cancellation between batches
@@ -82,7 +91,7 @@ async def execute_ingestion_job(
                     session.add(ds)
                     bg_job.status = JobStatus.CANCELLED
                     bg_job.completed_at = datetime.now(UTC)
-                    bg_job.result_summary = {"total_rows": total_rows, "batches": batch_num}
+                    bg_job.result_summary = _summary()
                     session.add(bg_job)
                     await session.commit()
                     return bg_job.result_summary
@@ -91,20 +100,25 @@ async def execute_ingestion_job(
                 if not batch.rows:
                     break
 
+                # Use connector-reported total if available
+                if batch.total_rows is not None:
+                    file_rows = batch.total_rows
+                else:
+                    file_rows = offset + len(batch.rows)
+
                 mapping = ds.config.get("column_mapping", {})
                 count = await _ingest_rows(session, project_id, ds.id, batch.rows, mapping)
-                total_rows += count
+                inserted_rows += count
                 offset += batch_size
                 batch_num += 1
 
                 # Update progress
-                bg_job.result_summary = {"total_rows": total_rows, "batches": batch_num}
-                # We don't know total ahead of time, so use batch count for progress
-                # If has_more is False on next check, we'll set to 100
+                bg_job.result_summary = _summary()
                 if not batch.has_more:
                     bg_job.progress = 100
+                elif file_rows > 0:
+                    bg_job.progress = min(95, int(offset / file_rows * 100))
                 else:
-                    # Estimate progress — we can't know total, so cap at 95
                     bg_job.progress = min(95, batch_num * 10)
                 session.add(bg_job)
                 await session.commit()
@@ -113,7 +127,7 @@ async def execute_ingestion_job(
                     break
 
             ds.status = IngestionStatus.COMPLETED
-            ds.row_count = total_rows
+            ds.row_count = inserted_rows
             ds.last_sync = datetime.now(UTC)
             ds.error_message = None
             session.add(ds)
@@ -121,13 +135,13 @@ async def execute_ingestion_job(
 
             await log_action(
                 session, project_id, AuditAction.DATA_INGESTED,
-                detail={"data_source_id": data_source_id, "row_count": total_rows},
+                detail={"data_source_id": data_source_id, "row_count": inserted_rows},
             )
 
             bg_job.status = JobStatus.COMPLETED
             bg_job.progress = 100
             bg_job.completed_at = datetime.now(UTC)
-            bg_job.result_summary = {"total_rows": total_rows, "batches": batch_num}
+            bg_job.result_summary = _summary()
 
         except Exception as exc:
             logger.exception("Ingestion job failed for project %s", project_id)

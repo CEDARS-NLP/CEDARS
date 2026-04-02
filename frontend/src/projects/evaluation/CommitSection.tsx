@@ -16,7 +16,8 @@ export default function CommitSection({ projectId, session, onRefresh }: CommitS
   const commitMutation = useMutation({
     mutationFn: () =>
       api.post<CommitResult>(
-        `/projects/${projectId}/evaluation/sessions/${session.id}/commit`
+        `/projects/${projectId}/evaluation/sessions/${session.id}/commit`,
+        {}
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["eval-session", projectId, session.id] });

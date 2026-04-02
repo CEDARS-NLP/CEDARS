@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,13 +6,15 @@ import {
   ChevronRight,
   XCircle,
   RotateCcw,
+  RefreshCw,
   Clock,
   CheckCircle2,
   AlertTriangle,
   Activity,
+  Layers,
 } from "lucide-react";
 import { api } from "@/api/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -47,21 +49,36 @@ function RunDetail({
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
 
-  const { data: stats } = useQuery<PipelineRunStats>({
+  const isActive = run.status === "queued" || run.status === "running";
+  const prevStatus = useRef(run.status);
+
+  const { data: stats, refetch: refetchStats } = useQuery<PipelineRunStats>({
     queryKey: ["run-stats", run.id],
     queryFn: () => api.get(`/projects/${projectId}/pipeline/runs/${run.id}/stats`),
-    refetchInterval: run.status === "running" || run.status === "queued" ? 3000 : false,
+    refetchInterval: isActive ? 3000 : false,
   });
+
+  // Refetch stats + tasks when run status transitions (e.g. running → completed)
+  useEffect(() => {
+    if (prevStatus.current !== run.status) {
+      prevStatus.current = run.status;
+      refetchStats();
+    }
+  }, [run.status, refetchStats]);
 
   const { data: tasks } = useQuery<PatientTaskSummary[]>({
     queryKey: ["run-tasks", run.id],
     queryFn: () => api.get(`/projects/${projectId}/pipeline/runs/${run.id}/tasks?limit=50`),
     enabled: expanded,
+    refetchInterval: expanded && isActive ? 5000 : false,
   });
 
   const cancelMutation = useMutation({
     mutationFn: () => api.post<PipelineRun>(`/projects/${projectId}/pipeline/runs/${run.id}/cancel`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["all-runs", projectId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["all-runs", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["eval-sessions", projectId] });
+    },
   });
 
   const retryMutation = useMutation({
@@ -69,7 +86,13 @@ function RunDetail({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["all-runs", projectId] }),
   });
 
-  const isActive = run.status === "queued" || run.status === "running";
+  const rerunMutation = useMutation({
+    mutationFn: () => api.post<PipelineRun>(`/projects/${projectId}/pipeline/runs/${run.id}/rerun`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["all-runs", projectId] }),
+  });
+
+  const isTerminal = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+
   const progress = stats && stats.total > 0
     ? Math.round(((stats.completed + stats.failed + stats.no_match) / stats.total) * 100)
     : 0;
@@ -121,6 +144,18 @@ function RunDetail({
                 Retry Failed
               </Button>
             ) : null}
+            {isTerminal && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 text-xs"
+                onClick={() => rerunMutation.mutate()}
+                disabled={rerunMutation.isPending}
+              >
+                <RefreshCw className="h-3 w-3" />
+                Rerun
+              </Button>
+            )}
           </div>
         </div>
         {isActive && <Progress value={progress} className="mt-2 h-1.5" />}
@@ -202,6 +237,73 @@ function RunDetail({
   );
 }
 
+interface QueueOverview {
+  pipeline_runs: { queued: number; running: number; completed: number; failed: number; cancelled: number };
+  background_jobs: { pending: number; running: number; completed: number; failed: number };
+  worker_active: boolean;
+  arq_queued: number;
+}
+
+function QueueStatus({ projectId }: { projectId: string }) {
+  const { data: queue } = useQuery<QueueOverview>({
+    queryKey: ["queue-overview", projectId],
+    queryFn: () => api.get(`/projects/${projectId}/pipeline/queue`),
+    refetchInterval: 5000,
+  });
+
+  if (!queue) return null;
+
+  const pr = queue.pipeline_runs;
+  const bj = queue.background_jobs;
+
+  return (
+    <Card>
+      <CardContent className="py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <div className={`h-2.5 w-2.5 rounded-full ${queue.worker_active ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
+              <span className="text-sm font-medium">
+                Worker {queue.worker_active ? "Online" : "Offline"}
+              </span>
+              {queue.arq_queued > 0 && (
+                <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300 text-xs">
+                  {queue.arq_queued} in queue
+                </Badge>
+              )}
+            </div>
+            <div className="h-4 border-l border-border" />
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted-foreground">Pipeline:</span>
+              {pr.queued + pr.running > 0 && (
+                <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 text-xs">
+                  {pr.queued + pr.running} active
+                </Badge>
+              )}
+              <span className="tabular-nums text-muted-foreground">
+                {pr.completed} done · {pr.failed} failed
+              </span>
+            </div>
+            <div className="h-4 border-l border-border" />
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted-foreground">Jobs:</span>
+              {bj.pending + bj.running > 0 && (
+                <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 text-xs">
+                  {bj.pending + bj.running} active
+                </Badge>
+              )}
+              <span className="tabular-nums text-muted-foreground">
+                {bj.completed} done · {bj.failed} failed
+              </span>
+            </div>
+          </div>
+          <Layers className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function JobDashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
 
@@ -219,6 +321,8 @@ export default function JobDashboardPage() {
           Monitor pipeline runs, cancel active jobs, and retry failures.
         </p>
       </div>
+
+      <QueueStatus projectId={projectId!} />
 
       {isLoading ? (
         <div className="space-y-3">

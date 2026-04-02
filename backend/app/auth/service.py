@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -46,9 +46,17 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str) -> dict | None:
-    """Decode and validate a JWT token. Returns None if invalid or expired."""
+    """Decode and validate a JWT token.
+
+    Returns the payload dict if the token is valid.
+    Returns None if the token is malformed or has an invalid signature.
+    Raises ExpiredSignatureError if the token is well-formed but expired,
+    allowing callers to distinguish expiry from other validation failures.
+    """
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+    except ExpiredSignatureError:
+        raise  # Propagate so callers can surface a specific "token expired" error
     except JWTError:
         return None
 
@@ -85,9 +93,12 @@ async def refresh_access_token(
 ) -> tuple[User, str, str]:
     """Validate refresh token, return (user, new_access_token, new_refresh_token).
 
-    Raises ValueError on invalid token or inactive user.
+    Raises ValueError on invalid token, expired token, or inactive user.
     """
-    payload = decode_token(refresh_token)
+    try:
+        payload = decode_token(refresh_token)
+    except ExpiredSignatureError:
+        raise ValueError("Refresh token has expired")
     if not payload or payload.get("type") != "refresh":
         raise ValueError("Invalid refresh token")
     user = await session.get(User, payload["sub"])

@@ -48,7 +48,10 @@ class PatientResponse(BaseModel):
     patient_id_ext: str
     status: str
     note_count: int = 0
+    annotation_count: int = 0
+    reviewed_count: int = 0
     created_at: datetime
+    updated_at: datetime
 
 
 class PatientListResponse(BaseModel):

@@ -138,7 +138,16 @@ def _term_to_pattern(term: str) -> list[dict]:
     """Convert a single search term to a spaCy Matcher pattern."""
     if "*" in term or "?" in term:
         # Wildcard → regex on TEXT (case-insensitive)
-        regex = term.replace("*", ".*").replace("?", ".")
+        # Escape regex-special chars first, then convert our wildcards
+        parts = re.split(r"(\*|\?)", term)
+        regex = ""
+        for part in parts:
+            if part == "*":
+                regex += ".*"
+            elif part == "?":
+                regex += "."
+            else:
+                regex += re.escape(part)
         regex = rf"(?i)^{regex}$"
         return [{"TEXT": {"REGEX": regex}}]
 

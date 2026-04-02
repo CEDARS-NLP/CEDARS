@@ -1,0 +1,148 @@
+<h2>Section 3: LLM Classification</h2>
+<p class="subtitle">Configure the LLM prompt, run on matched patients, review results</p>
+
+<!-- LLM Config -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">LLM Configuration (below search queries on the same page)</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+
+    <!-- Section header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div>
+        <div style="font-weight: 600; color: #e0e0e0; font-size: 1.1rem;">LLM Classification</div>
+        <div style="font-size: 0.85rem; color: #64748b;">Configure how the LLM judges each matched patient</div>
+      </div>
+      <div style="background: #172234; border: 1px solid #1e3a5f; border-radius: 6px; padding: 0.5rem 1rem; font-size: 0.85rem; color: #60a5fa;">
+        187 patients to classify &middot; est. ~$0.85
+      </div>
+    </div>
+
+    <!-- Event definition -->
+    <div style="margin-bottom: 1.25rem;">
+      <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Event Name</label>
+      <input class="mock-input" value="Myocardial Infarction" style="width: 100%; font-size: 0.95rem;">
+    </div>
+
+    <div style="margin-bottom: 1.25rem;">
+      <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Event Description</label>
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.75rem; min-height: 60px; color: #e2e8f0; font-size: 0.9rem;">
+        Confirmed myocardial infarction based on clinical evidence. Looking for the first occurrence of the event with a definitive diagnosis.
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.25rem;">
+      <div style="flex: 1;">
+        <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Include Criteria</label>
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.75rem; min-height: 80px; color: #e2e8f0; font-size: 0.85rem;">
+          Positive troponin with rising trend<br>
+          ST elevation or depression on ECG<br>
+          Cardiology consult confirming MI diagnosis<br>
+          Catheterization / PCI performed
+        </div>
+      </div>
+      <div style="flex: 1;">
+        <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Exclude Criteria</label>
+        <div style="background: #1e293b; border: 1px solid #5a2020; border-radius: 6px; padding: 0.75rem; min-height: 80px; color: #fca5a5; font-size: 0.85rem;">
+          Rule-out or suspected MI without confirmation<br>
+          Historical MI mentioned in past medical history<br>
+          Family history of MI<br>
+          Negative troponin / negative workup
+        </div>
+      </div>
+    </div>
+
+    <!-- Model selection -->
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+      <div style="flex: 1;">
+        <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">LLM Provider</label>
+        <select style="background: #1e293b; border: 1px solid #334155; color: #e0e0e0; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.9rem; width: 100%;">
+          <option>OpenAI</option>
+          <option>Anthropic</option>
+          <option>Ollama (local)</option>
+          <option>AWS Bedrock</option>
+        </select>
+      </div>
+      <div style="flex: 1;">
+        <label style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Model</label>
+        <select style="background: #1e293b; border: 1px solid #334155; color: #e0e0e0; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.9rem; width: 100%;">
+          <option>gpt-4o-mini</option>
+          <option>gpt-4o</option>
+          <option>gpt-3.5-turbo</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Run button -->
+    <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #334155;">
+      <div style="font-size: 0.85rem; color: #64748b;">
+        Will send 1 LLM call per matched patient (187 patients) with all their matched note excerpts + dates
+      </div>
+      <button class="mock-button" style="background: #4f8ff7; color: white; font-weight: 600; font-size: 0.95rem; padding: 0.6rem 2rem;">
+        Run LLM on Sample
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Progress state -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Running State (replaces Run button while active)</div>
+  <div class="mockup-body" style="padding: 1.25rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+      <div style="font-weight: 600; color: #e0e0e0;">Classifying patients...</div>
+      <div style="font-size: 0.85rem; color: #64748b;">72 / 187 patients &middot; 38%</div>
+    </div>
+    <div style="background: #1e293b; border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 0.5rem;">
+      <div style="width: 38%; height: 100%; background: #4f8ff7; border-radius: 4px; transition: width 0.3s;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #64748b;">
+      <span>Est. remaining: ~45 sec</span>
+      <button style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.8rem;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Updated funnel after LLM run -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Funnel Bar (after LLM run completes)</div>
+  <div class="mockup-body" style="padding: 1rem 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 0; width: 100%;">
+      <div style="flex: 3; background: #1e293b; padding: 0.75rem 1rem; border-radius: 8px 0 0 8px; border: 1px solid #334155;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Sample</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #e2e8f0;">1,240 patients</div>
+        <div style="font-size: 0.75rem; color: #64748b;">12,400 notes</div>
+      </div>
+      <div style="color: #4f8ff7; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <div style="flex: 3; background: #172234; padding: 0.75rem 1rem; border: 1px solid #1e3a5f;">
+        <div style="font-size: 0.7rem; color: #4f8ff7; text-transform: uppercase;">Search Match</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #60a5fa;">187 patients</div>
+        <div style="font-size: 0.75rem; color: #4f8ff7;">97% filtered out</div>
+      </div>
+      <div style="color: #34d399; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <div style="flex: 3; background: #0f2918; padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; border: 1px solid #166534;">
+        <div style="font-size: 0.7rem; color: #34d399; text-transform: uppercase;">LLM Positive</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #34d399;">43 patients</div>
+        <div style="font-size: 0.75rem; color: #22c55e;">23% of matched &middot; 3.5% of total</div>
+      </div>
+    </div>
+    <div style="display: flex; gap: 1.5rem; margin-top: 0.75rem; font-size: 0.8rem;">
+      <span style="color: #34d399;">&#9679; 43 positive</span>
+      <span style="color: #f87171;">&#9679; 132 negative</span>
+      <span style="color: #fbbf24;">&#9679; 8 inconclusive</span>
+      <span style="color: #64748b;">&#9679; 4 failed (retry available)</span>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>LLM Call Details</h3>
+  <ul style="color: #ccc; line-height: 1.8; font-size: 0.9rem;">
+    <li><strong>1 call per patient</strong> &mdash; sends all matched note excerpts with dates for that patient</li>
+    <li>LLM returns: <strong>label</strong> (positive/negative/inconclusive), <strong>event date</strong> (if positive), <strong>confidence score</strong>, <strong>reasoning</strong>, and <strong>evidence excerpts</strong></li>
+    <li>Event definition (name, description, include/exclude criteria) is the system prompt</li>
+    <li>Cost estimate shown before and after run</li>
+    <li>Can <strong>cancel</strong> mid-run &mdash; completed patients keep their results</li>
+    <li>Can <strong>re-run</strong> after changing the prompt &mdash; clears previous LLM results, keeps search matches</li>
+  </ul>
+</div>

@@ -24,33 +24,36 @@ async def pipeline_progress_ws(websocket: WebSocket, project_id: str, run_id: st
     last_stats: dict = {}
 
     try:
-        while True:
-            async with async_session() as session:
+        async with async_session() as session:
+            while True:
                 run = await session.get(PipelineRun, run_id)
                 if not run or run.project_id != project_id:
                     await websocket.send_json({"type": "error", "detail": "Run not found"})
                     break
 
+                # Expire the cached instance so the next get() fetches fresh data
+                session.expire(run)
+
                 stats = await get_run_stats(session, run_id)
 
-            msg = {
-                "type": "progress" if run.status not in _TERMINAL else run.status.value,
-                "run_id": run.id,
-                "status": run.status.value,
-                "total_patients": run.total_patients,
-                "processed_patients": run.processed_patients,
-                "failed_patients": run.failed_patients,
-                **stats,
-            }
+                msg = {
+                    "type": "progress" if run.status not in _TERMINAL else run.status.value,
+                    "run_id": run.id,
+                    "status": run.status.value,
+                    "total_patients": run.total_patients,
+                    "processed_patients": run.processed_patients,
+                    "failed_patients": run.failed_patients,
+                    **stats,
+                }
 
-            if stats != last_stats or run.status in _TERMINAL:
-                last_stats = stats
-                await websocket.send_json(msg)
+                if stats != last_stats or run.status in _TERMINAL:
+                    last_stats = stats
+                    await websocket.send_json(msg)
 
-            if run.status in _TERMINAL:
-                break
+                if run.status in _TERMINAL:
+                    break
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
     except WebSocketDisconnect:
         pass
     finally:

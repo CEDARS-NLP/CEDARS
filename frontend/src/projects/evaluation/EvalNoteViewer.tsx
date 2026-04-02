@@ -36,79 +36,141 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+/**
+ * Renders a single note with matching sentences highlighted inline.
+ * Match positions contain the sentence text and character offsets — we use
+ * those to highlight the matched sentences within the full note body.
+ */
 export default function EvalNoteViewer({
-  notes,
+  note,
   keywords,
-  activeNoteId,
 }: {
-  notes: ResultNoteContext[];
+  note: ResultNoteContext;
   keywords: string[];
-  activeNoteId?: string | null;
 }) {
-  const activeRef = useRef<HTMLDivElement>(null);
+  const firstMatchRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [activeNoteId]);
+    firstMatchRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [note.note_id]);
 
   const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
-  if (notes.length === 0) {
+  // Build a set of matched character ranges from match_positions
+  const matchRanges: { start: number; end: number; text: string }[] = [];
+  if (note.match_positions && note.match_positions.length > 0) {
+    for (const pos of note.match_positions) {
+      const start = pos.start ?? 0;
+      const end = pos.end ?? 0;
+      if (start < end) {
+        matchRanges.push({ start, end, text: pos.text || "" });
+      }
+    }
+    // Sort by start position
+    matchRanges.sort((a, b) => a.start - b.start);
+  }
+
+  // Render note header
+  const header = (
+    <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-4 py-2">
+      <span className="text-xs font-medium text-foreground">
+        {note.text_id}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {formatDate(note.note_date)}
+      </span>
+      {note.is_evidence && (
+        <Badge className="bg-primary/20 text-primary text-[10px] px-1.5 py-0">
+          LLM Evidence
+        </Badge>
+      )}
+      {note.note_tags &&
+        Object.entries(note.note_tags)
+          .filter(([k]) => k.startsWith("text_tag"))
+          .map(([key, val]) => (
+            <Badge
+              key={key}
+              variant="outline"
+              className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
+            >
+              {String(val)}
+            </Badge>
+          ))}
+    </div>
+  );
+
+  const fullText = note.text || "";
+
+  // If no match positions, just render text with keyword highlights
+  if (matchRanges.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No matched notes available for this patient.
-      </p>
+      <div>
+        {header}
+        <div
+          className="whitespace-pre-wrap px-4 py-3 text-[14px] leading-relaxed text-foreground/60"
+          style={noteFont}
+        >
+          {highlightKeywords(fullText, keywords)}
+        </div>
+      </div>
+    );
+  }
+
+  // Build segments: alternate between non-match and match regions
+  const segments: React.ReactNode[] = [];
+  let cursor = 0;
+  let isFirstMatch = true;
+
+  for (const range of matchRanges) {
+    // Skip overlapping ranges
+    if (range.start < cursor) continue;
+
+    // Non-match region before this match
+    if (range.start > cursor) {
+      const before = fullText.slice(cursor, range.start);
+      segments.push(
+        <span key={`pre-${cursor}`} className="text-foreground/50">
+          {highlightKeywords(before, keywords)}
+        </span>
+      );
+    }
+
+    // Matched sentence region
+    const matched = fullText.slice(range.start, range.end);
+    const refProp = isFirstMatch ? { ref: firstMatchRef } : {};
+    segments.push(
+      <span
+        key={`match-${range.start}`}
+        {...refProp}
+        className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
+      >
+        {highlightKeywords(matched, keywords)}
+      </span>
+    );
+    isFirstMatch = false;
+    cursor = range.end;
+  }
+
+  // Trailing non-match text
+  if (cursor < fullText.length) {
+    segments.push(
+      <span key={`post-${cursor}`} className="text-foreground/50">
+        {highlightKeywords(fullText.slice(cursor), keywords)}
+      </span>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {notes.map((note) => {
-        const isActive = note.note_id === activeNoteId;
-        return (
-          <div
-            key={note.note_id}
-            ref={isActive ? activeRef : undefined}
-            className={`rounded-lg border ${
-              note.is_evidence
-                ? "border-primary/40 bg-primary/5"
-                : "border-border"
-            } ${isActive ? "ring-2 ring-primary/50" : ""}`}
-          >
-            <div className="flex items-center gap-2 border-b border-border/50 px-4 py-2">
-              <span className="text-xs font-medium text-foreground">
-                {note.text_id}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {formatDate(note.note_date)}
-              </span>
-              {note.is_evidence && (
-                <Badge className="bg-primary/20 text-primary text-[10px] px-1.5 py-0">
-                  LLM Evidence
-                </Badge>
-              )}
-              {note.note_tags &&
-                Object.entries(note.note_tags)
-                  .filter(([k]) => k.startsWith("text_tag"))
-                  .map(([key, val]) => (
-                    <Badge
-                      key={key}
-                      variant="outline"
-                      className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
-                    >
-                      {String(val)}
-                    </Badge>
-                  ))}
-            </div>
-            <div
-              className="max-h-64 overflow-y-auto px-4 py-3 text-[14px] leading-relaxed text-foreground/70"
-              style={noteFont}
-            >
-              {highlightKeywords(note.text, keywords)}
-            </div>
-          </div>
-        );
-      })}
+    <div>
+      {header}
+      <div
+        className="whitespace-pre-wrap px-4 py-3 text-[14px] leading-relaxed"
+        style={noteFont}
+        role="region"
+        aria-label="Clinical note with highlighted matches"
+      >
+        {segments}
+      </div>
     </div>
   );
 }

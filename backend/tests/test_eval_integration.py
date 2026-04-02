@@ -10,7 +10,11 @@ from app.pipeline.classifier import ClassificationResult
 @pytest.fixture
 async def project_with_data(auth_client, app):
     """Create project and seed with test patients + notes."""
-    resp = await auth_client.post("/api/v1/projects", json={"name": "EvalTestProject"})
+    resp = await auth_client.post("/api/v1/projects", json={
+        "name": "EvalTestProject",
+        "llm_provider": "openai",
+        "llm_model": "gpt-4o-mini",
+    })
     assert resp.status_code == 201
     project_id = resp.json()["id"]
 
@@ -94,14 +98,12 @@ class TestUnifiedEvalSessionWorkflow:
         funnel = resp.json()
         assert funnel["matched_patients"] > 0
 
-        # 4. Update LLM config
-        resp = await auth_client.put(f"{base}/sessions/{sid}/llm-config", json={
+        # 4. Update event config
+        resp = await auth_client.put(f"{base}/sessions/{sid}/event-config", json={
             "event_name": "Myocardial Infarction",
             "event_description": "Confirmed MI with troponin elevation",
             "include_criteria": "Troponin elevation, ECG changes",
             "exclude_criteria": "Rule-out, family history only",
-            "llm_provider": "openai",
-            "llm_model": "gpt-4o-mini",
         })
         assert resp.status_code == 200
         assert resp.json()["event_name"] == "Myocardial Infarction"

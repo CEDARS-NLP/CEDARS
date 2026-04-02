@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Rules
+
+- **Never run ad-hoc database patches or data fixes** without explicit user permission. All recovery must be possible from the UI or happen automatically.
+
 ## Research Guidelines
 
 When working with external dependencies or APIs:

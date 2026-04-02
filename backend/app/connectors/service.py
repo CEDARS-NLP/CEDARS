@@ -6,9 +6,10 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.annotations.models import Annotation
 from app.audit.models import AuditAction
 from app.audit.service import log_action
 from app.connectors.models import (
@@ -171,7 +172,7 @@ async def _run_ingestion_pipeline(
     await session.commit()
 
     try:
-        total_rows = 0
+        inserted_rows = 0
         offset = 0
         batch_size = 1000
 
@@ -182,14 +183,14 @@ async def _run_ingestion_pipeline(
 
             mapping = ds.config.get("column_mapping", {})
             count = await row_handler(session, project_id, ds.id, batch.rows, mapping)
-            total_rows += count
+            inserted_rows += count
             offset += batch_size
 
             if not batch.has_more:
                 break
 
         ds.status = IngestionStatus.COMPLETED
-        ds.row_count = total_rows
+        ds.row_count = inserted_rows
         ds.last_sync = datetime.now(UTC)
         ds.error_message = None
 
@@ -486,9 +487,10 @@ async def purge_data_source(
 ) -> int:
     """Delete all patients, notes, sentences, and annotations from a data source.
 
+    All deletes run inside a savepoint so a partial failure leaves the DB consistent.
     Returns count of deleted notes.
     """
-    from sqlalchemy import delete
+    from sqlalchemy import delete, exists
 
     from app.annotations.models import Annotation
     from app.nlp.models import Sentence
@@ -506,28 +508,27 @@ async def purge_data_source(
     if not note_ids:
         return 0
 
-    await session.execute(
-        delete(Annotation).where(Annotation.note_id.in_(note_ids))
-    )
-    await session.execute(
-        delete(Sentence).where(Sentence.note_id.in_(note_ids))
-    )
-    await session.execute(
-        delete(Note).where(Note.id.in_(note_ids))
-    )
+    async with session.begin_nested():
+        await session.execute(
+            delete(Annotation).where(Annotation.note_id.in_(note_ids))
+        )
+        await session.execute(
+            delete(Sentence).where(Sentence.note_id.in_(note_ids))
+        )
+        await session.execute(
+            delete(Note).where(Note.id.in_(note_ids))
+        )
 
-    patient_ids_stmt = select(Patient.id).where(
-        Patient.project_id == project_id,
-        Patient.data_source_id == data_source_id,
-    )
-    for pid in [r[0] for r in (await session.execute(patient_ids_stmt)).all()]:
-        remaining = (
-            await session.execute(
-                select(func.count()).select_from(Note).where(Note.patient_id == pid)
-            )
-        ).scalar() or 0
-        if remaining == 0:
-            await session.execute(delete(Patient).where(Patient.id == pid))
+        # Delete patients from this data source that have no remaining notes.
+        # Uses a single anti-join bulk DELETE instead of a per-patient N+1 loop.
+        patient_ids_subq = select(Patient.id).where(
+            Patient.project_id == project_id,
+            Patient.data_source_id == data_source_id,
+            ~exists(select(Note.id).where(Note.patient_id == Patient.id)),
+        ).scalar_subquery()
+        await session.execute(
+            delete(Patient).where(Patient.id.in_(patient_ids_subq))
+        )
 
     ds.status = IngestionStatus.PENDING
     ds.row_count = None
@@ -677,7 +678,7 @@ async def list_patients(
     search: str | None = None,
     status: str | None = None,
 ) -> dict:
-    """List patients with note counts, optional search and status filter."""
+    """List patients with note counts, annotation counts, optional search and status filter."""
     base_where = [Patient.project_id == project_id, Patient.deleted_at.is_(None)]
 
     if search:
@@ -689,22 +690,57 @@ async def list_patients(
     count_stmt = select(func.count()).select_from(Patient).where(*base_where)
     total = (await session.execute(count_stmt)).scalar() or 0
 
-    # Fetch page with note counts
+    # Subquery for note counts
+    note_sub = (
+        select(
+            Note.patient_id,
+            func.count(Note.id).label("note_count"),
+        )
+        .where(Note.deleted_at.is_(None))
+        .group_by(Note.patient_id)
+        .subquery()
+    )
+
+    # Subquery for annotation counts
+    ann_sub = (
+        select(
+            Annotation.patient_id,
+            func.count(Annotation.id).label("annotation_count"),
+            func.sum(
+                case(
+                    (Annotation.review_status.in_(["reviewed", "confirmed", "rejected", "skipped"]), 1),
+                    else_=0,
+                )
+            ).label("reviewed_count"),
+        )
+        .where(Annotation.project_id == project_id)
+        .group_by(Annotation.patient_id)
+        .subquery()
+    )
+
+    # Fetch page with note + annotation counts
     stmt = (
         select(
             Patient,
-            func.count(Note.id).label("note_count"),
+            func.coalesce(note_sub.c.note_count, 0).label("note_count"),
+            func.coalesce(ann_sub.c.annotation_count, 0).label("annotation_count"),
+            func.coalesce(ann_sub.c.reviewed_count, 0).label("reviewed_count"),
         )
-        .outerjoin(Note, (Note.patient_id == Patient.id) & Note.deleted_at.is_(None))
+        .outerjoin(note_sub, note_sub.c.patient_id == Patient.id)
+        .outerjoin(ann_sub, ann_sub.c.patient_id == Patient.id)
         .where(*base_where)
-        .group_by(Patient.id)
-        .order_by(Patient.created_at.desc())
+        .order_by(Patient.updated_at.desc())
         .offset(offset)
         .limit(limit)
     )
     result = await session.execute(stmt)
     items = [
-        {"patient": row[0], "note_count": row[1]}
+        {
+            "patient": row[0],
+            "note_count": row[1],
+            "annotation_count": row[2],
+            "reviewed_count": row[3],
+        }
         for row in result.all()
     ]
 

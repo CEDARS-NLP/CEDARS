@@ -21,12 +21,15 @@ async def eval_pipeline_progress_ws(websocket: WebSocket, project_id: str, sessi
     last_stats: dict = {}
 
     try:
-        while True:
-            async with async_session() as db:
+        async with async_session() as db:
+            while True:
                 eval_sess = await db.get(EvaluationSession, session_id)
                 if not eval_sess or eval_sess.project_id != project_id:
                     await websocket.send_json({"type": "error", "detail": "Session not found"})
                     break
+
+                # Expire the cached instance so the next get() fetches fresh data
+                db.expire(eval_sess)
 
                 if eval_sess.status not in (SessionStatus.COMMITTED, SessionStatus.COMPLETED):
                     await websocket.send_json({
@@ -43,19 +46,19 @@ async def eval_pipeline_progress_ws(websocket: WebSocket, project_id: str, sessi
                     await websocket.send_json({"type": "error", "detail": "No pipeline run found"})
                     break
 
-            msg = {"type": "progress", "session_id": session_id, **stats}
+                msg = {"type": "progress", "session_id": session_id, **stats}
 
-            if stats != last_stats:
-                last_stats = stats
-                await websocket.send_json(msg)
+                if stats != last_stats:
+                    last_stats = stats
+                    await websocket.send_json(msg)
 
-            # Check if done
-            if stats.get("queued", 0) == 0 and stats.get("processing", 0) == 0:
-                msg["type"] = "completed"
-                await websocket.send_json(msg)
-                break
+                # Check if done
+                if stats.get("queued", 0) == 0 and stats.get("processing", 0) == 0:
+                    msg["type"] = "completed"
+                    await websocket.send_json(msg)
+                    break
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
     except WebSocketDisconnect:
         pass
     finally:

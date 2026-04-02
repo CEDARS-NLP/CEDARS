@@ -10,6 +10,15 @@
     <title>CEDARS</title>
   </head>
   <body>
+    <script>
+      // Sync dark mode with OS preference
+      (function() {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        function apply(dark) { document.documentElement.classList.toggle('dark', dark); }
+        apply(mq.matches);
+        mq.addEventListener('change', function(e) { apply(e.matches); });
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

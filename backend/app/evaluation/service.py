@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.connectors.models import Note, Patient
 from app.evaluation.models import (
     EvaluationSession,
@@ -20,6 +21,10 @@ from app.evaluation.models import (
 from app.nlp.engine import parse_query, process_note
 from app.pipeline.classifier import classify_patient
 from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
+
+# True when running against PostgreSQL (supports SELECT FOR UPDATE).
+# SQLite (used in tests) does not support FOR UPDATE.
+_USE_DB_LOCKING = "sqlite" not in settings.database_url
 
 
 async def _enqueue_eval_pipeline_run(run_id: str) -> None:
@@ -57,7 +62,7 @@ async def create_session(
     - Sample min(100, total_patients) patients from the project.
     - If cloned_from_id is provided, copy queries + LLM config from that session.
     """
-    # Check for blocking sessions
+    # Check for blocking sessions, locking the rows to prevent concurrent creation
     blocking_stmt = select(EvaluationSession).where(
         EvaluationSession.project_id == project_id,
         EvaluationSession.status.in_([
@@ -66,6 +71,8 @@ async def create_session(
             SessionStatus.COMMITTED,
         ]),
     )
+    if _USE_DB_LOCKING:
+        blocking_stmt = blocking_stmt.with_for_update()
     result = await db.execute(blocking_stmt)
     blocking = result.scalars().first()
     if blocking:
@@ -745,6 +752,20 @@ async def list_patient_results(
     """
     base = select(PatientResult).where(PatientResult.session_id == session_id)
 
+    # If a full pipeline run created copies of the sample results, only show those
+    # (pipeline copies have pipeline_run_id set; originals have NULL).
+    # This avoids duplicate rows for patients that were in the sample.
+    has_pipeline = (
+        await db.execute(
+            select(func.count()).where(
+                PatientResult.session_id == session_id,
+                PatientResult.pipeline_run_id.isnot(None),
+            )
+        )
+    ).scalar()
+    if has_pipeline:
+        base = base.where(PatientResult.pipeline_run_id.isnot(None))
+
     if label_filter and label_filter != "all":
         base = base.where(PatientResult.finding_label == label_filter)
 
@@ -1124,6 +1145,11 @@ async def dispatch_full_pipeline_run(
                 predicted_score=sr.predicted_score,
                 token_usage=sr.token_usage,
                 completed_at=sr.completed_at,
+                # Preserve any review judgments from sample phase
+                review_judgment=sr.review_judgment,
+                reviewed_by=sr.reviewed_by,
+                reviewed_at=sr.reviewed_at,
+                reviewer_date_override=sr.reviewer_date_override,
             )
         else:
             pr = PatientResult(
@@ -1250,6 +1276,51 @@ async def retry_failed_pipeline(db: AsyncSession, session_id: str, project_id: s
     await db.commit()
     await _enqueue_eval_pipeline_run(run_id)
     return {"requeued": len(failed), "run_id": run_id}
+
+
+async def resume_pipeline(db: AsyncSession, session_id: str, project_id: str) -> dict:
+    """Resume a stuck pipeline run.
+
+    Resets any 'processing' PatientResults back to 'queued' and re-enqueues
+    the ARQ job so the worker picks up where it left off.
+    """
+    stmt = select(PatientResult.pipeline_run_id).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.isnot(None),
+    ).distinct().limit(1)
+    result = await db.execute(stmt)
+    row = result.first()
+    if not row:
+        raise ValueError("No pipeline run found for this session")
+
+    run_id = row[0]
+
+    # Reset stuck 'processing' rows back to 'queued'
+    stuck_stmt = select(PatientResult).where(
+        PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id == run_id,
+        PatientResult.status == PatientResultStatus.PROCESSING,
+    )
+    result = await db.execute(stuck_stmt)
+    stuck = list(result.scalars().all())
+    for pr in stuck:
+        pr.status = PatientResultStatus.QUEUED
+        pr.started_at = None
+        db.add(pr)
+
+    await db.commit()
+    await _enqueue_eval_pipeline_run(run_id)
+
+    # Count remaining
+    remaining = (await db.execute(
+        select(func.count()).where(
+            PatientResult.session_id == session_id,
+            PatientResult.pipeline_run_id == run_id,
+            PatientResult.status == PatientResultStatus.QUEUED,
+        )
+    )).scalar() or 0
+
+    return {"resumed": True, "reset_stuck": len(stuck), "remaining_queued": remaining, "run_id": run_id}
 
 
 async def rerun_pipeline(

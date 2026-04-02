@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies for authentication and authorization."""
 
 from fastapi import Depends, HTTPException, Request, status
+from jose import ExpiredSignatureError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User, UserRole
@@ -16,7 +17,10 @@ async def get_current_user(
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    payload = decode_token(token)
+    try:
+        payload = decode_token(token)
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     if not payload or payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     user = await session.get(User, payload["sub"])

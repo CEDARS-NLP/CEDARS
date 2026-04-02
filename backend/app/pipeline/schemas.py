@@ -91,6 +91,13 @@ class RunStatsResponse(BaseModel):
     no_match: int
 
 
+class QueueOverviewResponse(BaseModel):
+    pipeline_runs: dict  # {queued, running, completed, failed, cancelled}
+    background_jobs: dict  # {pending, running, completed, failed}
+    worker_active: bool
+    arq_queued: int = 0  # jobs waiting in ARQ Redis queue
+
+
 class RunMetricsResponse(BaseModel):
     total_reviewed: int
     true_positives: int

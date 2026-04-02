@@ -1,0 +1,69 @@
+<h2>Unified Evaluation Session: Approaches</h2>
+<p class="subtitle">How to structure the regex + LLM + review flow within a single session</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Wizard Steps (Linear)</h3>
+      <p>Three sequential steps: <strong>1) Regex Filters</strong> &rarr; <strong>2) LLM Prompt</strong> &rarr; <strong>3) Review &amp; Commit</strong></p>
+      <p>Each step is a full-screen view. "Next" / "Back" navigation. Clinician must complete regex before configuring LLM, must run LLM before reviewing.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Clear progression, hard to get lost</li>
+          <li>Enforces the "filter first, classify second" mental model</li>
+          <li>Simple to discard and restart</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Can't glance at regex stats while reviewing LLM results</li>
+          <li>Going back to tweak regex requires navigating steps</li>
+          <li>Feels heavy if you just want to change one pattern</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Single Page with Sections (Scrollable)</h3>
+      <p>One long page with collapsible sections: <strong>Regex Filters</strong> (with live funnel) &rarr; <strong>LLM Config</strong> &rarr; <strong>Results &amp; Review</strong> &rarr; <strong>Commit</strong></p>
+      <p>Everything visible at once. Sections expand/collapse. The funnel stats bar is always pinned at the top.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Full context always visible &mdash; regex stats + LLM results on same page</li>
+          <li>Quick iteration: tweak regex, re-run, see impact without navigation</li>
+          <li>Feels lightweight and fast</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Can get long with many results to review</li>
+          <li>Needs careful visual hierarchy to avoid overwhelm</li>
+          <li>Must manage state carefully (what's stale after regex change?)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid: Tabs within Session</h3>
+      <p>Session page with tabs: <strong>Regex</strong> | <strong>LLM</strong> | <strong>Review</strong> | <strong>Summary</strong>. A persistent status bar at top shows the funnel: patients &rarr; regex match &rarr; LLM positive.</p>
+      <p>Tabs are always accessible (no forced progression), but LLM tab shows "configure regex first" if no patterns exist.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Clean separation without losing context (status bar always visible)</li>
+          <li>Jump between regex and review freely</li>
+          <li>Each tab stays focused &mdash; no scroll overwhelm</li>
+          <li>Easy to add more tabs later (e.g., Cost Estimate)</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Slightly more complex than single page</li>
+          <li>Tab state management (stale indicators when regex changes)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 2rem; text-align: center;">My recommendation: <strong>Option B (Single Page)</strong> &mdash; keeps the clinician in flow, everything visible, fast iteration. The funnel bar pins to top as they scroll.</p>

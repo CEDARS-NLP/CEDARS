@@ -17,9 +17,19 @@ async def create_project(
     user: User,
     name: str,
     description: str = "",
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    llm_api_base: str | None = None,
 ) -> Project:
     """Create a new project and add the creating user as an admin member."""
-    project = Project(name=name, description=description, owner_id=user.id)
+    project = Project(
+        name=name,
+        description=description,
+        owner_id=user.id,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        llm_api_base=llm_api_base,
+    )
     session.add(project)
     await session.flush()
 
@@ -62,7 +72,7 @@ async def get_project(
     return result.scalar_one_or_none()
 
 
-_PROJECT_UPDATE_FIELDS = {"name", "description", "settings"}
+_PROJECT_UPDATE_FIELDS = {"name", "description", "settings", "llm_provider", "llm_model", "llm_api_base"}
 
 
 async def update_project(

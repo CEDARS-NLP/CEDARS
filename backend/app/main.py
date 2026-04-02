@@ -37,10 +37,52 @@ def _ensure_s3_bucket():
         pass
 
 
+_UNSAFE_SECRET_KEYS = {"change-me-in-production", "secret", ""}
+
+
+def _validate_settings() -> None:
+    """Fail fast on unsafe defaults that must not reach production."""
+    import logging
+
+    from app.config import settings
+
+    log = logging.getLogger(__name__)
+
+    is_local = all(
+        "localhost" in o or "127.0.0.1" in o
+        for o in settings.cors_origins.split(",")
+        if o.strip()
+    )
+
+    if settings.secret_key in _UNSAFE_SECRET_KEYS:
+        if not is_local:
+            raise RuntimeError(
+                "CEDARS_SECRET_KEY is using an unsafe default value. "
+                "Set a strong secret via the CEDARS_SECRET_KEY environment variable before deploying."
+            )
+        log.warning(
+            "CEDARS_SECRET_KEY is using an unsafe default — acceptable only for local development."
+        )
+
+    if not settings.cookie_secure:
+        non_local = [
+            o.strip()
+            for o in settings.cors_origins.split(",")
+            if o.strip() and "localhost" not in o and "127.0.0.1" not in o
+        ]
+        if non_local:
+            log.warning(
+                "CEDARS_COOKIE_SECURE=False but non-localhost CORS origins are configured: %s. "
+                "Set CEDARS_COOKIE_SECURE=True for production deployments.",
+                non_local,
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager for startup/shutdown events."""
     # Startup
+    _validate_settings()
     _ensure_s3_bucket()
     yield
     # Shutdown

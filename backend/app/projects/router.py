@@ -38,6 +38,9 @@ def _project_response(project, role: str | None = None) -> dict:
         "description": project.description,
         "owner_id": project.owner_id,
         "settings": project.settings,
+        "llm_provider": project.llm_provider,
+        "llm_model": project.llm_model,
+        "llm_api_base": project.llm_api_base,
         "created_at": project.created_at.isoformat() if project.created_at else "",
         "role": role,
     }
@@ -53,7 +56,12 @@ async def create_project_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new project. The authenticated user becomes the admin."""
-    project = await create_project(session, current_user, body.name, body.description)
+    project = await create_project(
+        session, current_user, body.name, body.description,
+        llm_provider=body.llm_provider,
+        llm_model=body.llm_model,
+        llm_api_base=body.llm_api_base,
+    )
     return _project_response(project, role=ProjectRole.ADMIN.value)
 
 

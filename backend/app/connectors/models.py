@@ -4,7 +4,7 @@ import enum
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, JSON, Text, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 
@@ -89,6 +89,15 @@ class Patient(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=func.now(),
+            onupdate=func.now(),
+        ),
     )
     deleted_at: datetime | None = Field(
         default=None,

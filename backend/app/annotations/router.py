@@ -1,11 +1,15 @@
 """API routes for annotations: bulk prediction runs and review operations."""
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
 from app.dependencies import require_project_role
+from app.evaluation.models import EvaluationSession, PatientResult
 from app.annotations.schemas import (
     AnnotationResponse,
     AnnotationStatsResponse,
@@ -19,6 +23,7 @@ from app.annotations.schemas import (
     ReviewRequest,
     ReviewResultResponse,
 )
+from app.annotations.query_service import get_patient_matched_notes
 from app.annotations.service import (
     cancel_prediction_job,
     delete_event_date,
@@ -41,6 +46,48 @@ from app.annotations.service import (
 )
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/annotations", tags=["annotations"])
+
+
+def _extract_keywords_from_queries(search_queries: list[dict]) -> list[str]:
+    """Extract plain keyword tokens from evaluation session search queries."""
+    keywords: set[str] = set()
+    for sq in search_queries:
+        query = sq.get("query", "")
+        # Strip boolean operators and parens, split into tokens
+        cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", query, flags=re.IGNORECASE)
+        cleaned = re.sub(r"[()\"']", " ", cleaned)
+        for token in cleaned.split():
+            token = token.strip().rstrip("*")
+            if len(token) >= 2:
+                keywords.add(token.lower())
+    return sorted(keywords)
+
+
+async def _get_search_keywords(
+    db: AsyncSession,
+    project_id: str,
+    pipeline_run_id: str | None,
+) -> list[str]:
+    """Get search keywords for an annotation from its evaluation session."""
+    if not pipeline_run_id:
+        return []
+
+    # Find evaluation session via PatientResult → session
+    stmt = (
+        select(PatientResult.session_id)
+        .where(PatientResult.pipeline_run_id == pipeline_run_id)
+        .distinct()
+        .limit(1)
+    )
+    row = (await db.execute(stmt)).first()
+    if not row or not row[0]:
+        return []
+
+    eval_session = await db.get(EvaluationSession, row[0])
+    if not eval_session or not eval_session.search_queries:
+        return []
+
+    return _extract_keywords_from_queries(eval_session.search_queries)
 
 
 # ── Token Estimation ──────────────────────────────────────────────
@@ -249,7 +296,31 @@ async def annotation_context_endpoint(
     if not context:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    # Attach search keywords from the evaluation session linked via pipeline_run
+    context["search_keywords"] = await _get_search_keywords(
+        session, project_id, annotation.pipeline_run_id
+    )
+
     return context
+
+
+@router.get("/patient/{patient_id}/matched-notes")
+async def patient_matched_notes_endpoint(
+    project_id: str,
+    patient_id: str,
+    annotation_id: str = Query(..., description="Annotation ID to trace pipeline run"),
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Get all notes with keyword matches for a patient (for pipeline annotations)."""
+    annotation = await get_annotation(session, project_id, annotation_id)
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+
+    notes = await get_patient_matched_notes(
+        session, project_id, patient_id, annotation.pipeline_run_id
+    )
+    return notes
 
 
 # ── Review Operations ────────────────────────────────────────────

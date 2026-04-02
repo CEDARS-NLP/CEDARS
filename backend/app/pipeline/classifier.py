@@ -92,10 +92,27 @@ def _parse_json_response(content: str) -> dict:
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        match = re.search(r"\{[^}]+\}", content, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Could not parse LLM classification response: {content[:200]}")
+        pass
+
+    # Try to extract the outermost JSON object (handles nested braces)
+    start = content.find("{")
+    if start != -1:
+        depth = 0
+        for i in range(start, len(content)):
+            if content[i] == "{":
+                depth += 1
+            elif content[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = content[start : i + 1]
+                    # Fix common LLM issues: trailing commas before } or ]
+                    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break
+
+    raise ValueError(f"Could not parse LLM classification response: {content[:300]}")
 
 
 async def classify_patient(
@@ -131,6 +148,8 @@ async def classify_patient(
             ],
             temperature=0.0,
             timeout=120,
+            num_retries=3,  # litellm retries transient errors (429, 503, timeout)
+            response_format={"type": "json_object"},
             **conn_kwargs,
         )
     except Exception as e:

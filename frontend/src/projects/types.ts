@@ -225,7 +225,9 @@ export interface FunnelStats {
 export interface MatchPosition {
   start: number;
   end: number;
-  token: string;
+  token?: string;
+  text?: string;
+  sentence_number?: number;
 }
 
 export interface NoteSearchMatch {

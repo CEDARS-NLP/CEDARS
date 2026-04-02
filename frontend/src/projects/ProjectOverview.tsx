@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ProjectStats } from "@/projects/types";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Database,
   BarChart3,
@@ -12,6 +16,9 @@ import {
   ArrowRight,
   Users,
   Loader2,
+  Settings,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 interface DataSource {
@@ -98,6 +105,183 @@ function jobStatusBadge(status: string) {
     default:
       return `${base} bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200`;
   }
+}
+
+interface ProjectData {
+  id: string;
+  name: string;
+  description: string;
+  settings: Record<string, unknown>;
+  llm_provider: string | null;
+  llm_model: string | null;
+  llm_api_base: string | null;
+}
+
+const PROVIDERS = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "vllm", label: "vLLM" },
+  { value: "ollama", label: "Ollama (local)" },
+  { value: "bedrock", label: "AWS Bedrock" },
+];
+
+function ProjectSettings({ projectId }: { projectId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const { data: project } = useQuery<ProjectData>({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get<ProjectData>(`/projects/${projectId}`),
+  });
+
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [apiBase, setApiBase] = useState("");
+  const [skipAfterEvent, setSkipAfterEvent] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  // Sync local state when project loads
+  const syncFromProject = (p: ProjectData) => {
+    setProvider(p.llm_provider || "");
+    setModel(p.llm_model || "");
+    setApiBase(p.llm_api_base || "");
+    setSkipAfterEvent(!!p.settings?.skip_after_event_date);
+    setDirty(false);
+  };
+
+  // Initialize on first load
+  if (project && !dirty && provider === "" && model === "") {
+    syncFromProject(project);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.put(`/projects/${projectId}`, {
+        llm_provider: provider || null,
+        llm_model: model || null,
+        llm_api_base: apiBase || null,
+        settings: { ...project?.settings, skip_after_event_date: skipAfterEvent },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      setDirty(false);
+    },
+  });
+
+  const missingLlm = !project?.llm_provider || !project?.llm_model;
+
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-3 px-5 py-3 text-left"
+      >
+        <Settings className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium text-foreground">Project Settings</span>
+        {missingLlm && (
+          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            LLM not configured
+          </span>
+        )}
+        <span className="ml-auto">
+          {open ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-border px-5 py-4 space-y-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
+              LLM Configuration
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Provider</Label>
+                <select
+                  value={provider}
+                  onChange={(e) => { setProvider(e.target.value); setDirty(true); }}
+                  className="flex w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                >
+                  <option value="">— Select —</option>
+                  {PROVIDERS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Model</Label>
+                <Input
+                  value={model}
+                  onChange={(e) => { setModel(e.target.value); setDirty(true); }}
+                  placeholder="gpt-4o-mini"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">API Base (optional)</Label>
+                <Input
+                  value={apiBase}
+                  onChange={(e) => { setApiBase(e.target.value); setDirty(true); }}
+                  placeholder="http://localhost:11434"
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
+              Annotation Behavior
+            </p>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={skipAfterEvent}
+                onChange={(e) => { setSkipAfterEvent(e.target.checked); setDirty(true); }}
+                className="h-4 w-4 rounded border-border"
+              />
+              <div>
+                <span className="text-sm text-foreground">Skip annotations after event date</span>
+                <p className="text-xs text-muted-foreground">
+                  When a reviewer sets an event date, automatically skip annotations from notes
+                  on or after that date and show only earlier notes for verification.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {dirty && (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+              >
+                {saveMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { if (project) syncFromProject(project); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+
+          {saveMutation.isError && (
+            <p className="text-sm text-destructive">
+              {(saveMutation.error as Error).message}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ProjectOverview() {
@@ -188,6 +372,9 @@ export default function ProjectOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Project settings */}
+      <ProjectSettings projectId={projectId!} />
+
       {/* Stats cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border border-border bg-card px-5 py-4">

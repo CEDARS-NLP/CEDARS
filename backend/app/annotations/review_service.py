@@ -3,7 +3,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
@@ -12,6 +12,7 @@ from app.audit.models import AuditAction
 from app.audit.service import log_action
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
+from app.projects.models import Project
 
 logger = logging.getLogger(__name__)
 
@@ -71,39 +72,70 @@ async def review_annotation(
     annotation.reviewed_at = datetime.now(UTC)
 
     skipped_count = 0
+    earlier_count = 0
 
     if event_date:
         annotation.event_date = event_date
 
-        # Check if any active query has skip_after_event
-        has_skip = (
+        # Check project setting for skip_after_event_date
+        project = await session.get(Project, project_id)
+        skip_enabled = (project.settings or {}).get("skip_after_event_date", False) if project else False
+
+        # Fallback: also check per-query flag for backwards compatibility
+        if not skip_enabled:
+            skip_enabled = bool(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(SearchQuery)
+                        .where(
+                            SearchQuery.project_id == project_id,
+                            SearchQuery.is_active == True,  # noqa: E712
+                            SearchQuery.skip_after_event == True,  # noqa: E712
+                            SearchQuery.deleted_at.is_(None),
+                        )
+                    )
+                ).scalar()
+            )
+
+        if skip_enabled:
+            # Bulk-update annotations from notes on or after the event date to SKIPPED.
+            # The WHERE review_status = UNREVIEWED predicate is both correct and race-safe:
+            # it will only skip annotations that haven't already been acted on.
+            notes_on_or_after_subq = (
+                select(Note.id)
+                .where(Note.note_date >= event_date)
+                .scalar_subquery()
+            )
+            skip_result = await session.execute(
+                update(Annotation)
+                .where(
+                    Annotation.project_id == project_id,
+                    Annotation.patient_id == annotation.patient_id,
+                    Annotation.review_status == ReviewStatus.UNREVIEWED,
+                    Annotation.id != annotation_id,
+                    Annotation.note_id.in_(notes_on_or_after_subq),
+                )
+                .values(review_status=ReviewStatus.SKIPPED)
+                .execution_options(synchronize_session="fetch")
+            )
+            skipped_count = skip_result.rowcount
+
+        # Count remaining unreviewed annotations from notes BEFORE the event date
+        earlier_count = (
             await session.execute(
                 select(func.count())
-                .select_from(SearchQuery)
-                .where(
-                    SearchQuery.project_id == project_id,
-                    SearchQuery.is_active == True,  # noqa: E712
-                    SearchQuery.skip_after_event == True,  # noqa: E712
-                    SearchQuery.deleted_at.is_(None),
-                )
-            )
-        ).scalar() or 0
-
-        if has_skip > 0:
-            skip_stmt = (
-                select(Annotation)
+                .select_from(Annotation)
                 .join(Note, Annotation.note_id == Note.id)
                 .where(
                     Annotation.project_id == project_id,
                     Annotation.patient_id == annotation.patient_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
                     Annotation.id != annotation_id,
-                    Note.note_date >= event_date,
+                    Note.note_date < event_date,
                 )
             )
-            for ann in (await session.execute(skip_stmt)).scalars().all():
-                ann.review_status = ReviewStatus.SKIPPED
-                skipped_count += 1
+        ).scalar() or 0
 
     session.add(annotation)
     await session.commit()
@@ -122,7 +154,11 @@ async def review_annotation(
             detail={"annotation_id": annotation_id, "event_date": event_date.isoformat()},
         )
 
-    return {"annotation": annotation, "skipped_count": skipped_count}
+    return {
+        "annotation": annotation,
+        "skipped_count": skipped_count,
+        "earlier_count": earlier_count,
+    }
 
 
 async def skip_annotation(
@@ -169,6 +205,7 @@ async def get_next_patient_for_review(
         .where(
             Annotation.project_id == project_id,
             Annotation.review_status == ReviewStatus.UNREVIEWED,
+            Annotation.predicted_label == "1",
         )
         .distinct()
         .scalar_subquery()
@@ -194,6 +231,7 @@ async def get_next_patient_for_review(
                 .where(
                     Annotation.project_id == project_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
+                    Annotation.predicted_label == "1",
                 )
             )
         ).scalar() or 0
@@ -258,30 +296,46 @@ async def get_patient_annotations(
     from app.nlp.models import Sentence
 
     stmt = (
-        select(Annotation, Note.note_date, Note.text_id, Sentence.sentence_number)
+        select(
+            Annotation, Note.note_date, Note.text_id,
+            Sentence.sentence_number, Note.text,
+        )
         .join(Note, Annotation.note_id == Note.id)
-        .join(Sentence, Annotation.sentence_id == Sentence.id)
+        .outerjoin(Sentence, Annotation.sentence_id == Sentence.id)
         .where(
             Annotation.project_id == project_id,
             Annotation.patient_id == patient_id,
+            Annotation.predicted_label == "1",
         )
         .order_by(
             Note.note_date.asc().nullslast(),
             Note.id,
-            Sentence.sentence_number.asc(),
+            Sentence.sentence_number.asc().nullslast(),
         )
     )
     rows = (await session.execute(stmt)).all()
 
     results = []
-    for annotation, note_date, text_id, sentence_number in rows:
+    for annotation, note_date, text_id, sentence_number, note_text in rows:
+        sentence_text = annotation.sentence_text
+
+        # If sentence_text is the LLM reasoning (fallback from older pipeline),
+        # replace with actual note text excerpt
+        if (
+            sentence_text
+            and annotation.reasoning
+            and sentence_text == annotation.reasoning
+            and note_text
+        ):
+            sentence_text = note_text[:1000]
+
         results.append({
             "id": annotation.id,
             "project_id": annotation.project_id,
             "patient_id": annotation.patient_id,
             "note_id": annotation.note_id,
             "sentence_id": annotation.sentence_id,
-            "sentence_text": annotation.sentence_text,
+            "sentence_text": sentence_text,
             "matched_tokens": annotation.matched_tokens,
             "is_negated": annotation.is_negated,
             "predicted_score": annotation.predicted_score,

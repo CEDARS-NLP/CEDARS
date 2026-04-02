@@ -1,0 +1,139 @@
+<h2>Section 2: Regex Filters</h2>
+<p class="subtitle">First section of the evaluation session &mdash; filter notes before the LLM sees them</p>
+
+<!-- Funnel Bar (always pinned at top when scrolling) -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Pinned Funnel Bar (always visible at top of page)</div>
+  <div class="mockup-body" style="padding: 1rem 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 0; width: 100%;">
+      <!-- Total patients -->
+      <div style="flex: 3; background: #1e293b; padding: 0.75rem 1rem; border-radius: 8px 0 0 8px; border: 1px solid #334155;">
+        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Sample</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #e2e8f0;">1,240 patients</div>
+        <div style="font-size: 0.75rem; color: #64748b;">12,400 notes</div>
+      </div>
+      <!-- Arrow -->
+      <div style="color: #4f8ff7; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <!-- Regex matched -->
+      <div style="flex: 3; background: #172234; padding: 0.75rem 1rem; border: 1px solid #1e3a5f;">
+        <div style="font-size: 0.7rem; color: #4f8ff7; text-transform: uppercase; letter-spacing: 0.05em;">Regex Match</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #60a5fa;">187 patients</div>
+        <div style="font-size: 0.75rem; color: #4f8ff7;">342 notes &middot; <strong>97% filtered out</strong></div>
+      </div>
+      <!-- Arrow -->
+      <div style="color: #888; font-size: 1.5rem; padding: 0 0.5rem;">&rarr;</div>
+      <!-- LLM (grayed out until run) -->
+      <div style="flex: 3; background: #1a1a2e; padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; border: 1px solid #333; opacity: 0.4;">
+        <div style="font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">LLM Classification</div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #888;">&mdash;</div>
+        <div style="font-size: 0.75rem; color: #666;">Run LLM to see results</div>
+      </div>
+    </div>
+    <!-- Filter efficiency bar -->
+    <div style="margin-top: 0.75rem; background: #1e293b; border-radius: 4px; height: 6px; overflow: hidden;">
+      <div style="width: 97%; height: 100%; background: linear-gradient(90deg, #4f8ff7, #34d399); border-radius: 4px;"></div>
+    </div>
+    <div style="font-size: 0.75rem; color: #34d399; margin-top: 4px; text-align: right;">97% of notes filtered by regex &mdash; est. LLM cost: ~$0.85</div>
+  </div>
+</div>
+
+<!-- Regex Editor -->
+<div class="mockup">
+  <div class="mockup-header">Regex Pattern Editor</div>
+  <div class="mockup-body" style="padding: 1.5rem;">
+
+    <!-- LLM Suggest Button -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div style="font-weight: 600; color: #e0e0e0; font-size: 1rem;">Regex Patterns</div>
+      <button class="mock-button" style="background: linear-gradient(135deg, #7c3aed, #4f8ff7); color: white; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 1rem;">&#9733;</span> Suggest Patterns (LLM)
+      </button>
+    </div>
+
+    <!-- Pattern list -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
+      <!-- Pattern 1 -->
+      <div style="display: flex; align-items: center; gap: 0.75rem; background: #1e293b; padding: 0.6rem 1rem; border-radius: 6px; border: 1px solid #334155;">
+        <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+        <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.9rem;">troponin.*(?:elevated|positive|&gt;\s*0\.04)</code>
+        <span style="font-size: 0.8rem; color: #60a5fa; min-width: 80px; text-align: right;">142 notes</span>
+        <span style="font-size: 0.8rem; color: #888; min-width: 80px; text-align: right;">89 patients</span>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;" title="Edit">&#9998;</button>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;" title="Delete">&times;</button>
+      </div>
+
+      <!-- Pattern 2 -->
+      <div style="display: flex; align-items: center; gap: 0.75rem; background: #1e293b; padding: 0.6rem 1rem; border-radius: 6px; border: 1px solid #334155;">
+        <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+        <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.9rem;">(?:ST|EKG|ECG).*(?:elevation|changes)</code>
+        <span style="font-size: 0.8rem; color: #60a5fa; min-width: 80px; text-align: right;">98 notes</span>
+        <span style="font-size: 0.8rem; color: #888; min-width: 80px; text-align: right;">71 patients</span>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&#9998;</button>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&times;</button>
+      </div>
+
+      <!-- Pattern 3 -->
+      <div style="display: flex; align-items: center; gap: 0.75rem; background: #1e293b; padding: 0.6rem 1rem; border-radius: 6px; border: 1px solid #334155;">
+        <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+        <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.9rem;">(?:confirmed|diagnosed).*(?:MI|myocardial)</code>
+        <span style="font-size: 0.8rem; color: #60a5fa; min-width: 80px; text-align: right;">67 notes</span>
+        <span style="font-size: 0.8rem; color: #888; min-width: 80px; text-align: right;">52 patients</span>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&#9998;</button>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&times;</button>
+      </div>
+
+      <!-- Exclusion pattern -->
+      <div style="display: flex; align-items: center; gap: 0.75rem; background: #2a1a1a; padding: 0.6rem 1rem; border-radius: 6px; border: 1px solid #5a2020;">
+        <div style="width: 18px; height: 18px; background: #ef4444; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&minus;</div>
+        <code style="flex: 1; font-family: monospace; color: #fca5a5; font-size: 0.9rem;">rule.?out|family history|suspected</code>
+        <span style="font-size: 0.8rem; color: #f87171; min-width: 80px; text-align: right;">-45 notes</span>
+        <span style="font-size: 0.8rem; color: #888; min-width: 80px; text-align: right;">-12 patients</span>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&#9998;</button>
+        <button style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1rem;">&times;</button>
+      </div>
+    </div>
+
+    <!-- Add pattern -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+      <input class="mock-input" placeholder="Add regex pattern..." style="flex: 1; font-family: monospace;">
+      <select style="background: #1e293b; border: 1px solid #334155; color: #e0e0e0; padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.85rem;">
+        <option>Include</option>
+        <option>Exclude</option>
+      </select>
+      <button class="mock-button" style="font-size: 0.85rem;">Add</button>
+    </div>
+
+    <!-- Aggregate stats -->
+    <div style="background: #0f172a; border: 1px solid #1e3a5f; border-radius: 8px; padding: 1rem;">
+      <div style="font-size: 0.8rem; color: #64748b; text-transform: uppercase; margin-bottom: 0.5rem;">Combined Filter Impact</div>
+      <div style="display: flex; gap: 2rem;">
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">Include matches</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #60a5fa;">199 patients / 342 notes</div>
+        </div>
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">After exclusions</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #34d399;">187 patients / 297 notes</div>
+        </div>
+        <div>
+          <div style="font-size: 0.8rem; color: #888;">Filtered out</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: #f87171;">1,053 patients / 12,103 notes</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>How It Works</h3>
+  <ul style="color: #ccc; line-height: 1.8;">
+    <li>Session starts by auto-sampling <strong>100 patients or 10% of project</strong> (whichever is higher)</li>
+    <li>Each regex runs against all notes in the sample &mdash; counts update after each pattern add/edit/delete</li>
+    <li><strong>Include patterns</strong> (blue): notes matching ANY include pattern are kept (OR logic)</li>
+    <li><strong>Exclude patterns</strong> (red): notes matching ANY exclude pattern are removed, even if they matched an include</li>
+    <li>Per-pattern stats show how many notes/patients each pattern catches individually</li>
+    <li><strong>"Suggest Patterns" button</strong>: sends event name + description to LLM, returns suggested patterns that the clinician can accept/edit/reject one by one</li>
+    <li>The <strong>funnel bar</strong> at top updates live as patterns change &mdash; always shows filter % and estimated LLM cost</li>
+  </ul>
+</div>

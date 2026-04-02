@@ -1,0 +1,143 @@
+<h2>Section 2b: Note Preview with Highlighted Matches</h2>
+<p class="subtitle">Click any query to see matched notes with keywords highlighted inline</p>
+
+<!-- Query row with expand -->
+<div class="mockup" style="margin-bottom: 2rem;">
+  <div class="mockup-header">Query Row (Expanded)</div>
+  <div class="mockup-body" style="padding: 0;">
+
+    <!-- Query header -->
+    <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: #1e293b; border-bottom: 2px solid #4f8ff7;">
+      <div style="width: 18px; height: 18px; background: #4f8ff7; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: white;">&#10003;</div>
+      <code style="flex: 1; font-family: monospace; color: #e2e8f0; font-size: 0.95rem;">troponin OR myocardial infarction OR MI OR STEMI OR NSTEMI</code>
+      <span style="font-size: 0.8rem; color: #60a5fa;">248 notes</span>
+      <span style="font-size: 0.8rem; color: #94a3b8;">156 patients</span>
+      <span style="font-size: 0.85rem; color: #4f8ff7; cursor: pointer;">&#9650; Collapse</span>
+    </div>
+
+    <!-- Matched notes list -->
+    <div style="padding: 1rem; background: #0f172a; max-height: 600px; overflow-y: auto;">
+
+      <!-- Filter/sort bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div style="font-size: 0.85rem; color: #94a3b8;">Showing 248 matched notes across 156 patients</div>
+        <div style="display: flex; gap: 0.5rem;">
+          <input class="mock-input" placeholder="Filter by patient ID..." style="font-size: 0.8rem; width: 180px; padding: 4px 8px;">
+          <select style="background: #1e293b; border: 1px solid #334155; color: #e0e0e0; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem;">
+            <option>Sort: Most matches first</option>
+            <option>Sort: Date (newest)</option>
+            <option>Sort: Patient ID</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Note 1 -->
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <span style="font-weight: 600; color: #e0e0e0; font-size: 0.85rem;">Patient P-00142</span>
+            <span style="font-size: 0.8rem; color: #64748b;">Cardiology Consult</span>
+            <span style="font-size: 0.8rem; color: #64748b;">2024-01-15</span>
+          </div>
+          <span style="font-size: 0.75rem; color: #60a5fa; background: #172234; padding: 2px 8px; border-radius: 4px;">3 matches</span>
+        </div>
+        <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.7; font-family: 'Georgia', serif;">
+          Patient is a 67-year-old male presenting with acute chest pain radiating to the left arm. Labs significant for
+          <span style="background: rgba(79, 143, 247, 0.25); border-bottom: 2px solid #4f8ff7; padding: 1px 3px; border-radius: 2px; color: #93c5fd; font-weight: 500;">troponin</span>
+          I elevated at 2.4 ng/mL (normal &lt;0.04). Serial
+          <span style="background: rgba(79, 143, 247, 0.25); border-bottom: 2px solid #4f8ff7; padding: 1px 3px; border-radius: 2px; color: #93c5fd; font-weight: 500;">troponin</span>
+          trending upward. 12-lead ECG shows ST elevation in leads II, III, aVF consistent with inferior
+          <span style="background: rgba(79, 143, 247, 0.25); border-bottom: 2px solid #4f8ff7; padding: 1px 3px; border-radius: 2px; color: #93c5fd; font-weight: 500;">STEMI</span>.
+          Cardiology consulted for emergent catheterization. Patient taken to cath lab for primary PCI.
+        </div>
+      </div>
+
+      <!-- Note 2 -->
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <span style="font-weight: 600; color: #e0e0e0; font-size: 0.85rem;">Patient P-00089</span>
+            <span style="font-size: 0.8rem; color: #64748b;">ED Admission Note</span>
+            <span style="font-size: 0.8rem; color: #64748b;">2024-01-12</span>
+          </div>
+          <span style="font-size: 0.75rem; color: #60a5fa; background: #172234; padding: 2px 8px; border-radius: 4px;">2 matches</span>
+        </div>
+        <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.7; font-family: 'Georgia', serif;">
+          72 y/o female with history of hypertension and diabetes presents with substernal chest pressure x 2 hours.
+          Initial
+          <span style="background: rgba(79, 143, 247, 0.25); border-bottom: 2px solid #4f8ff7; padding: 1px 3px; border-radius: 2px; color: #93c5fd; font-weight: 500;">troponin</span>
+          0.08, repeat 0.32. Assessment:
+          <span style="background: rgba(79, 143, 247, 0.25); border-bottom: 2px solid #4f8ff7; padding: 1px 3px; border-radius: 2px; color: #93c5fd; font-weight: 500;">NSTEMI</span>.
+          Started on heparin drip, aspirin, and ticagrelor. Cardiology aware, plan for catheterization in AM.
+        </div>
+      </div>
+
+      <!-- Note 3 - potential false positive -->
+      <div style="background: #1e293b; border: 1px solid #4a3520; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <span style="font-weight: 600; color: #e0e0e0; font-size: 0.85rem;">Patient P-00331</span>
+            <span style="font-size: 0.8rem; color: #64748b;">Primary Care Visit</span>
+            <span style="font-size: 0.8rem; color: #64748b;">2024-02-03</span>
+          </div>
+          <span style="font-size: 0.75rem; color: #fbbf24; background: #2a2010; padding: 2px 8px; border-radius: 4px;">1 match &middot; possible noise</span>
+        </div>
+        <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.7; font-family: 'Georgia', serif;">
+          Patient returns for annual physical. Past medical history significant for
+          <span style="background: rgba(251, 191, 36, 0.2); border-bottom: 2px solid #fbbf24; padding: 1px 3px; border-radius: 2px; color: #fcd34d; font-weight: 500;">MI</span>
+          in 2019 (treated with PCI, two stents to LAD). Currently on aspirin, atorvastatin, metoprolol.
+          No current chest pain or shortness of breath. Exercise tolerance preserved.
+        </div>
+        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #fbbf24; font-style: italic;">
+          &#9888; Context suggests historical mention, not a current event
+        </div>
+      </div>
+
+      <!-- Note 4 - negated -->
+      <div style="background: #1e293b; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; opacity: 0.6;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <span style="font-weight: 600; color: #e0e0e0; font-size: 0.85rem;">Patient P-00205</span>
+            <span style="font-size: 0.8rem; color: #64748b;">ED Discharge Note</span>
+            <span style="font-size: 0.8rem; color: #64748b;">2024-01-28</span>
+          </div>
+          <span style="font-size: 0.75rem; color: #ef4444; background: #2a1515; padding: 2px 8px; border-radius: 4px;">negated &middot; excluded</span>
+        </div>
+        <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.7; font-family: 'Georgia', serif;">
+          Patient evaluated for chest pain. Serial
+          <span style="background: rgba(239, 68, 68, 0.15); border-bottom: 2px solid #ef4444; padding: 1px 3px; border-radius: 2px; color: #fca5a5; text-decoration: line-through; font-weight: 500;">troponin</span>
+          <span style="color: #ef4444; font-weight: 500;"> negative</span>.
+          ECG without acute changes. Assessment: Chest pain, likely musculoskeletal. No evidence of acute
+          <span style="background: rgba(239, 68, 68, 0.15); border-bottom: 2px solid #ef4444; padding: 1px 3px; border-radius: 2px; color: #fca5a5; text-decoration: line-through; font-weight: 500;">MI</span>.
+          Discharged home with follow-up.
+        </div>
+        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #ef4444; font-style: italic;">
+          &#10005; Negation detected: "troponin negative", "No evidence of acute MI" &mdash; auto-excluded by spaCy
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div style="display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #334155;">
+        <button class="mock-button" style="font-size: 0.8rem; background: #4f8ff7; color: white; padding: 4px 12px;">1</button>
+        <button class="mock-button" style="font-size: 0.8rem; background: transparent; border: 1px solid #334155; color: #94a3b8; padding: 4px 12px;">2</button>
+        <button class="mock-button" style="font-size: 0.8rem; background: transparent; border: 1px solid #334155; color: #94a3b8; padding: 4px 12px;">3</button>
+        <span style="color: #64748b; padding: 4px;">...</span>
+        <button class="mock-button" style="font-size: 0.8rem; background: transparent; border: 1px solid #334155; color: #94a3b8; padding: 4px 12px;">25</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>Preview Features</h3>
+  <ul style="color: #ccc; line-height: 1.8; font-size: 0.9rem;">
+    <li><strong>Click any query row</strong> to expand and see all matched notes with keywords highlighted</li>
+    <li><strong>Blue highlights</strong>: positive matches (included terms)</li>
+    <li><strong>Yellow highlights</strong>: matches that look like noise (historical mentions, ambiguous context)</li>
+    <li><strong>Red strikethrough</strong>: negated matches auto-excluded by spaCy's negation detection</li>
+    <li><strong>Filter &amp; sort</strong>: narrow by patient ID, sort by match count / date / patient</li>
+    <li><strong>Paginated</strong>: 10 notes per page to keep it responsive</li>
+    <li>Seeing too much noise? &rarr; Add an exclusion query. Seeing negated hits? &rarr; spaCy already handles it.</li>
+  </ul>
+</div>
