@@ -340,7 +340,10 @@ class AdjudicationHandler:
 
         res = None
         if date_obj:
-            res = date_obj.date()
+            if isinstance(date_obj, str):
+                res = datetime.datetime.fromisoformat(date_obj).date()
+            else:
+                res = date_obj.date()
 
         return res
 
@@ -436,7 +439,10 @@ class AnnotationFilterStrategy:
         filtered_results = {
             'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
             'review_statuses' : [ReviewStatus(int(x["reviewed"])) for x in annotations],
-            'annotations' : [dict(annotation) for annotation in annotations]
+            'annotations' : [
+                {k: str(v) if isinstance(v, ObjectId) else v for k, v in annotation.items()}
+                for annotation in annotations
+            ]
         }
 
         return filtered_results, annotations_with_duplicates
