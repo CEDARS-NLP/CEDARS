@@ -109,7 +109,7 @@ function RunDetail({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">
-                  {run.run_type === "sample" ? "Sample" : "Full"} Run
+                  {run.run_type === "sample" ? "Sample" : "Full"} run
                 </span>
                 <Badge className={`text-xs ${statusColor(run.status)}`}>{run.status}</Badge>
               </div>
@@ -141,7 +141,7 @@ function RunDetail({
                 disabled={retryMutation.isPending}
               >
                 <RotateCcw className="h-3 w-3" />
-                Retry Failed
+                Retry failed
               </Button>
             ) : null}
             {isTerminal && (
@@ -187,7 +187,7 @@ function RunDetail({
           {tasks && tasks.length > 0 && (
             <div>
               <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Patient Tasks
+                Patient tasks
               </h4>
               <div className="max-h-64 overflow-y-auto rounded-md border border-border">
                 <table className="w-full text-sm">
@@ -225,7 +225,7 @@ function RunDetail({
           {/* Config snapshot */}
           <div>
             <h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Config Snapshot
+              Config snapshot
             </h4>
             <pre className="max-h-32 overflow-auto rounded-md bg-muted p-2 text-xs">
               {JSON.stringify(run.config_snapshot, null, 2)}
@@ -264,7 +264,7 @@ function QueueStatus({ projectId }: { projectId: string }) {
             <div className="flex items-center gap-2">
               <div className={`h-2.5 w-2.5 rounded-full ${queue.worker_active ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
               <span className="text-sm font-medium">
-                Worker {queue.worker_active ? "Online" : "Offline"}
+                Worker {queue.worker_active ? "online" : "offline"}
               </span>
               {queue.arq_queued > 0 && (
                 <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300 text-xs">
@@ -316,7 +316,7 @@ export default function JobDashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Job Dashboard</h2>
+        <h2 className="text-lg font-semibold text-foreground">Job dashboard</h2>
         <p className="text-sm text-muted-foreground">
           Monitor pipeline runs, cancel active jobs, and retry failures.
         </p>

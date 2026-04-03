@@ -177,7 +177,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
         className="flex w-full items-center gap-3 px-5 py-3 text-left"
       >
         <Settings className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium text-foreground">Project Settings</span>
+        <span className="text-sm font-medium text-foreground">Project settings</span>
         {missingLlm && (
           <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
             LLM not configured
@@ -196,7 +196,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
         <div className="border-t border-border px-5 py-4 space-y-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-              LLM Configuration
+              LLM configuration
             </p>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1.5">
@@ -222,7 +222,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">API Base (optional)</Label>
+                <Label className="text-xs">API base (optional)</Label>
                 <Input
                   value={apiBase}
                   onChange={(e) => { setApiBase(e.target.value); setDirty(true); }}
@@ -235,7 +235,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
 
           <div className="border-t border-border pt-4">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-              Annotation Behavior
+              Annotation behavior
             </p>
             <label className="flex items-center gap-3 cursor-pointer">
               <input
@@ -397,7 +397,7 @@ export default function ProjectOverview() {
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card px-5 py-4">
-          <p className="text-sm text-muted-foreground">Target Sentences</p>
+          <p className="text-sm text-muted-foreground">Target sentences</p>
           <p className="mt-1 text-2xl font-semibold text-foreground">
             {stats?.sentences.target ?? 0}
           </p>
@@ -422,7 +422,7 @@ export default function ProjectOverview() {
       {/* Job status */}
       {stats?.jobs.latest && (
         <div>
-          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Latest Job</h3>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Latest job</h3>
           <div className="rounded-lg border border-border bg-card px-5 py-4">
             <div className="flex items-center gap-3">
               {stats.jobs.latest.status === "running" && (
@@ -459,7 +459,7 @@ export default function ProjectOverview() {
         <div>
           <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Users className="h-4 w-4" />
-            Annotator Activity
+            Annotator activity
           </h3>
           <div className="rounded-lg border border-border bg-card overflow-hidden">
             <table className="w-full text-sm">
@@ -468,7 +468,7 @@ export default function ProjectOverview() {
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">Name</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">Email</th>
                   <th className="px-4 py-2 text-right font-medium text-muted-foreground">Reviewed</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Events Found</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Events found</th>
                 </tr>
               </thead>
               <tbody>
@@ -535,7 +535,7 @@ export default function ProjectOverview() {
                     {state !== "locked" && (
                       <Link
                         to={`/projects/${projectId}/${step.path}`}
-                        className="mt-1.5 ml-7 inline-flex items-center gap-1 text-sm text-accent transition-colors hover:underline"
+                        className="mt-1.5 ml-7 inline-flex items-center gap-1 text-sm text-link transition-colors hover:underline"
                       >
                         {state === "done" ? "View" : "Get started"}
                         <ArrowRight className="h-3.5 w-3.5" />

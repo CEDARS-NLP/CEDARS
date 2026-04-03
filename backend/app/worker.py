@@ -378,6 +378,7 @@ async def on_worker_startup(ctx: dict) -> None:
     import logging
     log = logging.getLogger("arq.worker.startup")
     try:
+        from sqlalchemy import select
         from app.common.database import async_session
         from app.evaluation.models import PatientResult, PatientResultStatus
         from app.pipeline.models import PipelineRun, PipelineRunStatus

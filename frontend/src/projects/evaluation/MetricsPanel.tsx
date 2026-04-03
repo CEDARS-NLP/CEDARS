@@ -39,12 +39,12 @@ export default function MetricsPanel({ projectId, sessionId }: MetricsPanelProps
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
-      <h2 className="text-lg font-semibold">Live Metrics</h2>
+      <h2 className="text-lg font-semibold">Live metrics</h2>
       <div className="flex gap-3">
         <MetricCard label="Accuracy" value={`${(metrics.accuracy * 100).toFixed(1)}%`} color="text-green-400" />
         <MetricCard label="Precision" value={`${(metrics.precision * 100).toFixed(1)}%`} color="text-blue-400" />
         <MetricCard label="Recall" value={`${(metrics.recall * 100).toFixed(1)}%`} color="text-blue-400" />
-        <MetricCard label="F1 Score" value={`${(metrics.f1 * 100).toFixed(1)}%`} color="text-yellow-400" />
+        <MetricCard label="F1 score" value={`${(metrics.f1 * 100).toFixed(1)}%`} color="text-yellow-400" />
       </div>
       <div className="text-center text-xs text-muted-foreground">
         Based on {metrics.total_reviewed} reviewed patients ({metrics.total_pending} remaining)

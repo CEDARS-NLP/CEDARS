@@ -1,0 +1,3 @@
+# aws-iam-role Skill
+
+The `aws-iam-role` skill enforces MSK's IAM role standards within Terraform code. It ensures that every `aws_iam_role` resource Copilot generates or reviews follows MSK's mandatory naming conventions—requiring a `userServiceRole-` prefix for standard roles and a `bedrockServiceAccess-` prefix for Bedrock-related roles—and that each role includes the correct `permissions_boundary` ARN sourced dynamically via `data.aws_caller_identity`. This skill prevents non-compliant IAM roles from being created, rewrites any existing non-compliant names to use the correct prefix, and refuses to produce configurations missing a permissions boundary, ensuring all IAM roles remain within MSK's defined security guardrails.

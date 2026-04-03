@@ -27,7 +27,7 @@ function roleBadgeClass(role: string): string {
     case "admin":
       return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
     case "annotator":
-      return "bg-accent/10 text-accent dark:bg-accent/20";
+      return "bg-link/10 text-link dark:bg-link/20";
     default:
       return "bg-secondary text-secondary-foreground";
   }
@@ -66,7 +66,7 @@ export default function ProjectListPage() {
         <Button asChild>
           <Link to="/projects/new">
             <Plus className="mr-1.5 h-4 w-4" />
-            New Project
+            New project
           </Link>
         </Button>
       </div>
@@ -100,7 +100,7 @@ export default function ProjectListPage() {
           <Button asChild>
             <Link to="/projects/new">
               <Plus className="mr-1.5 h-4 w-4" />
-              Create Project
+              Create project
             </Link>
           </Button>
         </div>

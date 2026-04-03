@@ -108,7 +108,7 @@ export default function ExportPage() {
         <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4" role="status" aria-label="Export statistics">
           <Card className="border-border/60">
             <CardContent className="pt-5">
-              <p className="text-sm text-muted-foreground">Total Annotations</p>
+              <p className="text-sm text-muted-foreground">Total annotations</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
                 {stats.total}
               </p>
@@ -124,7 +124,7 @@ export default function ExportPage() {
           </Card>
           <Card className="border-border/60">
             <CardContent className="pt-5">
-              <p className="text-sm text-muted-foreground">Events Found</p>
+              <p className="text-sm text-muted-foreground">Events found</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
                 {stats.events}
               </p>
@@ -133,7 +133,7 @@ export default function ExportPage() {
           {stats.total_eval_tokens > 0 && (
             <Card className="border-border/60">
               <CardContent className="pt-5">
-                <p className="text-sm text-muted-foreground">Eval Tokens Used</p>
+                <p className="text-sm text-muted-foreground">Eval tokens used</p>
                 <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
                   {stats.total_eval_tokens.toLocaleString()}
                 </p>
@@ -146,7 +146,7 @@ export default function ExportPage() {
       {/* Export options */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Export Options</CardTitle>
+          <CardTitle className="text-base">Export options</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           {/* Format */}

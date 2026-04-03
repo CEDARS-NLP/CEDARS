@@ -1,11 +1,15 @@
 @import "tailwindcss";
+@import "@mskcc/tokens/css/root.css";
+@import "@mskcc/tokens/css/tailwind.css";
+@import "@mskcc/tokens/css/pro.css";
+@import "@mskcc/theme-antd/dist/styles/theme.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-sans: var(--msk-font-family-base, "MSK Sans Pro", Verdana, sans-serif);
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);
@@ -25,6 +29,7 @@
     --color-secondary-foreground: var(--secondary-foreground);
     --color-muted: var(--muted);
     --color-muted-foreground: var(--muted-foreground);
+    --color-link: var(--link);
     --color-accent: var(--accent);
     --color-accent-foreground: var(--accent-foreground);
     --color-destructive: var(--destructive);
@@ -46,86 +51,84 @@
     --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * Bridge shadcn CSS variables → MSK semantic tokens.
+ * MSK tokens auto-update light/dark via [data-theme] on <html>.
+ */
 :root {
     --radius: 0.5rem;
-    /* CEDARS clinical theme — inspired by v1 brand colors #0b3d5c / #328CC1 */
-    --background: oklch(0.985 0.002 240);
-    --foreground: oklch(0.15 0.02 240);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.15 0.02 240);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.15 0.02 240);
-    --primary: oklch(0.30 0.06 240);         /* #0b3d5c navy */
-    --primary-foreground: oklch(0.98 0 0);
-    --secondary: oklch(0.96 0.01 240);
-    --secondary-foreground: oklch(0.25 0.04 240);
-    --muted: oklch(0.955 0.008 240);
-    --muted-foreground: oklch(0.40 0.02 240);
-    --accent: oklch(0.55 0.12 240);          /* #328CC1 blue */
-    --accent-foreground: oklch(0.98 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.91 0.008 240);
-    --input: oklch(0.91 0.008 240);
-    --ring: oklch(0.55 0.12 240);
-    --chart-1: oklch(0.30 0.06 240);
-    --chart-2: oklch(0.55 0.12 240);
-    --chart-3: oklch(0.60 0.10 170);
-    --chart-4: oklch(0.70 0.14 200);
-    --chart-5: oklch(0.45 0.08 260);
-    --sidebar: oklch(0.22 0.045 240);
-    --sidebar-foreground: oklch(0.92 0.01 240);
-    --sidebar-primary: oklch(0.55 0.12 240);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
-    --sidebar-accent: oklch(0.28 0.05 240);
-    --sidebar-accent-foreground: oklch(0.92 0.01 240);
-    --sidebar-border: oklch(0.30 0.05 240);
-    --sidebar-ring: oklch(0.55 0.12 240);
+
+    /* Link text color — readable in both light and dark */
+    --link:                 var(--msk-color-content-link);
+
+    /* Surfaces */
+    --background:           var(--msk-color-bg);
+    --foreground:           var(--msk-color-content-primary);
+    --card:                 var(--msk-color-bg);
+    --card-foreground:      var(--msk-color-content-primary);
+    --popover:              var(--msk-color-bg);
+    --popover-foreground:   var(--msk-color-content-primary);
+
+    /* Primary action — MSK brand blue */
+    --primary:              var(--msk-color-bg-action-primary);
+    --primary-foreground:   var(--msk-color-content-inverse);
+
+    /* Secondary / subtle layer */
+    --secondary:            var(--msk-color-bg-layer);
+    --secondary-foreground: var(--msk-color-content-primary);
+
+    /* Muted */
+    --muted:                var(--msk-color-bg-layer);
+    --muted-foreground:     var(--msk-color-content-secondary);
+
+    /* Accent — selected highlight */
+    --accent:               var(--msk-color-bg-action-selected);
+    --accent-foreground:    var(--msk-color-content-action-selected);
+
+    /* Destructive */
+    --destructive:          var(--msk-color-content-feedback-error-decorative);
+
+    /* Chrome */
+    --border:               var(--msk-color-border);
+    --input:                var(--msk-color-border-input);
+    --ring:                 var(--msk-color-bg-action-primary);
+
+    /* Charts — MSK spectrum palette */
+    --chart-1:              var(--msk-color-blue-60);
+    --chart-2:              var(--msk-color-cyan-50);
+    --chart-3:              var(--msk-color-green-50);
+    --chart-4:              var(--msk-color-purple-50);
+    --chart-5:              var(--msk-color-orange-50);
+
+    /*
+     * Sidebar — light clinical style (cool-gray layer).
+     * Dark mode: --msk-color-bg-layer auto-shifts to cool-gray-80 via [data-theme="dark"].
+     */
+    --sidebar:                      var(--msk-color-bg-layer);
+    --sidebar-foreground:           var(--msk-color-content-primary);
+    --sidebar-primary:              var(--msk-color-bg-action-primary);
+    --sidebar-primary-foreground:   var(--msk-color-content-inverse);
+    --sidebar-accent:               var(--msk-color-bg-action-selected);
+    --sidebar-accent-foreground:    var(--msk-color-content-action-selected);
+    --sidebar-border:               var(--msk-color-border);
+    --sidebar-ring:                 var(--msk-color-bg-action-primary);
 }
 
+/* Dark mode: MSK tokens handle bg/text automatically via [data-theme="dark"].
+   We only need to re-declare values not covered by MSK tokens. */
 .dark {
-    --background: oklch(0.15 0.02 240);
-    --foreground: oklch(0.95 0.01 240);
-    --card: oklch(0.20 0.03 240);
-    --card-foreground: oklch(0.95 0.01 240);
-    --popover: oklch(0.20 0.03 240);
-    --popover-foreground: oklch(0.95 0.01 240);
-    --primary: oklch(0.55 0.12 240);
-    --primary-foreground: oklch(0.98 0 0);
-    --secondary: oklch(0.25 0.04 240);
-    --secondary-foreground: oklch(0.95 0.01 240);
-    --muted: oklch(0.25 0.04 240);
-    --muted-foreground: oklch(0.65 0.02 240);
-    --accent: oklch(0.55 0.12 240);
-    --accent-foreground: oklch(0.98 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.55 0.12 240);
-    --chart-1: oklch(0.55 0.12 240);
-    --chart-2: oklch(0.60 0.15 200);
-    --chart-3: oklch(0.65 0.12 170);
-    --chart-4: oklch(0.70 0.14 260);
-    --chart-5: oklch(0.50 0.18 300);
-    --sidebar: oklch(0.15 0.02 240);
-    --sidebar-foreground: oklch(0.92 0.01 240);
-    --sidebar-primary: oklch(0.55 0.12 240);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
-    --sidebar-accent: oklch(0.22 0.04 240);
-    --sidebar-accent-foreground: oklch(0.92 0.01 240);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.55 0.12 240);
+    --chart-1: var(--msk-color-blue-40);
+    --chart-2: var(--msk-color-cyan-40);
+    --chart-3: var(--msk-color-green-40);
+    --chart-4: var(--msk-color-purple-40);
+    --chart-5: var(--msk-color-orange-40);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
-}
-
-/* Focus ring visible on dark sidebar backgrounds */
-.dark *:focus-visible {
-  outline-color: oklch(0.55 0.12 240);
+  }
 }

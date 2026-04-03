@@ -11,12 +11,11 @@
   </head>
   <body>
     <script>
-      // Sync dark mode with OS preference
       (function() {
-        var mq = window.matchMedia('(prefers-color-scheme: dark)');
-        function apply(dark) { document.documentElement.classList.toggle('dark', dark); }
-        apply(mq.matches);
-        mq.addEventListener('change', function(e) { apply(e.matches); });
+        var stored = localStorage.getItem('theme');
+        var dark = stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
       })();
     </script>
     <div id="root"></div>

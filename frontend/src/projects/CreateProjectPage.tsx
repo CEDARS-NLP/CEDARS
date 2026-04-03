@@ -57,7 +57,7 @@ export default function CreateProjectPage() {
     <div className="flex h-full items-start justify-center px-8 py-12">
       <Card className="w-full max-w-lg border-border/60">
         <CardHeader>
-          <CardTitle>New Project</CardTitle>
+          <CardTitle>New project</CardTitle>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-5">
@@ -67,7 +67,7 @@ export default function CreateProjectPage() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="name">Project Name</Label>
+              <Label htmlFor="name">Project name</Label>
               <Input
                 id="name"
                 type="text"
@@ -89,7 +89,7 @@ export default function CreateProjectPage() {
             </div>
 
             <div className="border-t pt-4 mt-2">
-              <p className="text-sm font-medium mb-3">LLM Configuration</p>
+              <p className="text-sm font-medium mb-3">LLM configuration</p>
               <div className="space-y-3">
                 <div className="space-y-2">
                   <Label htmlFor="llmProvider">Provider</Label>
@@ -117,7 +117,7 @@ export default function CreateProjectPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="llmApiBase">API Base URL (optional)</Label>
+                  <Label htmlFor="llmApiBase">API base URL (optional)</Label>
                   <Input
                     id="llmApiBase"
                     type="text"
@@ -135,7 +135,7 @@ export default function CreateProjectPage() {
               className="flex-1"
               disabled={mutation.isPending}
             >
-              {mutation.isPending ? "Creating..." : "Create Project"}
+              {mutation.isPending ? "Creating..." : "Create project"}
             </Button>
             <Button type="button" variant="outline" className="flex-1" asChild>
               <Link to="/projects">Cancel</Link>

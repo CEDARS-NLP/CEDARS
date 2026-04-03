@@ -65,7 +65,7 @@ export default function RegisterPage() {
             <img
               src="/cedars-logo.png"
               alt="CEDARS"
-              className="h-8 w-8 dark:brightness-0 dark:invert"
+              className="h-8 w-8 brightness-0 dark:invert"
             />
             <span className="text-lg font-semibold text-foreground">CEDARS</span>
           </div>
@@ -122,7 +122,7 @@ export default function RegisterPage() {
             Already have an account?{" "}
             <Link
               to="/login"
-              className="font-medium text-accent hover:underline"
+              className="font-medium text-link hover:underline"
             >
               Sign in
             </Link>

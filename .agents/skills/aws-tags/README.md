@@ -1,0 +1,3 @@
+# aws-tags Skill
+
+The `aws-tags` skill enforces MSK's mandatory AWS resource tagging requirements in Terraform. It ensures that every Terraform AWS provider configuration includes a `default_tags` block containing all seven required tags—`application`, `application-id`, `application-tier`, `cost-center`, `env`, `owner-email`, and `service-id`—and that the `env` tag always references a Terraform variable rather than a hardcoded string. When generating new infrastructure or reviewing existing Terraform code, this skill validates tag presence and format, adds any missing required tags, and converts hardcoded `env` values to variable references, ensuring consistent and compliant resource tagging across all MSK AWS deployments.

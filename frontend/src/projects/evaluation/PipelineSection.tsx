@@ -94,7 +94,7 @@ export default function PipelineSection({
   return (
     <div className="rounded-lg border p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Full Pipeline</h2>
+        <h2 className="text-lg font-semibold">Full pipeline</h2>
         <div className="flex items-center gap-2">
           {isRunning && (
             <>
@@ -135,7 +135,7 @@ export default function PipelineSection({
               {rerunMutation.isPending ? (
                 <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Starting...</>
               ) : (
-                <><RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Re-run Pipeline</>
+                <><RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Re-run pipeline</>
               )}
             </Button>
           )}
@@ -164,7 +164,7 @@ export default function PipelineSection({
         </div>
         <div>
           <div className="text-lg font-semibold tabular-nums text-zinc-500">{stats.no_match}</div>
-          <div className="text-muted-foreground">No Match</div>
+          <div className="text-muted-foreground">No match</div>
         </div>
         <div>
           <div className="text-lg font-semibold tabular-nums text-red-600">{stats.failed}</div>

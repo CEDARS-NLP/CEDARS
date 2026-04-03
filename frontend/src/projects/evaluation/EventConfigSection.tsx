@@ -84,23 +84,23 @@ export default function EventConfigSection({ projectId, session, onRefresh }: Ev
 
   return (
     <div className="space-y-4 rounded-lg border p-4">
-      <h2 className="text-lg font-semibold">Event Definition</h2>
+      <h2 className="text-lg font-semibold">Event definition</h2>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Event Name</Label>
+          <Label>Event name</Label>
           <Input value={eventName} onChange={(e) => setEventName(e.target.value)} disabled={!isEditable} placeholder="e.g., Myocardial Infarction" />
         </div>
         <div className="space-y-2">
-          <Label>Event Description</Label>
+          <Label>Event description</Label>
           <textarea value={eventDesc} onChange={(e) => setEventDesc(e.target.value)} disabled={!isEditable} placeholder="Describe the clinical event..." className="flex w-full rounded-md border bg-background px-3 py-2 text-sm" rows={2} />
         </div>
         <div className="space-y-2">
-          <Label>Include Criteria</Label>
+          <Label>Include criteria</Label>
           <textarea value={includeCriteria} onChange={(e) => setIncludeCriteria(e.target.value)} disabled={!isEditable} placeholder="What to look for..." className="flex w-full rounded-md border bg-background px-3 py-2 text-sm" rows={2} />
         </div>
         <div className="space-y-2">
-          <Label>Exclude Criteria</Label>
+          <Label>Exclude criteria</Label>
           <textarea value={excludeCriteria} onChange={(e) => setExcludeCriteria(e.target.value)} disabled={!isEditable} placeholder="What to exclude..." className="flex w-full rounded-md border bg-background px-3 py-2 text-sm" rows={2} />
         </div>
       </div>
@@ -112,7 +112,7 @@ export default function EventConfigSection({ projectId, session, onRefresh }: Ev
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || llmRunning}
           >
-            Save Config
+            Save config
           </Button>
           <Button
             onClick={() => {
@@ -123,7 +123,7 @@ export default function EventConfigSection({ projectId, session, onRefresh }: Ev
             {runMutation.isPending || llmRunning ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {progressText}</>
             ) : (
-              <><Play className="mr-2 h-4 w-4" /> Run LLM on Sample</>
+              <><Play className="mr-2 h-4 w-4" /> Run LLM on sample</>
             )}
           </Button>
         </div>

@@ -58,7 +58,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
       >
         <div className="mb-3 flex items-center justify-between">
           <h4 className="text-sm font-semibold text-foreground">
-            Keyboard Shortcuts
+            Keyboard shortcuts
           </h4>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
@@ -176,7 +176,7 @@ export default function EvalReviewPanel({
 
       if (current && current.total_unreviewed <= 1) {
         setCompletionMessage(
-          `All ${current.total_results} patients reviewed!`
+          `All ${current.total_results} patients reviewed.`
         );
         setTimeout(() => setCompletionMessage(null), 3000);
       } else {
@@ -342,7 +342,7 @@ export default function EvalReviewPanel({
             <div className="rounded-lg border border-border bg-card p-4">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Brain className="h-4 w-4" />
-                LLM Classification
+                LLM classification
               </div>
 
               <div className="space-y-3">
@@ -354,9 +354,9 @@ export default function EvalReviewPanel({
                       }
                     >
                       {current.finding_label === "positive"
-                        ? "Event Detected"
+                        ? "Event detected"
                         : current.finding_label === "negative"
-                          ? "No Event"
+                          ? "No event"
                           : "Inconclusive"}
                     </Badge>
                   )}
@@ -446,7 +446,7 @@ export default function EvalReviewPanel({
                   size="lg"
                 >
                   <CalendarDays className="h-4 w-4" />
-                  Override Event Date
+                  Override event date
                   <kbd className="ml-auto rounded border border-border bg-muted px-1.5 py-0.5 text-xs">
                     E
                   </kbd>
@@ -471,7 +471,7 @@ export default function EvalReviewPanel({
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Set the correct date, then press Correct or Wrong above.
+                    Set the correct date, then select Correct or Wrong above.
                   </p>
                   <Button
                     size="sm"
@@ -493,7 +493,7 @@ export default function EvalReviewPanel({
           <div className="rounded-lg border border-border bg-card">
             <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
               <span className="text-sm font-medium text-foreground">
-                Matched Notes
+                Matched notes
               </span>
               {sortedNotes.length > 0 && (
                 <>

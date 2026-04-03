@@ -64,7 +64,7 @@ export default function LoginPage() {
             <img
               src="/cedars-logo.png"
               alt="CEDARS"
-              className="h-8 w-8 dark:brightness-0 dark:invert"
+              className="h-8 w-8 brightness-0 dark:invert"
             />
             <span className="text-lg font-semibold text-foreground">CEDARS</span>
           </div>
@@ -110,7 +110,7 @@ export default function LoginPage() {
             Don&apos;t have an account?{" "}
             <Link
               to="/register"
-              className="font-medium text-accent hover:underline"
+              className="font-medium text-link hover:underline"
             >
               Create one
             </Link>

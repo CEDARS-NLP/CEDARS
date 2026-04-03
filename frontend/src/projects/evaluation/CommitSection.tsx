@@ -46,7 +46,7 @@ export default function CommitSection({ projectId, session, onRefresh }: CommitS
           {commitMutation.isPending ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Committing...</>
           ) : (
-            <><Lock className="mr-2 h-4 w-4" /> Commit &amp; Run Full Pipeline</>
+            <><Lock className="mr-2 h-4 w-4" /> Commit and run full pipeline</>
           )}
         </Button>
       </div>
@@ -59,7 +59,7 @@ export default function CommitSection({ projectId, session, onRefresh }: CommitS
 
       {commitMutation.isSuccess && commitMutation.data && (
         <div className="mt-3 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">
-          Pipeline started! Processing {commitMutation.data.total_patients} patients.
+          Pipeline started. Processing {commitMutation.data.total_patients} patients.
         </div>
       )}
     </div>

@@ -10,7 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mskcc/theme-antd": "^1.0.5",
+    "@mskcc/tokens": "^1.0.5",
     "@tanstack/react-query": "^5.90.21",
+    "antd": "^6.3.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.576.0",

@@ -78,7 +78,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-foreground">NLP Search Queries</h3>
+        <h3 className="text-base font-semibold text-foreground">NLP search queries</h3>
         <p className="text-sm text-muted-foreground">
           Define keyword patterns to identify target sentences in clinical notes
         </p>
@@ -173,7 +173,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Play className="h-4 w-4" />
-              Run Pipeline
+              Run pipeline
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -224,7 +224,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <BarChart3 className="h-4 w-4" />
-              NLP Statistics
+              NLP statistics
             </CardTitle>
           </CardHeader>
           <CardContent>

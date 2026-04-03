@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "aws-iam-role": {
+      "source": "git@github.com:MSK-SLS/SoftwareModernization-AgentSkills",
+      "sourceType": "git",
+      "computedHash": "4974abe1d24a83efaa81aae90e6623d2b8b8db41363a466a6ae83aba848bec62"
+    },
+    "aws-secretsmanager": {
+      "source": "git@github.com:MSK-SLS/SoftwareModernization-AgentSkills",
+      "sourceType": "git",
+      "computedHash": "a8d4344acf21bded8b7e2050b2ce18cf4a49646a8e1a815da0ce4db81d39000c"
+    },
+    "aws-tags": {
+      "source": "git@github.com:MSK-SLS/SoftwareModernization-AgentSkills",
+      "sourceType": "git",
+      "computedHash": "ce199d817d9fb0d7aac0ee98428ce8eee60317703665790e00d77e65e376c451"
+    },
+    "msk-dsm-antd-setup": {
+      "source": "git@github.com:MSK-SLS/SoftwareModernization-AgentSkills",
+      "sourceType": "git",
+      "computedHash": "5b836ea4b1677551ccc4bd17b18227a27815a8a921d674c5f0dce56f23251a40"
+    },
+    "writing-clinical-ui-copy": {
+      "source": "git@github.com:MSK-SLS/SoftwareModernization-AgentSkills",
+      "sourceType": "git",
+      "computedHash": "6f697fba6180d6710e562f35ab43c3ade3a545324198b0ef25716faa89d8094d"
+    }
+  }
+}

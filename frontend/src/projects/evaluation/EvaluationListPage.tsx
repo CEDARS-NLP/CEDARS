@@ -68,7 +68,7 @@ export default function EvaluationListPage() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Evaluation Sessions</h1>
+          <h1 className="text-2xl font-bold">Evaluation sessions</h1>
           <p className="text-sm text-muted-foreground">
             Configure search queries, run LLM classification, review results,
             then commit to run on the full corpus.
@@ -79,7 +79,7 @@ export default function EvaluationListPage() {
           disabled={hasActive || hasCommitted || createMutation.isPending}
         >
           <Plus className="mr-2 h-4 w-4" />
-          New Session
+          New session
         </Button>
       </div>
 
@@ -95,7 +95,7 @@ export default function EvaluationListPage() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            No evaluation sessions yet. Click "New Session" to get started.
+            No evaluation sessions yet. Select "New session" to get started.
           </CardContent>
         </Card>
       ) : (
@@ -111,10 +111,10 @@ export default function EvaluationListPage() {
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <div className="flex items-center gap-3">
                   <CardTitle className="text-base">
-                    {s.event_name || "Untitled Session"}
+                    {s.event_name || "Untitled session"}
                   </CardTitle>
                   <Badge className={STATUS_COLORS[s.status] ?? ""}>
-                    {s.status.toUpperCase()}
+                    {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
                   </Badge>
                 </div>
                 <div

@@ -40,7 +40,7 @@ export default function ProjectLayout() {
           {error instanceof Error ? error.message : "Unknown error"}
         </p>
         <Button variant="outline" asChild>
-          <Link to="/projects">Back to Projects</Link>
+          <Link to="/projects">Back to projects</Link>
         </Button>
       </div>
     );

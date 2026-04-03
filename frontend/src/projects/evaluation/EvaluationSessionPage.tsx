@@ -61,7 +61,7 @@ export default function EvaluationSessionPage() {
       <div className="flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold">
-            {session.event_name || "Untitled Session"}
+            {session.event_name || "Untitled session"}
           </h1>
           <Badge className={STATUS_COLORS[session.status] ?? ""}>
             {session.status.toUpperCase()}

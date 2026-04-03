@@ -237,14 +237,14 @@ export default function PatientDetailPage() {
           disabled={reopenMutation.isPending}
         >
           <RotateCcw className="mr-1.5 h-4 w-4" />
-          {reopenMutation.isPending ? "Re-opening..." : "Re-open for Review"}
+          {reopenMutation.isPending ? "Re-opening..." : "Re-open for review"}
         </Button>
       </div>
 
       {/* Notes list */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium">
-          Clinical Notes{" "}
+          Clinical notes{" "}
           {notes && (
             <span className="text-muted-foreground font-normal">
               ({notes.length})

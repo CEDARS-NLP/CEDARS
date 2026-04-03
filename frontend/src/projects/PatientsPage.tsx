@@ -35,8 +35,8 @@ const PAGE_SIZE = 20;
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "new", label: "New" },
-  { value: "nlp_processing", label: "NLP Processing" },
-  { value: "nlp_complete", label: "NLP Complete" },
+  { value: "nlp_processing", label: "NLP processing" },
+  { value: "nlp_complete", label: "NLP complete" },
   { value: "reviewing", label: "Reviewing" },
   { value: "reviewed", label: "Reviewed" },
 ];
@@ -147,7 +147,7 @@ export default function PatientsPage() {
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-right font-medium">Notes</th>
               <th className="px-4 py-3 text-right font-medium">Reviewed</th>
-              <th className="px-4 py-3 text-left font-medium">Last Updated</th>
+              <th className="px-4 py-3 text-left font-medium">Last updated</th>
             </tr>
           </thead>
           <tbody>

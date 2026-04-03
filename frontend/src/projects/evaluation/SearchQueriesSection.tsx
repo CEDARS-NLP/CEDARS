@@ -76,7 +76,7 @@ export default function SearchQueriesSection({ projectId, session, onRefresh }: 
   return (
     <div className="space-y-4 rounded-lg border p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Search Queries</h2>
+        <h2 className="text-lg font-semibold">Search queries</h2>
         <div className="flex gap-2">
           {isEditable && (
             <Button
@@ -85,7 +85,7 @@ export default function SearchQueriesSection({ projectId, session, onRefresh }: 
               onClick={() => setShowSuggest(!showSuggest)}
             >
               <Sparkles className="mr-1 h-4 w-4" />
-              Suggest Queries
+              Suggest queries
             </Button>
           )}
           <Button
@@ -94,7 +94,7 @@ export default function SearchQueriesSection({ projectId, session, onRefresh }: 
             disabled={session.search_queries.length === 0 || executeMutation.isPending}
           >
             <Search className="mr-1 h-4 w-4" />
-            {executeMutation.isPending ? "Running..." : "Run Search"}
+            {executeMutation.isPending ? "Running..." : "Run search"}
           </Button>
         </div>
       </div>

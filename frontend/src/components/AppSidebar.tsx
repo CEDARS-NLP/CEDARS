@@ -26,6 +26,8 @@ const projectNavSections = [
 ];
 
 function useDarkMode() {
+  // The index.html script sets .dark class and data-theme before React mounts,
+  // so this initialization is always correct — no race condition.
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
@@ -33,22 +35,16 @@ function useDarkMode() {
   useEffect(() => {
     if (dark) {
       document.documentElement.classList.add("dark");
+      document.documentElement.setAttribute("data-theme", "dark");
       localStorage.setItem("theme", "dark");
     } else {
       document.documentElement.classList.remove("dark");
+      document.documentElement.setAttribute("data-theme", "light");
       localStorage.setItem("theme", "light");
     }
   }, [dark]);
 
-  useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    if (stored === "dark") {
-      setDark(true);
-    } else if (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setDark(true);
-    }
-  }, []);
-
+  // OS preference changes only take effect when no explicit user choice is stored
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => {
@@ -75,7 +71,7 @@ export default function AppSidebar() {
         <img
           src="/cedars-logo.png"
           alt="CEDARS"
-          className="h-8 w-8 brightness-0 invert opacity-90"
+          className="h-8 w-8 brightness-0 dark:invert opacity-90"
         />
         <span className="text-lg font-semibold tracking-tight">CEDARS</span>
       </div>
@@ -91,7 +87,7 @@ export default function AppSidebar() {
               className="mb-3 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               <FolderOpen className="h-4 w-4" />
-              All Projects
+              All projects
             </NavLink>
             <div className="mb-2 px-2.5 text-xs font-medium uppercase tracking-wider text-sidebar-foreground/40">
               Project

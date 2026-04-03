@@ -67,7 +67,7 @@ function PatientCard({
           <span className="font-medium">Patient {result.patient_id.slice(0, 8)}...</span>
           {result.finding_label && (
             <Badge className={LABEL_COLORS[result.finding_label] ?? ""}>
-              {result.finding_label.toUpperCase()}
+              {result.finding_label.charAt(0).toUpperCase() + result.finding_label.slice(1).replace("_", " ")}
             </Badge>
           )}
           {result.predicted_score !== null && (
@@ -102,7 +102,7 @@ function PatientCard({
         <div className="border-t p-3 space-y-3">
           {result.finding_reasoning && (
             <div className="rounded-md bg-muted/50 p-3">
-              <div className="text-xs font-medium uppercase text-muted-foreground mb-1">LLM Reasoning</div>
+              <div className="text-xs font-medium uppercase text-muted-foreground mb-1">LLM reasoning</div>
               <div className="text-sm leading-relaxed">{result.finding_reasoning}</div>
             </div>
           )}
@@ -185,7 +185,7 @@ export default function ResultsSection({ projectId, sessionId, sessionStatus, on
   return (
     <div className="space-y-4 rounded-lg border p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Patient Results</h2>
+        <h2 className="text-lg font-semibold">Patient results</h2>
         <div className="flex items-center gap-3">
           {sessionStatus === "reviewing" && (
             <Button
@@ -193,7 +193,7 @@ export default function ResultsSection({ projectId, sessionId, sessionStatus, on
               size="sm"
               onClick={onToggleReviewMode}
             >
-              {reviewMode ? "Show List" : "Start Review"}
+              {reviewMode ? "Show list" : "Start review"}
             </Button>
           )}
           {!reviewMode && (

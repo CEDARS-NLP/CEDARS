@@ -41,11 +41,11 @@ const REQUIRED_FIELDS = [
   { key: "patient_id", label: "Patient ID", description: "Unique patient identifier (e.g. MRN)" },
   { key: "text_id", label: "Text ID", description: "Unique note/document identifier" },
   { key: "text", label: "Text", description: "Clinical note content" },
-  { key: "note_date", label: "Note Date", description: "Date of the note (ISO format)" },
+  { key: "note_date", label: "Note date", description: "Date of the note (ISO format)" },
 ] as const;
 
 const OPTIONAL_FIELDS = [
-  { key: "source_ref", label: "Source Ref", description: "Source reference / accession number" },
+  { key: "source_ref", label: "Source ref", description: "Source reference / accession number" },
 ] as const;
 
 /** Normalize a column name for matching: lowercase, trim, collapse spaces/underscores */
@@ -88,7 +88,7 @@ function statusIcon(status: string) {
     case "failed":
       return <XCircle className="h-4 w-4 text-destructive" />;
     case "running":
-      return <Loader2 className="h-4 w-4 animate-spin text-accent" />;
+      return <Loader2 className="h-4 w-4 animate-spin text-link" />;
     default:
       return <Clock className="h-4 w-4 text-muted-foreground" />;
   }
@@ -380,7 +380,7 @@ export default function DataPage() {
           onClick={() => setSourceType("file")}
         >
           <Upload className="mr-1.5 h-4 w-4" />
-          File Upload
+          File upload
         </Button>
         <Button
           variant={sourceType === "databricks" ? "default" : "outline"}
@@ -530,7 +530,7 @@ export default function DataPage() {
                                 <th key={col} className="px-3 py-2 text-left font-medium text-foreground">
                                   <span>{col}</span>
                                   {mappedTo && (
-                                    <span className="ml-1 text-[10px] font-normal text-accent">
+                                    <span className="ml-1 text-[10px] font-normal text-link">
                                       &rarr; {mappedTo[0]}
                                     </span>
                                   )}
@@ -569,7 +569,7 @@ export default function DataPage() {
                     ) : (
                       <>
                         <Upload className="mr-1.5 h-4 w-4" />
-                        Upload &amp; Create Data Source
+                        Upload and create data source
                       </>
                     )}
                   </Button>
@@ -607,7 +607,7 @@ export default function DataPage() {
                 <Database className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">Databricks Connection</p>
+                <p className="text-sm font-medium text-foreground">Databricks connection</p>
                 <p className="text-xs text-muted-foreground">Connect to a Databricks SQL warehouse table</p>
               </div>
             </div>
@@ -676,7 +676,7 @@ export default function DataPage() {
             {/* Column mapping */}
             <div>
               <Label className="mb-3 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Column Mapping
+                Column mapping
               </Label>
               <p className="mb-4 text-xs text-muted-foreground">
                 Enter the column names in your Databricks table that correspond to each field.
@@ -733,7 +733,7 @@ export default function DataPage() {
                 ) : (
                   <>
                     <Database className="mr-1.5 h-4 w-4" />
-                    Create Data Source
+                    Create data source
                   </>
                 )}
               </Button>
@@ -752,7 +752,7 @@ export default function DataPage() {
       {/* Data sources list */}
       <div>
         <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-          Data Sources
+          Data sources
         </h3>
 
         {isLoading && (

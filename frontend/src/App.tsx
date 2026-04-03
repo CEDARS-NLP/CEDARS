@@ -1,5 +1,8 @@
+import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ConfigProvider } from "antd";
+import { getDsmTheme } from "@mskcc/theme-antd";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import LoginPage from "@/auth/LoginPage";
 import RegisterPage from "@/auth/RegisterPage";
@@ -18,6 +21,25 @@ import PatientDetailPage from "@/projects/PatientDetailPage";
 import JobDashboardPage from "@/projects/JobDashboardPage";
 
 const queryClient = new QueryClient();
+
+function useThemeMode(): "light" | "dark" {
+  // index.html inline script sets data-theme before React mounts — read it directly
+  const [scheme, setScheme] = React.useState<"light" | "dark">(() =>
+    document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"
+  );
+
+  React.useEffect(() => {
+    // Watch for data-theme attribute changes driven by the sidebar toggle
+    const observer = new MutationObserver(() => {
+      const next = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      setScheme(next);
+    });
+    observer.observe(document.documentElement, { attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return scheme;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -56,8 +78,12 @@ function GuestRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const colorScheme = useThemeMode();
+  const antdTheme = getDsmTheme("pro", colorScheme);
+
   return (
-    <QueryClientProvider client={queryClient}>
+    <ConfigProvider theme={antdTheme}>
+      <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
           <Routes>
@@ -106,5 +132,6 @@ export default function App() {
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
+    </ConfigProvider>
   );
 }
