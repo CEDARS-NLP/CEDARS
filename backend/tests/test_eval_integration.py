@@ -60,7 +60,7 @@ async def project_with_data(auth_client, app):
 class TestUnifiedEvalSessionWorkflow:
     """Tests the full evaluation session workflow end-to-end."""
 
-    async def test_full_workflow(self, auth_client, project_with_data):
+    async def test_full_workflow(self, auth_client, app, project_with_data):
         pid = project_with_data
         base = f"/api/v1/projects/{pid}/evaluation"
 
@@ -108,7 +108,10 @@ class TestUnifiedEvalSessionWorkflow:
         assert resp.status_code == 200
         assert resp.json()["event_name"] == "Myocardial Infarction"
 
-        # 5. Run LLM classification (mocked)
+        # 5. Run LLM classification. The endpoint enqueues an ARQ job and returns
+        #    202; the actual classification happens in the worker via
+        #    execute_sample_llm. We mock the enqueue (no Redis in tests) then drive
+        #    the worker function directly, mirroring what the worker would do.
         mock_result = ClassificationResult(
             label="positive",
             confidence=0.92,
@@ -121,11 +124,29 @@ class TestUnifiedEvalSessionWorkflow:
             }],
             token_usage={"prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250},
         )
-        with patch("app.evaluation.service.classify_patient", new_callable=AsyncMock, return_value=mock_result):
+
+        mock_pool = AsyncMock()
+        with patch("arq.create_pool", new_callable=AsyncMock, return_value=mock_pool):
             resp = await auth_client.post(f"{base}/sessions/{sid}/run-llm")
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         run_stats = resp.json()
-        assert run_stats["patients_classified"] > 0
+        assert run_stats["status"] == "started"
+        assert run_stats["matched_patients"] > 0
+        # The endpoint should have enqueued the worker job.
+        mock_pool.enqueue_job.assert_awaited_once()
+
+        # Drive the worker job inline using the test database session.
+        from app.common.database import get_session
+        from app.evaluation import service as eval_service
+
+        override_func = app.dependency_overrides[get_session]
+        async for db in override_func():
+            with patch.object(
+                eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result
+            ):
+                worker_stats = await eval_service.execute_sample_llm(sid, pid, db_session=db)
+            break
+        assert worker_stats["patients_classified"] > 0
 
         # 6. Session should now be REVIEWING
         resp = await auth_client.get(f"{base}/sessions/{sid}")
