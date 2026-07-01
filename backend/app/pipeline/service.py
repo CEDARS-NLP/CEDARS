@@ -19,6 +19,7 @@ async def create_event_config(
     llm_provider: str,
     llm_model: str,
     llm_api_base: str | None = None,
+    llm_api_key: str | None = None,
 ) -> EventConfig:
     ec = EventConfig(
         project_id=project_id,
@@ -30,6 +31,7 @@ async def create_event_config(
         llm_provider=llm_provider,
         llm_model=llm_model,
         llm_api_base=llm_api_base,
+        llm_api_key=llm_api_key,
     )
     session.add(ec)
     await session.commit()

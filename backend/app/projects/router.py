@@ -41,6 +41,7 @@ def _project_response(project, role: str | None = None) -> dict:
         "llm_provider": project.llm_provider,
         "llm_model": project.llm_model,
         "llm_api_base": project.llm_api_base,
+        "llm_api_key_set": bool(project.llm_api_key),
         "created_at": project.created_at.isoformat() if project.created_at else "",
         "role": role,
     }
@@ -61,6 +62,7 @@ async def create_project_endpoint(
         llm_provider=body.llm_provider,
         llm_model=body.llm_model,
         llm_api_base=body.llm_api_base,
+        llm_api_key=body.llm_api_key,
     )
     return _project_response(project, role=ProjectRole.ADMIN.value)
 

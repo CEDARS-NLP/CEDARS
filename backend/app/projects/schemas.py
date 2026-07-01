@@ -9,6 +9,7 @@ class CreateProjectRequest(BaseModel):
     llm_provider: str | None = Field(default=None, max_length=50)
     llm_model: str | None = Field(default=None, max_length=200)
     llm_api_base: str | None = Field(default=None, max_length=500)
+    llm_api_key: str | None = Field(default=None, max_length=500)
 
 
 class UpdateProjectRequest(BaseModel):
@@ -18,6 +19,9 @@ class UpdateProjectRequest(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_api_base: str | None = None
+    # Send a non-empty string to set/replace the key, or "" to clear it.
+    # Omit the field entirely to leave the stored key unchanged.
+    llm_api_key: str | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -29,6 +33,8 @@ class ProjectResponse(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_api_base: str | None = None
+    # Never expose the stored key; only whether one is set.
+    llm_api_key_set: bool = False
     created_at: str
     role: str | None = None  # User's role in this project
 

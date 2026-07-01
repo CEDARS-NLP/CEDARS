@@ -27,10 +27,11 @@ export default function CreateProjectPage() {
   const [llmProvider, setLlmProvider] = useState("openai");
   const [llmModel, setLlmModel] = useState("gpt-4o-mini");
   const [llmApiBase, setLlmApiBase] = useState("");
+  const [llmApiKey, setLlmApiKey] = useState("");
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: (data: { name: string; description: string; llm_provider: string; llm_model: string; llm_api_base: string | null }) =>
+    mutationFn: (data: { name: string; description: string; llm_provider: string; llm_model: string; llm_api_base: string | null; llm_api_key: string | null }) =>
       api.post<CreateProjectResponse>("/projects", data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -50,6 +51,7 @@ export default function CreateProjectPage() {
       llm_provider: llmProvider,
       llm_model: llmModel,
       llm_api_base: llmApiBase || null,
+      llm_api_key: llmApiKey || null,
     });
   }
 
@@ -124,6 +126,17 @@ export default function CreateProjectPage() {
                     placeholder="http://localhost:11434"
                     value={llmApiBase}
                     onChange={(e) => setLlmApiBase(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="llmApiKey">API key (optional)</Label>
+                  <Input
+                    id="llmApiKey"
+                    type="password"
+                    autoComplete="off"
+                    placeholder="sk-… (leave blank for local/self-hosted)"
+                    value={llmApiKey}
+                    onChange={(e) => setLlmApiKey(e.target.value)}
                   />
                 </div>
               </div>

@@ -47,14 +47,18 @@ def _build_litellm_model(provider: str, model: str) -> str:
     return model
 
 
-def _build_connection_kwargs(provider: str, api_base: str | None) -> dict:
+def _build_connection_kwargs(
+    provider: str, api_base: str | None, api_key: str | None = None
+) -> dict:
     kwargs: dict = {}
     if api_base:
         api_base = api_base.rstrip("/")
         if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):
             api_base = api_base + "/v1"
         kwargs["api_base"] = api_base
-    if provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
+    if api_key:
+        kwargs["api_key"] = api_key
+    elif provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
         kwargs["api_key"] = "no-key-required"
     return kwargs
 
@@ -84,6 +88,7 @@ async def suggest_queries(
     llm_provider: str,
     llm_model: str,
     llm_api_base: str | None = None,
+    llm_api_key: str | None = None,
 ) -> list[dict]:
     """Generate search query suggestions from a natural language event description.
 
@@ -97,7 +102,7 @@ async def suggest_queries(
 Respond with a JSON array only."""
 
     model_str = _build_litellm_model(llm_provider, llm_model)
-    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base)
+    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base, llm_api_key)
 
     try:
         response = await litellm.acompletion(

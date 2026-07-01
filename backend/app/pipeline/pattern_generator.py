@@ -104,6 +104,7 @@ async def generate_search_patterns(
     llm_provider: str,
     llm_model: str,
     llm_api_base: str | None = None,
+    llm_api_key: str | None = None,
 ) -> dict:
     """Generate search patterns using an LLM.
 
@@ -112,7 +113,7 @@ async def generate_search_patterns(
     """
     user_prompt = _build_user_prompt(event_name, description, include_criteria, exclude_criteria)
     model_str = _build_litellm_model(llm_provider, llm_model)
-    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base)
+    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base, llm_api_key)
 
     try:
         response = await litellm.acompletion(

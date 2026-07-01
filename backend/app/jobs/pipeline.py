@@ -170,6 +170,7 @@ async def process_single_patient(
                 proxy.llm_provider = config["llm_provider"]
                 proxy.llm_model = config["llm_model"]
                 proxy.llm_api_base = config.get("llm_api_base")
+                proxy.llm_api_key = config.get("llm_api_key")
 
                 classification = await classify_patient(excerpts, proxy)
 

@@ -72,14 +72,20 @@ def _build_litellm_model(provider: str, model: str) -> str:
     return model
 
 
-def _build_connection_kwargs(provider: str, api_base: str | None) -> dict:
+def _build_connection_kwargs(
+    provider: str, api_base: str | None, api_key: str | None = None
+) -> dict:
     kwargs: dict = {}
     if api_base:
         api_base = api_base.rstrip("/")
         if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):
             api_base = api_base + "/v1"
         kwargs["api_base"] = api_base
-    if provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
+    # Prefer an explicitly configured key (e.g. gated vLLM behind an auth proxy).
+    # Fall back to a placeholder for self-hosted providers that require some value.
+    if api_key:
+        kwargs["api_key"] = api_key
+    elif provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
         kwargs["api_key"] = "no-key-required"
     return kwargs
 
@@ -137,7 +143,11 @@ async def classify_patient(
 
     user_prompt = _build_user_prompt(excerpts, event_config)
     model_str = _build_litellm_model(event_config.llm_provider, event_config.llm_model)
-    conn_kwargs = _build_connection_kwargs(event_config.llm_provider, event_config.llm_api_base)
+    conn_kwargs = _build_connection_kwargs(
+        event_config.llm_provider,
+        event_config.llm_api_base,
+        getattr(event_config, "llm_api_key", None),
+    )
 
     try:
         response = await litellm.acompletion(

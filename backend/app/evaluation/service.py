@@ -612,6 +612,7 @@ async def _execute_sample_llm_impl(
         llm_provider=project.llm_provider,
         llm_model=project.llm_model,
         llm_api_base=project.llm_api_base,
+        llm_api_key=project.llm_api_key,
     )
 
     patients_classified = 0
@@ -1031,6 +1032,7 @@ async def commit_session(
         "llm_provider": project.llm_provider,
         "llm_model": project.llm_model,
         "llm_api_base": project.llm_api_base,
+        "llm_api_key": project.llm_api_key,
         "sample_size": session.sample_size,
         "metrics": session.metrics,
     }
@@ -1075,6 +1077,7 @@ async def _get_or_create_event_config_for_session(
         llm_provider=project.llm_provider or "",
         llm_model=project.llm_model or "",
         llm_api_base=project.llm_api_base,
+        llm_api_key=project.llm_api_key,
         is_committed=True,
     )
     db.add(ec)

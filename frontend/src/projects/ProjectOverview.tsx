@@ -115,6 +115,7 @@ interface ProjectData {
   llm_provider: string | null;
   llm_model: string | null;
   llm_api_base: string | null;
+  llm_api_key_set: boolean;
 }
 
 const PROVIDERS = [
@@ -137,6 +138,8 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [apiBase, setApiBase] = useState("");
+  // Empty string = leave stored key unchanged. Reset after each successful save.
+  const [apiKey, setApiKey] = useState("");
   const [skipAfterEvent, setSkipAfterEvent] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -145,6 +148,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
     setProvider(p.llm_provider || "");
     setModel(p.llm_model || "");
     setApiBase(p.llm_api_base || "");
+    setApiKey("");
     setSkipAfterEvent(!!p.settings?.skip_after_event_date);
     setDirty(false);
   };
@@ -155,13 +159,18 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   }
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      api.put(`/projects/${projectId}`, {
+    mutationFn: () => {
+      const payload: Record<string, unknown> = {
         llm_provider: provider || null,
         llm_model: model || null,
         llm_api_base: apiBase || null,
         settings: { ...project?.settings, skip_after_event_date: skipAfterEvent },
-      }),
+      };
+      // Only send the key when the user typed one, so an untouched field
+      // leaves the stored key intact rather than clearing it.
+      if (apiKey) payload.llm_api_key = apiKey;
+      return api.put(`/projects/${projectId}`, payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
       setDirty(false);
@@ -227,6 +236,17 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                   value={apiBase}
                   onChange={(e) => { setApiBase(e.target.value); setDirty(true); }}
                   placeholder="http://localhost:11434"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">API key (optional)</Label>
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(e) => { setApiKey(e.target.value); setDirty(true); }}
+                  placeholder={project?.llm_api_key_set ? "•••••••• (set)" : "sk-…"}
                   className="h-8 text-sm"
                 />
               </div>

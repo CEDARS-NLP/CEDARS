@@ -92,6 +92,7 @@ async def dispatch_sample_run(
         "llm_provider": ec.llm_provider,
         "llm_model": ec.llm_model,
         "llm_api_base": ec.llm_api_base,
+        "llm_api_key": ec.llm_api_key,
     }
 
     run = PipelineRun(
@@ -167,6 +168,7 @@ async def dispatch_full_run(
         "llm_provider": ec.llm_provider,
         "llm_model": ec.llm_model,
         "llm_api_base": ec.llm_api_base,
+        "llm_api_key": ec.llm_api_key,
         "confidence_threshold": ec.confidence_threshold,
     }
 

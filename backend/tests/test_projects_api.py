@@ -149,6 +149,55 @@ async def test_delete_project_soft_deletes(client):
     assert resp.status_code == 404
 
 
+# --- LLM API key handling ---
+
+
+@pytest.mark.asyncio
+async def test_llm_api_key_stored_but_never_echoed(client):
+    await register_and_login(client, "llmkey@test.com")
+    resp = await client.post("/api/v1/projects", json={
+        "name": "Gated vLLM",
+        "llm_provider": "vllm",
+        "llm_model": "google/gemma-4-31B-it",
+        "llm_api_base": "http://gateway:8000",
+        "llm_api_key": "sk-secret-value",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    # The raw key must never appear in a response, only a boolean flag.
+    assert "llm_api_key" not in data
+    assert data["llm_api_key_set"] is True
+
+    project_id = data["id"]
+    get_resp = await client.get(f"/api/v1/projects/{project_id}")
+    assert "llm_api_key" not in get_resp.json()
+    assert get_resp.json()["llm_api_key_set"] is True
+
+
+@pytest.mark.asyncio
+async def test_llm_api_key_preserved_when_update_omits_it(client):
+    await register_and_login(client, "llmkey-upd@test.com")
+    resp = await client.post("/api/v1/projects", json={
+        "name": "Keep Key",
+        "llm_provider": "vllm",
+        "llm_model": "m",
+        "llm_api_key": "sk-keep-me",
+    })
+    project_id = resp.json()["id"]
+
+    # Update other fields without sending the key.
+    upd = await client.put(f"/api/v1/projects/{project_id}", json={"llm_model": "m2"})
+    assert upd.status_code == 200
+    assert upd.json()["llm_model"] == "m2"
+    # Key is still set.
+    assert upd.json()["llm_api_key_set"] is True
+
+    # Explicitly clearing with empty string removes it.
+    cleared = await client.put(f"/api/v1/projects/{project_id}", json={"llm_api_key": ""})
+    assert cleared.status_code == 200
+    assert cleared.json()["llm_api_key_set"] is False
+
+
 # --- Membership ---
 
 

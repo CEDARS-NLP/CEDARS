@@ -189,6 +189,7 @@ async def suggest_queries_endpoint(
             llm_provider=project.llm_provider,
             llm_model=project.llm_model,
             llm_api_base=project.llm_api_base,
+            llm_api_key=project.llm_api_key,
         )
         return SuggestQueriesResponse(suggestions=suggestions)
     except ValueError as e:

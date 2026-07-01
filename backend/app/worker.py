@@ -154,6 +154,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
         classifier_config.llm_provider = config.get("llm_provider", "")
         classifier_config.llm_model = config.get("llm_model", "")
         classifier_config.llm_api_base = config.get("llm_api_base")
+        classifier_config.llm_api_key = config.get("llm_api_key")
 
         # Process queued patients
         processed = 0

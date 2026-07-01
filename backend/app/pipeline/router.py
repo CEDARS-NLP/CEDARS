@@ -54,6 +54,7 @@ async def create_event_config_endpoint(
         llm_provider=body.llm_provider,
         llm_model=body.llm_model,
         llm_api_base=body.llm_api_base,
+        llm_api_key=body.llm_api_key,
     )
     return ec
 
@@ -159,6 +160,7 @@ async def generate_patterns_endpoint(
             llm_provider=ec.llm_provider,
             llm_model=ec.llm_model,
             llm_api_base=ec.llm_api_base,
+            llm_api_key=ec.llm_api_key,
         )
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))

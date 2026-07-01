@@ -157,3 +157,51 @@ class TestClassifyPatient:
             )
             assert result.label == "positive"
             assert result.confidence == 0.88
+
+
+class TestConnectionKwargs:
+    """Verify how the LLM API key is threaded into LiteLLM connection kwargs."""
+
+    def test_explicit_key_used_for_gated_endpoint(self):
+        from app.pipeline.classifier import _build_connection_kwargs
+
+        kwargs = _build_connection_kwargs(
+            "vllm", "http://gateway:8000", "sk-real-key"
+        )
+        # Real key wins over the self-hosted placeholder.
+        assert kwargs["api_key"] == "sk-real-key"
+        assert kwargs["api_base"] == "http://gateway:8000/v1"
+
+    def test_selfhosted_falls_back_to_placeholder(self):
+        from app.pipeline.classifier import _build_connection_kwargs
+
+        kwargs = _build_connection_kwargs("vllm", "http://localhost:8080", None)
+        assert kwargs["api_key"] == "no-key-required"
+        assert kwargs["api_base"] == "http://localhost:8080/v1"
+
+    def test_hosted_provider_without_key_sends_none(self):
+        from app.pipeline.classifier import _build_connection_kwargs
+
+        # OpenAI/Anthropic read their key from env; we should not inject a placeholder.
+        kwargs = _build_connection_kwargs("openai", None, None)
+        assert "api_key" not in kwargs
+
+    async def test_classify_passes_api_key_to_litellm(self):
+        from app.pipeline.classifier import classify_patient
+
+        cfg = _mock_event_config()
+        cfg.llm_provider = "vllm"
+        cfg.llm_api_base = "http://gateway:8000"
+        cfg.llm_api_key = "sk-real-key"
+
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _mock_response(json.dumps({
+                "event_detected": True, "confidence": 0.9, "reasoning": "ok",
+            }))
+            await classify_patient(
+                excerpts=[{"note_id": "n1", "text": "MI confirmed"}],
+                event_config=cfg,
+            )
+            _, kwargs = mock_llm.call_args
+            assert kwargs["api_key"] == "sk-real-key"
+            assert kwargs["api_base"] == "http://gateway:8000/v1"

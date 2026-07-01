@@ -89,6 +89,7 @@ class EventConfig(SQLModel, table=True):
     llm_provider: str = Field(max_length=50)
     llm_model: str = Field(max_length=200)
     llm_api_base: str | None = Field(default=None, max_length=500)
+    llm_api_key: str | None = Field(default=None, max_length=500)
 
     # Calibration
     confidence_threshold: float | None = Field(default=None)

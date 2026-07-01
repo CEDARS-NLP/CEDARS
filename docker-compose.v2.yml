@@ -48,6 +48,9 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    extra_hosts:
+      # VPN-only LLM hosts, unresolvable from inside the container's DNS.
+      - "ppliapppytorc01:10.254.160.26"
     depends_on:
       db:
         condition: service_healthy
@@ -69,6 +72,8 @@ services:
     command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
     extra_hosts:
       - "plmimskbia4:10.254.130.44"
+      # VPN-only LLM hosts, unresolvable from inside the container's DNS.
+      - "ppliapppytorc01:10.254.160.26"
     depends_on:
       db:
         condition: service_healthy
