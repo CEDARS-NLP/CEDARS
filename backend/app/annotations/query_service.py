@@ -168,31 +168,37 @@ async def get_patient_matched_notes(
     - matched_sentences: list of {text, start, end} from match_positions
     - full note text
     - search_keywords
+
+    SearchMatch rows only exist for the sample/preview phase. Patients processed
+    by the full pipeline have no SearchMatch rows (the full job discards keyword
+    matches after building the annotation), so fall back to reconstructing the
+    payload from the patient's annotations.
     """
-    if not pipeline_run_id:
-        return []
+    session_id = None
+    if pipeline_run_id:
+        # Trace pipeline_run → eval session
+        stmt = (
+            select(PatientResult.session_id)
+            .where(PatientResult.pipeline_run_id == pipeline_run_id)
+            .distinct()
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).first()
+        if row and row[0]:
+            session_id = row[0]
 
-    # Trace pipeline_run → eval session
-    stmt = (
-        select(PatientResult.session_id)
-        .where(PatientResult.pipeline_run_id == pipeline_run_id)
-        .distinct()
-        .limit(1)
-    )
-    row = (await session.execute(stmt)).first()
-    if not row or not row[0]:
-        return []
+    search_matches: list = []
+    if session_id:
+        # Get SearchMatch records for this patient in this session
+        matches_stmt = select(SearchMatch).where(
+            SearchMatch.session_id == session_id,
+            SearchMatch.patient_id == patient_id,
+        )
+        search_matches = list((await session.execute(matches_stmt)).scalars().all())
 
-    session_id = row[0]
-
-    # Get SearchMatch records for this patient in this session
-    matches_stmt = select(SearchMatch).where(
-        SearchMatch.session_id == session_id,
-        SearchMatch.patient_id == patient_id,
-    )
-    search_matches = list((await session.execute(matches_stmt)).scalars().all())
     if not search_matches:
-        return []
+        # Full-pipeline patients have no SearchMatch rows; build from annotations.
+        return await _matched_notes_from_annotations(session, project_id, patient_id)
 
     # Group by note_id
     matches_by_note: dict[str, list] = {}
@@ -244,6 +250,91 @@ async def get_patient_matched_notes(
             "matched_sentences": matched_sentences,
             "match_positions": all_positions,
             "search_keywords": search_keywords,
+        })
+
+    return result
+
+
+async def _matched_notes_from_annotations(
+    session: AsyncSession,
+    project_id: str,
+    patient_id: str,
+) -> list[dict]:
+    """Reconstruct matched-notes for a patient from their annotations.
+
+    Used for full-pipeline patients that have no SearchMatch rows. The full
+    pipeline stores the keyword sentences on the Annotation (``sentence_text``,
+    joined with ``"; "``) and the matched tokens on ``matched_tokens``
+    (comma-separated), so we can rebuild everything the review UI needs.
+    """
+    ann_stmt = (
+        select(Annotation)
+        .where(
+            Annotation.project_id == project_id,
+            Annotation.patient_id == patient_id,
+        )
+        .order_by(Annotation.created_at)
+    )
+    annotations = list((await session.execute(ann_stmt)).scalars().all())
+    if not annotations:
+        return []
+
+    # Group annotations by note.
+    anns_by_note: dict[str, list[Annotation]] = {}
+    for a in annotations:
+        anns_by_note.setdefault(a.note_id, []).append(a)
+
+    note_ids = list(anns_by_note.keys())
+    notes_stmt = (
+        select(Note)
+        .where(Note.id.in_(note_ids))
+        .order_by(Note.note_date)
+    )
+    notes = list((await session.execute(notes_stmt)).scalars().all())
+
+    def _find_positions(text: str, keywords: list[str]) -> list[dict]:
+        """Locate case-insensitive keyword occurrences in the note text."""
+        lowered = text.lower()
+        positions = []
+        for kw in keywords:
+            if not kw:
+                continue
+            start = lowered.find(kw)
+            while start != -1:
+                positions.append({"start": start, "end": start + len(kw)})
+                start = lowered.find(kw, start + 1)
+        return positions
+
+    result = []
+    for note in notes:
+        note_anns = anns_by_note.get(note.id, [])
+
+        # Keywords come from the comma-separated matched_tokens.
+        keywords: list[str] = []
+        for a in note_anns:
+            for tok in (a.matched_tokens or "").split(","):
+                tok = tok.strip()
+                if len(tok) >= 2:
+                    keywords.append(tok.lower())
+        keywords = sorted(set(keywords))
+
+        # Matched sentences come from the "; "-joined sentence_text.
+        matched_sentences: list[str] = []
+        for a in note_anns:
+            for sent in (a.sentence_text or "").split(";"):
+                sent = sent.strip()
+                if sent and sent not in matched_sentences:
+                    matched_sentences.append(sent)
+
+        result.append({
+            "note_id": note.id,
+            "text_id": note.text_id,
+            "text": note.text,
+            "note_date": note.note_date.isoformat() if note.note_date else None,
+            "note_tags": note.metadata_ or {},
+            "matched_sentences": matched_sentences,
+            "match_positions": _find_positions(note.text, keywords),
+            "search_keywords": keywords,
         })
 
     return result
