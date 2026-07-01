@@ -376,7 +376,12 @@ async def get_run_stats(session: AsyncSession, run_id: str) -> dict:
         .group_by(PatientTask.status)
     )
     result = await session.execute(stmt)
-    counts = {status.value: count for status, count in result.all()}
+    # Postgres returns the enum column as a plain str; SQLite (tests) returns the
+    # enum member. Handle both so .value isn't called on a str.
+    counts = {
+        (status.value if hasattr(status, "value") else status): count
+        for status, count in result.all()
+    }
 
     # Eval-session runs use PatientResult instead of PatientTask
     if not counts:
@@ -388,7 +393,10 @@ async def get_run_stats(session: AsyncSession, run_id: str) -> dict:
             .group_by(PatientResult.status)
         )
         result = await session.execute(stmt)
-        counts = {status.value: count for status, count in result.all()}
+        counts = {
+            (status.value if hasattr(status, "value") else status): count
+            for status, count in result.all()
+        }
 
     return {
         "total": sum(counts.values()),
