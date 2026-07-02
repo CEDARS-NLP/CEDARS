@@ -26,6 +26,11 @@ from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
 # SQLite (used in tests) does not support FOR UPDATE.
 _USE_DB_LOCKING = "sqlite" not in settings.database_url
 
+# How many patients to fetch matched notes for per query in the sample LLM run.
+# Bounds both DB round-trips (avoids an N+1 over patients) and peak memory
+# (avoids loading every matched note — potentially millions — at once).
+_LLM_PATIENT_BATCH_SIZE = 100
+
 
 async def _enqueue_eval_pipeline_run(run_id: str) -> None:
     """Enqueue the eval-specific pipeline job (processes PatientResult rows)."""
@@ -619,81 +624,94 @@ async def _execute_sample_llm_impl(
     patients_failed = 0
     total_token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-    for patient_id in matched_patient_ids:
-        notes_stmt = (
+    # Fetch matched notes in batches of patients rather than one query per
+    # patient (avoids an N+1: 1 query per patient) or one giant query for all
+    # (unbounded memory — a session may match millions of notes). Each batch is
+    # a single query grouped in Python, bounding both round-trips and memory.
+    matched_ids_list = list(matched_patient_ids)
+    for batch_start in range(0, len(matched_ids_list), _LLM_PATIENT_BATCH_SIZE):
+        batch_ids = matched_ids_list[batch_start : batch_start + _LLM_PATIENT_BATCH_SIZE]
+
+        batch_notes_stmt = (
             select(Note)
             .where(
-                Note.patient_id == patient_id,
+                Note.patient_id.in_(batch_ids),
                 Note.id.in_(
                     select(SearchMatch.note_id).where(
                         SearchMatch.session_id == session_id,
-                        SearchMatch.patient_id == patient_id,
+                        SearchMatch.patient_id.in_(batch_ids),
                         SearchMatch.is_negated.is_(False),
                     )
                 ),
             )
-            .order_by(Note.note_date)
+            .order_by(Note.patient_id, Note.note_date)
         )
-        notes_result = await db.execute(notes_stmt)
-        notes = notes_result.scalars().all()
+        batch_result = await db.execute(batch_notes_stmt)
+        notes_by_patient: dict[str, list[Note]] = {}
+        for note in batch_result.scalars().all():
+            notes_by_patient.setdefault(note.patient_id, []).append(note)
 
-        excerpts = [
-            {
-                "note_id": note.id,
-                "text": note.text,
-                "note_date": note.note_date.isoformat() if note.note_date else "unknown",
+        for patient_id in batch_ids:
+            # Already ordered by (patient_id, note_date) in the query above.
+            notes = notes_by_patient.get(patient_id, [])
+
+            excerpts = [
+                {
+                    "note_id": note.id,
+                    "text": note.text,
+                    "note_date": note.note_date.isoformat() if note.note_date else "unknown",
+                }
+                for note in notes
+            ]
+
+            try:
+                classification = await classify_patient(excerpts, config)
+                pr = PatientResult(
+                    session_id=session_id,
+                    patient_id=patient_id,
+                    notes_searched=len(notes),
+                    notes_matched=len(notes),
+                    finding_label=classification.label,
+                    finding_reasoning=classification.reasoning,
+                    finding_evidence=classification.evidence,
+                    event_date=classification.event_date,
+                    predicted_score=classification.confidence,
+                    token_usage=classification.token_usage,
+                    status=PatientResultStatus.COMPLETED,
+                    completed_at=datetime.now(UTC),
+                )
+                db.add(pr)
+                patients_classified += 1
+
+                if classification.token_usage:
+                    for key in total_token_usage:
+                        total_token_usage[key] += classification.token_usage.get(key, 0)
+
+            except Exception as exc:
+                logger.warning("LLM classification failed for patient %s: %s", patient_id, exc)
+                pr = PatientResult(
+                    session_id=session_id,
+                    patient_id=patient_id,
+                    notes_searched=len(notes),
+                    notes_matched=len(notes),
+                    status=PatientResultStatus.FAILED,
+                    error_message=str(exc),
+                    completed_at=datetime.now(UTC),
+                )
+                db.add(pr)
+                patients_failed += 1
+
+            # Update progress in session metrics
+            session.metrics = {
+                **(session.metrics or {}),
+                "llm_status": "running",
+                "llm_total": len(matched_patient_ids),
+                "llm_completed": patients_classified,
+                "llm_failed": patients_failed,
             }
-            for note in notes
-        ]
-
-        try:
-            classification = await classify_patient(excerpts, config)
-            pr = PatientResult(
-                session_id=session_id,
-                patient_id=patient_id,
-                notes_searched=len(notes),
-                notes_matched=len(notes),
-                finding_label=classification.label,
-                finding_reasoning=classification.reasoning,
-                finding_evidence=classification.evidence,
-                event_date=classification.event_date,
-                predicted_score=classification.confidence,
-                token_usage=classification.token_usage,
-                status=PatientResultStatus.COMPLETED,
-                completed_at=datetime.now(UTC),
-            )
-            db.add(pr)
-            patients_classified += 1
-
-            if classification.token_usage:
-                for key in total_token_usage:
-                    total_token_usage[key] += classification.token_usage.get(key, 0)
-
-        except Exception as exc:
-            logger.warning("LLM classification failed for patient %s: %s", patient_id, exc)
-            pr = PatientResult(
-                session_id=session_id,
-                patient_id=patient_id,
-                notes_searched=len(notes),
-                notes_matched=len(notes),
-                status=PatientResultStatus.FAILED,
-                error_message=str(exc),
-                completed_at=datetime.now(UTC),
-            )
-            db.add(pr)
-            patients_failed += 1
-
-        # Update progress in session metrics
-        session.metrics = {
-            **(session.metrics or {}),
-            "llm_status": "running",
-            "llm_total": len(matched_patient_ids),
-            "llm_completed": patients_classified,
-            "llm_failed": patients_failed,
-        }
-        db.add(session)
-        await db.commit()
-        await db.refresh(session)
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
 
     # Create NO_MATCH results for unmatched sample patients
     unmatched_ids = sample_patient_ids - matched_patient_ids
