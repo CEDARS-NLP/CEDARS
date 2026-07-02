@@ -1,9 +1,6 @@
 """Tests for pipeline eval calibration metrics."""
 
-from datetime import UTC, datetime
 
-import pytest
-from httpx import AsyncClient
 
 from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_and_login
 from tests.test_pipeline_orchestration import _seed_patients
@@ -17,7 +14,7 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
 
     await register_and_login(client)
     pid = await create_project(client)
-    patient_ids = await _seed_patients(app, pid, count=4)
+    await _seed_patients(app, pid, count=4)
     eid_resp = await client.post(
         f"/api/v1/projects/{pid}/pipeline/events", json=EVENT_CONFIG_BODY,
     )
@@ -52,16 +49,27 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
             (0, 0.2, "negative", "rejected"),    # TN (reviewer agrees negative)
         ]
 
+        from app.connectors.models import Note
+
         for i, task in enumerate(tasks[:4]):
             task.status = PatientTaskStatus.COMPLETED
             session.add(task)
+
+            # Use a real note for this patient — Postgres enforces the
+            # annotations.note_id FK (SQLite did not). sentence_id is a nullable
+            # FK, so leave it None rather than a fake id.
+            note = (
+                await session.execute(
+                    select(Note).where(Note.patient_id == task.patient_id).limit(1)
+                )
+            ).scalars().first()
 
             pred_label, score, _, review_status = predictions[i]
             ann = Annotation(
                 project_id=pid,
                 patient_id=task.patient_id,
-                note_id="fake-note",
-                sentence_id=f"fake-sent-{i}",
+                note_id=note.id,
+                sentence_id=None,
                 sentence_text="test",
                 predicted_score=score,
                 predicted_label=pred_label,

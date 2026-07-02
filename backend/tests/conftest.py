@@ -164,6 +164,30 @@ def client_factory(app):
     return _make_client
 
 
+async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
+    """Insert a User and Project (+ membership) with the given IDs.
+
+    Model-level unit tests historically used bare placeholder IDs like "proj-1";
+    Postgres enforces the FKs those rows depend on (SQLite did not), so tests
+    must seed real parent rows first. Returns (project_id, user_id).
+    """
+    from app.common.database import get_session
+    from app.projects.models import ProjectRole
+
+    async for session in app.dependency_overrides[get_session]():
+        session.add(
+            User(id=user_id, email=f"{user_id}@test.com", name="Test", password_hash="x")
+        )
+        session.add(Project(id=project_id, name="Test Project", owner_id=user_id))
+        await session.flush()
+        session.add(
+            ProjectMember(project_id=project_id, user_id=user_id, role=ProjectRole.ADMIN)
+        )
+        await session.commit()
+        break
+    return project_id, user_id
+
+
 @pytest.fixture
 async def auth_client(app):
     """Client pre-authenticated with a test user via cookies."""

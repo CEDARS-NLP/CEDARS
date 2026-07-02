@@ -1,6 +1,7 @@
 """Tests for pipeline data models."""
 import pytest
-from sqlmodel import select
+
+from tests.conftest import seed_project_and_user
 
 
 async def _get_session(app):
@@ -17,6 +18,7 @@ async def _get_session(app):
 class TestEventConfigModel:
     async def test_create_event_config(self, app):
         from app.pipeline.models import EventConfig
+        await seed_project_and_user(app)
         async for session in _get_session(app):
             config = EventConfig(
                 project_id="proj-1",
@@ -43,6 +45,7 @@ class TestEventConfigModel:
 class TestPipelineRunModel:
     async def test_create_pipeline_run(self, app):
         from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
+        await seed_project_and_user(app)
         async for session in _get_session(app):
             ec = EventConfig(
                 project_id="proj-1", name="MI", description="MI",
@@ -68,6 +71,7 @@ class TestPipelineRunModel:
 
     async def test_pipeline_run_snapshot_version(self, app):
         from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
+        await seed_project_and_user(app)
         async for session in _get_session(app):
             ec = EventConfig(
                 project_id="proj-1", name="MI", description="MI",
@@ -93,9 +97,13 @@ class TestPipelineRunModel:
 class TestPatientTaskModel:
     async def test_create_patient_task(self, app):
         from app.pipeline.models import (
-            EventConfig, PipelineRun, PipelineRunStatus,
-            PatientTask, PatientTaskStatus,
+            EventConfig,
+            PatientTask,
+            PatientTaskStatus,
+            PipelineRun,
+            PipelineRunStatus,
         )
+        await seed_project_and_user(app)
         async for session in _get_session(app):
             ec = EventConfig(
                 project_id="proj-1", name="MI", description="MI",
@@ -129,9 +137,13 @@ class TestPatientTaskModel:
     async def test_valid_state_transitions(self, app):
         """PatientTask should allow valid state transitions."""
         from app.pipeline.models import (
-            EventConfig, PipelineRun, PipelineRunStatus,
-            PatientTask, PatientTaskStatus,
+            EventConfig,
+            PatientTask,
+            PatientTaskStatus,
+            PipelineRun,
+            PipelineRunStatus,
         )
+        await seed_project_and_user(app)
         async for session in _get_session(app):
             ec = EventConfig(
                 project_id="proj-1", name="MI", description="MI",
