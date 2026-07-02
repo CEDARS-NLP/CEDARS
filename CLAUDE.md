@@ -100,6 +100,7 @@ docker compose --profile cpu up --build          # Without local MongoDB
 - Environment: `.env` file (see `.env.sample`)
 - Flask configs: `cedars/config.py` (Base, Local, Test, Dev, Prod classes)
 - Key env vars: `DB_HOST`, `DB_NAME`, `REDIS_URL`, `PINES_API_URL`, `MINIO_*`
+- AWS profiles: `cedars-dev` (development), `cedars-prod` (production)
 
 ## Testing
 

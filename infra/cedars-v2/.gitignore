@@ -1,0 +1,16 @@
+# Terraform state (contains secrets in plaintext — TFC holds the real state)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Provider cache / lock working dir
+.terraform/
+.terraform.lock.hcl
+
+# Local variable values (may contain secrets); commit terraform.tfvars.example instead
+terraform.tfvars
+*.auto.tfvars
+
+# Plan output
+*.tfplan
+crash.log

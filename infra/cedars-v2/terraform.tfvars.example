@@ -1,0 +1,38 @@
+# Copy to terraform.tfvars and fill in the values that have no safe default.
+# Verified account/network defaults are already set in variables.tf.
+
+environment = "dev"
+
+# ---- TLS ----
+# Spike (default): HTTP on port 80, no domain or cert needed. Reach the app via
+# the ALB's AWS-generated DNS name (see `terraform output alb_dns_name`).
+enable_https = false
+
+# Production: flip to true and provide a cert + hostname.
+# enable_https        = true
+# alb_certificate_arn = "arn:aws:acm:us-east-1:180294205688:certificate/REPLACE_ME"
+# app_hostname        = "cedars.REPLACE.internal"
+# route53_zone_id     = "REPLACE_ME"   # optional: create the DNS record
+
+# ---- IAM ----
+# Execution role: mskEngineerUser CAN self-create it (userServiceRole- prefix +
+# automation boundary). Keep the default:
+create_execution_role = true
+
+# Task role (Bedrock): mskEngineerUser CANNOT create it — the automation
+# boundary caps out bedrock:InvokeModel. Have an IAM admin pre-create it
+# (see README "IAM roles handoff") and paste the ARN:
+create_task_role = false
+task_role_arn    = "arn:aws:iam::180294205688:role/bedrockServiceAccess-cedars-v2-dev-task"
+
+# In an account where you hold full IAM rights, instead set both create_*=true.
+
+# ---- Image tags (set to the git SHA you pushed to ECR) ----
+backend_image_tag  = "latest"
+frontend_image_tag = "latest"
+
+# ---- Optional overrides ----
+# redis_ha_enabled       = true    # remove queue SPOF for production
+# db_reader_enabled      = true
+# worker_desired_count   = 2
+# worker_memory          = 8192    # bump after load-testing NLP/spaCy
