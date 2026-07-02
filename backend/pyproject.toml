@@ -44,6 +44,7 @@ dev = [
     "httpx>=0.28",
     "ruff>=0.9",
     "aiosqlite>=0.21",
+    "testcontainers[postgres]>=4.0",
 ]
 
 [tool.ruff]

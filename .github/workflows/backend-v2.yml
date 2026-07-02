@@ -1,0 +1,75 @@
+name: Backend v2 CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-v2.yml"
+  push:
+    branches:
+      - "main"
+      - "feature/v2-platform"
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-v2.yml"
+
+jobs:
+  # Fast feedback: full suite on in-memory SQLite.
+  test-sqlite:
+    name: Tests (SQLite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Lint
+        run: uv run ruff check app
+      - name: Run tests
+        run: uv run pytest tests/ --cov=app --cov-report=term-missing
+
+  # Catches Postgres-only bugs SQLite hides: enum name-vs-value casing,
+  # int/str comparisons, strict FK enforcement, and create_all-vs-migration
+  # drift (the suite builds the schema from Alembic migrations, not create_all).
+  test-postgres:
+    name: Tests (Postgres, migrations)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cedars
+          POSTGRES_PASSWORD: cedars
+          POSTGRES_DB: cedars
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # The conftest Postgres path: when set, tests run migrations against this DB.
+      CEDARS_TEST_POSTGRES: "1"
+      # In CI the postgres service is reachable directly (no testcontainers/Docker
+      # socket needed); point the fixture at it.
+      CEDARS_TEST_POSTGRES_URL: "postgresql+asyncpg://cedars:cedars@localhost:5432/cedars"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run tests against Postgres
+        run: uv run pytest tests/ -q

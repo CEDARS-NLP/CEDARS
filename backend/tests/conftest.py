@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch
 
 import pytest
@@ -6,21 +7,77 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
-from app.projects.models import Project, ProjectMember  # noqa: F401
-from app.connectors.models import DataSource, Patient, Note  # noqa: F401
-from app.predictors.models import PredictorConfig  # noqa: F401
-from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: F401
 from app.annotations.models import Annotation  # noqa: F401
-from app.evaluation.models import EvaluationSession, SearchMatch, PatientResult  # noqa: F401  # Phase 1: new models
-# from app.evaluation.models import OldEvaluationSession, EvaluationJudgment, ValidatedPredictor  # noqa: F401  # Phase 1: old models removed
-from app.jobs.models import BackgroundJob  # noqa: F401
-from app.pipeline.models import EventConfig as _EC, PipelineRun as _PR, PatientTask as _PT, Evidence as _Ev  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
+from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
 from app.common.database import get_session
+from app.connectors.models import DataSource, Note, Patient  # noqa: F401
+from app.evaluation.models import (  # noqa: F401
+    EvaluationSession,
+    PatientResult,
+    SearchMatch,
+)
+from app.jobs.models import BackgroundJob  # noqa: F401
 from app.main import create_app
+from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
+from app.pipeline.models import (  # noqa: F401 — register pipeline tables in metadata
+    EventConfig,
+    Evidence,
+    PatientTask,
+    PipelineRun,
+)
+from app.predictors.models import PredictorConfig  # noqa: F401
+from app.projects.models import Project, ProjectMember  # noqa: F401
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
+
+# When CEDARS_TEST_POSTGRES=1, the whole suite runs against a throwaway Postgres
+# container built from Alembic migrations (not create_all). This catches the
+# class of bugs SQLite hides: enum name-vs-value casing, int/str comparisons,
+# strict FK enforcement, and create_all-vs-migration drift.
+_USE_POSTGRES = os.getenv("CEDARS_TEST_POSTGRES") == "1"
+
+
+@pytest.fixture(scope="session")
+def _postgres_url():
+    """Session-scoped Postgres URL; yields an asyncpg URL. Skips if disabled.
+
+    Two sources:
+      - CEDARS_TEST_POSTGRES_URL set (CI with a Postgres service container) → use it.
+      - otherwise spin up a throwaway container via testcontainers (local dev;
+        needs Docker — on macOS set DOCKER_HOST to your Docker Desktop socket).
+    """
+    if not _USE_POSTGRES:
+        yield None
+        return
+
+    explicit = os.getenv("CEDARS_TEST_POSTGRES_URL")
+    if explicit:
+        yield explicit
+        return
+
+    from testcontainers.postgres import PostgresContainer
+
+    with PostgresContainer("postgres:16-alpine") as pg:
+        # testcontainers returns a psycopg2 URL; normalize to asyncpg for the app.
+        sync_url = pg.get_connection_url()  # postgresql+psycopg2://...
+        async_url = sync_url.replace("+psycopg2", "+asyncpg")
+        yield async_url
+
+
+def _run_migrations(async_url: str) -> None:
+    """Run Alembic migrations against the target DB (sync engine under the hood)."""
+    from alembic import command
+    from alembic.config import Config
+
+    # Alembic env reads settings.database_url; point it at the test DB.
+    os.environ["CEDARS_DATABASE_URL"] = async_url
+    from app.config import settings
+
+    settings.database_url = async_url  # in case settings was already instantiated
+
+    cfg = Config(str(__import__("pathlib").Path(__file__).parent.parent / "alembic.ini"))
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture(autouse=True)
@@ -36,17 +93,23 @@ def _force_sync_nlp_dispatch():
 
 
 @pytest.fixture
-async def app():
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def app(_postgres_url):
+    if _USE_POSTGRES:
+        # Build schema from Alembic migrations (matches production), then create
+        # a per-test schema by truncating between tests via drop/create all.
+        _run_migrations(_postgres_url)
+        engine = create_async_engine(_postgres_url, echo=False)
+    else:
+        engine = create_async_engine(
+            TEST_DATABASE_URL,
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     application = create_app()
 
@@ -57,8 +120,16 @@ async def app():
     application.dependency_overrides[get_session] = override_get_session
     yield application
 
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+    if _USE_POSTGRES:
+        # Nuke and recreate the public schema — drops all tables, enum types, and
+        # the alembic_version marker in one shot, avoiding FK-dependency ordering
+        # issues. Next test's migration run starts from a clean schema.
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql("DROP SCHEMA public CASCADE")
+            await conn.exec_driver_sql("CREATE SCHEMA public")
+    else:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.drop_all)
     await engine.dispose()
 
 
