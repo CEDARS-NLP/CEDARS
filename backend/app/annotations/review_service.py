@@ -205,7 +205,7 @@ async def get_next_patient_for_review(
         .where(
             Annotation.project_id == project_id,
             Annotation.review_status == ReviewStatus.UNREVIEWED,
-            Annotation.predicted_label == "1",
+            Annotation.predicted_label == 1,
         )
         .distinct()
         .scalar_subquery()
@@ -231,7 +231,7 @@ async def get_next_patient_for_review(
                 .where(
                     Annotation.project_id == project_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
-                    Annotation.predicted_label == "1",
+                    Annotation.predicted_label == 1,
                 )
             )
         ).scalar() or 0
@@ -305,7 +305,7 @@ async def get_patient_annotations(
         .where(
             Annotation.project_id == project_id,
             Annotation.patient_id == patient_id,
-            Annotation.predicted_label == "1",
+            Annotation.predicted_label == 1,
         )
         .order_by(
             Note.note_date.asc().nullslast(),

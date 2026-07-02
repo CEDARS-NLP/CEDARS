@@ -76,7 +76,7 @@ async def get_annotation_stats(
     """
     base = select(func.count()).select_from(Annotation).where(
         Annotation.project_id == project_id,
-        Annotation.predicted_label == "1",
+        Annotation.predicted_label == 1,
     )
 
     total = (await session.execute(base)).scalar() or 0
