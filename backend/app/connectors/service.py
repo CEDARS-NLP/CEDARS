@@ -209,7 +209,7 @@ async def _run_ingestion_pipeline(
     if ds.status == IngestionStatus.COMPLETED:
         await log_action(
             session, project_id, audit_action,
-            detail={"data_source_id": data_source_id, "row_count": total_rows},
+            detail={"data_source_id": data_source_id, "row_count": inserted_rows},
         )
 
     return ds

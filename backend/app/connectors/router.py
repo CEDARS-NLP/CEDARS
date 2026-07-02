@@ -1,6 +1,6 @@
 """API routes for data sources, ingestion, patients, and notes."""
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -293,8 +293,8 @@ async def purge_data_source_endpoint(
 @router.get("/patients", response_model=PatientListResponse)
 async def list_patients_endpoint(
     project_id: str,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     search: str | None = None,
     status: str | None = None,
     session: AsyncSession = Depends(get_session),

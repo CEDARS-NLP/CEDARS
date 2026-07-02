@@ -515,7 +515,9 @@ async def get_queue_overview(session: AsyncSession, project_id: str) -> dict:
         arq_queued = await redis.zcard(redis.default_queue_name)
         await redis.aclose()
     except Exception:
-        pass
+        # Redis/ARQ health probe failed — surface it rather than silently
+        # reporting worker_active=False (which hides infra outages from ops).
+        logger.warning("ARQ/Redis health probe failed", exc_info=True)
 
     return {
         "pipeline_runs": {

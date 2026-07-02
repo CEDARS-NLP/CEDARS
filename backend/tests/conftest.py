@@ -124,7 +124,13 @@ async def app(_postgres_url):
         # Nuke and recreate the public schema — drops all tables, enum types, and
         # the alembic_version marker in one shot, avoiding FK-dependency ordering
         # issues. Next test's migration run starts from a clean schema.
+        # First terminate any lingering backends (e.g. an ARQ-dispatch path that
+        # left a connection open) so DROP SCHEMA can't deadlock against them.
         async with engine.begin() as conn:
+            await conn.exec_driver_sql(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
             await conn.exec_driver_sql("DROP SCHEMA public CASCADE")
             await conn.exec_driver_sql("CREATE SCHEMA public")
     else:
