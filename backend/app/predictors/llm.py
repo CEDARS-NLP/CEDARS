@@ -170,8 +170,15 @@ class LLMPredictor(BasePredictor):
         LiteLLM appends /chat/completions to it.
         """
         kwargs: dict = {}
-        if self.api_base:
-            api_base = self.api_base.rstrip("/")
+        # Bedrock authenticates via AWS SigV4 (env/role creds) and takes no HTTP
+        # api_base or api_key — passing either yields an invalid URL. Ignore both.
+        if self.provider == "bedrock":
+            return kwargs
+        # Treat whitespace/quote-only api_base as unset (guards against a stray
+        # stored value like a literal "" becoming a bogus endpoint URL).
+        api_base = (self.api_base or "").strip().strip('"').strip("'").strip()
+        if api_base:
+            api_base = api_base.rstrip("/")
             # For OpenAI-compatible providers, ensure /v1 suffix so LiteLLM
             # builds the correct URL: {api_base}/chat/completions
             if self.provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):

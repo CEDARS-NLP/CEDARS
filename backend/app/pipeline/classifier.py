@@ -76,6 +76,13 @@ def _build_connection_kwargs(
     provider: str, api_base: str | None, api_key: str | None = None
 ) -> dict:
     kwargs: dict = {}
+    # Bedrock uses AWS SigV4 creds, not an HTTP endpoint/key — passing either
+    # produces an invalid URL. Ignore both regardless of stored config.
+    if provider == "bedrock":
+        return kwargs
+    # Treat whitespace/quote-only api_base as unset (guards against a stray
+    # stored value like a literal "" becoming a bogus endpoint URL).
+    api_base = (api_base or "").strip().strip('"').strip("'").strip()
     if api_base:
         api_base = api_base.rstrip("/")
         if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):

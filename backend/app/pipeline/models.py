@@ -17,9 +17,24 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
+
+
+def _enum_column(enum_cls, **kwargs):
+    """Enum column that persists the member VALUE (lowercase), not the NAME.
+
+    SQLAlchemy's default binds the enum member name (e.g. "RUNNING"), but the
+    Postgres enum types were created with the lowercase values ("running").
+    values_callable forces the correct binding so Postgres accepts it. SQLite
+    (tests) is lax about this, which is why the mismatch only surfaced on PG.
+    """
+    return Column(
+        SAEnum(enum_cls, values_callable=lambda e: [m.value for m in e]),
+        **kwargs,
+    )
 
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -120,7 +135,10 @@ class PipelineRun(SQLModel, table=True):
     event_config_id: str = Field(foreign_key="event_configs.id", index=True)
 
     run_type: str = Field(max_length=20)  # "sample" or "full"
-    status: PipelineRunStatus = Field(default=PipelineRunStatus.QUEUED)
+    status: PipelineRunStatus = Field(
+        default=PipelineRunStatus.QUEUED,
+        sa_column=_enum_column(PipelineRunStatus, nullable=False),
+    )
 
     # Frozen config at execution time
     config_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default="{}"))
@@ -172,7 +190,10 @@ class PatientTask(SQLModel, table=True):
     pipeline_run_id: str = Field(foreign_key="pipeline_runs.id", index=True)
     patient_id: str = Field(index=True)
 
-    status: PatientTaskStatus = Field(default=PatientTaskStatus.QUEUED)
+    status: PatientTaskStatus = Field(
+        default=PatientTaskStatus.QUEUED,
+        sa_column=_enum_column(PatientTaskStatus, nullable=False),
+    )
 
     # Search results
     notes_searched: int = Field(default=0)

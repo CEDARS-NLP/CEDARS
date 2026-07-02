@@ -140,8 +140,16 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   const [apiBase, setApiBase] = useState("");
   // Empty string = leave stored key unchanged. Reset after each successful save.
   const [apiKey, setApiKey] = useState("");
+  // Explicit "remove the stored key" toggle — the only way to clear a key that
+  // is already set (typing nothing leaves it unchanged).
+  const [clearApiKey, setClearApiKey] = useState(false);
   const [skipAfterEvent, setSkipAfterEvent] = useState(false);
   const [dirty, setDirty] = useState(false);
+
+  // Bedrock authenticates via the deploy's AWS credentials (task role), so it
+  // uses no api_base and no api_key. Track which fields the provider needs.
+  const providerUsesEndpoint = provider !== "bedrock" && provider !== "";
+  const providerUsesKey = provider !== "bedrock" && provider !== "ollama" && provider !== "";
 
   // Sync local state when project loads
   const syncFromProject = (p: ProjectData) => {
@@ -149,8 +157,24 @@ function ProjectSettings({ projectId }: { projectId: string }) {
     setModel(p.llm_model || "");
     setApiBase(p.llm_api_base || "");
     setApiKey("");
+    setClearApiKey(false);
     setSkipAfterEvent(!!p.settings?.skip_after_event_date);
     setDirty(false);
+  };
+
+  // When the provider changes, drop connection fields that don't apply to the
+  // new provider (prevents a stale Ollama api_base leaking into a Bedrock call).
+  const onProviderChange = (next: string) => {
+    setProvider(next);
+    if (next === "bedrock") {
+      setApiBase("");
+      setClearApiKey(true); // remove any stored key on save
+      setApiKey("");
+    } else if (next === "ollama") {
+      setClearApiKey(true);
+      setApiKey("");
+    }
+    setDirty(true);
   };
 
   // Initialize on first load
@@ -163,12 +187,19 @@ function ProjectSettings({ projectId }: { projectId: string }) {
       const payload: Record<string, unknown> = {
         llm_provider: provider || null,
         llm_model: model || null,
-        llm_api_base: apiBase || null,
+        // Send "" (not null) to explicitly clear the stored api_base — the
+        // backend treats "" as "unset" and drops null. Providers that don't use
+        // an endpoint (e.g. Bedrock) always clear it.
+        llm_api_base: providerUsesEndpoint ? apiBase : "",
         settings: { ...project?.settings, skip_after_event_date: skipAfterEvent },
       };
-      // Only send the key when the user typed one, so an untouched field
-      // leaves the stored key intact rather than clearing it.
-      if (apiKey) payload.llm_api_key = apiKey;
+      // Key handling: a typed value sets it; clearApiKey sends "" to remove the
+      // stored key; otherwise omit so an untouched field stays unchanged.
+      if (apiKey) {
+        payload.llm_api_key = apiKey;
+      } else if (clearApiKey) {
+        payload.llm_api_key = "";
+      }
       return api.put(`/projects/${projectId}`, payload);
     },
     onSuccess: () => {
@@ -212,7 +243,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                 <Label className="text-xs">Provider</Label>
                 <select
                   value={provider}
-                  onChange={(e) => { setProvider(e.target.value); setDirty(true); }}
+                  onChange={(e) => onProviderChange(e.target.value)}
                   className="flex w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                 >
                   <option value="">— Select —</option>
@@ -226,7 +257,11 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                 <Input
                   value={model}
                   onChange={(e) => { setModel(e.target.value); setDirty(true); }}
-                  placeholder="gpt-4o-mini"
+                  placeholder={
+                    provider === "bedrock"
+                      ? "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                      : "gpt-4o-mini"
+                  }
                   className="h-8 text-sm"
                 />
               </div>
@@ -236,8 +271,14 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                   value={apiBase}
                   onChange={(e) => { setApiBase(e.target.value); setDirty(true); }}
                   placeholder="http://localhost:11434"
+                  disabled={!providerUsesEndpoint}
                   className="h-8 text-sm"
                 />
+                {provider === "bedrock" && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Not used for Bedrock — calls use the deployment's AWS credentials.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">API key (optional)</Label>
@@ -245,10 +286,32 @@ function ProjectSettings({ projectId }: { projectId: string }) {
                   type="password"
                   autoComplete="off"
                   value={apiKey}
-                  onChange={(e) => { setApiKey(e.target.value); setDirty(true); }}
-                  placeholder={project?.llm_api_key_set ? "•••••••• (set)" : "sk-…"}
+                  onChange={(e) => { setApiKey(e.target.value); setClearApiKey(false); setDirty(true); }}
+                  placeholder={
+                    clearApiKey
+                      ? "will be cleared on save"
+                      : project?.llm_api_key_set
+                      ? "•••••••• (set)"
+                      : "sk-…"
+                  }
+                  disabled={!providerUsesKey || clearApiKey}
                   className="h-8 text-sm"
                 />
+                {provider === "bedrock" ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    Not used for Bedrock — authenticates via the AWS task role.
+                  </p>
+                ) : project?.llm_api_key_set && !apiKey ? (
+                  <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={clearApiKey}
+                      onChange={(e) => { setClearApiKey(e.target.checked); setDirty(true); }}
+                      className="h-3 w-3 rounded border-border"
+                    />
+                    Clear the stored key
+                  </label>
+                ) : null}
               </div>
             </div>
           </div>

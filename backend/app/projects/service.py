@@ -76,6 +76,11 @@ async def get_project(
 
 _PROJECT_UPDATE_FIELDS = {"name", "description", "settings", "llm_provider", "llm_model", "llm_api_base", "llm_api_key"}
 
+# LLM connection fields that may be explicitly cleared by sending "" (empty
+# string). The router drops None (exclude_none), so "" is the "unset it" signal,
+# distinct from an absent field which means "leave unchanged".
+_CLEARABLE_FIELDS = {"llm_api_base", "llm_api_key"}
+
 
 async def update_project(
     session: AsyncSession,
@@ -88,7 +93,13 @@ async def update_project(
         return None
 
     for key, value in updates.items():
-        if key in _PROJECT_UPDATE_FIELDS and value is not None:
+        if key not in _PROJECT_UPDATE_FIELDS or value is None:
+            continue
+        # Empty string on a clearable connection field means "unset it" (store
+        # NULL) rather than persisting a literal "".
+        if value == "" and key in _CLEARABLE_FIELDS:
+            setattr(project, key, None)
+        else:
             setattr(project, key, value)
 
     session.add(project)
