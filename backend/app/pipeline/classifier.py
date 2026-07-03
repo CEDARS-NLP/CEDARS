@@ -4,14 +4,15 @@ Instead of one LLM call per note, sends all matched excerpts for a patient
 in a single call and gets a unified classification decision.
 """
 
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 
-import litellm
+from app.llm import complete_json
+from app.llm.client import build_connection_kwargs as _build_connection_kwargs
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["ClassificationResult", "classify_patient", "_build_connection_kwargs"]
 
 SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a patient's clinical notes contain evidence of a specific medical event. You will receive relevant excerpts from the patient's notes sorted chronologically. Respond ONLY with a JSON object.
 
@@ -62,72 +63,6 @@ Patient excerpts ({len(excerpts)} matched notes, chronological order):
 Based on ALL excerpts above, classify whether this patient has evidence of the event. Identify the EARLIEST confirmed occurrence date if positive. Respond with JSON only."""
 
 
-def _build_litellm_model(provider: str, model: str) -> str:
-    if provider == "ollama":
-        return f"ollama/{model}"
-    if provider == "bedrock":
-        return f"bedrock/{model}"
-    if provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):
-        return f"openai/{model}"
-    return model
-
-
-def _build_connection_kwargs(
-    provider: str, api_base: str | None, api_key: str | None = None
-) -> dict:
-    kwargs: dict = {}
-    # Bedrock uses AWS SigV4 creds, not an HTTP endpoint/key — passing either
-    # produces an invalid URL. Ignore both regardless of stored config.
-    if provider == "bedrock":
-        return kwargs
-    # Treat whitespace/quote-only api_base as unset (guards against a stray
-    # stored value like a literal "" becoming a bogus endpoint URL).
-    api_base = (api_base or "").strip().strip('"').strip("'").strip()
-    if api_base:
-        api_base = api_base.rstrip("/")
-        if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):
-            api_base = api_base + "/v1"
-        kwargs["api_base"] = api_base
-    # Prefer an explicitly configured key (e.g. gated vLLM behind an auth proxy).
-    # Fall back to a placeholder for self-hosted providers that require some value.
-    if api_key:
-        kwargs["api_key"] = api_key
-    elif provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
-        kwargs["api_key"] = "no-key-required"
-    return kwargs
-
-
-def _parse_json_response(content: str) -> dict:
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"```(?:json)?\s*", "", content)
-        content = content.rstrip("`").strip()
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        pass
-
-    # Try to extract the outermost JSON object (handles nested braces)
-    start = content.find("{")
-    if start != -1:
-        depth = 0
-        for i in range(start, len(content)):
-            if content[i] == "{":
-                depth += 1
-            elif content[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = content[start : i + 1]
-                    # Fix common LLM issues: trailing commas before } or ]
-                    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
-                    try:
-                        return json.loads(candidate)
-                    except json.JSONDecodeError:
-                        break
-
-    raise ValueError(f"Could not parse LLM classification response: {content[:300]}")
-
-
 async def classify_patient(
     excerpts: list[dict],
     event_config,
@@ -149,39 +84,27 @@ async def classify_patient(
         return ClassificationResult(label="negative", confidence=0.0, reasoning="No matched excerpts")
 
     user_prompt = _build_user_prompt(excerpts, event_config)
-    model_str = _build_litellm_model(event_config.llm_provider, event_config.llm_model)
-    conn_kwargs = _build_connection_kwargs(
-        event_config.llm_provider,
-        event_config.llm_api_base,
-        getattr(event_config, "llm_api_key", None),
-    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
     try:
-        response = await litellm.acompletion(
-            model=model_str,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
+        data, token_usage = await complete_json(
+            provider=event_config.llm_provider,
+            model=event_config.llm_model,
+            messages=messages,
+            api_base=event_config.llm_api_base,
+            api_key=getattr(event_config, "llm_api_key", None),
             timeout=120,
             num_retries=3,  # litellm retries transient errors (429, 503, timeout)
             response_format={"type": "json_object"},
-            **conn_kwargs,
         )
+    except ValueError:
+        # Parse failures already carry a "parse" message; surface as-is.
+        raise
     except Exception as e:
         raise ValueError(f"Classification failed: {e}") from e
-
-    content = response.choices[0].message.content or ""
-    data = _parse_json_response(content)
-
-    token_usage = None
-    if hasattr(response, "usage") and response.usage:
-        token_usage = {
-            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
-            "completion_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(response.usage, "total_tokens", 0) or 0,
-        }
 
     detected = data.get("event_detected", False)
     confidence = float(data.get("confidence", 0.5))

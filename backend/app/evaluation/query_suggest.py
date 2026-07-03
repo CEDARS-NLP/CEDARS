@@ -4,11 +4,9 @@ Generates clinician-friendly search queries (spaCy Matcher syntax)
 from a natural language event description.
 """
 
-import json
 import logging
-import re
 
-import litellm
+from app.llm import complete_json
 
 logger = logging.getLogger(__name__)
 
@@ -37,60 +35,6 @@ Respond ONLY with a JSON array:
 ]"""
 
 
-def _build_litellm_model(provider: str, model: str) -> str:
-    if provider == "ollama":
-        return f"ollama/{model}"
-    if provider == "bedrock":
-        return f"bedrock/{model}"
-    if provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):
-        return f"openai/{model}"
-    return model
-
-
-def _build_connection_kwargs(
-    provider: str, api_base: str | None, api_key: str | None = None
-) -> dict:
-    kwargs: dict = {}
-    # Bedrock authenticates via AWS SigV4 (env/role creds) and takes no HTTP
-    # api_base or api_key — passing either produces an invalid URL. Ignore both
-    # regardless of what is stored on the project.
-    if provider == "bedrock":
-        return kwargs
-    # Normalize: treat whitespace/quote-only values as unset so a stray stored
-    # value (e.g. a literal "") can't become a bogus endpoint URL.
-    api_base = (api_base or "").strip().strip('"').strip("'").strip()
-    if api_base:
-        api_base = api_base.rstrip("/")
-        if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):
-            api_base = api_base + "/v1"
-        kwargs["api_base"] = api_base
-    if api_key:
-        kwargs["api_key"] = api_key
-    elif provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
-        kwargs["api_key"] = "no-key-required"
-    return kwargs
-
-
-def _parse_json_response(content: str) -> list[dict]:
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"```(?:json)?\s*", "", content)
-        content = content.rstrip("`").strip()
-
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        match = re.search(r"\[.*\]", content, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-        else:
-            raise ValueError(f"Could not parse LLM response as JSON: {content[:200]}")
-
-    if not isinstance(data, list):
-        raise ValueError("Expected JSON array of query suggestions")
-    return data
-
-
 async def suggest_queries(
     description: str,
     llm_provider: str,
@@ -109,25 +53,27 @@ async def suggest_queries(
 
 Respond with a JSON array only."""
 
-    model_str = _build_litellm_model(llm_provider, llm_model)
-    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base, llm_api_key)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
     try:
-        response = await litellm.acompletion(
-            model=model_str,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
+        suggestions, _ = await complete_json(
+            provider=llm_provider,
+            model=llm_model,
+            messages=messages,
+            api_base=llm_api_base,
+            api_key=llm_api_key,
             timeout=60,
-            **conn_kwargs,
         )
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Query suggestion failed: {e}") from e
 
-    content = response.choices[0].message.content or ""
-    suggestions = _parse_json_response(content)
+    if not isinstance(suggestions, list):
+        raise ValueError("Expected JSON array of query suggestions")
 
     # Validate each suggestion has required fields
     validated = []

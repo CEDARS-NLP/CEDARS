@@ -1,11 +1,16 @@
 """LLM predictor using LiteLLM for multi-provider abstraction."""
 
-import json
 import logging
 import re
 
 import litellm
 
+from app.llm.client import (
+    build_connection_kwargs,
+    build_litellm_model,
+    extract_json,
+    extract_token_usage,
+)
 from app.predictors.base import BasePredictor, PredictionResult, PredictorError, TokenUsage
 
 logger = logging.getLogger(__name__)
@@ -95,14 +100,14 @@ class LLMPredictor(BasePredictor):
 
         try:
             response = await litellm.acompletion(
-                model=self._litellm_model(),
+                model=build_litellm_model(self.provider, self.model),
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=self.temperature,
                 timeout=self.timeout,
-                **self._connection_kwargs(),
+                **build_connection_kwargs(self.provider, self.api_base, self.api_key),
             )
         except litellm.AuthenticationError as e:
             raise PredictorError(f"Authentication failed for {self.provider}: {e}") from e
@@ -121,13 +126,8 @@ class LLMPredictor(BasePredictor):
             raise PredictorError(f"LLM prediction failed: {e}") from e
 
         content = response.choices[0].message.content or ""
-        token_usage = None
-        if hasattr(response, "usage") and response.usage:
-            token_usage = TokenUsage(
-                prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
-                completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
-                total_tokens=getattr(response.usage, "total_tokens", 0) or 0,
-            )
+        usage = extract_token_usage(response)
+        token_usage = TokenUsage(**usage) if usage else None
         result = self._parse_response(content)
         result.token_usage = token_usage
         return result
@@ -135,85 +135,31 @@ class LLMPredictor(BasePredictor):
     async def healthcheck(self) -> bool:
         try:
             response = await litellm.acompletion(
-                model=self._litellm_model(),
+                model=build_litellm_model(self.provider, self.model),
                 messages=[{"role": "user", "content": "Reply with: OK"}],
                 max_tokens=5,
                 timeout=10,
-                **self._connection_kwargs(),
+                **build_connection_kwargs(self.provider, self.api_base, self.api_key),
             )
             return bool(response.choices)
         except Exception:
             return False
 
-    def _litellm_model(self) -> str:
-        """Build the LiteLLM model string.
-
-        LiteLLM uses a provider/model format. For OpenAI-compatible endpoints
-        (vLLM, LMStudio, text-generation-inference), prefix with 'openai/'.
-        """
-        if self.provider == "ollama":
-            return f"ollama/{self.model}"
-        if self.provider == "bedrock":
-            return f"bedrock/{self.model}"
-        if self.provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):
-            return f"openai/{self.model}"
-        return self.model
-
-    def _connection_kwargs(self) -> dict:
-        """Build connection kwargs for litellm.acompletion.
-
-        Handles api_base and api_key. For self-hosted providers (ollama, vllm,
-        lmstudio) that don't need a real key, supplies a dummy key so LiteLLM
-        doesn't raise AuthenticationError.
-
-        For OpenAI-compatible providers, ensures api_base ends with /v1 since
-        LiteLLM appends /chat/completions to it.
-        """
-        kwargs: dict = {}
-        # Bedrock authenticates via AWS SigV4 (env/role creds) and takes no HTTP
-        # api_base or api_key — passing either yields an invalid URL. Ignore both.
-        if self.provider == "bedrock":
-            return kwargs
-        # Treat whitespace/quote-only api_base as unset (guards against a stray
-        # stored value like a literal "" becoming a bogus endpoint URL).
-        api_base = (self.api_base or "").strip().strip('"').strip("'").strip()
-        if api_base:
-            api_base = api_base.rstrip("/")
-            # For OpenAI-compatible providers, ensure /v1 suffix so LiteLLM
-            # builds the correct URL: {api_base}/chat/completions
-            if self.provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):
-                if not api_base.endswith("/v1"):
-                    api_base = api_base + "/v1"
-            kwargs["api_base"] = api_base
-        # Determine API key
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        elif self.provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
-            # Self-hosted — no real key needed, but LiteLLM requires one
-            kwargs["api_key"] = "no-key-required"
-        return kwargs
-
     def _parse_response(self, content: str) -> PredictionResult:
-        """Parse LLM JSON response into PredictionResult."""
-        # Try to extract JSON from response
-        content = content.strip()
-        if content.startswith("```"):
-            content = re.sub(r"```(?:json)?\s*", "", content)
-            content = content.rstrip("`").strip()
+        """Parse LLM JSON response into PredictionResult.
 
+        Unlike the raising ``extract_json``, an unparseable response degrades to
+        a neutral negative result rather than erroring — a prediction backend
+        should not crash a run on a single malformed reply.
+        """
         try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            # Try to find JSON object in response
-            match = re.search(r"\{[^}]+\}", content, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-            else:
-                logger.warning("Failed to parse LLM response: %s", content[:200])
-                return PredictionResult(
-                    score=0.0, label=0, model=self.model,
-                    reasoning=f"Failed to parse response: {content[:100]}",
-                )
+            data = extract_json(content)
+        except ValueError:
+            logger.warning("Failed to parse LLM response: %s", content[:200])
+            return PredictionResult(
+                score=0.0, label=0, model=self.model,
+                reasoning=f"Failed to parse response: {content[:100]}",
+            )
 
         detected = data.get("event_detected", False)
         confidence = float(data.get("confidence", 0.5))

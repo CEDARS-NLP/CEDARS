@@ -1,10 +1,9 @@
 """LLM-powered search pattern generation for pipeline EventConfigs."""
 
-import json
 import logging
 import re
 
-import litellm
+from app.llm import complete_json
 
 logger = logging.getLogger(__name__)
 
@@ -46,51 +45,6 @@ Exclude criteria: {exclude_criteria}
 Respond with JSON only."""
 
 
-def _build_litellm_model(provider: str, model: str) -> str:
-    if provider == "ollama":
-        return f"ollama/{model}"
-    if provider == "bedrock":
-        return f"bedrock/{model}"
-    if provider in ("vllm", "lmstudio", "tgi", "openai_compatible"):
-        return f"openai/{model}"
-    return model
-
-
-def _build_connection_kwargs(provider: str, api_base: str | None, api_key: str | None = None) -> dict:
-    kwargs: dict = {}
-    # Bedrock uses AWS SigV4 creds, not an HTTP endpoint/key — ignore both.
-    if provider == "bedrock":
-        return kwargs
-    # Treat whitespace/quote-only api_base as unset (guards against a stray
-    # stored value like a literal "" becoming an invalid endpoint URL).
-    api_base = (api_base or "").strip().strip('"').strip("'").strip()
-    if api_base:
-        api_base = api_base.rstrip("/")
-        if provider in ("vllm", "lmstudio", "tgi", "openai_compatible") and not api_base.endswith("/v1"):
-            api_base = api_base + "/v1"
-        kwargs["api_base"] = api_base
-    if api_key:
-        kwargs["api_key"] = api_key
-    elif provider in ("ollama", "vllm", "lmstudio", "tgi", "openai_compatible"):
-        kwargs["api_key"] = "no-key-required"
-    return kwargs
-
-
-def _parse_json_response(content: str) -> dict:
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"```(?:json)?\s*", "", content)
-        content = content.rstrip("`").strip()
-
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        match = re.search(r"\{[^}]+\}", content, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Could not parse LLM response as JSON: {content[:200]}")
-
-
 def _validate_regex_patterns(patterns: list[str]) -> list[str]:
     valid = []
     for p in patterns:
@@ -118,25 +72,24 @@ async def generate_search_patterns(
     Raises ValueError on LLM or parsing errors.
     """
     user_prompt = _build_user_prompt(event_name, description, include_criteria, exclude_criteria)
-    model_str = _build_litellm_model(llm_provider, llm_model)
-    conn_kwargs = _build_connection_kwargs(llm_provider, llm_api_base, llm_api_key)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
     try:
-        response = await litellm.acompletion(
-            model=model_str,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
+        data, _ = await complete_json(
+            provider=llm_provider,
+            model=llm_model,
+            messages=messages,
+            api_base=llm_api_base,
+            api_key=llm_api_key,
             timeout=60,
-            **conn_kwargs,
         )
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Pattern generation failed: {e}") from e
-
-    content = response.choices[0].message.content or ""
-    data = _parse_json_response(content)
 
     return {
         "keywords": data.get("keywords", []),
