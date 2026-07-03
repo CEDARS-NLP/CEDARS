@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.common.schemas import PaginatedResponse
 from app.connectors.models import ConnectorType, IngestionStatus
 
 
@@ -54,11 +55,8 @@ class PatientResponse(BaseModel):
     updated_at: datetime
 
 
-class PatientListResponse(BaseModel):
-    items: list[PatientResponse]
-    total: int
-    limit: int
-    offset: int
+class PatientListResponse(PaginatedResponse[PatientResponse]):
+    pass
 
 
 class NoteResponse(BaseModel):

@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel
 
+from app.common.schemas import PaginatedResponse
+
 
 class AuditEntryResponse(BaseModel):
     id: str
@@ -13,11 +15,8 @@ class AuditEntryResponse(BaseModel):
     created_at: str
 
 
-class AuditLogResponse(BaseModel):
-    items: list[AuditEntryResponse]
-    total: int
-    limit: int
-    offset: int
+class AuditLogResponse(PaginatedResponse[AuditEntryResponse]):
+    pass
 
 
 class PatientActivitySummary(BaseModel):
