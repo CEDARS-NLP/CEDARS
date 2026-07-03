@@ -1,7 +1,7 @@
 # CEDARS v2 Backend — Code Review Remediation Plan
 
 **Date:** 2026-07-02
-**Status:** Phases 1 + 0 DONE; Phase 4 partial; Phases 2/3 pending
+**Status:** Phases 1 + 0 + 2 + 3 DONE; Phase 4 partial
 **Source:** Full backend review (4 parallel reviewers: DRY, Postgres-portability, correctness, testing)
 **Trigger:** A single bug (LLM `api_base`) had 4 copies; a schema-casing bug crashed prod but passed tests. Both point to systemic issues: duplication and SQLite-only testing.
 
@@ -71,9 +71,34 @@ Dep: `testcontainers[postgres]>=4.0` in dev group.
 
 ---
 
-## Phase 2 — Enum handling, done once and correctly (P1)
+## Phase 2 — Enum handling, done once and correctly (P1) ✅ DONE (2026-07-02)
 
-**Decision needed:** the enums split into two groups (verified against live Aurora):
+**Approach B, confirmed empirically.** Landed commit `611b33ae`:
+`tests/test_enum_roundtrip.py` — a cross-backend guard that inserts AND reads
+back *every member of every persisted enum* on both SQLite (`create_all`) and
+Postgres (Alembic migrations). 326 passed on both backends.
+
+**What the round-trip test proved about the "3 miscased ALTER migrations":**
+they are *not* live crashers, so no migration rewrite was done (rewriting
+already-applied history would be an ad-hoc DB patch — forbidden by CLAUDE.md).
+
+- `jobstatus`/`jobtype` native types were created UPPERCASE and `BackgroundJob`
+  binds the enum NAME (no `values_callable`), so the `CANCELLED` (b5f066242811)
+  and `INGESTION` (c3a1e7f82d9b) ALTERs added *matching* uppercase labels →
+  correct, round-trip PASS.
+- `patienttaskstatus` was created lowercase and the model binds the lowercase
+  value via `enum_column` → valid. Migration `ec642691720e` added a
+  `NO_MATCH` label; the model's `no_match` value round-trips PASS. (The stray
+  uppercase label is harmless cruft, not corruption.)
+- Dedicated regression guards for both ALTER-added members
+  (`PatientTaskStatus.NO_MATCH`, `JobStatus.CANCELLED`) are in the test file.
+
+**Teeth verified:** mutating `enum_column` to bind member *names* instead of
+*values* fails the sweep on Postgres exactly as the original prod bug did.
+
+Below is the original decision analysis, preserved for context:
+
+**Decision was:** the enums split into two groups (verified against live Aurora):
 - **Stored UPPERCASE** (work today by luck): auditaction, connectortype, ingestionstatus, jobstatus, jobtype, judgmentvalue, nlpjobstatus, patientstatus, predictortype, projectrole, reviewstatus(varchar), userrole.
 - **Stored lowercase** (crash): pipelinerunstatus, patienttaskstatus (already fixed via `values_callable`).
 - **Stale/wrong values**: sessionstatus PG type has `SAMPLING/RUNNING` (v1); code has `DRAFT/COMMITTED/DISCARDED` (v2 uses VARCHAR — OK, but the old enum type lingers).
@@ -87,21 +112,30 @@ Add a **cross-backend enum test** (asserts every enum round-trips identically on
 
 ---
 
-## Phase 3 — DRY consolidation (P1–P2)
+## Phase 3 — DRY consolidation (P1–P2) ✅ DONE (2026-07-02)
 
-Extract shared modules under `app/common/`:
+Landed as 4 commits on `feature/v2-platform`, each a subset of a tree that
+passed the full suite on **both** SQLite and Postgres (323 each):
 
-| Rank | Concept | Copies | New home |
-|------|---------|--------|----------|
-| 1 | CRUD + soft-delete (`select().where(project_id, deleted_at.is_(None))`) | 8 | `app/common/crud.py` (generic get/list/soft_delete + SoftDeleteMixin) |
-| 2 | LLM plumbing (`_litellm_model`, `_connection_kwargs`, JSON extract, exception mapping) | 4 | `app/llm/client.py` — `complete_json(cfg, system, user)`; call sites keep only prompts |
-| 3 | JSON-from-LLM-response parse | 3 | fold into `app/llm/client.py:extract_json` |
-| 4 | 404 helper | 12 | `app/common/errors.py:raise_not_found()` |
-| 5 | Pagination response wrapper | 3 | `app/common/schemas.py:PaginatedResponse` |
-| 6 | `now_utc()` timestamp helper | 6 | `app/common/utils.py` |
-| 7 | `_enum_column` / db types | — | `app/common/db_types.py` (promote from pipeline/models.py) |
+| Commit | Concept | Copies | New home |
+|--------|---------|--------|----------|
+| `72ae7475` | CRUD + soft-delete (`select().where(project_id, deleted_at.is_(None))`) | ~8 | `app/common/crud.py`: `get_scoped`/`list_scoped`/`soft_delete` |
+| `fbb327ff` | LLM plumbing (`_litellm_model`, `_connection_kwargs`, JSON extract, token usage) | 4 | `app/llm/client.py` — `complete`/`complete_json`; call sites keep only prompts + per-call params |
+| `fbb327ff` | JSON-from-LLM-response parse | 3–4 | folded into `app/llm/client.py:extract_json` (depth-matched, handles arrays + trailing commas) |
+| `8733580f` | 404 helper | 47 raises / 9 routers | `app/common/errors.py:raise_not_found()` |
+| `4ed493ef` | Pagination response wrapper | 2 | `app/common/schemas.py:PaginatedResponse[T]` |
+| `72ae7475` | `now_utc()` timestamp helper | ~30 | `app/common/utils.py` |
+| `72ae7475` | `_enum_column` / db types | — | `app/common/db_types.py` (promoted from pipeline/models.py, re-exported as `_enum_column`) |
 
-Do **after** Phase 1 so the PG suite guards the refactor. Estimated LLM files: ~714 → ~400 lines.
+Net ~-274 lines (LLM files alone: ~-370).
+
+**Deliberate deviation:** did NOT add a `SoftDeleteMixin`. The `deleted_at`
+columns have per-model `sa_column` declarations; redeclaring them via a mixin
+would risk exactly the schema/migration-drift bug class Phase 1 exists to
+catch, for little gain. Extracted the *query* logic only — zero schema impact.
+`classify_patient`/`suggest_queries`/`generate_search_patterns` re-raise
+`ValueError` (parse failures) before their catch-all so error contracts held;
+`predictors/llm._parse_response` keeps its graceful no-raise fallback.
 
 ---
 
@@ -137,6 +171,8 @@ Do **after** Phase 1 so the PG suite guards the refactor. Estimated LLM files: ~
 Phases 0/2/4 fan out cleanly to parallel agents (independent files). Phase 3 is best done as one coordinated refactor.
 
 ## Open decisions for reviewer
-1. Enum approach **A (normalize all + migration)** vs **B (fix only broken + miscased migrations)**.
+1. ~~Enum approach A vs B~~ — **RESOLVED: approach B**, confirmed empirically by
+   the Phase 2 round-trip test (611b33ae). No migration rewrite needed.
 2. `create_all` fate: drop entirely (migrations everywhere) or keep for local-only?
-3. Commit the already-landed session fixes now, or bundle into Phase 0?
+   (Still open; tests already use migrations on the PG path.)
+3. ~~Commit the already-landed session fixes now~~ — done (Phase 0 commits).
