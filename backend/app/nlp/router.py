@@ -1,11 +1,14 @@
 """API routes for NLP pipeline: search queries, processing, sentences."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
+from app.jobs.schemas import BackgroundJobResponse
+from app.nlp.engine import get_pipeline_info
 from app.nlp.schemas import (
     CreateSearchQueryRequest,
     NlpJobResponse,
@@ -14,8 +17,6 @@ from app.nlp.schemas import (
     SentenceResponse,
     UpdateSearchQueryRequest,
 )
-from app.nlp.engine import get_pipeline_info
-from app.jobs.schemas import BackgroundJobResponse
 from app.nlp.service import (
     cancel_nlp_job,
     clear_sentences,
@@ -80,7 +81,7 @@ async def get_query_endpoint(
 ):
     sq = await get_search_query(session, project_id, query_id)
     if not sq:
-        raise HTTPException(status_code=404, detail="Search query not found")
+        raise_not_found("Search query not found")
     return sq
 
 
@@ -95,7 +96,7 @@ async def update_query_endpoint(
     updates = body.model_dump(exclude_none=True)
     sq = await update_search_query(session, project_id, query_id, updates)
     if not sq:
-        raise HTTPException(status_code=404, detail="Search query not found")
+        raise_not_found("Search query not found")
     return sq
 
 
@@ -108,7 +109,7 @@ async def delete_query_endpoint(
 ):
     deleted = await delete_search_query(session, project_id, query_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Search query not found")
+        raise_not_found("Search query not found")
 
 
 # ── NLP Processing ───────────────────────────────────────────────
@@ -143,7 +144,7 @@ async def cancel_nlp_endpoint(
     """Cancel a running NLP job."""
     result = await cancel_nlp_job(session, project_id)
     if not result:
-        raise HTTPException(status_code=404, detail="No active NLP job found")
+        raise_not_found("No active NLP job found")
     return result
 
 

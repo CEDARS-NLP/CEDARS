@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.connectors.registry import get_connector
 from app.connectors.schemas import (
     CreateDataSourceRequest,
@@ -27,8 +28,8 @@ from app.connectors.service import (
     list_patients,
     upload_and_create_data_source,
 )
-from app.jobs.schemas import BackgroundJobResponse
 from app.dependencies import require_project_role
+from app.jobs.schemas import BackgroundJobResponse
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/data", tags=["data"])
 
@@ -67,7 +68,7 @@ async def get_data_source_endpoint(
 ):
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
     return ds
 
 
@@ -80,7 +81,7 @@ async def delete_data_source_endpoint(
 ):
     deleted = await delete_data_source(session, project_id, data_source_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
 
 
 # ── File Upload ───────────────────────────────────────────────────
@@ -189,7 +190,7 @@ async def preview_data_source_endpoint(
 ):
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
 
     connector = get_connector(ds.connector_type)
     result = await connector.preview(ds.config, limit=limit)
@@ -213,7 +214,7 @@ async def ingest_data_source_endpoint(
     """Trigger ingestion of a data source as a background job."""
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
 
     return await dispatch_ingestion_job(session, project_id, data_source_id, current_user.id)
 
@@ -239,7 +240,7 @@ async def cancel_ingestion_endpoint(
     """Cancel a running ingestion job."""
     result = await cancel_ingestion_job(session, project_id, data_source_id)
     if not result:
-        raise HTTPException(status_code=404, detail="No active ingestion job found")
+        raise_not_found("No active ingestion job found")
     return result
 
 
@@ -253,7 +254,7 @@ async def resync_data_source_endpoint(
     """Re-sync a data source: update existing notes, add new ones."""
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
 
     from app.connectors.service import resync_data_source
     result = await resync_data_source(session, project_id, data_source_id)
@@ -281,7 +282,7 @@ async def purge_data_source_endpoint(
 
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise_not_found("Data source not found")
 
     from app.connectors.service import purge_data_source
     deleted = await purge_data_source(session, project_id, data_source_id)

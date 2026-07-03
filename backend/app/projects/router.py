@@ -1,10 +1,11 @@
 """Project API router: CRUD and membership endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.dependencies import get_current_user, require_project_role
 from app.projects.models import ProjectRole
 from app.projects.schemas import (
@@ -14,7 +15,6 @@ from app.projects.schemas import (
     ProjectResponse,
     UpdateProjectRequest,
 )
-from app.projects.stats import get_project_stats
 from app.projects.service import (
     add_member,
     create_project,
@@ -26,6 +26,7 @@ from app.projects.service import (
     remove_member,
     update_project,
 )
+from app.projects.stats import get_project_stats
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
@@ -86,7 +87,7 @@ async def get_project_endpoint(
     """Get project details. Requires project membership."""
     project = await get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_not_found("Project not found")
     role = await get_user_project_role(session, project_id, current_user.id)
     return _project_response(project, role=role.value if role else None)
 
@@ -112,7 +113,7 @@ async def update_project_endpoint(
     updates = body.model_dump(exclude_none=True)
     project = await update_project(session, project_id, updates)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_not_found("Project not found")
     role = await get_user_project_role(session, project_id, current_user.id)
     return _project_response(project, role=role.value if role else None)
 
@@ -126,7 +127,7 @@ async def delete_project_endpoint(
     """Soft-delete a project. Requires admin role."""
     deleted = await delete_project(session, project_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_not_found("Project not found")
     return None
 
 
@@ -147,9 +148,10 @@ async def add_member_endpoint(
     """Add a member to the project by email. Requires admin role."""
     member = await add_member(session, project_id, body.email, body.role)
     if not member:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise_not_found("User not found")
     # Fetch user info for the response
     from sqlmodel import select
+
     from app.auth.models import User as UserModel
     result = await session.execute(
         select(UserModel).where(UserModel.id == member.user_id)
@@ -195,5 +197,5 @@ async def remove_member_endpoint(
     """Remove a member from the project. Requires admin role."""
     removed = await remove_member(session, project_id, user_id)
     if not removed:
-        raise HTTPException(status_code=404, detail="Member not found")
+        raise_not_found("Member not found")
     return None

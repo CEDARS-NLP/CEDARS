@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.export.databricks import ExportType, export_to_databricks
 from app.export.schemas import (
@@ -90,7 +91,7 @@ async def export_to_databricks_endpoint(
             export_type=export_type,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise_not_found(str(exc))
     except Exception:
         logger.exception("Databricks export failed")
         raise HTTPException(status_code=500, detail="Export to Databricks failed")

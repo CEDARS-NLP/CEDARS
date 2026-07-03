@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.evaluation.schemas import (
     CommitRequest,
@@ -34,13 +35,15 @@ from app.evaluation.service import (
     get_next_unreviewed_result,
     get_query_matches,
     get_result_note_context,
-    get_session as get_eval_session,
     list_patient_results,
     list_sessions,
     run_llm_on_sample,
     submit_judgment,
     update_llm_config,
     update_queries,
+)
+from app.evaluation.service import (
+    get_session as get_eval_session,
 )
 
 router = APIRouter(
@@ -58,7 +61,7 @@ async def _get_session_or_404(
     """Fetch an evaluation session, raising 404 if not found or wrong project."""
     eval_session = await get_eval_session(db, session_id)
     if not eval_session or eval_session.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise_not_found("Session not found")
     return eval_session
 
 
@@ -326,7 +329,7 @@ async def next_unreviewed_endpoint(
     await _get_session_or_404(db, project_id, session_id)
     result = await get_next_unreviewed_result(db, session_id, after_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="No unreviewed results")
+        raise_not_found("No unreviewed results")
     return result
 
 
@@ -365,7 +368,7 @@ async def result_notes_endpoint(
     await _get_session_or_404(db, project_id, session_id)
     context = await get_result_note_context(db, session_id, result_id)
     if context is None:
-        raise HTTPException(status_code=404, detail="Result not found")
+        raise_not_found("Result not found")
     return context
 
 
@@ -391,7 +394,7 @@ async def submit_judgment_endpoint(
             event_date_override=body.event_date_override,
         )
     except Exception:
-        raise HTTPException(status_code=404, detail="Result not found")
+        raise_not_found("Result not found")
 
 
 # ── Metrics & funnel ─────────────────────────────────────────────
@@ -472,7 +475,7 @@ async def pipeline_stats_endpoint(
     try:
         return await get_pipeline_stats(db, session_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise_not_found(str(e))
 
 
 @router.post("/sessions/{session_id}/pipeline/cancel")

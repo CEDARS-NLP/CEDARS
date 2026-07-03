@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
+from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.predictors.factory import create_predictor
 from app.predictors.schemas import (
@@ -23,7 +24,6 @@ from app.predictors.service import (
     list_predictor_configs,
     update_predictor_config,
 )
-from app.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/predictors", tags=["predictors"])
 
@@ -59,7 +59,7 @@ async def get_predictor_endpoint(
 ):
     pc = await get_predictor_config(session, project_id, predictor_id)
     if not pc:
-        raise HTTPException(status_code=404, detail="Predictor not found")
+        raise_not_found("Predictor not found")
     return pc
 
 
@@ -75,7 +75,7 @@ async def update_predictor_endpoint(
         session, project_id, predictor_id, name=body.name, config=body.config
     )
     if not pc:
-        raise HTTPException(status_code=404, detail="Predictor not found")
+        raise_not_found("Predictor not found")
     return pc
 
 
@@ -88,7 +88,7 @@ async def delete_predictor_endpoint(
 ):
     deleted = await delete_predictor_config(session, project_id, predictor_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Predictor not found")
+        raise_not_found("Predictor not found")
 
 
 @router.post("/{predictor_id}/activate", response_model=PredictorResponse)
@@ -100,7 +100,7 @@ async def activate_predictor_endpoint(
 ):
     pc = await activate_predictor(session, project_id, predictor_id)
     if not pc:
-        raise HTTPException(status_code=404, detail="Predictor not found")
+        raise_not_found("Predictor not found")
     return pc
 
 
@@ -115,7 +115,7 @@ async def test_predictor_endpoint(
     """Run a single test prediction against a configured predictor."""
     pc = await get_predictor_config(session, project_id, predictor_id)
     if not pc:
-        raise HTTPException(status_code=404, detail="Predictor not found")
+        raise_not_found("Predictor not found")
 
     predictor = create_predictor(pc)
     try:

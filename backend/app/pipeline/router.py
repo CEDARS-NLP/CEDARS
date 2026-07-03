@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.common.database import get_session
-from app.dependencies import get_current_user, require_project_role
+from app.common.errors import raise_not_found
+from app.dependencies import require_project_role
 from app.pipeline.schemas import (
     CommitEventConfigRequest,
     CreateEventConfigRequest,
@@ -13,8 +14,8 @@ from app.pipeline.schemas import (
     PatientTaskResponse,
     PipelineRunResponse,
     QueueOverviewResponse,
-    RunSampleRequest,
     RunMetricsResponse,
+    RunSampleRequest,
     RunStatsResponse,
     UpdateEventConfigRequest,
 )
@@ -77,7 +78,7 @@ async def get_event_config_endpoint(
 ):
     ec = await get_event_config(session, project_id, event_config_id)
     if not ec:
-        raise HTTPException(status_code=404, detail="EventConfig not found")
+        raise_not_found("EventConfig not found")
     return ec
 
 
@@ -97,7 +98,7 @@ async def update_event_config_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not ec:
-        raise HTTPException(status_code=404, detail="EventConfig not found")
+        raise_not_found("EventConfig not found")
     return ec
 
 
@@ -113,7 +114,7 @@ async def delete_event_config_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not deleted:
-        raise HTTPException(status_code=404, detail="EventConfig not found")
+        raise_not_found("EventConfig not found")
 
 
 @router.post("/events/{event_config_id}/commit", response_model=EventConfigResponse)
@@ -132,7 +133,7 @@ async def commit_event_config_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not ec:
-        raise HTTPException(status_code=404, detail="EventConfig not found")
+        raise_not_found("EventConfig not found")
     return ec
 
 
@@ -145,7 +146,7 @@ async def generate_patterns_endpoint(
 ):
     ec = await get_event_config(session, project_id, event_config_id)
     if not ec:
-        raise HTTPException(status_code=404, detail="EventConfig not found")
+        raise_not_found("EventConfig not found")
     if ec.is_committed:
         raise HTTPException(status_code=400, detail="Cannot modify a committed EventConfig")
 
@@ -249,7 +250,7 @@ async def get_run_endpoint(
 
     run = await get_run(session, project_id, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return run
 
 
@@ -264,7 +265,7 @@ async def get_run_stats_endpoint(
 
     run = await get_run(session, project_id, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return await get_run_stats(session, run_id)
 
 
@@ -280,7 +281,7 @@ async def get_run_metrics_endpoint(
 
     run = await get_run(session, project_id, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return await compute_run_metrics(session, run_id)
 
 
@@ -298,7 +299,7 @@ async def list_tasks_endpoint(
 
     run = await get_run(session, project_id, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return await list_tasks(session, run_id, status_filter, limit, offset)
 
 
@@ -316,7 +317,7 @@ async def cancel_run_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return run
 
 
@@ -350,7 +351,7 @@ async def retry_failed_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not run:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
+        raise_not_found("Pipeline run not found")
     return run
 
 

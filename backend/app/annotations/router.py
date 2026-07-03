@@ -2,14 +2,11 @@
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.models import User
-from app.common.database import get_session
-from app.dependencies import require_project_role
-from app.evaluation.models import EvaluationSession, PatientResult
+from app.annotations.query_service import get_patient_matched_notes
 from app.annotations.schemas import (
     AnnotationResponse,
     AnnotationStatsResponse,
@@ -23,7 +20,6 @@ from app.annotations.schemas import (
     ReviewRequest,
     ReviewResultResponse,
 )
-from app.annotations.query_service import get_patient_matched_notes
 from app.annotations.service import (
     cancel_prediction_job,
     delete_event_date,
@@ -44,6 +40,11 @@ from app.annotations.service import (
     skip_annotation,
     unlock_patient,
 )
+from app.auth.models import User
+from app.common.database import get_session
+from app.common.errors import raise_not_found
+from app.dependencies import require_project_role
+from app.evaluation.models import EvaluationSession, PatientResult
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/annotations", tags=["annotations"])
 
@@ -156,7 +157,7 @@ async def cancel_predictions_endpoint(
     """Cancel the running prediction job."""
     result = await cancel_prediction_job(session, project_id)
     if not result:
-        raise HTTPException(status_code=404, detail="No running prediction job found")
+        raise_not_found("No running prediction job found")
     return result
 
 
@@ -260,7 +261,7 @@ async def reopen_patient_endpoint(
     """Re-queue a reviewed patient. Admin only. Preserves annotation decisions."""
     success = await reopen_patient(session, project_id, patient_id, current_user.id)
     if not success:
-        raise HTTPException(status_code=404, detail="Patient not found or not in reviewed state")
+        raise_not_found("Patient not found or not in reviewed state")
     return {"ok": True}
 
 
@@ -276,7 +277,7 @@ async def get_annotation_endpoint(
 ):
     annotation = await get_annotation(session, project_id, annotation_id)
     if not annotation:
-        raise HTTPException(status_code=404, detail="Annotation not found")
+        raise_not_found("Annotation not found")
     return annotation
 
 
@@ -290,11 +291,11 @@ async def annotation_context_endpoint(
     """Get the full note context for an annotation (for review UI)."""
     annotation = await get_annotation(session, project_id, annotation_id)
     if not annotation:
-        raise HTTPException(status_code=404, detail="Annotation not found")
+        raise_not_found("Annotation not found")
 
     context = await get_note_context(session, annotation.note_id)
     if not context:
-        raise HTTPException(status_code=404, detail="Note not found")
+        raise_not_found("Note not found")
 
     # Attach search keywords from the evaluation session linked via pipeline_run
     context["search_keywords"] = await _get_search_keywords(
@@ -315,7 +316,7 @@ async def patient_matched_notes_endpoint(
     """Get all notes with keyword matches for a patient (for pipeline annotations)."""
     annotation = await get_annotation(session, project_id, annotation_id)
     if not annotation:
-        raise HTTPException(status_code=404, detail="Annotation not found")
+        raise_not_found("Annotation not found")
 
     notes = await get_patient_matched_notes(
         session, project_id, patient_id, annotation.pipeline_run_id
@@ -343,7 +344,7 @@ async def review_annotation_endpoint(
         event_date=body.event_date,
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Annotation not found")
+        raise_not_found("Annotation not found")
     return result
 
 
@@ -362,7 +363,7 @@ async def delete_event_date_endpoint(
         session, project_id, annotation_id, current_user.id,
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Annotation not found or no event date set")
+        raise_not_found("Annotation not found or no event date set")
     return result
 
 
@@ -381,5 +382,5 @@ async def skip_annotation_endpoint(
         session, project_id, annotation_id, current_user.id,
     )
     if not annotation:
-        raise HTTPException(status_code=404, detail="Annotation not found")
+        raise_not_found("Annotation not found")
     return annotation
