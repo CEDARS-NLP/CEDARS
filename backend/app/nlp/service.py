@@ -1,11 +1,12 @@
 """Business logic for NLP pipeline: search queries, sentence processing, jobs."""
 
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.crud import get_scoped, list_scoped, soft_delete
+from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.engine import parse_query, process_note
@@ -46,25 +47,13 @@ async def create_search_query(
 async def list_search_queries(
     session: AsyncSession, project_id: str
 ) -> list[SearchQuery]:
-    stmt = (
-        select(SearchQuery)
-        .where(SearchQuery.project_id == project_id, SearchQuery.deleted_at.is_(None))
-        .order_by(SearchQuery.created_at.desc())
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return await list_scoped(session, SearchQuery, project_id)
 
 
 async def get_search_query(
     session: AsyncSession, project_id: str, query_id: str
 ) -> SearchQuery | None:
-    stmt = select(SearchQuery).where(
-        SearchQuery.id == query_id,
-        SearchQuery.project_id == project_id,
-        SearchQuery.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return await get_scoped(session, SearchQuery, project_id, query_id)
 
 
 _QUERY_UPDATE_FIELDS = {"query", "name", "is_active", "nlp_apply", "hide_duplicates", "skip_after_event"}
@@ -91,9 +80,7 @@ async def delete_search_query(
     sq = await get_search_query(session, project_id, query_id)
     if not sq:
         return False
-    sq.deleted_at = datetime.now(UTC)
-    session.add(sq)
-    await session.commit()
+    await soft_delete(session, sq)
     return True
 
 
@@ -141,7 +128,8 @@ async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str)
     if use_sync:
         import asyncio
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession as _AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from app.jobs.nlp import execute_nlp_job
 
@@ -218,7 +206,7 @@ async def cancel_nlp_job(
 
     bg_job.is_cancelled = True
     bg_job.status = JobStatus.CANCELLED
-    bg_job.completed_at = datetime.now(UTC)
+    bg_job.completed_at = now_utc()
     session.add(bg_job)
     await session.commit()
 
@@ -302,7 +290,7 @@ async def run_nlp_pipeline(
 
     try:
         job.status = NlpJobStatus.RUNNING
-        job.started_at = datetime.now(UTC)
+        job.started_at = now_utc()
         session.add(job)
         await session.commit()
 
@@ -317,7 +305,7 @@ async def run_nlp_pipeline(
         job.status = NlpJobStatus.COMPLETED
         job.total_notes = stats["total_notes"]
         job.processed_notes = stats["processed_notes"]
-        job.completed_at = datetime.now(UTC)
+        job.completed_at = now_utc()
 
     except Exception as exc:
         logger.exception("NLP pipeline failed for project %s", project_id)

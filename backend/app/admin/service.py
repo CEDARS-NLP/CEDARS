@@ -2,10 +2,10 @@
 
 import logging
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.jobs.models import BackgroundJob, JobStatus
+from app.jobs.models import BackgroundJob
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ async def get_worker_info() -> list[dict]:
     """Get active ARQ worker info from Redis. Returns empty if unavailable."""
     try:
         from arq import create_pool
+
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())

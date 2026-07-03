@@ -7,11 +7,13 @@ will be rewritten in subsequent tasks.
 """
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Index, JSON, String, Text
+from sqlalchemy import JSON, Column, DateTime, Index, String, Text
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class SessionStatus(str, enum.Enum):
@@ -85,12 +87,12 @@ class EvaluationSession(SQLModel, table=True):
     # Audit
     created_by: str = Field(foreign_key="users.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
     )
 
 
@@ -110,8 +112,8 @@ class SearchMatch(SQLModel, table=True):
     match_positions: list = Field(default=[], sa_column=Column(JSON, default=[]))
     is_negated: bool = Field(default=False)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
     )
 
 
@@ -160,8 +162,8 @@ class PatientResult(SQLModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(UTC)),
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
     )
 
     def transition_status(self, new_status: PatientResultStatus) -> None:

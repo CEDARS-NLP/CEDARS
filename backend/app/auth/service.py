@@ -1,6 +1,6 @@
 """Auth service: password hashing, JWT token management, and user operations."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.auth.models import User
+from app.common.utils import now_utc
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -33,14 +34,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(user_id: str, role: str) -> str:
     """Create a short-lived access token with user ID and role."""
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    expire = now_utc() + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {"sub": user_id, "role": role, "type": "access", "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
 def create_refresh_token(user_id: str) -> str:
     """Create a long-lived refresh token with user ID."""
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+    expire = now_utc() + timedelta(days=settings.refresh_token_expire_days)
     payload = {"sub": user_id, "type": "refresh", "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 

@@ -1,13 +1,11 @@
 """Business logic for project CRUD and membership management."""
 
-from datetime import UTC, datetime
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.auth.models import User
+from app.common.crud import soft_delete
 from app.projects.models import Project, ProjectMember, ProjectRole
-
 
 # --- Project CRUD ---
 
@@ -117,9 +115,7 @@ async def delete_project(
     if not project:
         return False
 
-    project.deleted_at = datetime.now(UTC)
-    session.add(project)
-    await session.commit()
+    await soft_delete(session, project)
     return True
 
 

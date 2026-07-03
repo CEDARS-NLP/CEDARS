@@ -2,12 +2,12 @@
 
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.annotations.models import Annotation
+from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus
@@ -47,7 +47,7 @@ async def execute_prediction_job(
             return {"error": "Job not found"}
 
         bg_job.status = JobStatus.RUNNING
-        bg_job.started_at = datetime.now(UTC)
+        bg_job.started_at = now_utc()
         session.add(bg_job)
         await session.commit()
 
@@ -109,7 +109,7 @@ async def execute_prediction_job(
                 await session.refresh(bg_job)
                 if bg_job.is_cancelled:
                     bg_job.status = JobStatus.CANCELLED
-                    bg_job.completed_at = datetime.now(UTC)
+                    bg_job.completed_at = now_utc()
                     bg_job.result_summary = stats
                     session.add(bg_job)
                     await session.commit()
@@ -156,7 +156,7 @@ async def execute_prediction_job(
 
             bg_job.status = JobStatus.COMPLETED
             bg_job.progress = 100
-            bg_job.completed_at = datetime.now(UTC)
+            bg_job.completed_at = now_utc()
             bg_job.result_summary = stats
 
         except Exception as exc:

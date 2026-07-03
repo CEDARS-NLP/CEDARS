@@ -1,11 +1,13 @@
 """Data models for connectors, patients, and clinical notes."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class ConnectorType(str, enum.Enum):
@@ -55,7 +57,7 @@ class DataSource(SQLModel, table=True):
     row_count: int | None = Field(default=None)
     error_message: str | None = Field(default=None)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(
@@ -87,11 +89,11 @@ class Patient(SQLModel, table=True):
     )
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(
             DateTime(timezone=True),
             nullable=False,
@@ -128,7 +130,7 @@ class Note(SQLModel, table=True):
     source_ref: str | None = Field(default=None)
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(

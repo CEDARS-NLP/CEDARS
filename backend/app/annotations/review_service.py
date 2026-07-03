@@ -1,7 +1,7 @@
 """Review service: patient-first annotation review, skip, event dates."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from app.annotations.models import Annotation, ReviewStatus
 from app.annotations.schemas import NextPatientResponse, PatientReviewStats
 from app.audit.models import AuditAction
 from app.audit.service import log_action
+from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
 from app.projects.models import Project
@@ -69,7 +70,7 @@ async def review_annotation(
 
     annotation.review_status = ReviewStatus.REVIEWED
     annotation.reviewed_by = user_id
-    annotation.reviewed_at = datetime.now(UTC)
+    annotation.reviewed_at = now_utc()
 
     skipped_count = 0
     earlier_count = 0
@@ -176,7 +177,7 @@ async def skip_annotation(
 
     annotation.review_status = ReviewStatus.SKIPPED
     annotation.reviewed_by = user_id
-    annotation.reviewed_at = datetime.now(UTC)
+    annotation.reviewed_at = now_utc()
     session.add(annotation)
     await session.commit()
     await session.refresh(annotation)
@@ -244,7 +245,7 @@ async def get_next_patient_for_review(
         )
 
     patient.locked_by = user_id
-    patient.locked_at = datetime.now(UTC)
+    patient.locked_at = now_utc()
     if patient.status not in (PatientStatus.REVIEWING, PatientStatus.REVIEWED):
         patient.status = PatientStatus.REVIEWING
     session.add(patient)

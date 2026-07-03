@@ -1,11 +1,13 @@
 """Predictor configuration models."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON
+from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class PredictorType(str, enum.Enum):
@@ -31,7 +33,7 @@ class PredictorConfig(SQLModel, table=True):
     is_active: bool = Field(default=False)
     created_by: str = Field(foreign_key="users.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(

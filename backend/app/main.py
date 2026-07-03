@@ -5,16 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.admin.router import router as admin_router
+from app.annotations.router import router as annotations_router
+from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.connectors.router import router as data_router
-from app.annotations.router import router as annotations_router
 from app.evaluation.router import router as evaluation_router
 from app.export.router import router as export_router
 from app.nlp.router import router as nlp_router
-from app.admin.router import router as admin_router
-from app.audit.router import router as audit_router
-from app.predictors.router import router as predictors_router
 from app.pipeline.router import router as pipeline_router
+from app.predictors.router import router as predictors_router
 from app.projects.router import router as projects_router
 
 
@@ -127,9 +127,9 @@ def create_app() -> FastAPI:
     application.include_router(audit_router)
     application.include_router(pipeline_router)
 
+    from app.evaluation.ws import eval_pipeline_progress_ws
     from app.jobs.ws import job_progress_ws
     from app.pipeline.ws import pipeline_progress_ws
-    from app.evaluation.ws import eval_pipeline_progress_ws
 
     application.websocket("/ws/projects/{project_id}/jobs/{job_id}")(job_progress_ws)
     application.websocket("/ws/projects/{project_id}/pipeline/{run_id}")(pipeline_progress_ws)

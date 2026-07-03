@@ -1,11 +1,13 @@
 """Annotation models for clinical event adjudication."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, String, Text
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class ReviewStatus(str, enum.Enum):
@@ -70,6 +72,6 @@ class Annotation(SQLModel, table=True):
     )
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -1,7 +1,7 @@
 """Base predictor interface and prediction result."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 class PredictorError(Exception):

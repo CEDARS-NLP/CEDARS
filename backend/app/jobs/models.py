@@ -1,11 +1,13 @@
 """Generic background job model for ARQ task tracking."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, Text
+from sqlalchemy import JSON, Column, DateTime, Text
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class JobType(str, enum.Enum):
@@ -57,6 +59,6 @@ class BackgroundJob(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, ReviewStatus
-from app.connectors.databricks import connect_databricks, _fqn
+from app.connectors.databricks import _fqn, connect_databricks
 from app.connectors.models import DataSource, Note
 
 logger = logging.getLogger(__name__)

@@ -1,11 +1,13 @@
 """Data models for NLP pipeline: sentences and search queries."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, Text, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class Sentence(SQLModel, table=True):
@@ -30,7 +32,7 @@ class Sentence(SQLModel, table=True):
         sa_column=Column(JSON, nullable=False, server_default="[]"),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -54,7 +56,7 @@ class SearchQuery(SQLModel, table=True):
     skip_after_event: bool = Field(default=True)  # skip sentences after event date
     created_by: str | None = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(
@@ -92,6 +94,6 @@ class NlpJob(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

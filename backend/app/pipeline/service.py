@@ -1,10 +1,10 @@
 """Business logic for pipeline EventConfig management and metrics."""
 
-from datetime import UTC, datetime
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.crud import get_scoped, list_scoped, soft_delete
+from app.common.utils import now_utc
 from app.pipeline.models import EventConfig
 
 
@@ -42,28 +42,13 @@ async def create_event_config(
 async def list_event_configs(
     session: AsyncSession, project_id: str
 ) -> list[EventConfig]:
-    stmt = (
-        select(EventConfig)
-        .where(
-            EventConfig.project_id == project_id,
-            EventConfig.deleted_at.is_(None),
-        )
-        .order_by(EventConfig.created_at.desc())
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return await list_scoped(session, EventConfig, project_id)
 
 
 async def get_event_config(
     session: AsyncSession, project_id: str, event_config_id: str
 ) -> EventConfig | None:
-    stmt = select(EventConfig).where(
-        EventConfig.id == event_config_id,
-        EventConfig.project_id == project_id,
-        EventConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return await get_scoped(session, EventConfig, project_id, event_config_id)
 
 
 async def update_event_config(
@@ -81,7 +66,7 @@ async def update_event_config(
     for key, value in fields.items():
         if value is not None and hasattr(ec, key):
             setattr(ec, key, value)
-    ec.updated_at = datetime.now(UTC)
+    ec.updated_at = now_utc()
     session.add(ec)
     await session.commit()
     await session.refresh(ec)
@@ -96,9 +81,7 @@ async def delete_event_config(
         return False
     if ec.is_committed:
         raise ValueError("Cannot delete a committed EventConfig")
-    ec.deleted_at = datetime.now(UTC)
-    session.add(ec)
-    await session.commit()
+    await soft_delete(session, ec)
     return True
 
 
@@ -115,7 +98,7 @@ async def commit_event_config(
         raise ValueError("EventConfig is already committed")
     ec.is_committed = True
     ec.confidence_threshold = confidence_threshold
-    ec.updated_at = datetime.now(UTC)
+    ec.updated_at = now_utc()
     session.add(ec)
     await session.commit()
     await session.refresh(ec)

@@ -3,12 +3,12 @@
 import logging
 import math
 import random
-from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note, Patient
 from app.evaluation.models import (
@@ -176,7 +176,7 @@ async def discard_session(
         )
 
     session.status = SessionStatus.DISCARDED
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -196,7 +196,7 @@ async def update_queries(
     ).scalar_one()
 
     session.search_queries = search_queries
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
 
     # Clear old search matches
@@ -228,7 +228,7 @@ async def update_llm_config(
         if key in allowed_fields:
             setattr(session, key, value)
 
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -301,7 +301,7 @@ async def execute_search_queries(
                     )
                     db.add(match)
 
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -534,13 +534,14 @@ async def run_llm_on_sample(
         "llm_completed": 0,
         "llm_failed": 0,
     }
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
 
     # Enqueue background job
     try:
         from arq import create_pool
+
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
@@ -573,7 +574,6 @@ async def execute_sample_llm(
     Uses its own database session unless db_session is provided (for testing).
     Updates session metrics with progress. Sets session status to REVIEWING on completion.
     """
-    from app.projects.models import Project
 
     if db_session is not None:
         return await _execute_sample_llm_impl(db_session, session_id, project_id)
@@ -678,7 +678,7 @@ async def _execute_sample_llm_impl(
                     predicted_score=classification.confidence,
                     token_usage=classification.token_usage,
                     status=PatientResultStatus.COMPLETED,
-                    completed_at=datetime.now(UTC),
+                    completed_at=now_utc(),
                 )
                 db.add(pr)
                 patients_classified += 1
@@ -696,7 +696,7 @@ async def _execute_sample_llm_impl(
                     notes_matched=len(notes),
                     status=PatientResultStatus.FAILED,
                     error_message=str(exc),
-                    completed_at=datetime.now(UTC),
+                    completed_at=now_utc(),
                 )
                 db.add(pr)
                 patients_failed += 1
@@ -720,7 +720,7 @@ async def _execute_sample_llm_impl(
             session_id=session_id,
             patient_id=patient_id,
             status=PatientResultStatus.NO_MATCH,
-            completed_at=datetime.now(UTC),
+            completed_at=now_utc(),
         )
         db.add(pr)
 
@@ -735,7 +735,7 @@ async def _execute_sample_llm_impl(
         "llm_no_match": len(unmatched_ids),
         "token_usage": total_token_usage,
     }
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
 
@@ -841,7 +841,7 @@ async def submit_judgment(
 
     pr.review_judgment = judgment
     pr.reviewed_by = user_id
-    pr.reviewed_at = datetime.now(UTC)
+    pr.reviewed_at = now_utc()
     if event_date_override is not None:
         pr.reviewer_date_override = event_date_override
 
@@ -989,7 +989,7 @@ async def compute_metrics(
         )
     ).scalar_one()
     session.metrics = metrics
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
 
@@ -1058,10 +1058,10 @@ async def commit_session(
         committed_config["confidence_threshold"] = confidence_threshold
 
     session.committed_config = committed_config
-    session.committed_at = datetime.now(UTC)
+    session.committed_at = now_utc()
     session.committed_by = user_id
     session.status = SessionStatus.COMMITTED
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -1255,7 +1255,7 @@ async def cancel_pipeline_run(db: AsyncSession, session_id: str, project_id: str
 
     # Move session to discarded so new sessions can be created
     session.status = SessionStatus.DISCARDED
-    session.updated_at = datetime.now(UTC)
+    session.updated_at = now_utc()
     db.add(session)
     await db.commit()
 

@@ -6,7 +6,8 @@ import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.models import Annotation
+from app.common.utils import now_utc
 from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.models import Sentence
@@ -209,8 +210,8 @@ async def dispatch_prediction_job(
     if use_sync:
         import asyncio
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from app.jobs.prediction import execute_prediction_job
 
@@ -271,7 +272,6 @@ async def cancel_prediction_job(
     Also handles stuck/zombie jobs: if the job is already cancelled but
     still in a non-terminal status, force it to CANCELLED.
     """
-    from datetime import UTC, datetime
 
     # Find any non-terminal prediction job (pending, running)
     stmt = (
@@ -293,7 +293,7 @@ async def cancel_prediction_job(
     # If job is stuck (already cancelled but still "running"), force terminal state
     if bg_job.status in (JobStatus.PENDING, JobStatus.RUNNING):
         bg_job.status = JobStatus.CANCELLED
-        bg_job.completed_at = datetime.now(UTC)
+        bg_job.completed_at = now_utc()
     session.add(bg_job)
     await session.commit()
 

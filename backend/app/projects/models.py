@@ -1,11 +1,13 @@
 """Project and ProjectMember models for multi-tenant project management."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, ForeignKey
-from sqlmodel import Field, SQLModel, Relationship
+from sqlalchemy import JSON, Column, DateTime
+from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class ProjectRole(str, enum.Enum):
@@ -37,7 +39,7 @@ class Project(SQLModel, table=True):
         sa_column=Column(JSON, nullable=False, server_default="{}"),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(
@@ -56,6 +58,6 @@ class ProjectMember(SQLModel, table=True):
     user_id: str = Field(foreign_key="users.id", index=True)
     role: ProjectRole = Field(default=ProjectRole.ANNOTATOR)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

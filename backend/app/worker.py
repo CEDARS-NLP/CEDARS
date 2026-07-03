@@ -8,17 +8,18 @@ from urllib.parse import urlparse
 
 from arq.connections import RedisSettings
 
-from app.config import settings
+import app.annotations.models  # noqa: F401
 
 # Import ALL models at worker startup so SQLAlchemy can resolve foreign keys.
 # The ARQ worker runs in a separate process without the FastAPI app context.
 import app.auth.models  # noqa: F401
-import app.projects.models  # noqa: F401
 import app.connectors.models  # noqa: F401
-import app.nlp.models  # noqa: F401
-import app.annotations.models  # noqa: F401
-import app.pipeline.models  # noqa: F401
 import app.evaluation.models  # noqa: F401  # Phase 1: unified eval models
+import app.nlp.models  # noqa: F401
+import app.pipeline.models  # noqa: F401
+import app.projects.models  # noqa: F401
+from app.common.utils import now_utc
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,15 +88,16 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
     Uses PatientResult rows instead of PatientTask. Reuses the same
     search + classify logic but stores results in the new schema.
     """
+    import logging
+
+    from sqlalchemy import select
+
     from app.common.database import async_session
-    from app.evaluation.models import EvaluationSession, PatientResult, PatientResultStatus
-    from app.pipeline.models import PipelineRun, PipelineRunStatus
     from app.connectors.models import Note
+    from app.evaluation.models import EvaluationSession, PatientResult, PatientResultStatus
     from app.nlp.engine import parse_query, process_note
     from app.pipeline.classifier import classify_patient
-    from sqlalchemy import select
-    from datetime import UTC, datetime
-    import logging
+    from app.pipeline.models import PipelineRun, PipelineRunStatus
 
     logger = logging.getLogger(__name__)
 
@@ -105,7 +107,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
             return {"error": "Run not found"}
 
         run.status = PipelineRunStatus.RUNNING
-        run.started_at = datetime.now(UTC)
+        run.started_at = now_utc()
         db.add(run)
         await db.commit()
 
@@ -175,7 +177,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                 break
 
             pr.status = PatientResultStatus.PROCESSING
-            pr.started_at = datetime.now(UTC)
+            pr.started_at = now_utc()
             db.add(pr)
             await db.commit()
 
@@ -224,7 +226,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                 if not matched_notes:
                     pr.status = PatientResultStatus.NO_MATCH
                     pr.finding_label = "no_match"
-                    pr.completed_at = datetime.now(UTC)
+                    pr.completed_at = now_utc()
                 else:
                     # Classify with LLM
                     excerpts = [
@@ -244,7 +246,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                     pr.predicted_score = classification.confidence
                     pr.token_usage = classification.token_usage
                     pr.status = PatientResultStatus.COMPLETED
-                    pr.completed_at = datetime.now(UTC)
+                    pr.completed_at = now_utc()
 
                     # Create annotation with matched keyword sentences (not LLM evidence)
                     from app.annotations.models import Annotation, ReviewStatus
@@ -284,7 +286,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
             except Exception as e:
                 pr.status = PatientResultStatus.FAILED
                 pr.error_message = str(e)
-                pr.completed_at = datetime.now(UTC)
+                pr.completed_at = now_utc()
                 failed += 1
                 logger.warning("Eval pipeline failed for patient %s: %s", pr.patient_id, e)
 
@@ -362,7 +364,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
             eval_session.status = SessionStatus.COMPLETED
             db.add(eval_session)
 
-        run.completed_at = datetime.now(UTC)
+        run.completed_at = now_utc()
         db.add(run)
         await db.commit()
 
@@ -380,6 +382,7 @@ async def on_worker_startup(ctx: dict) -> None:
     log = logging.getLogger("arq.worker.startup")
     try:
         from sqlalchemy import select
+
         from app.common.database import async_session
         from app.evaluation.models import PatientResult, PatientResultStatus
         from app.pipeline.models import PipelineRun, PipelineRunStatus

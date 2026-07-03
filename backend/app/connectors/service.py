@@ -4,7 +4,7 @@ import io
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.annotations.models import Annotation
 from app.audit.models import AuditAction
 from app.audit.service import log_action
+from app.common.crud import get_scoped, list_scoped, soft_delete
+from app.common.utils import now_utc
 from app.connectors.models import (
     ConnectorType,
     DataSource,
@@ -50,25 +52,13 @@ async def create_data_source(
 async def list_data_sources(
     session: AsyncSession, project_id: str
 ) -> list[DataSource]:
-    stmt = (
-        select(DataSource)
-        .where(DataSource.project_id == project_id, DataSource.deleted_at.is_(None))
-        .order_by(DataSource.created_at.desc())
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return await list_scoped(session, DataSource, project_id)
 
 
 async def get_data_source(
     session: AsyncSession, project_id: str, data_source_id: str
 ) -> DataSource | None:
-    stmt = select(DataSource).where(
-        DataSource.id == data_source_id,
-        DataSource.project_id == project_id,
-        DataSource.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return await get_scoped(session, DataSource, project_id, data_source_id)
 
 
 async def delete_data_source(
@@ -77,9 +67,7 @@ async def delete_data_source(
     ds = await get_data_source(session, project_id, data_source_id)
     if not ds:
         return False
-    ds.deleted_at = datetime.now(UTC)
-    session.add(ds)
-    await session.commit()
+    await soft_delete(session, ds)
     return True
 
 
@@ -195,7 +183,7 @@ async def _run_ingestion_pipeline(
 
         ds.status = IngestionStatus.COMPLETED
         ds.row_count = inserted_rows
-        ds.last_sync = datetime.now(UTC)
+        ds.last_sync = now_utc()
         ds.error_message = None
 
     except Exception as exc:
@@ -272,8 +260,8 @@ async def dispatch_ingestion_job(
     if use_sync:
         import asyncio
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from app.jobs.ingestion import execute_ingestion_job
 
@@ -351,7 +339,7 @@ async def cancel_ingestion_job(
 
     bg_job.is_cancelled = True
     bg_job.status = JobStatus.CANCELLED
-    bg_job.completed_at = datetime.now(UTC)
+    bg_job.completed_at = now_utc()
     session.add(bg_job)
     await session.commit()
 

@@ -1,10 +1,10 @@
 """Ingestion pipeline ARQ job implementation."""
 
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.common.utils import now_utc
 from app.config import settings
 from app.jobs.models import BackgroundJob, JobStatus
 
@@ -44,7 +44,7 @@ async def execute_ingestion_job(
             return {"error": "Job not found"}
 
         bg_job.status = JobStatus.RUNNING
-        bg_job.started_at = datetime.now(UTC)
+        bg_job.started_at = now_utc()
         session.add(bg_job)
         await session.commit()
 
@@ -90,7 +90,7 @@ async def execute_ingestion_job(
                     ds.error_message = "Cancelled by user"
                     session.add(ds)
                     bg_job.status = JobStatus.CANCELLED
-                    bg_job.completed_at = datetime.now(UTC)
+                    bg_job.completed_at = now_utc()
                     bg_job.result_summary = _summary()
                     session.add(bg_job)
                     await session.commit()
@@ -128,7 +128,7 @@ async def execute_ingestion_job(
 
             ds.status = IngestionStatus.COMPLETED
             ds.row_count = inserted_rows
-            ds.last_sync = datetime.now(UTC)
+            ds.last_sync = now_utc()
             ds.error_message = None
             session.add(ds)
             await session.commit()
@@ -140,7 +140,7 @@ async def execute_ingestion_job(
 
             bg_job.status = JobStatus.COMPLETED
             bg_job.progress = 100
-            bg_job.completed_at = datetime.now(UTC)
+            bg_job.completed_at = now_utc()
             bg_job.result_summary = _summary()
 
         except Exception as exc:

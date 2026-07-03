@@ -3,7 +3,6 @@
 from app.connectors.base import ConnectorBase
 from app.connectors.models import ConnectorType
 
-
 _registry: dict[ConnectorType, type[ConnectorBase]] = {}
 
 

@@ -1,11 +1,12 @@
 """Pipeline run orchestration: dispatch, cancel, retry, stats."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Patient
 from app.evaluation.models import EvaluationSession, PatientResult, SessionStatus
@@ -210,7 +211,7 @@ async def cancel_run(
         raise ValueError("Cannot cancel a completed/failed run")
     run.is_cancelled = True
     run.status = PipelineRunStatus.CANCELLED
-    run.updated_at = datetime.now(UTC)
+    run.updated_at = now_utc()
     session.add(run)
     await session.commit()
 
@@ -227,7 +228,7 @@ async def cancel_run(
         eval_session = await session.get(EvaluationSession, row[0])
         if eval_session and eval_session.status == SessionStatus.COMMITTED:
             eval_session.status = SessionStatus.DISCARDED
-            eval_session.updated_at = datetime.now(UTC)
+            eval_session.updated_at = now_utc()
             session.add(eval_session)
             await session.commit()
 
@@ -333,7 +334,7 @@ async def retry_failed(
 
     run.status = PipelineRunStatus.QUEUED
     run.is_cancelled = False
-    run.updated_at = datetime.now(UTC)
+    run.updated_at = now_utc()
     session.add(run)
     await session.commit()
     await session.refresh(run)
@@ -416,7 +417,7 @@ async def retry_stalled(
     if not run or run.project_id != project_id:
         raise ValueError("Pipeline run not found")
 
-    cutoff = datetime.now(UTC) - __import__("datetime").timedelta(minutes=stale_minutes)
+    cutoff = now_utc() - timedelta(minutes=stale_minutes)
     stmt = select(PatientTask).where(
         PatientTask.pipeline_run_id == run_id,
         PatientTask.status == PatientTaskStatus.PROCESSING,
@@ -506,6 +507,7 @@ async def get_queue_overview(session: AsyncSession, project_id: str) -> dict:
     arq_queued = 0
     try:
         from arq import create_pool
+
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())

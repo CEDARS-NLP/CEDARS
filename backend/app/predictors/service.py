@@ -1,10 +1,9 @@
 """Business logic for predictor configuration."""
 
-from datetime import UTC, datetime
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.predictors.models import PredictorConfig, PredictorType
 
 
@@ -32,25 +31,13 @@ async def create_predictor_config(
 async def list_predictor_configs(
     session: AsyncSession, project_id: str
 ) -> list[PredictorConfig]:
-    stmt = (
-        select(PredictorConfig)
-        .where(PredictorConfig.project_id == project_id, PredictorConfig.deleted_at.is_(None))
-        .order_by(PredictorConfig.created_at.desc())
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return await list_scoped(session, PredictorConfig, project_id)
 
 
 async def get_predictor_config(
     session: AsyncSession, project_id: str, predictor_id: str
 ) -> PredictorConfig | None:
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.id == predictor_id,
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return await get_scoped(session, PredictorConfig, project_id, predictor_id)
 
 
 async def update_predictor_config(
@@ -79,9 +66,7 @@ async def delete_predictor_config(
     pc = await get_predictor_config(session, project_id, predictor_id)
     if not pc:
         return False
-    pc.deleted_at = datetime.now(UTC)
-    session.add(pc)
-    await session.commit()
+    await soft_delete(session, pc)
     return True
 
 

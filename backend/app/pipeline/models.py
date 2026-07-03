@@ -13,29 +13,15 @@ State machines:
 """
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, Index, Text
-from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
-
-def _enum_column(enum_cls, **kwargs):
-    """Enum column that persists the member VALUE (lowercase), not the NAME.
-
-    SQLAlchemy's default binds the enum member name (e.g. "RUNNING"), but the
-    Postgres enum types were created with the lowercase values ("running").
-    values_callable forces the correct binding so Postgres accepts it. SQLite
-    (tests) is lax about this, which is why the mismatch only surfaced on PG.
-    """
-    return Column(
-        SAEnum(enum_cls, values_callable=lambda e: [m.value for m in e]),
-        **kwargs,
-    )
-
+from app.common.db_types import enum_column as _enum_column
+from app.common.utils import now_utc
 
 # ── Enums ────────────────────────────────────────────────────────
 
@@ -112,11 +98,11 @@ class EventConfig(SQLModel, table=True):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     deleted_at: datetime | None = Field(
@@ -158,11 +144,11 @@ class PipelineRun(SQLModel, table=True):
     # Metadata
     created_by: str = Field(default="")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     started_at: datetime | None = Field(
@@ -213,7 +199,7 @@ class PatientTask(SQLModel, table=True):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     started_at: datetime | None = Field(

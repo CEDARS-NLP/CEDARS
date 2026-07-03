@@ -14,12 +14,12 @@ misconfigured event definition or a downed provider.
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.annotations.models import Annotation, ReviewStatus
+from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note
 from app.evaluation.models import EvaluationSession, PatientResult, SessionStatus
@@ -75,7 +75,7 @@ async def _sync_eval_session_status(
     else:
         return
 
-    eval_session.updated_at = datetime.now(UTC)
+    eval_session.updated_at = now_utc()
     db.add(eval_session)
     await db.commit()
 
@@ -117,7 +117,7 @@ async def process_single_patient(
         try:
             async with db.begin_nested():
                 task.transition_status(PatientTaskStatus.PROCESSING)
-                task.started_at = datetime.now(UTC)
+                task.started_at = now_utc()
                 db.add(task)
                 await db.flush()
 
@@ -136,7 +136,7 @@ async def process_single_patient(
 
                 if not matches:
                     task.transition_status(PatientTaskStatus.NO_MATCH)
-                    task.completed_at = datetime.now(UTC)
+                    task.completed_at = now_utc()
                     db.add(task)
                     await db.commit()
                     return {"status": "no_match", "patient_id": task.patient_id}
@@ -191,7 +191,7 @@ async def process_single_patient(
                 ))
 
                 task.transition_status(PatientTaskStatus.COMPLETED)
-                task.completed_at = datetime.now(UTC)
+                task.completed_at = now_utc()
                 db.add(task)
 
             await db.commit()
@@ -211,7 +211,7 @@ async def process_single_patient(
             await db.refresh(task)
             task.status = PatientTaskStatus.FAILED
             task.error_message = str(exc)[:1000]
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = now_utc()
             db.add(task)
             await db.commit()
             return {
@@ -247,7 +247,7 @@ async def execute_pipeline_run(
             return {"error": "Run not found"}
 
         run.status = PipelineRunStatus.RUNNING
-        run.updated_at = datetime.now(UTC)
+        run.updated_at = now_utc()
         db.add(run)
         await db.commit()
 
@@ -265,7 +265,7 @@ async def execute_pipeline_run(
         if not tasks:
             run.status = PipelineRunStatus.COMPLETED
             run.result_summary = {"patients_processed": 0}
-            run.updated_at = datetime.now(UTC)
+            run.updated_at = now_utc()
             db.add(run)
             await db.commit()
             return {"patients_processed": 0}
@@ -273,6 +273,7 @@ async def execute_pipeline_run(
         # Enqueue each patient as a separate ARQ job
         try:
             from arq import create_pool
+
             from app.worker import parse_redis_settings
 
             redis = await create_pool(parse_redis_settings())
@@ -291,7 +292,7 @@ async def execute_pipeline_run(
             logger.exception("Failed to enqueue patient jobs for run %s", pipeline_run_id)
             run.status = PipelineRunStatus.FAILED
             run.result_summary = {"error": "Failed to enqueue patient jobs"}
-            run.updated_at = datetime.now(UTC)
+            run.updated_at = now_utc()
             db.add(run)
             await db.commit()
             return {"error": "Failed to enqueue patient jobs"}
@@ -332,7 +333,7 @@ async def execute_pipeline_run(
             # Update run progress
             run.processed_patients = done
             run.failed_patients = failed
-            run.updated_at = datetime.now(UTC)
+            run.updated_at = now_utc()
             db.add(run)
             await db.commit()
 
@@ -391,7 +392,7 @@ async def execute_pipeline_run(
         }
 
         run.result_summary = stats
-        run.updated_at = datetime.now(UTC)
+        run.updated_at = now_utc()
         db.add(run)
         await db.commit()
         await _sync_eval_session_status(db, run.id, run.status)

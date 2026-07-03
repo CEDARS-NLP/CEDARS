@@ -1,11 +1,13 @@
 """User model and role enum for authentication."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
+
+from app.common.utils import now_utc
 
 
 class UserRole(str, enum.Enum):
@@ -27,6 +29,6 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.USER)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
