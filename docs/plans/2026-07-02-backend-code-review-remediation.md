@@ -1,7 +1,7 @@
 # CEDARS v2 Backend — Code Review Remediation Plan
 
 **Date:** 2026-07-02
-**Status:** Phases 1 + 0 + 2 + 3 DONE; Phase 4 partial
+**Status:** Phases 1 + 0 + 2 + 3 DONE; Phase 4 mostly done (4 of 8 items; 4 pending)
 **Source:** Full backend review (4 parallel reviewers: DRY, Postgres-portability, correctness, testing)
 **Trigger:** A single bug (LLM `api_base`) had 4 copies; a schema-casing bug crashed prod but passed tests. Both point to systemic issues: duplication and SQLite-only testing.
 
@@ -141,16 +141,29 @@ catch, for little gain. Extracted the *query* logic only — zero schema impact.
 
 ## Phase 4 — Robustness (P2)
 
-| Issue | Location | Fix |
-|-------|----------|-----|
-| N+1 note fetch per patient | `evaluation/service.py:622-637` | Single `.where(Note.patient_id.in_(ids))`, group in Python |
-| Race in cancellation check | `worker.py:164-171` | `SELECT FOR UPDATE` on the run row (mirror `orchestrator._check_no_active_run`) |
-| Unbounded list/dict inputs | `pipeline/schemas.py:13`, `evaluation/schemas.py:17,22` | Pydantic `max_length` on lists |
-| Missing pagination bounds | `connectors/service.py:687` | `limit: int = Field(le=1000)`, `offset: ge=0` |
-| Silent `except Exception: pass` | `orchestrator.py:517` | Log at WARNING |
-| Redis connection leak on error | `connectors/service.py:249-269` | `async with create_pool(...)` |
-| Cross-project resource access | eval/pipeline routers | Assert fetched resource `.project_id == path project_id` |
-| Databricks SQL f-string LIMIT/OFFSET | `connectors/databricks.py:65,72,87` | Parameterize (keep identifier validation) |
+| Issue | Location | Fix | Status |
+|-------|----------|-----|--------|
+| N+1 note fetch per patient | `evaluation/service.py:622-637` | Batch fetch (bounded), group in Python | ✅ DONE (70d35913) |
+| ~~Race in cancellation check~~ **patient-claim race** | `worker.py` `run_eval_pipeline_job` | `FOR UPDATE SKIP LOCKED` on the claim, guarded by `_USE_DB_LOCKING` | ✅ DONE (7de5e893) |
+| Unbounded list inputs | `evaluation/schemas.py` | Pydantic `max_length=50` on `search_queries` | ✅ DONE (083db2a9) |
+| Redis connection leak on error | `connectors/service.py` | `contextlib.aclosing(create_pool(...))` | ✅ DONE (931512f3) |
+| Missing pagination bounds | `connectors/service.py:687` | `limit: int = Field(le=1000)`, `offset: ge=0` | pending |
+| Silent `except Exception: pass` | `orchestrator.py:517` | Log at WARNING | pending |
+| Cross-project resource access | eval/pipeline routers | Assert fetched resource `.project_id == path project_id` | pending |
+| Databricks SQL f-string LIMIT/OFFSET | `connectors/databricks.py:65,72,87` | Parameterize (keep identifier validation) | pending |
+
+**Correction to the original review:** item #2 was filed as a "cancellation
+race" fixable with `SELECT FOR UPDATE` on the run row. Verified against the
+code: `is_cancelled` is a plain bool set from one place and re-read via
+`db.refresh(run)` each iteration — that's eventual-consistency *lag* (the loop
+finishes the in-flight patient before noticing), not a lost-update race, and
+`FOR UPDATE` wouldn't address it. The genuine latent bug is the **patient
+claim** (`SELECT ... LIMIT 1` → mark PROCESSING with no row lock): two workers
+on the same run could grab the same patient. Fixed with `SKIP LOCKED` to match
+the standard pipeline path. Latent today (one ARQ job per run = single
+consumer). Also: `pipeline/schemas.py` list fields were re-checked — they are
+`dict`, not `list`, so no list bound applies there; only `evaluation/schemas.py`
+needed the cap.
 
 ---
 
