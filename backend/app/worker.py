@@ -23,6 +23,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Row-level locking (FOR UPDATE SKIP LOCKED) is a PostgreSQL feature; SQLite
+# (tests) ignores/rejects it. Mirror the guard used in pipeline/orchestrator.py
+# and evaluation/service.py so the same code path is safe on both backends.
+_USE_DB_LOCKING = "sqlite" not in settings.database_url
+
 
 def parse_redis_settings() -> RedisSettings:
     """Parse CEDARS redis_url into ARQ RedisSettings."""
@@ -166,11 +171,16 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
             if run.is_cancelled:
                 break
 
-            # Pick next queued patient
+            # Pick next queued patient. FOR UPDATE SKIP LOCKED lets multiple
+            # workers on the same run claim distinct patients without two workers
+            # grabbing the same row (which would double the LLM spend and create
+            # duplicate annotations). Matches the standard pipeline claim path.
             stmt = select(PatientResult).where(
                 PatientResult.pipeline_run_id == run_id,
                 PatientResult.status == PatientResultStatus.QUEUED,
             ).limit(1)
+            if _USE_DB_LOCKING:
+                stmt = stmt.with_for_update(skip_locked=True)
             result = await db.execute(stmt)
             pr = result.scalar_one_or_none()
             if not pr:
