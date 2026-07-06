@@ -223,3 +223,32 @@ class TestUnifiedEvalSessionWorkflow:
         resp = await auth_client.post(f"{base}/sessions", json={"search_queries": []})
         assert resp.status_code == 201
         assert resp.json()["id"] != sid1
+
+
+class TestSessionInputBounds:
+    """Guard the search_queries list bound (evaluation/schemas.py)."""
+
+    async def test_create_session_rejects_oversized_query_list(
+        self, auth_client, project_with_data
+    ):
+        """A search_queries list past the cap is rejected with 422, not run.
+
+        Each query fans out across every note of every sampled patient, so an
+        unbounded list is a real DoS/memory vector — the cap must be enforced
+        at the API boundary.
+        """
+        base = f"/api/v1/projects/{project_with_data}/evaluation"
+        oversized = [{"query": f"term{i}", "type": "include"} for i in range(51)]
+
+        resp = await auth_client.post(f"{base}/sessions", json={"search_queries": oversized})
+        assert resp.status_code == 422
+
+    async def test_create_session_accepts_list_at_cap(
+        self, auth_client, project_with_data
+    ):
+        """Exactly the cap (50) is still accepted."""
+        base = f"/api/v1/projects/{project_with_data}/evaluation"
+        at_cap = [{"query": f"term{i}", "type": "include"} for i in range(50)]
+
+        resp = await auth_client.post(f"{base}/sessions", json={"search_queries": at_cap})
+        assert resp.status_code == 201

@@ -12,13 +12,19 @@ class SearchQueryItem(BaseModel):
     type: str = "include"  # "include" or "exclude"
 
 
+# A session runs every query against every note of every sampled patient, so an
+# unbounded list is both a memory risk and a fan-out multiplier in the worker
+# loop. 50 is far above any real event definition.
+_MAX_SEARCH_QUERIES = 50
+
+
 class CreateSessionRequest(BaseModel):
-    search_queries: list[SearchQueryItem] = []
+    search_queries: list[SearchQueryItem] = Field(default=[], max_length=_MAX_SEARCH_QUERIES)
     cloned_from_id: str | None = None
 
 
 class UpdateQueriesRequest(BaseModel):
-    search_queries: list[SearchQueryItem]
+    search_queries: list[SearchQueryItem] = Field(max_length=_MAX_SEARCH_QUERIES)
 
 
 class EventConfigRequest(BaseModel):
