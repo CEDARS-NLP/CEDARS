@@ -235,25 +235,27 @@ async def dispatch_ingestion_job(
 
     use_sync = True
     try:
+        from contextlib import aclosing
+
         from arq import create_pool
 
         from app.worker import parse_redis_settings
 
-        redis = await create_pool(parse_redis_settings())
-
-        health_key = await redis.exists(b"arq:queue:health-check")
-        if health_key:
-            arq_job = await redis.enqueue_job(
-                "run_ingestion_job", project_id, bg_job.id, data_source_id
-            )
-            bg_job.arq_job_id = arq_job.job_id
-            session.add(bg_job)
-            await session.commit()
-            use_sync = False
-        else:
-            logger.warning("No ARQ workers found, running ingestion as background task")
-
-        await redis.aclose()
+        # aclosing guarantees the pool is closed even if exists()/enqueue_job()/
+        # commit() raises — a bare aclose() after the block leaks the connection
+        # on any error before it (relevant when Redis is flapping).
+        async with aclosing(await create_pool(parse_redis_settings())) as redis:
+            health_key = await redis.exists(b"arq:queue:health-check")
+            if health_key:
+                arq_job = await redis.enqueue_job(
+                    "run_ingestion_job", project_id, bg_job.id, data_source_id
+                )
+                bg_job.arq_job_id = arq_job.job_id
+                session.add(bg_job)
+                await session.commit()
+                use_sync = False
+            else:
+                logger.warning("No ARQ workers found, running ingestion as background task")
     except Exception:
         logger.warning("ARQ unavailable, running ingestion as background task")
 
