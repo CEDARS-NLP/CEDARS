@@ -30,6 +30,19 @@ logger = logging.getLogger(__name__)
 # ── Data Source CRUD ──────────────────────────────────────────────
 
 
+def _encrypt_secrets(connector_type: ConnectorType, config: dict) -> dict:
+    """Encrypt sensitive fields in a connector config before persisting.
+
+    Databricks access tokens are stored encrypted at rest; connect paths
+    decrypt them via ``app.common.crypto.decrypt_value``.
+    """
+    if connector_type == ConnectorType.DATABRICKS and config.get("token"):
+        from app.common.crypto import encrypt_value
+
+        config = {**config, "token": encrypt_value(config["token"])}
+    return config
+
+
 async def create_data_source(
     session: AsyncSession,
     project_id: str,
@@ -37,6 +50,7 @@ async def create_data_source(
     connector_type: ConnectorType,
     config: dict,
 ) -> DataSource:
+    config = _encrypt_secrets(connector_type, config)
     ds = DataSource(
         project_id=project_id,
         name=name,

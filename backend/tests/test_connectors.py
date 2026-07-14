@@ -62,6 +62,52 @@ class TestModels:
         assert PatientStatus.REVIEWED.value == "reviewed"
 
 
+# ── Secret encryption at rest ─────────────────────────────────────
+
+
+class TestSecretEncryption:
+    def test_databricks_token_encrypted_on_write(self):
+        from app.connectors.service import _encrypt_secrets
+
+        config = {"host": "h", "http_path": "p", "token": "dapi-secret"}
+        stored = _encrypt_secrets(ConnectorType.DATABRICKS, config)
+
+        assert stored["token"] != "dapi-secret"  # not persisted verbatim
+        assert config["token"] == "dapi-secret"  # input dict not mutated
+
+    def test_encrypted_token_decrypts_for_connect(self):
+        from app.common.crypto import decrypt_value
+        from app.connectors.service import _encrypt_secrets
+
+        stored = _encrypt_secrets(
+            ConnectorType.DATABRICKS,
+            {"host": "h", "http_path": "p", "token": "dapi-secret"},
+        )
+        assert decrypt_value(stored["token"]) == "dapi-secret"
+
+    def test_file_upload_config_untouched(self):
+        from app.connectors.service import _encrypt_secrets
+
+        config = {"s3_key": "x.csv", "file_type": "csv"}
+        assert _encrypt_secrets(ConnectorType.FILE_UPLOAD, config) == config
+
+    def test_connect_databricks_decrypts_token(self):
+        from app.common.crypto import encrypt_value
+        from app.connectors.databricks import connect_databricks
+
+        config = {
+            "host": "h",
+            "http_path": "p",
+            "token": encrypt_value("dapi-secret"),
+        }
+        with patch(
+            "app.connectors.databricks.databricks_sql.connect"
+        ) as mock_connect:
+            connect_databricks(config)
+        mock_connect.assert_called_once()
+        assert mock_connect.call_args.kwargs["access_token"] == "dapi-secret"
+
+
 # ── Registry tests ────────────────────────────────────────────────
 
 
