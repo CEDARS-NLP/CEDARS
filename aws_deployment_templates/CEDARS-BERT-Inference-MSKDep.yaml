@@ -1,0 +1,470 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fully self-contained CEDARS with AutoScaling for CPU BERT Model via SQS
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+  WebServerInstanceType:
+    Description: CEDARS CPU EC2 instance type
+    Type: String
+    Default: t3.xlarge
+    AllowedValues:
+      - t3.xlarge
+      - t3.2xlarge
+
+  ModelS3Path:
+    Type: String
+    Default: s3://impactvte-20241126180226478700000001/models/mets-mbert-8k-cedars/
+    Description: Path to BERT model stored on S3
+    AllowedValues:
+      - s3://pines-models-storage/models/bert-tiny/
+      - s3://impactvte-20241126180226478700000001/models/mets-mbert-8k-cedars/
+
+Resources:
+  # -----------------------
+  # SQS Queue
+  # -----------------------
+  InferenceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: bert-inference
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: InferenceQueue
+
+  ResponseQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: bert-response
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: ResponseQueue
+
+  # -----------------------
+  # Web Server Security Rules
+  # -----------------------
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group For CEDARS EC2 connections
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5001
+          ToPort: 5001
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServerSecurityGroup
+
+  # -----------------------
+  # Web Server IAM Role
+  # -----------------------
+  #userServiceRoleCedarsWebApp:
+  #  Type: AWS::IAM::Role
+  #  Properties:
+  #    AssumeRolePolicyDocument:
+  #      Version: '2012-10-17'
+  #      Statement:
+  #        - Effect: Allow
+  #          Principal:
+  #            Service: ec2.amazonaws.com
+  #          Action: sts:AssumeRole
+  #    ManagedPolicyArns: 
+  #      - 'arn:aws:iam::aws:policy/AmazonSQSFullAccess'
+  #    RoleName: userServiceRoleCedarsWebApp
+  #    PermissionsBoundary: arn:aws:iam::${AWS::AccountId}:policy/AutomationOrUserServiceRolePermissions
+  #    Tags:
+  #      - Key: cost-center
+  #        Value: '99424'
+  #      - Key: owner-email
+  #        Value: manthas@mskcc.org
+  #      - Key: resource-name
+  #        Value: userServiceRoleCedarsWebApp
+
+  #WebAppInstanceProfile:
+  #  Type: AWS::IAM::InstanceProfile
+  #  Properties:
+  #    Roles:
+  #      - arn:aws:iam::730335493184:role/userServiceRoleCedarsWebApp
+
+  # -----------------------
+  # Web Server EC2
+  # -----------------------
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      InstanceType: !Ref WebServerInstanceType
+      IamInstanceProfile: arn:aws:iam::730335493184:instance-profile/userServiceRoleCedarsWebApp
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 64
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServer
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          set -e
+
+          # Update system
+          dnf update -y
+
+          # Install dnf plugin
+          dnf -y install dnf-plugins-core
+          # Add CentOS repository
+          dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+          # Adjust release server version in the path as it will not match with Amazon Linux 2023
+          sed -i 's/$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+          # Install as usual
+          dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # Enable the docker service
+          systemctl enable --now docker
+
+          # Install Docker, Docker Compose and Git
+          dnf install -y git
+
+          mkdir -p /home/ec2-user/CEDARS
+          cd /home/ec2-user/
+
+          # Get CEDARS
+          git clone https://github.com/CEDARS-NLP/CEDARS.git --branch aws_template CEDARS
+          cd /home/ec2-user/CEDARS
+
+          # Get the PINES submodule
+          git submodule init
+          git submodule update
+
+          # Add the .env files
+
+          export DB_PASSWORD=$(tr -dc 'A-Za-z0-9_' </dev/urandom | head -c 24)
+          export MINIO_PASSWORD=$(tr -dc 'A-Za-z0-9_' </dev/urandom | head -c 24)
+          export PROJECT_ID=$(tr -dc 'a-z0-9' </dev/urandom | head -c 24)
+          export SECRET_KEY=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+
+          cat > /home/ec2-user/CEDARS/.env << EOF
+          DB_PORT=27017
+          DB_HOST_PORT=27018
+          DB_USER=admin
+          DB_PWD=$DB_PASSWORD
+          MINIO_HOST=minio
+          MINIO_PORT=9000
+          MINIO_ACCESS_KEY=rootuser
+          MINIO_SECRET_KEY=$MINIO_PASSWORD
+          MINIO_VERSION=RELEASE.2024-05-10T01-41-38Z
+          AWS_REGION=${AWS::Region}
+          MINIO_CONNECTION_TYPE=LOCAL_DOCKER
+          ENV=prod
+          REDIS_PORT=6379
+          WORKER_SCALE=2
+          GPU_SCALE=1
+          PINES_WORKERS=1
+          BERT_INFERENCE_TYPE=SQS_Inference
+          INFERENCE_QUEUE_URL=${InferenceQueue}
+          RESPONSE_QUEUE_URL=${ResponseQueue}
+          EOF
+
+          cat > /home/ec2-user/CEDARS/cedars/.env << EOF
+          PROJECT_ID=$PROJECT_ID
+          SECRET_KEY=$SECRET_KEY
+          HOST=0.0.0.0
+          DB_HOST=db
+          DB_NAME=cedars
+          DB_PORT=27017
+          DB_HOST_PORT=27018
+          DB_USER=admin
+          DB_PWD=$DB_PASSWORD
+          DB_PARAMS="authSource=admin"
+          MINIO_HOST=minio
+          MINIO_PORT=9000
+          MINIO_ACCESS_KEY=rootuser
+          MINIO_SECRET_KEY=$MINIO_PASSWORD
+          AWS_REGION=${AWS::Region}
+          MINIO_CONNECTION_TYPE=LOCAL_DOCKER
+          ENV=dev
+          PINES_API_URL=http://pines:8036
+          REDIS_URL=redis
+          REDIS_PORT=6379
+          RQ_DASHBOARD_URL=/rq
+          PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          BERT_INFERENCE_TYPE=SQS_Inference
+          INFERENCE_QUEUE_URL=${InferenceQueue}
+          RESPONSE_QUEUE_URL=${ResponseQueue}
+          EOF
+
+          systemctl start docker
+          systemctl enable docker
+
+          echo "Starting docker build"
+          docker compose --profile selfhosted --profile cpu build --no-cache
+          echo "Finished docker build"
+          docker compose --profile selfhosted --profile cpu up -d
+          echo "Docker is now running"
+
+  # -----------------------
+  # IAM Inference Roles
+  # -----------------------
+  #userServiceRoleBERTInferenceInstance:
+  #  Type: AWS::IAM::Role
+  #  Properties:
+  #    AssumeRolePolicyDocument:
+  #      Version: '2012-10-17'
+  #      Statement:
+  #        - Effect: Allow
+  #          Principal:
+  #            Service: ec2.amazonaws.com
+  #          Action: sts:AssumeRole
+  #    ManagedPolicyArns:
+  #      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+  #      - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+  #      - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+  #      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  #    RoleName: userServiceRoleBERTInferenceInstance
+  #    PermissionsBoundary: arn:aws:iam::${AWS::AccountId}:policy/AutomationOrUserServiceRolePermissions
+  #    Tags:
+  #      - Key: cost-center
+  #        Value: '99424'
+  #      - Key: owner-email
+  #        Value: manthas@mskcc.org
+  #      - Key: resource-name
+  #        Value: userServiceRoleBERTInferenceInstance
+
+  #BERTInferenceInstanceProfile:
+  #  Type: AWS::IAM::InstanceProfile
+  #  Properties:
+  #    Roles:
+  #      - !Ref userServiceRoleBERTInferenceInstance
+
+  # -----------------------
+  # Launch Template
+  # -----------------------
+  SQSBERTSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group For BERT inference connections
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServerSecurityGroup
+
+  SQSBERTLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType: g4dn.xlarge
+        ImageId: !Sub ami-073d9221f657bc5ff
+        SecurityGroupIds:
+          - !Ref SQSBERTSecurityGroup
+        IamInstanceProfile:
+          Arn: arn:aws:iam::730335493184:instance-profile/userServiceRoleBERTInferenceInstance
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda # Root volume (use /dev/sda1 for some AMIs)
+            Ebs:
+              VolumeSize: 64 # Size in GB
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash
+            set -e
+
+            # Update system
+            dnf update -y
+
+            # Install dnf plugin
+            dnf -y install dnf-plugins-core
+            # Add CentOS repository
+            dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            # Adjust release server version in the path as it will not match with Amazon Linux 2023
+            sed -i 's/$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+            # Install as usual
+            dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            # Enable the docker service
+            systemctl enable --now docker
+
+            # Install Git
+            dnf install -y git
+
+            usermod -aG docker ec2-user
+
+            # Clone repo
+            cd /home/ec2-user
+            git clone https://github.com/Kayan1920/PINES-ECS-DEPLOYMENT.git  --branch base_template app
+            cd app
+
+            cat > /home/ec2-user/app/.env << EOF
+            MODEL_S3_PATH=${ModelS3Path}
+            MAX_LENGTH=256
+            AWS_REGION=${AWS::Region}
+            QUEUE_URL=${InferenceQueue}
+            EOF
+
+            systemctl enable docker
+            systemctl start docker
+
+            # Build Docker image
+            echo "Starting docker build"
+            docker build -t bert-worker .
+            echo "Finished docker build"
+            docker run -d --restart unless-stopped --env-file .env bert-worker
+            echo "Docker is now running"
+
+  # -----------------------
+  # Auto Scaling Group
+  # -----------------------
+  SQSBERTAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: 0
+      MaxSize: 1
+      DesiredCapacity: 0
+      VPCZoneIdentifier:
+        - !Ref SubnetId
+      LaunchTemplate:
+        LaunchTemplateId: !Ref SQSBERTLaunchTemplate
+        Version: !GetAtt SQSBERTLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+          PropagateAtLaunch: true
+        - Key: owner-email
+          Value: manthas@mskcc.org
+          PropagateAtLaunch: true
+        - Key: resource-name
+          Value: SQSBERTAutoScalingGroup
+          PropagateAtLaunch: true
+
+  # -----------------------
+  # Scale Policies
+  # -----------------------
+  SQSBERTScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref SQSBERTAutoScalingGroup
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: 1
+      Cooldown: 60
+
+  SQSBERTQueueDepthHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt InferenceQueue.QueueName
+      AlarmActions:
+        - !Ref SQSBERTScaleUpPolicy
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: SQSBERTQueueDepthHigh
+
+  SQSBERTScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref SQSBERTAutoScalingGroup
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: -1
+      Cooldown: 1800 # 30 minute cooldown
+
+  SQSBERTQueueDepthLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 30
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt InferenceQueue.QueueName
+      AlarmActions:
+        - !Ref SQSBERTScaleDownPolicy
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: SQSBERTQueueDepthLow
+
+Outputs:
+  InferenceQueueURL:
+    Value: !Ref InferenceQueue
+
+  ResponseQueueURL:
+    Value: !Ref ResponseQueue
+
+  WebsiteURL:
+    Value: !Join
+      - ''
+      - - http://
+        - !GetAtt WebServer.PrivateDnsName
+    Description: Website URL

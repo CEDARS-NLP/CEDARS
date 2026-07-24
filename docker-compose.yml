@@ -18,7 +18,8 @@ services:
   web:
     build:
       context: ./cedars
-    image: cedars
+    ports:
+      - 5001:5001
     restart: always
     # flask requires SIGINT to stop gracefully
     # (default stop signal from Compose is SIGTERM)
@@ -172,7 +173,8 @@ services:
       - superbio
 
   worker-task:
-    image: cedars
+    build:
+      context: ./cedars
     command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
@@ -197,7 +199,8 @@ services:
           cpus: '1.0'
     
   worker-ops:
-    image: cedars
+    build:
+      context: ./cedars
     command: python -m app.make_rq ops
     scale: 1
     networks:

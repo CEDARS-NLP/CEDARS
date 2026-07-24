@@ -1892,6 +1892,32 @@ def get_prediction(note: str) -> float:
         raise e
 
 @log_function_call
+def get_prediction_sqs(note: str, sqs_handler) -> float:
+    """
+    ##### PINES predictions
+
+    Get prediction from sqs endpoint.
+    """
+
+    try:
+        request_id = sqs_handler.send_job([note])
+        response = sqs_handler.wait_for_result(request_id)
+        logger.debug(f"Got response from sqs : {response}")
+
+        score = float(response['results'][0]['score'])
+        return score
+    except TimeoutError as e:
+        logger.error("SQS inference request timed out while waiting for response")
+        raise e
+    except Exception as e:
+        logger.error(f"Failed to get prediction for note: {note}")
+        raise e
+<<<<<<< copilot/sub-pr-208
+=======
+
+>>>>>>> aws_template
+
+@log_function_call
 def get_max_prediction_score(patient_id: str):
     """
     Get the max predicted note score for a patient
@@ -1987,7 +2013,8 @@ def get_note_prediction_from_db(note_id: str,
 def predict_and_save(text_ids: Optional[list[str]] = None,
                      note_collection_name: str = "NOTES",
                      pines_collection_name: str = "PINES",
-                     force_update: bool = False) -> None:
+                     force_update: bool = False,
+                     sqs_handler = None) -> None:
     """
     ##### Save PINES predictions
 
@@ -2005,7 +2032,10 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
         note_id = note.get("text_id")
         if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
             logger.info(f"Predicting for note: {note_id}")
-            prediction = get_prediction(note.get("text"))
+            if sqs_handler is None:
+                prediction = get_prediction(note.get("text"))
+            else:
+                prediction = get_prediction_sqs(note.get("text"), sqs_handler)
             pines_collection.insert_one({
                 "text_id": note_id,
                 "text": note.get("text"),

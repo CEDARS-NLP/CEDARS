@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Template for Standalone CPU CEDARS WebServer with
+  Security Group and EC2 Instance
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  InstanceType:
+    Description: CEDARS CPU EC2 instance type
+    Type: String
+    Default: t3.xlarge
+    AllowedValues:
+      - t3.xlarge
+      - t3.2xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+  BucketTitle:
+    Type: String
+    Default: cedars-minio-bucket
+    Description: Lowercase project identifier (used for S3 bucket names)
+    AllowedPattern: "^[a-z0-9-]+$"
+    ConstraintDescription: must contain only lowercase letters, numbers, and hyphens
+Resources:
+  CedarsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${BucketTitle}"
+      VersioningConfiguration:
+        Status: Enabled
+
+  MinioIamUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "minio-s3-${AWS::StackName}"
+      Policies:
+        - PolicyName: MinioS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${CedarsBucket}"
+                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
+  
+  MinioAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref MinioIamUser
+
+  MinioSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MinIO access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group For CEDARS EC2 connections
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5001
+          ToPort: 5001
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0fa3fe0fa7920f68e
+      InstanceType: !Ref InstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 64
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Update system
+          dnf update -y
+
+          # Install dnf plugin
+          dnf -y install dnf-plugins-core
+          # Add CentOS repository
+          dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+          # Adjust release server version in the path as it will not match with Amazon Linux 2023
+          sed -i 's/$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+          # Install as usual
+          dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # Enable the docker service
+          systemctl enable --now docker
+
+          # Install Docker, Docker Compose and Git
+          dnf install -y git
+
+          mkdir -p /home/ec2-user/CEDARS
+          cd /home/ec2-user/
+
+          # Get CEDARS
+          git clone https://github.com/CEDARS-NLP/CEDARS.git --branch aws_template CEDARS
+          cd /home/ec2-user/CEDARS
+
+          # Get the PINES submodule
+          git submodule init
+          git submodule update
+
+          # Add the .env files
+
+          export DB_PASSWORD=$(tr -dc 'A-Za-z0-9_' </dev/urandom | head -c 24)
+          export MINIO_PASSWORD=$(tr -dc 'A-Za-z0-9_' </dev/urandom | head -c 24)
+          export PROJECT_ID=$(tr -dc 'a-z0-9' </dev/urandom | head -c 24)
+          export SECRET_KEY=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+
+          cat > /home/ec2-user/CEDARS/.env << EOF
+          DB_PORT=27017
+          DB_HOST_PORT=27018
+          DB_USER=admin
+          DB_PWD=$DB_PASSWORD
+          MINIO_HOST=minio
+          MINIO_PORT=9000
+          MINIO_ACCESS_KEY=rootuser
+          MINIO_SECRET_KEY=$MINIO_PASSWORD
+          MINIO_VERSION=RELEASE.2024-05-10T01-41-38Z
+          AWS_ACCESS_KEY_ID=${MinioAccessKey}
+          AWS_SECRET_ACCESS_KEY=${MinioAccessKey.SecretAccessKey}
+          S3_BUCKET_NAME=${CedarsBucket}
+          AWS_REGION=${AWS::Region}
+          MINIO_CONNECTION_TYPE=AWS_S3
+          ENV=prod
+          REDIS_PORT=6379
+          WORKER_SCALE=2
+          GPU_SCALE=1
+          PINES_WORKERS=1
+          EOF
+
+          cat > /home/ec2-user/CEDARS/cedars/.env << EOF
+          PROJECT_ID=$PROJECT_ID
+          SECRET_KEY=$SECRET_KEY
+          HOST=0.0.0.0
+          DB_HOST=db
+          DB_NAME=cedars
+          DB_PORT=27017
+          DB_HOST_PORT=27018
+          DB_USER=admin
+          DB_PWD=$DB_PASSWORD
+          DB_PARAMS="authSource=admin"
+          MINIO_HOST=minio
+          MINIO_PORT=9000
+          MINIO_ACCESS_KEY=rootuser
+          MINIO_SECRET_KEY=$MINIO_PASSWORD
+          AWS_ACCESS_KEY_ID=${MinioAccessKey}
+          AWS_SECRET_ACCESS_KEY=${MinioAccessKey.SecretAccessKey}
+          S3_BUCKET_NAME=${CedarsBucket}
+          AWS_REGION=${AWS::Region}
+          MINIO_CONNECTION_TYPE=AWS_S3
+          ENV=dev
+          PINES_API_URL=http://pines:8036
+          REDIS_URL=redis
+          REDIS_PORT=6379
+          RQ_DASHBOARD_URL=/rq
+          PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+          EOF
+
+          systemctl start docker
+          systemctl enable docker
+
+          echo "Starting docker build"
+          docker compose --profile selfhosted --profile cpu build --no-cache
+          echo "Finished docker build"
+          docker compose --profile selfhosted --profile cpu up -d
+          echo "Docker is now running"
+  
+  BucketCleanupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Cleanup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub "arn:aws:s3:::${CedarsBucket}"
+                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  BucketCleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.10
+      Handler: index.handler
+      Role: !GetAtt BucketCleanupRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              bucket_name = event["ResourceProperties"]["BucketName"]
+              
+              try:
+                  if event["RequestType"] == "Delete":
+                      s3 = boto3.resource("s3")
+                      bucket = s3.Bucket(bucket_name)
+                      
+                      logger.info(f"Deleting all objects and versions from bucket: {bucket_name}")
+                      
+                      # Delete all object versions and delete markers
+                      bucket.object_versions.all().delete()
+                      
+                      logger.info(f"Successfully emptied bucket: {bucket_name}")
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  
+  EmptyBucketOnDelete:
+    Type: Custom::EmptyS3Bucket
+    DependsOn: CedarsBucket
+    Properties:
+      ServiceToken: !GetAtt BucketCleanupFunction.Arn
+      BucketName: !Ref CedarsBucket
+
+
+
+Outputs:
+  WebsiteURL:
+    Value: !Join
+      - ''
+      - - http://
+        - !GetAtt WebServer.PublicDnsName
+    Description: Website URL

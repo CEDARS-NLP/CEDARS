@@ -29,7 +29,8 @@ dependencies = [
     "rq_dashboard",
     "polars",
     "prometheus-client",
-    "prometheus-flask-exporter"
+    "prometheus-flask-exporter",
+    "boto3"
 ]
 
 [build-system]
