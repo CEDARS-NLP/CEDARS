@@ -13,6 +13,11 @@ import ProjectLayout from "@/projects/ProjectLayout";
 import ProjectOverview from "@/projects/ProjectOverview";
 import DataPage from "@/projects/DataPage";
 import AnnotationsPage from "@/projects/AnnotationsPage";
+import QueryPage from "@/projects/QueryPage";
+import NlpRunPage from "@/projects/NlpRunPage";
+import AdjudicatePage from "@/projects/AdjudicatePage";
+import StatsPage from "@/projects/StatsPage";
+import InternalProcessesPage from "@/projects/InternalProcessesPage";
 import EvaluationListPage from "@/projects/evaluation/EvaluationListPage";
 import EvaluationSessionPage from "@/projects/evaluation/EvaluationSessionPage";
 import ExportPage from "@/projects/ExportPage";
@@ -119,6 +124,11 @@ export default function App() {
               <Route path="/projects/:projectId" element={<ProjectLayout />}>
                 <Route index element={<ProjectOverview />} />
                 <Route path="data" element={<DataPage />} />
+                <Route path="query" element={<QueryPage />} />
+                <Route path="process" element={<NlpRunPage />} />
+                <Route path="adjudicate" element={<AdjudicatePage />} />
+                <Route path="stats" element={<StatsPage />} />
+                <Route path="internal" element={<InternalProcessesPage />} />
                 <Route path="patients" element={<PatientsPage />} />
                 <Route path="patients/:patientId" element={<PatientDetailPage />} />
                 <Route path="jobs" element={<JobDashboardPage />} />

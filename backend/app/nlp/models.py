@@ -54,6 +54,8 @@ class SearchQuery(SQLModel, table=True):
     nlp_apply: bool = Field(default=True)  # apply predictor after NLP
     hide_duplicates: bool = Field(default=True)  # filter duplicate sentences
     skip_after_event: bool = Field(default=True)  # skip sentences after event date
+    use_negation: bool = Field(default=False)  # v1 tag_query: surface negated matches
+    tag_exact: bool = Field(default=False)  # v1 tag_query.exact flag
     created_by: str | None = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(
         default_factory=now_utc,
@@ -93,6 +95,29 @@ class NlpJob(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    created_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class NotePrediction(SQLModel, table=True):
+    """A predictor score for a single note.
+
+    BCNF port of v1's PINES collection: stores the per-note prediction score
+    produced by PINES/LLM predictors during the optional post-NLP step.
+    """
+
+    __tablename__ = "note_predictions"
+    __table_args__ = (
+        UniqueConstraint("note_id", "predictor_name", name="uq_note_prediction"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    project_id: str = Field(foreign_key="projects.id", index=True)
+    note_id: str = Field(foreign_key="notes.id", index=True)
+    predictor_name: str = Field(default="PINES")
+    score: float
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),

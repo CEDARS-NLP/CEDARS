@@ -18,6 +18,7 @@ import app.evaluation.models  # noqa: F401  # Phase 1: unified eval models
 import app.nlp.models  # noqa: F401
 import app.pipeline.models  # noqa: F401
 import app.projects.models  # noqa: F401
+import app.workflow.models  # noqa: F401
 from app.common.utils import now_utc
 from app.config import settings
 
@@ -71,6 +72,22 @@ async def run_pipeline_job(ctx: dict, pipeline_run_id: str) -> dict:
     from app.jobs.pipeline import execute_pipeline_run
 
     return await execute_pipeline_run(pipeline_run_id)
+
+
+async def run_v1_nlp_patient(ctx: dict, project_id: str, patient_id: str) -> dict:
+    """ARQ task: run the v1-style NLP processor for one patient (ops.py ``do_nlp_processing``)."""
+    from app.common.database import async_session
+    from app.connectors.models import Patient, PatientStatus
+    from app.nlp.processor import process_patient_notes
+
+    async with async_session() as db:
+        result = await process_patient_notes(db, project_id, patient_id)
+        patient = await db.get(Patient, patient_id)
+        if patient is not None and patient.status == PatientStatus.NLP_PROCESSING:
+            patient.status = PatientStatus.NLP_COMPLETE
+            db.add(patient)
+            await db.commit()
+    return result
 
 
 async def run_patient_task(ctx: dict, pipeline_run_id: str, patient_task_id: int) -> dict:
@@ -447,6 +464,7 @@ class WorkerSettings:
         run_patient_task,
         run_sample_llm_job,
         run_eval_pipeline_job,
+        run_v1_nlp_patient,
     ]
     on_startup = on_worker_startup
     redis_settings = parse_redis_settings()

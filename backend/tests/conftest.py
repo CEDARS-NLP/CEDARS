@@ -7,11 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from app.annotations.models import Annotation  # noqa: F401
+from app.annotations.models import Annotation, AnnotationToken  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
 from app.common.database import get_session
-from app.connectors.models import DataSource, Note, Patient  # noqa: F401
+from app.connectors.models import DataSource, Note, NoteTag, Patient  # noqa: F401
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
     PatientResult,
@@ -19,7 +19,7 @@ from app.evaluation.models import (  # noqa: F401
 )
 from app.jobs.models import BackgroundJob  # noqa: F401
 from app.main import create_app
-from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
+from app.nlp.models import NlpJob, NotePrediction, SearchQuery, Sentence  # noqa: F401
 from app.pipeline.models import (  # noqa: F401 — register pipeline tables in metadata
     EventConfig,
     Evidence,
@@ -28,6 +28,7 @@ from app.pipeline.models import (  # noqa: F401 — register pipeline tables in 
 )
 from app.predictors.models import PredictorConfig  # noqa: F401
 from app.projects.models import Project, ProjectMember  # noqa: F401
+from app.workflow.models import PatientReviewResult, ReviewSession  # noqa: F401
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 

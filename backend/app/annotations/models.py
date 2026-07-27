@@ -41,6 +41,17 @@ class Annotation(SQLModel, table=True):
     matched_tokens: str = Field(default="")  # comma-separated
     is_negated: bool = Field(default=False)
 
+    # v1 workflow fields (faithful port of db.py ANNOTATIONS collection).
+    # sentence_number/start/end locate the sentence within the note; text_date is
+    # the denormalized note date used for ordering annotations during adjudication.
+    sentence_number: int | None = Field(default=None)
+    sentence_start: int | None = Field(default=None)
+    sentence_end: int | None = Field(default=None)
+    text_date: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
     # Prediction result (from LLM/PINES)
     predicted_score: float | None = Field(default=None)
     predicted_label: int | None = Field(default=None)  # 0 or 1
@@ -75,3 +86,22 @@ class Annotation(SQLModel, table=True):
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class AnnotationToken(SQLModel, table=True):
+    """A single matched token within an annotation's sentence.
+
+    BCNF normalization of v1's per-token ANNOTATIONS documents: one
+    ``annotations`` row represents a matched sentence, and each keyword match
+    inside it (token text + character offsets + negation) becomes its own row.
+    Drives the lemma/token distribution statistic.
+    """
+
+    __tablename__ = "annotation_tokens"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    annotation_id: str = Field(foreign_key="annotations.id", index=True)
+    token: str = Field(index=True)
+    note_start_index: int
+    note_end_index: int
+    is_negated: bool = Field(default=False)

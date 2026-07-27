@@ -78,6 +78,22 @@ class Patient(SQLModel, table=True):
     project_id: str = Field(foreign_key="projects.id", index=True)
     patient_id_ext: str = Field(index=True)
     status: PatientStatus = Field(default=PatientStatus.NEW)
+    # v1 adjudication fields (faithful port of cedars/app db.py PATIENTS collection).
+    # A patient is "reviewed" when status == REVIEWED; reviewed_by records who/what
+    # closed it. It is a free string (a username, or "CEDARS"/a predictor name for
+    # auto-review), so it is intentionally not a FK to users.
+    reviewed_by: str | None = Field(default=None)
+    event_date: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # References an annotations.id but stored without a FK constraint to avoid a
+    # circular dependency (annotations already references patients).
+    event_annotation_id: str | None = Field(default=None)
+    comments: str = Field(
+        default="",
+        sa_column=Column(Text, nullable=False, server_default=""),
+    )
     locked_by: str | None = Field(default=None, foreign_key="users.id")
     locked_at: datetime | None = Field(
         default=None,
@@ -129,6 +145,9 @@ class Note(SQLModel, table=True):
     )
     source_ref: str | None = Field(default=None)
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
+    # v1 note-level review tracking (faithful port of db.py mark_note_reviewed).
+    reviewed: bool = Field(default=False)
+    reviewed_by: str | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -137,3 +156,21 @@ class Note(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+
+class NoteTag(SQLModel, table=True):
+    """A display tag for a clinical note.
+
+    BCNF replacement for v1's repeating ``text_tag_1..5`` columns on NOTES:
+    each tag becomes its own row keyed by ``(note_id, position)``.
+    """
+
+    __tablename__ = "note_tags"
+    __table_args__ = (
+        UniqueConstraint("note_id", "position", name="uq_note_tag_position"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    note_id: str = Field(foreign_key="notes.id", index=True)
+    position: int = Field()  # 1..5, preserves v1 text_tag_N ordering
+    value: str = Field(sa_column=Column(Text, nullable=False, server_default=""))

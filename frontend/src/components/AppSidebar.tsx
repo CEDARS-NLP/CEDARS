@@ -12,17 +12,32 @@ import {
   Moon,
   Sun,
   Activity,
+  Search,
+  Cpu,
+  ClipboardCheck,
+  PieChart,
+  Wrench,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+// Primary (v1-style) linear workflow — the default project flow.
 const projectNavSections = [
   { label: "Overview", suffix: "", icon: LayoutDashboard, end: true },
   { label: "Data", suffix: "/data", icon: Database },
+  { label: "Query", suffix: "/query", icon: Search },
+  { label: "Process", suffix: "/process", icon: Cpu },
+  { label: "Adjudicate", suffix: "/adjudicate", icon: ClipboardCheck },
+  { label: "Statistics", suffix: "/stats", icon: PieChart },
+  { label: "Export", suffix: "/export", icon: Download },
+];
+
+// Optional (v2) evaluate/annotate flow + technical admin.
+const advancedNavSections = [
   { label: "Patients", suffix: "/patients", icon: Users },
   { label: "Evaluation", suffix: "/evaluation", icon: BarChart3 },
-  { label: "Jobs", suffix: "/jobs", icon: Activity },
   { label: "Annotations", suffix: "/annotations", icon: MessageSquareText },
-  { label: "Export", suffix: "/export", icon: Download },
+  { label: "Jobs", suffix: "/jobs", icon: Activity },
+  { label: "Internal", suffix: "/internal", icon: Wrench },
 ];
 
 function useDarkMode() {
@@ -97,6 +112,25 @@ export default function AppSidebar() {
                 key={item.label}
                 to={`/projects/${projectId}${item.suffix}`}
                 end={item.end}
+                className={({ isActive }) =>
+                  `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                    isActive
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  }`
+                }
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
+              </NavLink>
+            ))}
+            <div className="mb-2 mt-4 px-2.5 text-xs font-medium uppercase tracking-wider text-sidebar-foreground/40">
+              Advanced
+            </div>
+            {advancedNavSections.map((item) => (
+              <NavLink
+                key={item.label}
+                to={`/projects/${projectId}${item.suffix}`}
                 className={({ isActive }) =>
                   `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
                     isActive

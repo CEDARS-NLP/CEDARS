@@ -3,7 +3,7 @@
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.models import Annotation, AnnotationToken, ReviewStatus
 from app.auth.models import User
 from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus
@@ -118,6 +118,62 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
     )
     failed_count = failed_q.scalar_one()
 
+    # --- Lemma / token distribution (v1 get_curr_stats) ---
+    # Top-10 non-negated matched tokens as a percentage of all non-negated tokens.
+    token_rows = (
+        await session.execute(
+            select(AnnotationToken.token, func.count(AnnotationToken.id))
+            .join(Annotation, Annotation.id == AnnotationToken.annotation_id)
+            .where(
+                Annotation.project_id == project_id,
+                AnnotationToken.is_negated.is_(False),
+            )
+            .group_by(AnnotationToken.token)
+            .order_by(func.count(AnnotationToken.id).desc())
+            .limit(10)
+        )
+    ).all()
+    total_tokens = (
+        await session.execute(
+            select(func.count(AnnotationToken.id))
+            .join(Annotation, Annotation.id == AnnotationToken.annotation_id)
+            .where(
+                Annotation.project_id == project_id,
+                AnnotationToken.is_negated.is_(False),
+            )
+        )
+    ).scalar_one()
+    lemma_dist = (
+        {row[0]: round(100 * row[1] / total_tokens, 2) for row in token_rows}
+        if total_tokens
+        else {}
+    )
+
+    # --- Per-user patient review counts (v1 user_review_stats) ---
+    user_rows = (
+        await session.execute(
+            select(Patient.reviewed_by, func.count(Patient.id))
+            .where(
+                Patient.project_id == project_id,
+                Patient.deleted_at.is_(None),
+                Patient.status == PatientStatus.REVIEWED,
+                Patient.reviewed_by.isnot(None),
+            )
+            .group_by(Patient.reviewed_by)
+        )
+    ).all()
+    user_review_stats = {row[0]: row[1] for row in user_rows}
+
+    # --- Patients with at least one non-negated annotation (v1 number_of_annotated_patients) ---
+    annotated_patients = (
+        await session.execute(
+            select(func.count(func.distinct(Annotation.patient_id))).where(
+                Annotation.project_id == project_id,
+                Annotation.is_negated.is_(False),
+            )
+        )
+    ).scalar_one()
+
     return {
         "patients": {
             "total": patient_total,
@@ -137,6 +193,9 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
             "events_found": events_found,
         },
         "annotators": annotators,
+        "lemma_dist": lemma_dist,
+        "user_review_stats": user_review_stats,
+        "number_of_annotated_patients": annotated_patients,
         "jobs": {
             "latest": {
                 "id": latest_job.id,

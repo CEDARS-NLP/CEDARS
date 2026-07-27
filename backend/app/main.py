@@ -16,6 +16,8 @@ from app.nlp.router import router as nlp_router
 from app.pipeline.router import router as pipeline_router
 from app.predictors.router import router as predictors_router
 from app.projects.router import router as projects_router
+from app.workflow.internal_router import router as workflow_internal_router
+from app.workflow.router import router as workflow_router
 
 
 def _ensure_s3_bucket():
@@ -126,6 +128,8 @@ def create_app() -> FastAPI:
     application.include_router(admin_router)
     application.include_router(audit_router)
     application.include_router(pipeline_router)
+    application.include_router(workflow_router)
+    application.include_router(workflow_internal_router)
 
     from app.evaluation.ws import eval_pipeline_progress_ws
     from app.jobs.ws import job_progress_ws
