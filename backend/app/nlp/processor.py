@@ -149,6 +149,7 @@ async def process_patient_notes(
     nlp_apply = search_query.nlp_apply
 
     nlp_model = get_nlp()
+    has_lemmatizer = True # use a model with a lemmatizer for morphological matching
     matcher = Matcher(nlp_model.vocab)
     spacy_patterns = query_to_patterns(query)
     for i, item in enumerate(spacy_patterns):

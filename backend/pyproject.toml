@@ -2,6 +2,10 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+# Allow the direct URL dependency for the scispaCy model wheel.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
@@ -34,6 +38,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     "spacy>=3.7",
     "google-re2>=1.1",
+    # Faithful v1 NLP: scispaCy clinical pipeline (lemmatizer + dependency parser).
+    # nmslib-metabrainz is pulled transitively as a prebuilt wheel (no compiler needed).
+    "scispacy>=0.6.0",
+    "en-core-sci-lg @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_lg-0.5.4.tar.gz",
 ]
 
 [project.optional-dependencies]

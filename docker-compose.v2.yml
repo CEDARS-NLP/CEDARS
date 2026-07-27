@@ -66,6 +66,7 @@ services:
       CEDARS_S3_ACCESS_KEY: rootuser
       CEDARS_S3_SECRET_KEY: rootpassword
       CEDARS_SECRET_KEY: dev-secret-key
+      CEDARS_SPACY_MODEL: en_core_sci_lg
 
   worker:
     build: ./backend
@@ -89,6 +90,7 @@ services:
       CEDARS_S3_ACCESS_KEY: rootuser
       CEDARS_S3_SECRET_KEY: rootpassword
       CEDARS_SECRET_KEY: dev-secret-key
+      CEDARS_SPACY_MODEL: en_core_sci_lg
 
   frontend:
     build: ./frontend
