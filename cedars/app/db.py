@@ -3,6 +3,7 @@ This file contatins an abstract class for CEDARS to interact with mongodb.
 """
 
 from math import ceil
+from time import sleep
 import os
 from io import BytesIO, StringIO
 import re
@@ -21,7 +22,7 @@ import polars as pl
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
-from .database import mongo, minio
+from .database import mongo, s3
 from .cedars_enums import ReviewStatus
 from .cedars_enums import log_function_call
 
@@ -46,7 +47,11 @@ def create_project(project_name,
     Returns:
         None
     """
+    
+    create_collections()
+
     create_db_indices()
+
     if mongo.db["INFO"].find_one() is not None:
         logger.info("Database already created.")
         return
@@ -61,7 +66,26 @@ def create_project(project_name,
 
     logger.info("Database creation successful!")
 
-@log_function_call
+
+def create_collections():
+
+    create_collection("NOTES")
+    create_collection("NOTES_SUMMARY")
+    create_collection("PATIENTS")
+    create_collection("RESULTS")
+    create_collection("ANNOTATIONS")
+    create_collection("PINES")
+    create_collection("USERS")
+    create_collection("TASK")
+
+
+def create_collection(collection_name):
+
+    if collection_name not in mongo.db.list_collection_names():
+        logger.info(f"Creating {collection_name} collection.")
+        mongo.db.create_collection(collection_name)
+
+
 def create_pines_info(pines_url, is_url_from_api):
     """
     Retrives the PINES url from the relevant source and
@@ -303,9 +327,11 @@ def update_notes_summary():
     ]
 
     # Perform aggregation
+    logger.info("Aggregating notes by patient_id.")
     aggregated_results = list(notes_collection.aggregate(pipeline))
 
     # Insert or update summaries in NOTES_SUMMARY
+    logger.info("Appending notes_summary records to bulk operations.")
     bulk_operations = []
     for summary in aggregated_results:
         bulk_operations.append(
@@ -324,6 +350,7 @@ def update_notes_summary():
 
     if bulk_operations:
         # Perform bulk write to update or insert summaries
+        logger.info("Performing bulk write on notes_summary collection.")
         result = notes_summary_collection.bulk_write(bulk_operations)
         return result.modified_count + result.upserted_count
     
@@ -341,7 +368,7 @@ def bulk_insert_notes(notes):
         return bwe.details['nInserted']
 
 @log_function_call
-def bulk_upsert_patients(patient_ids):
+def bulk_upsert_patients(patient_ids, chunk_size_upsert_patients):
     '''
     This function will automatically create default enteries in the
     PATIENTS and RESULTS collection for each patient. The order in which
@@ -363,8 +390,10 @@ def bulk_upsert_patients(patient_ids):
     number_of_patients_in_db = patients_collection.count_documents({})
 
     # get cached note summary for all patients where each patient is a key
+    logger.info("Getting notes summary for all patients.")
     notes_summary_dict = get_notes_summary()
 
+    logger.info("Generating records for patients and results.")
 
     for index_no, p_id in enumerate(patient_ids):
         # Update the index in cases where a batch of patients
@@ -393,18 +422,25 @@ def bulk_upsert_patients(patient_ids):
         chunk_size = 2000
         total_uploaded_patients = 0
         total_uploaded_results = 0
-        for i in range(0, len(patient_operations), chunk_size):
-            patients_update = patients_collection.bulk_write(patient_operations[i:i+chunk_size],
+
+        logger.info("Performing bulk writes on patients collection.")
+
+        for i in range(0, len(patient_operations), chunk_size_upsert_patients):
+            patients_update = patients_collection.bulk_write(patient_operations[i:i+chunk_size_upsert_patients],
                                                             ordered=False)
             total_uploaded_patients += patients_update.upserted_count
+
+        logger.info("Performing bulk writes on results collection.")
     
-        for i in range(0, len(results_operations), chunk_size):
-            results_update = results_collection.bulk_write(results_operations[i:i+chunk_size],
+        for i in range(0, len(results_operations), chunk_size_upsert_patients):
+            results_update = results_collection.bulk_write(results_operations[i:i+chunk_size_upsert_patients],
                                                             ordered=False)
             total_uploaded_results += results_update.upserted_count
 
         logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
+
         return total_uploaded_patients, total_uploaded_results
+    
     except BulkWriteError as bwe:
         logger.error(f"Bulk write error: {bwe.details}")
 
@@ -554,13 +590,15 @@ def upsert_patient_records(patient_id: str, insert_datetime: datetime = None, up
     max_score_note_id = ""
     max_score_note_date = None
     try:
-        res = list(get_max_prediction_score(patient_id))
-        if len(res) > 0:
-            res = res[0]
+        res = get_max_prediction_score(patient_id)
+        if res:
             max_score = res["max_score"]
             max_score_note_id = res["text_id"]
             max_score_note_date = get_note_date(max_score_note_id)
-    except Exception:
+        else:
+            logger.info(f"No prediction scores found for patient: {patient_id}")
+    except Exception as exc:
+        logger.info(f"Error in upsert_patient_records - get_max_prediction_score: {str(exc)}")
         logger.info(f"PINES results not available for patient: {patient_id}")
 
     patient_results = {
@@ -874,6 +912,35 @@ def get_documents_to_annotate(patient_id=None):
         }])
 
     return documents_to_annotate
+
+@log_function_call
+def get_documents_to_annotate_docdb(patient_id=None):
+    """
+    Retrives all documents that have not been annotated.
+
+    Returns: All matching notes from the database.
+    """
+    logger.debug("Retriving all annotated documents from database.")
+    notes_match_stage = {
+        "reviewed": {"$ne": True}
+    }
+    if patient_id:
+        notes_match_stage["patient_id"] = patient_id
+
+    documents_to_annotate = list(mongo.db["NOTES"].find(notes_match_stage))
+
+    for doc in documents_to_annotate:
+        # Fetch annotations that match the document's text_id
+        annotations = list(mongo.db["ANNOTATIONS"].find({"note_id": doc["text_id"]}))
+        
+        # Only include documents with no annotations, to match the original condition in match_stage
+        if not annotations:
+            doc["annotations"] = annotations  
+        else:
+            documents_to_annotate.remove(doc) 
+    logger.debug(f"Number of documents to annotate : {len(documents_to_annotate)}")        
+    return documents_to_annotate
+
 
 @log_function_call
 def get_all_annotations_for_patient(patient_id: str):
@@ -1277,52 +1344,6 @@ def update_pines_api_url(new_url):
     mongo.db["INFO"].update_one({},
                                 {"$set": {"pines_url": new_url}})
 
-
-@log_function_call
-def batch_mark_annotation_reviewed(annotation_ids, reviewed_by):
-    """
-    Updates the annotation in the database to mark it as reviewed.
-    Also updates the note it belongs to as reviewed if all annotations that
-    belong to it are also reviewed.
-
-    Args:
-        - annotation_ids (List[str]) : A list of unique IDs for the annotations.
-        - reviewed_by (str) : The name of the user who reviewed these annotations.
-
-    Returns:
-        None
-    """
-    logger.debug(f"Marking annotations {annotation_ids} as reviewed.")
-    annotation_ids = [ObjectId(annotation_id) for annotation_id in annotation_ids]
-    mongo.db["ANNOTATIONS"].update_many({"_id": {"$in": annotation_ids}},
-                                       {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
-
-    annotation_data = mongo.db["ANNOTATIONS"].find({"_id": {"$in": annotation_ids}})
-    note_ids = list(set([i['note_id'] for i in annotation_data]))
-
-    # Get the number of unreviewed annotations for each note that any of the annotations belong to
-    count_unreviewed_annotations_pipeline = [
-        {"$match": {"note_id": {"$in": note_ids}, "reviewed": ReviewStatus.UNREVIEWED.value}},
-        {"$group": {"_id": "$note_id", "count": {"$sum": 1}}}
-    ]
-
-    num_unreviewed_annos = mongo.db["ANNOTATIONS"].aggregate(count_unreviewed_annotations_pipeline)
-    num_unreviewed_in_notes = {_id : 0 for _id in note_ids}
-    for result in num_unreviewed_annos:
-        num_unreviewed_in_notes[result['_id']] = result['count']
-
-    notes_to_be_marked_reviewed = []
-    for note_id in num_unreviewed_in_notes:
-        count = num_unreviewed_in_notes[note_id]
-        logger.debug(f"Note ID {note_id} has {count} unreviewed annotations")
-        # If there are no unreviewed annotations left for any note,
-        # then mark that note as reviewed
-        if count == 0:
-            notes_to_be_marked_reviewed.append(note_id)
-
-    if len(notes_to_be_marked_reviewed) > 0:
-        batch_mark_note_reviewed(notes_to_be_marked_reviewed, reviewed_by)
-
 @log_function_call
 def mark_annotation_reviewed(annotation_id, reviewed_by):
     """
@@ -1340,51 +1361,7 @@ def mark_annotation_reviewed(annotation_id, reviewed_by):
     logger.debug(f"Marking annotation #{annotation_id} as reviewed.")
     mongo.db["ANNOTATIONS"].update_one({"_id": ObjectId(annotation_id)},
                                        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
-    update_note_review_status(annotation_id, reviewed_by)
 
-@log_function_call
-def mark_annotation_reviewed_batch(annotation_ids, reviewed_by):
-    """
-    Updates a batch of annotations in the database to mark them as reviewed.
-    Also updates the note it belongs to as reviewed if all annotations that
-    belong to it are also reviewed.
-
-    Args:
-        - annotation_ids (list[str]) : Unique IDs for the annotations that
-                                        have been reviewed.
-        - reviewed_by (str) : The name of the user who reviewed these annotations.
-
-    Returns:
-        None
-    """
-
-    if not annotation_ids:
-        logger.debug("No annotations to mark as reviewed.")
-        return
-
-    logger.info(f"Marking annotations {annotation_ids} as reviewed.")
-
-    mongo.db["ANNOTATIONS"].update_many(
-        {"_id": {"$in": [ObjectId(aid) for aid in annotation_ids]}},
-        {"$set": {"reviewed": ReviewStatus.REVIEWED.value}}
-    )
-    update_batch_note_review_status(annotation_ids, reviewed_by)
-
-@log_function_call
-def update_note_review_status(annotation_id, reviewed_by):
-    '''
-    Checks and updates the review status of a note. 
-    Updates the note it belongs to as reviewed if
-    all annotations that belong to it are also reviewed.
-
-    Args:
-        - annotation_id (str) : The annotation ID of any
-                                        annotation from that note.
-        - reviewed_by (str) : The name of the user who reviewed this annotation.
-
-    Returns:
-        None
-    '''
     annotation_data = get_annotation(annotation_id)
     note_id = annotation_data['note_id']
 
@@ -1396,54 +1373,47 @@ def update_note_review_status(annotation_id, reviewed_by):
         mark_note_reviewed(note_id, reviewed_by)
 
 @log_function_call
-def update_batch_note_review_status(annotation_ids, reviewed_by):
-    '''
-    Checks and updates the review status of a batch of notes note. 
-    Updates the note it belongs to as reviewed if
-    all annotations that belong to it are also reviewed.
-
+def batch_mark_annotation_reviewed(annotation_ids, reviewed_by):
+    """
+    Updates the annotation in the database to mark it as reviewed.
+    Also updates the note it belongs to as reviewed if all annotations that
+    belong to it are also reviewed.
     Args:
-        - annotation_ids (list[str]) : A list of annotation IDs that have been reviewed.
+        - annotation_ids (List[str]) : A list of unique IDs for the annotations.
         - reviewed_by (str) : The name of the user who reviewed these annotations.
-
     Returns:
         None
-    '''
-    pipeline = [
-        {"$match": {"_id": {"$in": [ObjectId(aid) for aid in annotation_ids]}}},
-        {"$group": {"_id": "$note_id"}},
-        {"$lookup": {
-            "from": "ANNOTATIONS",
-            "localField": "_id",
-            "foreignField": "note_id",
-            "as": "annotations"
-        }},
-        {"$project": {
-            "_id": 1,
-            "unreviewed_count": {
-                "$size": {
-                    "$filter": {
-                        "input": "$annotations",
-                        "as": "annotation",
-                        "cond": {"$eq": ["$$annotation.reviewed", ReviewStatus.UNREVIEWED.value]}
-                    }
-                }
-            }
-        }},
-        {"$match": {"unreviewed_count": 0}},
-        {"$project": {"_id": 1}}
+    """
+    logger.debug(f"Marking annotations {annotation_ids} as reviewed.")
+    annotation_ids = [ObjectId(annotation_id) for annotation_id in annotation_ids]
+    mongo.db["ANNOTATIONS"].update_many({"_id": {"$in": annotation_ids}},
+                                       {"$set": {"reviewed": ReviewStatus.REVIEWED.value}})
+ 
+    annotation_data = mongo.db["ANNOTATIONS"].find({"_id": {"$in": annotation_ids}})
+    note_ids = list(set([i['note_id'] for i in annotation_data]))
+ 
+    # Get the number of unreviewed annotations for each note that any of the annotations belong to
+    count_unreviewed_annotations_pipeline = [
+        {"$match": {"note_id": {"$in": note_ids}, "reviewed": ReviewStatus.UNREVIEWED.value}},
+        {"$group": {"_id": "$note_id", "count": {"$sum": 1}}}
     ]
-
-    reviewed_notes = [doc["_id"] for doc in mongo.db["ANNOTATIONS"].aggregate(pipeline)]
-
-    if reviewed_notes:
-        logger.debug(f"Marking notes {reviewed_notes} as reviewed.")
-        mongo.db["NOTES"].update_many(
-            {"text_id": {"$in": reviewed_notes}},
-            {"$set": {"reviewed": True,
-                      "reviewed_by": reviewed_by}}
-        )
-
+ 
+    num_unreviewed_annos = mongo.db["ANNOTATIONS"].aggregate(count_unreviewed_annotations_pipeline)
+    num_unreviewed_in_notes = {_id : 0 for _id in note_ids}
+    for result in num_unreviewed_annos:
+        num_unreviewed_in_notes[result['_id']] = result['count']
+ 
+    notes_to_be_marked_reviewed = []
+    for note_id in num_unreviewed_in_notes:
+        count = num_unreviewed_in_notes[note_id]
+        logger.debug(f"Note ID {note_id} has {count} unreviewed annotations")
+        # If there are no unreviewed annotations left for any note,
+        # then mark that note as reviewed
+        if count == 0:
+            notes_to_be_marked_reviewed.append(note_id)
+ 
+    if len(notes_to_be_marked_reviewed) > 0:
+        batch_mark_note_reviewed(notes_to_be_marked_reviewed, reviewed_by)
 
 @log_function_call
 def revert_annotation_reviewed(annotation_id, reviewed_by):
@@ -1674,12 +1644,11 @@ def mark_note_reviewed(note_id, reviewed_by: str):
 def batch_mark_note_reviewed(note_ids, reviewed_by: str):
     """
     Updates a batch of notes status to reviewed in the database.
-
      Args:
         note_ids (List[str]) : A list of Unique ID for the notes.
         reviewed_by (str) : The name of the user who reviewed the note.
     """
-    logger.debug(f"Marking notes #{note_ids} as reviewed.")
+    logger.debug(f"Marking notes {note_ids} as reviewed.")
     mongo.db["NOTES"].update_many({"text_id": {"$in": note_ids}},
                                  {"$set": {"reviewed": True,
                                            "reviewed_by": reviewed_by}})
@@ -1705,11 +1674,16 @@ def add_comment(patient_id, comment):
 
     Args:
         patient_id (str) : Unique ID for the patient.
-        comment (str) : Text of the comment on this annotation.
+        comment (str) : Text of the comment on this patient.
     Returns:
         None
     """
     comment = comment.strip()
+    if len(comment) == 0:
+        logger.debug(f"Comment deleted on patient # {patient_id}.")
+    else:
+        logger.info(f"Adding comment to patient #{patient_id}")
+
     mongo.db["PATIENTS"].update_one({"patient_id": patient_id},
                                     {"$set":
                                      {"comments": comment}
@@ -1875,18 +1849,37 @@ def get_prediction(note: str) -> float:
     data = {'text': note}
     log_notes = None
     try:
-        response = requests.post(url, json=data, timeout=3600)
+        logger.info(f"Calling PINES /predict endpoint at : {url}")
+        response = requests.post(url, json=data, timeout=3600, verify=False)
+        request_status = response.status_code
+        logger.debug(f"Got response code {request_status} from URL {url}.")
+        if request_status == 502:
+            for num_retries in range(1, 4):
+                '''
+                In the event that a request status of 502 is raised,
+                this can be caused by an overload of the PINES server,
+                in which case we can wait and then retry up to 3 times.
+                '''
+                logger.info(f"Got PINES request status 502, sleeping for 300s before retrying.")
+                sleep(300)
+                logger.info(f"Trying to reach {url}/predict. Retry no : {num_retries}")
+                response = requests.post(url, json=data, timeout=3600, verify=False)
+                request_status = response.status_code
+                if request_status != 502:
+                    break
+
         response.raise_for_status()
         res = response.json()["prediction"]
         score = res.get("score")
         label = res.get("label")
+        clf_threshold = res.get("classification_threshold")
         if isinstance(label, str):
             score = 1 - score if "0" in label else score
         else:
             score = 1 - score if label == 0 else score
         log_notes = re.sub(r'\d', '*', note[:20])
         logger.debug(f"Got prediction for note: {log_notes} with score: {score} and label: {label}")
-        return score
+        return score, clf_threshold
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to get prediction for note: {log_notes}")
         raise e
@@ -1896,7 +1889,7 @@ def get_max_prediction_score(patient_id: str):
     """
     Get the max predicted note score for a patient
     """
-    return mongo.db.PINES.aggregate(
+    results = mongo.db.PINES.aggregate(
         [
             {
                 '$match': {
@@ -1960,6 +1953,66 @@ def get_max_prediction_score(patient_id: str):
         ]
     )
 
+    results_list = list(results)
+
+    if len(results_list) == 0:
+        return None
+    
+    return results_list[0]
+
+
+@log_function_call
+def get_max_prediction_score_docdb(patient_id: str):
+    """
+    Get the max predicted note score for a patient
+    """
+    # Broke down original $lookup query into smaller parts to make it work with AWS DocumentDB. 
+    # DocumentDB does not support the $lookup operator with correlated subqueries.
+    max_score_result = mongo.db.PINES.aggregate([
+            {
+                '$match': {
+                    'patient_id': patient_id
+                }
+            },
+            {
+                '$group': {
+                            '_id': '$patient_id',
+                            'max_score': {
+                                '$max': '$predicted_score'
+                            }
+                        }
+            }
+        ])
+
+    max_score_data = list(max_score_result)
+    if max_score_data:
+        max_score = max_score_data[0]['max_score']
+        patient_id = max_score_data[0]['_id']
+    else:
+        return None
+
+    text_id_result = mongo.db.PINES.find_one(
+            {
+                'patient_id': patient_id,
+                'predicted_score': max_score
+            },
+            {
+                'text_id': 1,
+                '_id': 0
+            }
+        )
+    text_id = text_id_result['text_id'] if text_id_result else None
+    
+    result = {
+         '_id': patient_id,
+         'max_score': max_score,
+         'text_id': text_id
+        }
+    logger.debug(f"get_max_prediction_score - id: {patient_id}, max_score: {max_score}, text_id: {text_id}")
+    return result
+
+
+
 @log_function_call
 def get_note_prediction_from_db(note_id: str,
                                 pines_collection_name: str = "PINES") -> Optional[float]:
@@ -2001,11 +2054,12 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
 
     cedars_notes = notes_collection.find(query)
     count = 0
+    clf_threshold = None
     for note in cedars_notes:
         note_id = note.get("text_id")
         if force_update or get_note_prediction_from_db(note_id, pines_collection_name) is None:
             logger.info(f"Predicting for note: {note_id}")
-            prediction = get_prediction(note.get("text"))
+            prediction, clf_threshold = get_prediction(note.get("text"))
             pines_collection.insert_one({
                 "text_id": note_id,
                 "text": note.get("text"),
@@ -2016,6 +2070,8 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
                 "document_type": note.get("text_tag_1")
                 })
         count += 1
+
+    return clf_threshold
 
 @log_function_call
 def add_task(task):
@@ -2138,7 +2194,7 @@ def is_pines_api_running():
 @log_function_call
 def download_annotations(filename: str = "annotations.csv", get_sentences: bool = False) -> bool:
     """
-    Download annotations from the database and stream them to MinIO.
+    Download annotations from the database and stream them to S3.
     """
     schema = {
         'patient_id': pl.Utf8,
@@ -2168,9 +2224,9 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         # Create an in-memory buffer for the CSV data
         csv_buffer = StringIO()
         writer = pd.DataFrame(columns=list(schema.keys()))
-        writer.to_csv(csv_buffer, index=False, header=True, encoding="utf-8-sig")
+        writer.to_csv(csv_buffer, index=False, header=True)
 
-        # Write data in chunks and stream to MinIO
+        # Write data in chunks and stream to S3
         columns_to_retrive = {'_id': False}
         columns_to_retrive.update({column : True for column in schema.keys()})
 
@@ -2205,14 +2261,15 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         data_bytes = csv_buffer.getvalue().encode('utf-8')
         data_stream = BytesIO(data_bytes)
 
-        logger.info("Uploading RESULTS to minio")
-        # Upload to MinIO
-        minio.put_object(g.bucket_name,
-                         f"annotated_files/{filename}",
-                         data_stream,
-                         length=len(data_bytes),
-                         content_type="application/csv")
-        logger.info(f"Uploaded annotations to s3: {filename}")
+        #Upload to AWS S3
+        s3.upload_fileobj(
+              Fileobj=data_stream,  
+              Bucket=g.bucket_name,
+              Key=f"annotated_files/{filename}",
+              ExtraArgs={"ContentType": "application/csv"}  
+        )
+        logger.info(f"File '{filename}' successfully uploaded to bucket '{g.bucket_name}'")
+            
         return True
     except Exception as e:
         logger.error(f"Failed to upload annotations to s3: {filename}, error: {str(e)}")

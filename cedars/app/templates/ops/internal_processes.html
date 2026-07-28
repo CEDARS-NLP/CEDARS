@@ -55,21 +55,6 @@
     </div>
 
 
-
-    <h3>Prometheus Logging</h3>
-    <div class="form-group">
-        Prometheus is a logging software used to track the endpoint calls and utilisation by CEDARS.
-        <br>
-        <br>
-        <div class="mb-3">
-            <form action="/metrics" class="inline" target="_blank">
-                <button type="submit" class="btn btn-primary cedars-btn" type="button">Open Prometheus Logs</button>
-            </form>
-        </div>
-        <br>
-    </div>
-
-
     <h3>Unlock All Patients</h3>
     <div class="form-group">
         The "unlock all patients" tool will automatically unlock patients in the database that can no longer be accessed.
@@ -87,9 +72,33 @@
           <div id="patientUnlockStatus" class="mt-3">
             <!-- This div will be updated with the download status -->
         </div>
-        </div>
+      </div>
+    </div>
 
-        
+    <h3>Start PINES Server</h3>
+    <div class="form-group">
+        Clicking on the button below will trigger the PINES ECS to scale-up.
+        <br>
+        <br>
+        <div class="mb-3">
+            <form action="/ops/init_pines" class="inline" method="POST">
+                <button type="submit" class="btn btn-primary cedars-btn" type="button">Start PINES server</button>
+            </form>
+        </div>
+        <br>
+    </div>
+
+    <h3>Stop PINES Server</h3>
+    <div class="form-group">
+        Clicking on the button below will trigger the PINES ECS to scale-down.
+        <br>
+        <br>
+        <div class="mb-3">
+            <form action="/ops/shutdown_pines" class="inline" method="POST">
+                <button type="submit" class="btn btn-primary cedars-btn" type="button">Shutdown PINES server</button>
+            </form>
+        </div>
+        <br>
     </div>
 
 </div>

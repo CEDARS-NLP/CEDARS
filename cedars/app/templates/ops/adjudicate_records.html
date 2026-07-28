@@ -14,7 +14,7 @@
 </div>
 
 <script>
-  // only run /ops/unlock_patient on unload if a form is submitted to /ops/adjudicate_records 
+  // only run /ops/unlock_patient on unload if a form is not submitted to /ops/adjudicate_records 
   let shouldRunBeforeUnload = true;
 
   // Disable beforeunload behavior on form submission
@@ -25,7 +25,7 @@
   // Code to ensure that the patient currently being reviewed is unlocked when before the page is left.
   window.addEventListener('beforeunload', (event) => {
     if (!shouldRunBeforeUnload) return;
-
+  
     // Send the token to the backend
     navigator.sendBeacon('/ops/unlock_patient', JSON.stringify({}));
   });

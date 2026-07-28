@@ -1,12 +1,17 @@
 """
 Basic configurations for the app
 """
+import os
 from datetime import timedelta
-
-from dotenv import dotenv_values
+from urllib.parse import quote_plus
+from dotenv import dotenv_values,load_dotenv
 from redis import Redis
 
+
+load_dotenv()
 config = dotenv_values(".env")
+
+FULL_REDIS_URL = f'{os.getenv("REDIS_PROTOCOL")}://:{os.getenv("AUTH_TOKEN")}@{os.getenv("REDIS_URL")}:{os.getenv("REDIS_PORT")}/0'
 
 
 class Base:  # pylint: disable=too-few-public-methods
@@ -18,29 +23,30 @@ class Base:  # pylint: disable=too-few-public-methods
 
     TODO: make the bulk writes chunked?
     """
-    SECRET_KEY = config['SECRET_KEY']
+    SECRET_KEY = os.getenv('SECRET_KEY')
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
 
-    MONGO_URI = MONGO_URI = (
-    f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
-    f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
-    f'{config["DB_NAME"]}?'
-    f'{config["DB_PARAMS"]}'
-    f'&maxPoolSize=50'
-    f'&minPoolSize=5'
-    f'&connectTimeoutMS=30000'
-    f'&retryWrites=true'
-    f'&socketTimeoutMS=20000'
-    f'&serverSelectionTimeoutMS=20000'
-    f'&heartbeatFrequencyMS=20000'
-    f'&readPreference=primaryPreferred'
-)
+    db_replica_set = os.getenv("DB_REPLICA_SET")
+    if db_replica_set is not None:
+        MONGO_URI = (
+            f'{os.getenv("DB_PROTOCOL", "mongodb")}://{os.getenv("DB_USER")}:{quote_plus(os.getenv("DB_PWD"))}'
+            f'@{db_replica_set}/'
+            f'{os.getenv("DB_NAME")}?{os.getenv("DB_PARAMS")}'
+        )
+    else:
+        MONGO_URI = (
+            f'{os.getenv("DB_PROTOCOL", "mongodb")}://{os.getenv("DB_USER")}:{quote_plus(os.getenv("DB_PWD"))}'
+            f'@{os.getenv("DB_HOST")}:{os.getenv("DB_PORT")}/'
+            f'{os.getenv("DB_NAME")}?{os.getenv("DB_PARAMS")}'
+        )
+
+    
     RQ = {
-        "redis_url": f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0',
+        "redis_url": FULL_REDIS_URL,
         "task_queue_name": "cedars",
         "ops_queue_name": "ops",
         "job_timeout": 3600,
-        "operation_timeout": 7200
+        "operation_timeout": 86400
     }
 
 class Local(Base):  # pylint: disable=too-few-public-methods
@@ -50,30 +56,14 @@ class Local(Base):  # pylint: disable=too-few-public-methods
 
 class Test(Base):  # pylint: disable=too-few-public-methods
     """Test Config - for running tests"""
-    TESTING = True
-    SESSION_TYPE = 'redis'
-    SESSION_KEY_PREFIX = "cedars:test:"
-    SESSION_USE_SIGNER = True
-    SESSION_PERMANENT = False
-    SESSION_SERIALIZATION_FORMAT = "json"
-    SESSION_REDIS = Redis.from_url(f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0')
+    CACHE_TYPE = 'SimpleCache'
 
 
 class Dev(Base):  # pylint: disable=too-few-public-methods
     """Dev Config - for deplaying to dev"""
-    SESSION_TYPE = 'redis'
-    SESSION_KEY_PREFIX = "cedars:"
-    SESSION_USE_SIGNER = True
-    SESSION_PERMANENT = False
-    SESSION_SERIALIZATION_FORMAT = "json"
-    SESSION_REDIS = Redis.from_url(f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0')
+    CACHE_TYPE = 'RedisCache'
 
 
 class Prod(Base):  # pylint: disable=too-few-public-methods
     """Dev Config - for deplaying to dev"""
-    SESSION_TYPE = 'redis'
-    SESSION_KEY_PREFIX = "cedars:prod:"
-    SESSION_USE_SIGNER = True
-    SESSION_PERMANENT = False
-    SESSION_SERIALIZATION_FORMAT = "json"
-    SESSION_REDIS = Redis.from_url(f'redis://{config["REDIS_URL"]}:{config["REDIS_PORT"]}/0')
+    CACHE_TYPE = 'RedisCache'

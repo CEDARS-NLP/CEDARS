@@ -27,9 +27,10 @@ from rq.registry import FinishedJobRegistry, StartedJobRegistry
 from . import db
 from . import nlpprocessor
 from . import auth
-from .database import minio
-from .api import load_pines_url, kill_pines_api
+from .database import s3, s3_resource
+from .api import check_is_pines_available, kill_pines_api
 from .api import get_token_status
+from botocore.exceptions import ClientError
 from .adjudication_handler import AdjudicationHandler
 from .cedars_enums import PatientStatus
 from .cedars_enums import log_function_call
@@ -76,6 +77,21 @@ def allowed_image_file(filename):
 
     return extension in allowed_extensions
 
+@log_function_call
+def load_patient_data(patient_id):
+    '''
+    Loads all relevant info for a new patient to adjudicate
+    from the database. These read calls have been organised into
+    a seperate function to test DB read speeds.
+    '''
+    patient_data = {}
+    patient_data['raw_annotations'] = db.get_all_annotations_for_patient(patient_id)
+    patient_data['hide_duplicates'] = db.get_search_query("hide_duplicates")
+    patient_data['stored_event_date'] = db.get_event_date(patient_id)
+    patient_data['stored_annotation_id'] = db.get_event_annotation_id(patient_id)
+    patient_data['patient_comments'] = db.get_patient_by_id(patient_id)["comments"]
+
+    return patient_data
 
 @bp.route("/project_details", methods=["GET", "POST"])
 @auth.admin_required
@@ -110,7 +126,6 @@ def project_details():
                     db.terminate_project()
                     # reset all rq queues
                     flask.current_app.task_queue.empty()
-                    flask.current_app.ops_queue.empty()
                     auth.logout_user()
                     session.clear()
                     flash("Project Terminated.")
@@ -185,15 +200,17 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
                          {', '.join(loaders.keys())}.""")
 
     try:
+        # Log the filepath and prepare the local temp directory
         logger.info(filepath)
-        obj = minio.get_object(g.bucket_name, filepath)
         local_directory = tempfile.gettempdir()
         os.makedirs(local_directory, exist_ok=True)
         local_filename = os.path.join(local_directory, os.path.basename(filepath))
-        minio.fget_object(g.bucket_name, filepath, local_filename)
+
+        # Download the file from S3
+        s3.download_file(g.bucket_name, filepath, local_filename)
         logger.info(f"File downloaded successfully to {local_filename}")
 
-        # Re-initialise object from minio to load it again
+        # Process the file depending on its extension
         if extension == 'parquet':
             parquet_file = pq.ParquetFile(local_filename)
             for batch in parquet_file.iter_batches(batch_size=chunk_size):
@@ -208,9 +225,8 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
     except Exception as exc:
         raise RuntimeError(f"Failed to load the file '{filepath}' due to: {str(exc)}") from exc
     finally:
-        obj.close()
-        obj.release_conn()
-        if 'local_filepath' in locals() and os.path.exists(local_filename):
+        # Clean up the downloaded local file
+        if os.path.exists(local_filename):
             os.remove(local_filename)
             logger.info(f"Removed temporary file: {local_filename}")
 
@@ -229,7 +245,7 @@ def prepare_patients(patient_ids):
     return [str(p_id).strip() for p_id in patient_ids]
 
 @log_function_call
-def EMR_to_mongodb(filepath, chunk_size=1000):
+def EMR_to_mongodb(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patients=2000):
     """
     This function is used to open a file and load its contents into the MongoDB database in chunks.
 
@@ -247,7 +263,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
     all_patient_ids = []
 
     try:
-        for chunk in load_pandas_dataframe(filepath, chunk_size):
+        for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
             total_chunks += 1
             rows_in_chunk = len(chunk)
             total_rows += rows_in_chunk
@@ -271,7 +287,7 @@ def EMR_to_mongodb(filepath, chunk_size=1000):
         notes_summary_count = db.update_notes_summary()
         logger.info(f"Updated {notes_summary_count} notes summary")
         # Bulk upsert patients
-        upserted_count_patients, _ = db.bulk_upsert_patients(all_patient_ids)
+        upserted_count_patients, _ = db.bulk_upsert_patients(all_patient_ids, chunk_size_upsert_patients)
         logger.info(f"Upserted {upserted_count_patients} patients")
         logger.info(f"Completed document migration to MongoDB database. "
                     f"Total rows processed: {total_rows}, "
@@ -295,10 +311,10 @@ def upload_data():
         # if db.get_task(f"upload_and_process:{current_user.username}"):
         #     flash("A file is already being processed.")
         #     return redirect(request.url)
-        minio_file = request.form.get("miniofile")
-        if minio_file != "None" and minio_file is not None:
-            logger.info(f"Using minio file: {minio_file}")
-            filename = minio_file
+        s3_file = request.form.get("miniofile")
+        if s3_file != "None" and s3_file is not None:
+            logger.info(f"Using S3 file: {s3_file}")
+            filename = s3_file
         else:
             if 'data_file' not in request.files:
                 flash('No file part')
@@ -316,13 +332,14 @@ def upload_data():
             size = os.fstat(file.fileno()).st_size
 
             try:
-                minio.put_object(g.bucket_name,
-                                 filename,
-                                 file,
-                                 size,
-                                 part_size=10*1024*1024,
-                                 num_parallel_uploads=10
-                                 )
+                # Upload the file to S3 using Boto3
+                s3.upload_fileobj(
+                    Fileobj=file,      
+                    Bucket=g.bucket_name,  
+                    Key=filename,      
+                    ExtraArgs={"ContentType": file.content_type}  
+                )
+        
                 logger.info(f"File - {file.filename} uploaded successfully.")
                 flash(f"{filename} uploaded successfully.")
             except Exception as e:
@@ -332,16 +349,26 @@ def upload_data():
 
         if filename:
             try:
-                EMR_to_mongodb(filename)
+                chunk_size_insert_notes = int(os.getenv("CHUNK_SIZE_INSERT_NOTES"))
+                chunk_size_upsert_patients = int(os.getenv("CHUNK_SIZE_UPSERT_PATIENTS"))
+                EMR_to_mongodb(filename, chunk_size_insert_notes, chunk_size_upsert_patients)
                 flash(f"Data from {filename} uploaded to the database.")
                 return redirect(url_for('ops.upload_query'))
             except Exception as e:
                 flash(f"Failed to upload data: {str(e)}")
                 return redirect(request.url)
     try:
-        files = [(obj.object_name, obj.size)
-                 for obj in minio.list_objects(g.bucket_name,
-                                               prefix="uploaded_files/")]
+         # List objects in the specified S3 bucket with the given prefix
+            response = s3.list_objects_v2(
+                Bucket=g.bucket_name,
+                Prefix="uploaded_files/"
+            )
+
+            # Extract the file names and sizes
+            if 'Contents' in response:
+                files = [(obj['Key'], obj['Size']) for obj in response['Contents']]
+            else:
+                files = [] 
     except Exception as e:
         flash(f"Error listing files: {e}")
         files = []
@@ -392,13 +419,6 @@ def upload_query():
             flash("Invalid superbio token.")
             return redirect(url_for("ops.upload_query"))
 
-    if use_pines:
-        is_pines_available = init_pines_connection(superbio_api_token)
-        if is_pines_available is False:
-            # PINES could not load successfully
-            flash("Could not load PINES server.")
-            return redirect(url_for("ops.upload_query"))
-
     use_negation = False  # bool(request.form.get("view_negations"))
     hide_duplicates = not bool(request.form.get("keep_duplicates"))
     skip_after_event = bool(request.form.get("skip_after_event"))
@@ -418,9 +438,46 @@ def upload_query():
     if "patient_id" in session:
         session.pop("patient_id")
         session.modified = True
-
+   
     do_nlp_processing()
     return redirect(url_for("stats_page.stats_route"))
+
+@bp.route("/init_pines", methods=["POST"])
+@log_function_call
+def ConnectToPines():
+    use_pines = bool(request.form.get("nlp_apply"))
+    superbio_api_token = session.get('superbio_api_token')
+
+    try:
+        is_pines_available = check_is_pines_available(superbio_api_token)
+        if use_pines:
+            # Return JSON response based on connection status
+            if is_pines_available:
+                logger.info(f"PINES EC2 instance is available now")
+                return jsonify({"status": "success"})
+            else:
+                logger.info(f"PINES EC2 instance is not up and running yet")
+                return jsonify({"status": "failed"}) 
+            
+    except Exception as e:
+        logger.error(f"Error while connecting to PINES: {e}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+def send_shutdown_msg():
+    logger.info("All the notes were processed successfully from the task queue - Shutdown EC2")
+
+@bp.route("/shutdown_pines", methods=["POST"])
+@log_function_call
+def shutdown_pines():
+    logger.info(f"Sending command to shutdown PINES EC2 instance")
+
+    # Call send_shutdown_msg and enqueue it so that both the frontend and worker logs reflect the command
+    send_shutdown_msg()
+    job = flask.current_app.ops_queue.enqueue(
+        send_shutdown_msg,
+    )
+    return redirect("/ops/internal_processes")
+           
 
 @bp.route("/start_process")
 @log_function_call
@@ -432,24 +489,44 @@ def do_nlp_processing():
     nlp_processor = nlpprocessor.NlpProcessor()
     pt_ids = db.get_patient_ids()
     superbio_api_token = session.get('superbio_api_token')
-
+    usePines = db.get_search_query("tag_query").get('nlp_apply', False)
+    # when comes from superbio api
+    if superbio_api_token is not None or usePines is False:
     # add task to the queue
-    for patient in pt_ids:
-        flask.current_app.task_queue.enqueue(
-            nlp_processor.automatic_nlp_processor,
-            args=(patient,),
-            job_id=f'spacy:{patient}',
-            description=f"Processing patient {patient} with spacy",
-            retry=Retry(max=3),
-            on_success=Callback(callback_job_success),
-            on_failure=Callback(callback_job_failure),
-            kwargs={
-                "user": current_user.username,
-                "job_id": f'spacy:{patient}',
-                "superbio_api_token" : superbio_api_token,
-                "description": f"Processing patient {patient} with spacy"
-            }
-        )
+        for patient in pt_ids:
+            flask.current_app.task_queue.enqueue(
+                nlp_processor.automatic_nlp_processor,
+                args=(patient,),
+                job_id=f'spacy:{patient}',
+                description=f"Processing patient {patient} with spacy",
+                retry=Retry(max=3),
+                on_success=Callback(callback_job_success),
+                on_failure=Callback(callback_job_failure),
+                kwargs={
+                    "user": current_user.username,
+                    "job_id": f'spacy:{patient}',
+                    "superbio_api_token" : superbio_api_token,
+                    "description": f"Processing patient {patient} with spacy"
+                }
+            )
+    else: #in case of usePines with aws - we need to shutdown EC2 instance of success/failure of the task queue
+        # add task to the queue
+        for patient in pt_ids:
+            flask.current_app.task_queue.enqueue(
+                nlp_processor.automatic_nlp_processor,
+                args=(patient,),
+                job_id=f'spacy:{patient}',
+                description=f"Processing patient {patient} with spacy",
+                retry=Retry(max=3),
+                on_success=Callback(callback_job_success_lambda),
+                on_failure=Callback(callback_job_failure_lambda),
+                kwargs={
+                    "user": current_user.username,
+                    "job_id": f'spacy:{patient}',
+                    "description": f"Processing patient {patient} with spacy"
+                }
+            )
+                
     return redirect(url_for("ops.get_job_status"))
 
 @log_function_call
@@ -481,37 +558,53 @@ def callback_job_failure(job, connection, result, *args, **kwargs):
             close_pines_connection(job.kwargs['superbio_api_token'])
 
 @log_function_call
-def init_pines_connection(superbio_api_token = None):
+def callback_job_success_lambda(job, connection, result, *args, **kwargs):
     '''
-    Initializes the PINES url in the INFO col.
-    If no server is available this is marked as None.
+    A callback function to shutdown EC2 intance. event where
+    a job from the task queue is completed successfully so we can shutdown EC2 instance.
+    '''
+    db.report_success(job)
 
-    Args :
-        - superbio_api_token (str) : Access token for superbio server if one is being used.
+    if len(list(db.get_tasks_in_progress())) == 0:
+        # Send a spin down request to the AWS Lambda to shutdown EC2 instance 
+        check_all_tasks_completed()
+        
+
+@log_function_call
+def callback_job_failure_lambda(job, connection, result, *args, **kwargs):
+    '''
+    A callback function to handle the event where
+    a job from the task queue has failed.
+    '''
+    db.report_failure(job)
+
+    if len(list(db.get_tasks_in_progress())) == 0:
+        # Send a spin down request to the AWS Lambda to shutdown EC2 instance 
+        check_all_tasks_completed()
+
+
+@log_function_call
+def check_all_tasks_completed():
+    # Access the queue and registries
+    queue = flask.current_app.task_queue
+    failed_registry = FailedJobRegistry(queue=queue)
+
+    # Check the total jobs remaining in the queue
+    total_jobs = len(queue.job_ids)
+    failed_jobs_count = len(failed_registry)
+    usePines = db.get_search_query("tag_query").get('nlp_apply', False)
+    logger.info(f"usePines: {usePines}, total jobs: {total_jobs}, failed jobs: {failed_jobs_count}")
+
+    if usePines: # log this only when using pines to execute search
+        if total_jobs == 0: # all the tasks has been processed successfully
+            if failed_jobs_count == 0: #all the tasks were successful
+                logger.info("All the notes were processed successfully from the task queue - Shutdown EC2")
+            else: # some of the tasks failed in the queue.
+                logger.info("All the notes were processed from the task queue with some failure - Shutdown EC2")
+        else:
+                logger.info("Some tasks are still running or queued.")
+
     
-    Returns :
-        (bool) : True if a valid pines url has been found.
-                            False if not valid pines url available.
-    '''
-    project_info = db.get_info()
-    project_id = project_info["project_id"]
-
-    try:
-        pines_url, is_url_from_api = load_pines_url(project_id,
-                                        superbio_api_token=superbio_api_token)
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"Got HTTP error when trying to start PINES server : {e}")
-        pines_url, is_url_from_api = None, False
-    except Exception as e:
-        logger.error(f"Got error when trying to access PINES server : {e}")
-        pines_url, is_url_from_api = None, False
-
-    db.create_pines_info(pines_url, is_url_from_api)
-    if pines_url is not None:
-        return True
-
-    return False
-
 @log_function_call
 def close_pines_connection(superbio_api_token):
     '''
@@ -613,13 +706,11 @@ def restore_session_data():
 
 @log_function_call
 def update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp,
-                        is_patient_reviewed=True):
+                        reviewed_annotation_ids, timestamp):
     '''
     Updates the comments, results and list of reviewed annotations for
     a patient in the database. This function will also automatically unlock
     the patient after the updates have been made.
-
     Args:
         - patient_id (str) : Unique ID for the patient.
         - comment (str) : Text of the comment on this annotation.
@@ -627,12 +718,9 @@ def update_patient_data(patient_id, comments, reviewed_by,
                                         have been reviewed.
         - reviewed_by (str) : The name of the user who reviewed these annotations.
         - timestamp (datetime obj) : The timestamp at which this information was entered.
-        - is_patient_reviewed (bool) : True if the patient review is finished and
-                                        the patient will need to be unlocked after the
-                                        DB updates.
     '''
 
-    db.mark_annotation_reviewed_batch(reviewed_annotation_ids,
+    db.batch_mark_annotation_reviewed(reviewed_annotation_ids,
                                        reviewed_by)
     db.add_comment(patient_id, comments.strip())
 
@@ -640,9 +728,7 @@ def update_patient_data(patient_id, comments, reviewed_by,
                              timestamp,
                              reviewed_by
                     )
-
-    if is_patient_reviewed:
-        db.set_patient_lock_status(patient_id, False)
+    db.set_patient_lock_status(patient_id, False)
 
 @log_function_call
 def enter_patient_date(patient_id, new_date,
@@ -656,7 +742,6 @@ def enter_patient_date(patient_id, new_date,
     This will additionally call the 'update_patient_data'
     function to unlock the patient and enter any other
     relevant information into the database.
-
     Args:
         - patient_id (str) : Unique ID for the patient.
         - new_date (datetime obj) : New event date for this patient
@@ -669,7 +754,8 @@ def enter_patient_date(patient_id, new_date,
         - skip_after_event (bool) : True if we need to skip unreviewed annotations that
                                         occur after the event date.
         - is_patient_reviewed (bool) : True if the patient review is finished and
-                                        the patient will need to be unlocked after the
+                                        the patient results will need to be entered.
+                                        The patient will also be unlocked after the
                                         DB updates.
     '''
 
@@ -679,9 +765,9 @@ def enter_patient_date(patient_id, new_date,
     db.mark_annotation_reviewed(current_annotation_id, reviewed_by)
     db.update_event_date(patient_id, new_date, current_annotation_id)
 
-    update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp,
-                        is_patient_reviewed)
+    if is_patient_reviewed:
+        update_patient_data(patient_id, comments, reviewed_by,
+                        reviewed_annotation_ids, timestamp)
 
 @log_function_call
 def delete_patient_date(patient_id,
@@ -694,7 +780,6 @@ def delete_patient_date(patient_id,
     This will additionally call the 'update_patient_data'
     function to unlock the patient and enter any other
     relevant information into the database.
-
     Args:
         - patient_id (str) : Unique ID for the patient.
         - current_annotation_id (str) : Annotation ID at which the date was deleted.
@@ -704,16 +789,17 @@ def delete_patient_date(patient_id,
                                         have been reviewed.
         - timestamp (datetime obj) : The timestamp at which this information was entered.
         - is_patient_reviewed (bool) : True if the patient review is finished and
-                                        the patient will need to be unlocked after the
+                                        the patient results will need to be entered.
+                                        The patient will also be unlocked after the
                                         DB updates.
     '''
     db.delete_event_date(patient_id)
     db.revert_skipped_annotations(patient_id)
     db.revert_annotation_reviewed(current_annotation_id, reviewed_by)
 
-    update_patient_data(patient_id, comments, reviewed_by,
-                        reviewed_annotation_ids, timestamp,
-                        is_patient_reviewed)
+    if is_patient_reviewed:
+        update_patient_data(patient_id, comments, reviewed_by,
+                        reviewed_annotation_ids, timestamp)
 
 @bp.route("/save_adjudications", methods=["GET", "POST"])
 @login_required
@@ -813,8 +899,7 @@ def save_adjudications():
     # We do not skip to the next patient if the current operation was just a shift.
     # This is done as users may want to view notes for a patient that has already been
     # reviewed.
-    is_reviewed = adjudication_handler.is_patient_reviewed()
-    if is_reviewed and not is_shift_performed:
+    if adjudication_handler.is_patient_reviewed() and not is_shift_performed:
         db.mark_patient_reviewed(patient_id, reviewed_by=current_user.username)
         if not db_results_updated:
             flask.current_app.ops_queue.enqueue(update_patient_data,
@@ -849,12 +934,13 @@ def show_annotation():
 
     logger.info(f"Presenting annotation for patient {session['patient_id']}")
 
+    index = session.get("index", 0)
     adjudication_handler = AdjudicationHandler(session['patient_id'])
     adjudication_handler.load_from_patient_data(session['patient_id'],
                                                 session['patient_data'])
     annotation_id = adjudication_handler.get_curr_annotation_id()
-    annotation = adjudication_handler.get_curr_annotation()
 
+    annotation = adjudication_handler.get_curr_annotation()
     note = db.get_annotation_note(annotation_id)
     if not note:
         flash("Annotation note not found.")
@@ -871,9 +957,8 @@ def show_annotation():
 
     return render_template("ops/adjudicate_records.html",
                            name = current_user.username,
-                           **annotation_data,
-                           project = session['project_name']
-                           )
+                           project = session['project_name'],
+                           **annotation_data)
 
 
 @bp.route("/adjudicate_records", methods=["GET", "POST"])
@@ -923,14 +1008,12 @@ def adjudicate_records():
             if session.get('patient_comments') is not None:
                 db.add_comment(session["patient_id"], session['patient_comments'].strip())
             if session.get('reviewed_annotation_ids') is not None:
-                db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
+                db.batch_mark_annotation_reviewed(session['reviewed_annotation_ids'],
                                                     current_user.username)
-            flask.current_app.ops_queue.enqueue(
-                    db.upsert_patient_records,
-                    session.get("patient_id"),
-                    datetime.now(),
-                    current_user.username
-                    )
+            results_update_job = flask.current_app.ops_queue.enqueue(
+                db.upsert_patient_records, session.get("patient_id"),
+                datetime.now(), current_user.username
+            )
             db.set_patient_lock_status(session.get("patient_id"), False)
             session.pop("patient_id", None)
             session.pop("patient_data", None)
@@ -962,11 +1045,13 @@ def adjudicate_records():
 
     logger.info(f"Fetching annotations for patient {patient_id}.")
 
-    raw_annotations = db.get_all_annotations_for_patient(patient_id)
-    hide_duplicates = db.get_search_query("hide_duplicates")
-    stored_event_date = db.get_event_date(patient_id)
-    stored_annotation_id = db.get_event_annotation_id(patient_id)
-    patient_comments = db.get_patient_by_id(patient_id)["comments"]
+    # Read raw info for new patient from the db
+    raw_patient_data = load_patient_data(patient_id)
+    raw_annotations = raw_patient_data['raw_annotations']
+    hide_duplicates = raw_patient_data['hide_duplicates']
+    stored_event_date = raw_patient_data['stored_event_date']
+    stored_annotation_id = raw_patient_data['stored_annotation_id']
+    patient_comments = raw_patient_data['patient_comments']
 
     logger.info(f"Creating adjudication handler for patient {patient_id}.")
     adjudication_handler = AdjudicationHandler(patient_id)
@@ -974,9 +1059,8 @@ def adjudicate_records():
                                            hide_duplicates, stored_event_date,
                                            stored_annotation_id)
 
-    db.mark_annotation_reviewed_batch(annotations_with_duplicates,
-                                      current_user.username)
-
+    db.batch_mark_annotation_reviewed(annotations_with_duplicates, current_user.username)
+    
     logger.info(f"Finished loading adjudication handler for patient {patient_id}.")
 
     if len(patient_data["annotation_ids"]) > 0:
@@ -990,12 +1074,10 @@ def adjudicate_records():
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         flash(f"Patient {patient_id} has no annotations. Showing next patient")
-        flask.current_app.ops_queue.enqueue(
-                    db.upsert_patient_records,
-                    patient_id,
-                    datetime.now(),
-                    current_user.username
-                    )
+        results_update_job = flask.current_app.ops_queue.enqueue(
+                db.upsert_patient_records, patient_id,
+                datetime.now(), current_user.username
+            )
         db.set_patient_lock_status(patient_id, False)
         return redirect(url_for("ops.adjudicate_records"))
 
@@ -1033,21 +1115,19 @@ def unlock_current_patient():
     """
     Sets the locked status of the patient in the session to False.
     """
-    patient_id = session["patient_id"]
+    patient_id = session.get("patient_id")
     message = "No patient to unlock."
     if patient_id is not None:
         if session.get('patient_comments') is not None:
                 db.add_comment(patient_id, session['patient_comments'].strip())
 
         if session.get('reviewed_annotation_ids') is not None:
-                db.mark_annotation_reviewed_batch(session['reviewed_annotation_ids'],
+                db.batch_mark_annotation_reviewed(session['reviewed_annotation_ids'],
                                                     current_user.username)
-        flask.current_app.ops_queue.enqueue(
-                    db.upsert_patient_records,
-                    patient_id,
-                    datetime.now(),
-                    current_user.username
-                    )
+        results_update_job = flask.current_app.ops_queue.enqueue(
+                db.upsert_patient_records, patient_id,
+                datetime.now(), current_user.username
+            )
         db.set_patient_lock_status(patient_id, False)
         session["patient_id"] = None
         message = f"Unlocking patient # {patient_id}."
@@ -1091,12 +1171,27 @@ def download_page(job_id=None):
     Loads the page where an admin can download the results
     of annotations made for that project.
     """
-    files = [(obj.object_name.rsplit("/", 1)[-1],
-              obj.size,
-              obj.last_modified.strftime("%Y-%m-%d %H:%M:%S")
-              ) for obj in minio.list_objects(
-                   g.bucket_name,
-                   prefix="annotated_files/")]
+    files = []
+
+    try:
+        # List objects in the specified S3 bucket with the given prefix
+        response = s3.list_objects_v2(
+            Bucket=g.bucket_name,
+            Prefix="annotated_files/"
+        )
+
+        # Extract the file names, sizes, and modified times
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                file_name = obj['Key'].rsplit("/", 1)[-1] 
+                size = obj['Size'] 
+                last_modified = obj['LastModified'].strftime("%Y-%m-%d %H:%M:%S") 
+
+                # Append to the files list
+                files.append((file_name, size, last_modified))
+
+    except Exception as e:
+        flash(f"Error listing files: {str(e)}")
 
     if job_id is not None:
         return flask.jsonify({"files": files}), 202
@@ -1126,11 +1221,12 @@ def download_file(filename='annotations.csv'):
     """
     logger.info("Downloading annotations")
     filename = request.form.get("filename")
-    file = minio.get_object(g.bucket_name, f"annotated_files/{filename}")
-    logger.info(f"Downloaded annotations from s3: {filename}")
-
+        
+    response = s3.get_object(Bucket=g.bucket_name, Key=f"annotated_files/{filename}")     
+    file = response['Body'].read()
+    logger.info(f"Downloaded annotations from S3: {filename}")
     return flask.Response(
-        file.stream(32*1024),
+        file,
         mimetype='text/csv',
         headers={"Content-Disposition": f"attachment;filename=cedars_{filename}"}
     )
@@ -1171,15 +1267,28 @@ def create_download_full():
 @log_function_call
 def delete_download_file():
     """
-    Deletes a download file from the current minio bucket.
+    Deletes a download file from the current S3 bucket.
     """
-
-    filename = request.form.get("filename")
-    minio.remove_object(g.bucket_name, f"annotated_files/{filename}")
-    logger.info(f"Successfully removed {filename} from minio server.")
-
-    return redirect("/ops/download_page")
-
+    try:
+        filename = "annotated_files/"+request.form.get("filename")
+        S3_bucket=s3_resource.Bucket(g.bucket_name)
+        response = S3_bucket.object_versions.filter(Prefix=filename).delete()
+        logger.info(f"S3 delete object Response: '{response}'")
+        logger.info(f"Permanently deleted all versions of object '{filename}'")
+        return redirect("/ops/download_page")
+    except ClientError as e:
+         flash(f"Error deleting file '{filename}' from bucket '{g.bucket_name}': {e}")
+         error_code = e.response['Error']['Code']
+         if error_code == 'NoSuchKey':
+            logger.info(f"File '{filename}' not found in bucket '{g.bucket_name}'")
+            return redirect(request.url)
+         elif error_code == 'AccessDenied':
+            logger.info(f"Access denied while deleting file '{filename}' from bucket '{g.bucket_name}'")
+            return redirect(request.url)
+         else:
+            logger.info(f"Error deleting file '{filename}' from bucket '{g.bucket_name}': {e}")
+            return redirect(request.url)
+       
 @bp.route('/update_results_collection', methods=["GET"])
 @auth.admin_required
 @log_function_call

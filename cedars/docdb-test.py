@@ -1,12 +1,14 @@
+import os
 from pymongo import MongoClient
-from dotenv import dotenv_values
+from dotenv import dotenv_values,load_dotenv
 
-config = dotenv_values(".env")
+load_dotenv()
+# config = dotenv_values(".env")
 
 MONGO_URI = (
-        f'mongodb://{config["DB_USER"]}:{config["DB_PWD"]}'
-        f'@{config["DB_HOST"]}:{config["DB_PORT"]}/'
-        f'{config["DB_NAME"]}?{config["DB_PARAMS"]}'
+        f'{os.getenv("DB_PROTOCOL", "mongodb")}://{os.getenv("DB_USER")}:{os.getenv("DB_PWD")}'
+        f'@{os.getenv("DB_HOST")}:{os.getenv("DB_PORT")}/'
+        f'{os.getenv("DB_NAME")}?{os.getenv("DB_PARAMS")}'
     )
 
 print(MONGO_URI)

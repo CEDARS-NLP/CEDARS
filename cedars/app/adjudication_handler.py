@@ -94,7 +94,7 @@ class AdjudicationHandler:
     @log_function_call
     def get_curr_annotation_id(self):
         return self.patient_data['annotation_ids'][self.patient_data['current_index']]
-    
+
     @log_function_call
     def get_all_annotations_for_curr_note(self):
         """

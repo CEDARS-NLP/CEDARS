@@ -4,8 +4,14 @@
 
 {% block content %}
 <div class="w-75 mx-auto">
-  <form class="form-inline" method="POST">
 
+  <!-- display spinner and wait message while waiting for Pine EC2 instance to spin up.-->
+  <div id="loadingMessage" style="display: none; text-align: center;">
+      <div id="spinner" class="spinner"></div>
+      <p id="loadingText">Wait while it loads the PINES server...</p>
+  </div>
+
+  <form class="form-inline" method="POST" id="searchForm" onsubmit="return checkAndInitPines();">
     <div class="mb-4">
       <div class="form-group">
         <label class="h3">Search Query</label>
@@ -29,4 +35,107 @@
       <button type="submit" class="btn btn-primary">Submit</button>
   </form>
 </div>
+
+<style>
+    .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+<script>
+    let isPollingServer = false;
+
+    function checkAndInitPines(event) {
+        const formData = new FormData($("#searchForm")[0]);
+        if (isPollingServer) {
+            return false; // Block further actions
+        }
+        if ($('#nlp_apply').is(':checked')) {
+            initPinesConnection(formData);
+        } else {
+            submitUploadQuery(formData);
+        }
+        return false; // Prevent default form submission
+    }
+
+    function initPinesConnection(formData) {
+        const $loadingMessage = $("#loadingMessage");
+        const $loadingText = $("#loadingText");
+        const $spinner = $("#spinner");
+
+        $loadingMessage.show();
+        $loadingText.text("Wait while it loads the PINES server...");
+        $spinner.css("display", "inline-block");
+        isPollingServer = true;
+        // Poll Pines server every 5 seconds until it's up and running
+        function pollPinesServer() {
+            $loadingMessage.show();
+            $spinner.css("display", "inline-block");
+            $loadingText.text("Wait while it loads the PINES server...");
+
+            fetch("/ops/init_pines", {
+                method: "POST",
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === "success") {
+                        isPollingServer = false;
+                        console.log("PINES server is ready. Proceeding with query...");
+                        $loadingText.text("PINES server is ready. Proceeding with query...");
+                        $spinner.hide();
+                        submitUploadQuery(formData);
+                    } else if (data.status === "failed") {
+                        setTimeout(pollPinesServer, 5000); // Retry connecting to EC2 every 5 sec
+                    } else {
+                        console.error("Unexpected server response:", data);
+                        isPollingServer = false;
+                        $spinner.hide();
+                        $loadingText.text("Could not connect to PINES server. Please try again later.");
+                    }
+                })
+                .catch(error => {
+                    console.error("Error while polling PINES server:", error);
+                    isPollingServer = false;
+                    $spinner.hide();
+                    $loadingText.text("An unexpected error occurred. Please try again.");
+                });
+        }
+
+        pollPinesServer();
+    }
+
+    function submitUploadQuery(formData) {
+        // submit form and execute search query
+        // if Pine checkbox checked, this will execute only once EC2 instance is up and running
+        // if Pine checkbox is uncheckd, this will execute right away
+        fetch("/ops/upload_query", {
+            method: "POST",
+            body: formData
+        })
+            .then(response => {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                }
+            })
+            .catch(error => console.error("Error:", error));
+    }
+</script>
+
 {% endblock %}

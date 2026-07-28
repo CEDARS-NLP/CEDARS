@@ -11,6 +11,7 @@ classifiers = [
 
 dependencies = [
     "flask",
+    "nmslib",
     "flask-caching",
     "flask-login",
     "python-dotenv",
@@ -28,8 +29,7 @@ dependencies = [
     "passvalidate",
     "rq_dashboard",
     "polars",
-    "prometheus-client",
-    "prometheus-flask-exporter"
+    "flask-pyoidc"
 ]
 
 [build-system]

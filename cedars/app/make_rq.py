@@ -6,11 +6,10 @@ import argparse
 
 load_dotenv()
 
-config = dotenv_values(".env")
-
+environment = os.getenv('ENV', 'local')
 
 def create_rq_app():
-    flask_app = create_app(f"config.Base")
+    flask_app = create_app(f"config.{environment.title()}")
     rq_app = flask_app.extensions['rq']
     return rq_app
 

@@ -1,10 +1,13 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
+from time import sleep
+from datetime import datetime
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
 from . import db
+from .api import check_is_pines_available
 from .cedars_enums import ReviewStatus
 
 logger.enable(__name__)
@@ -151,94 +154,134 @@ class NlpProcessor:
         """
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
+
+        if db.get_search_query("tag_query")["nlp_apply"] is True:
+            # This healthcheck for PINES will also trigger a startup if PINES is inactive
+            is_pines_available = check_is_pines_available()
+            if is_pines_available:
+                logger.info(f"Run initial PINES healthcheck for {patient_id}, got status : ACTIVE")
+            else:
+                logger.info(f"Run initial PINES healthcheck for {patient_id}, got status : INACTIVE")
+
         # load previosly processed documents
         # document_processed = load_progress()
         spacy_patterns = query_to_patterns(self.query)
         for i, item in enumerate(spacy_patterns):
             self.matcher.add(f"DVT_{i}", [item])
+        try:
+            
+            # check all documents already processed
+            documents_to_process = []
+            if patient_id is not None:
+                # get all note for patient which are not reviewed
+                documents_to_process = db.get_documents_to_annotate(patient_id)
+            else:
+                # get all notes which are not in annotation collection.
+                documents_to_process = db.get_documents_to_annotate()
 
-        # check all documents already processed
-        documents_to_process = []
-        if patient_id is not None:
-            # get all note for patient which are not reviewed
-            documents_to_process = db.get_documents_to_annotate(patient_id)
-        else:
-            # get all notes which are not in annotation collection.
-            documents_to_process = db.get_documents_to_annotate()
+            document_list = [document for document in documents_to_process]
+            if len(document_list) == 0:
+                # no notes found to annotate
+                logger.info(f"No documents to process for patient {patient_id}")
+                if db.get_search_query("tag_query")["nlp_apply"] is True:
+                    self.process_patient_pines(patient_id)
+                return
 
-        document_list = [document for document in documents_to_process]
-        if len(document_list) == 0:
-            # no notes found to annotate
-            logger.info(f"No documents to process for patient {patient_id}")
-            if db.get_search_query("tag_query")["nlp_apply"] is True:
-                self.process_patient_pines(patient_id)
-            return
+            if patient_id is not None:
+                logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
+            else:
+                logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
 
-        if patient_id is not None:
-            logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
-        else:
-            logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
+            logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
+            annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
+                                            n_process=processes,
+                                            batch_size=batch_size)
+            logger.info(f"Starting to process document annotations: {len(document_list)}")
 
-        logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
-        annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
-                                          n_process=processes,
-                                          batch_size=batch_size)
-        logger.info(f"Starting to process document annotations: {len(document_list)}")
+            count = 0
+            docs_with_annotations = 0
+            for document, doc in zip(document_list, annotations):
+                match_count = 0
+                sentence_start = 0
+                sentence_end = 0
+                for sent_no, sentence_annotation in enumerate(doc.sents):
+                    sentence_text = sentence_annotation.text.strip()
+                    sentence_end = sentence_start + len(sentence_text)
+                    matches = self.matcher(sentence_annotation)
+                    for match in matches:
+                        _, start, end = match
+                        token = sentence_annotation[start:end]
+                        has_negation = is_negated(token)
+                        token_start = token.start_char
+                        token_end = token_start + len(token.text)
+                        annotation = {
+                                        "sentence": sentence_text,
+                                        "token": token.text,
+                                        "isNegated": has_negation,
+                                        "note_start_index": token_start,
+                                        "note_end_index": token_end,
+                                        "sentence_number": sent_no,
+                                        "sentence_start" : sentence_start,
+                                        "sentence_end" : sentence_end
+                                        }
+                        annotation['note_id'] = document["text_id"]
+                        annotation["text_date"] = document["text_date"]
+                        annotation["patient_id"] = document["patient_id"]
+                        annotation["reviewed"] = ReviewStatus.UNREVIEWED.value
+                        db.insert_one_annotation(annotation)
+                        if not has_negation:
+                            if match_count == 0:
+                                docs_with_annotations += 1
+                            match_count += 1
 
-        count = 0
-        docs_with_annotations = 0
-        for document, doc in zip(document_list, annotations):
-            match_count = 0
-            sentence_start = 0
-            sentence_end = 0
-            for sent_no, sentence_annotation in enumerate(doc.sents):
-                sentence_text = sentence_annotation.text.strip()
-                sentence_end = sentence_start + len(sentence_text)
-                matches = self.matcher(sentence_annotation)
-                for match in matches:
-                    _, start, end = match
-                    token = sentence_annotation[start:end]
-                    has_negation = is_negated(token)
-                    token_start = token.start_char
-                    token_end = token_start + len(token.text)
-                    annotation = {
-                                    "sentence": sentence_text,
-                                    "token": token.text,
-                                    "isNegated": has_negation,
-                                    "note_start_index": token_start,
-                                    "note_end_index": token_end,
-                                    "sentence_number": sent_no,
-                                    "sentence_start" : sentence_start,
-                                    "sentence_end" : sentence_end
-                                    }
-                    annotation['note_id'] = document["text_id"]
-                    annotation["text_date"] = document["text_date"]
-                    annotation["patient_id"] = document["patient_id"]
-                    annotation["reviewed"] = ReviewStatus.UNREVIEWED.value
-                    db.insert_one_annotation(annotation)
-                    if not has_negation:
-                        if match_count == 0:
-                            docs_with_annotations += 1
-                        match_count += 1
+                    sentence_start = sentence_end + 1
 
-                sentence_start = sentence_end + 1
+                if match_count == 0:
+                    db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
+                count += 1
+                if (count) % 10 == 0:
+                    logger.info(f"Processed {count} / {len(document_list)} documents")
 
-            if match_count == 0:
-                db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
-            count += 1
-            if (count) % 10 == 0:
-                logger.info(f"Processed {count} / {len(document_list)} documents")
+            # Mark the patient as reviewed if no annotations are found.
+            if docs_with_annotations == 0:
+                db.mark_patient_reviewed(patient_id, "CEDARS")
 
-        # Mark the patient as reviewed if no annotations are found.
-        if docs_with_annotations == 0:
-            db.mark_patient_reviewed(patient_id, "CEDARS")
+            # check if nlp processing is enabled
+            if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
+                logger.info(f"Checking PINES server status.... (patient : {patient_id})")
 
-        # check if nlp processing is enabled
-        if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
-            logger.info(f"Processing {docs_with_annotations} documents with PINES")
-            self.process_patient_pines(patient_id)
+                is_pines_ready = False
+                while is_pines_ready is not True:
+                    is_pines_ready = check_is_pines_available()
+                    logger.info(f"Run PINES healthcheck for {patient_id}, got response : {is_pines_ready} .")
+                    sleep(5)
 
-    def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
+                logger.info(f"PINES server is ready (patient : {patient_id})")
+                logger.info(f"Processing {docs_with_annotations} documents for patient {patient_id} with PINES")
+
+                # Save and raise any error PINES encounters only after running upsert_patient_records
+                pines_error = None
+                try:
+                    self.process_patient_pines(patient_id)
+                except Exception as e:
+                    logger.error(f"An error was thrown when processing documents for patient {patient_id} with PINES : {e}")
+                    
+                    # Store the error to be raised after the patient update
+                    pines_error = e
+                finally:
+                    db.upsert_patient_records(patient_id, datetime.now(), updated_by="PINES")
+
+                    if pines_error is not None:
+                        raise pines_error
+
+            else:
+                db.upsert_patient_records(patient_id, datetime.now(), updated_by="CEDARS")
+
+        except Exception as exc:
+            logger.error(f"Error in nplprocessor for patient {patient_id} - process_notes: {str(exc)}")
+            raise exc
+
+    def process_patient_pines(self, patient_id: str, default_threshold: float = 0.5) -> None:
         """
         For each patient who are unreviewed,
 
@@ -258,17 +301,21 @@ class NlpProcessor:
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
 
-        db.predict_and_save(notes)
+        clf_threshold = db.predict_and_save(notes)
+        if clf_threshold is None:
+            clf_threshold = default_threshold
+
+        logger.debug(f"PINES marking patient {patient_id} with a classification threshold of {clf_threshold}")
         scores = []
         for note_id in notes:
             score = db.get_note_prediction_from_db(note_id)
             scores.append(score)
-            if score < threshold:
+            if score < clf_threshold:
                 updated_annots = db.update_annotation_reviewed(note_id)
                 db.mark_note_reviewed(note_id, reviewed_by="PINES")
                 logger.info(f"Marked {updated_annots} annotations as reviewed for note {note_id} with score {score}")
 
-        if max(scores) < threshold:
+        if max(scores) < clf_threshold:
             db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
             logger.debug(f"Marked patient {patient_id} as reviewed")
 
@@ -308,10 +355,14 @@ class NlpProcessor:
                     self.process_notes(patient_id)
                 except Exception as exc:
                     logger.error(f"Error processing notes for patient {patient_id}: {exc}")
-                finally:
-                    # TODO: make sure the patient is not unlocked if locked by a user.
-                    # when we have the user-lock mapping - we can add the check here.
-                    db.set_patient_lock_status(patient_id, False)
+                    raise exc
+
+                #finally:
+                # TODO: make sure the patient is not unlocked if locked by a user.
+                # when we have the user-lock mapping - we can add the check here.
+                
+                # Only unlock this patient if process_notes completed without any errors
+                db.set_patient_lock_status(patient_id, False)
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 

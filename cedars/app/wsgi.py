@@ -1,5 +1,6 @@
 """Create flask application"""
 
+import ddtrace.auto
 import os
 import sys
 import logging
@@ -11,11 +12,10 @@ from . import db
 load_dotenv()
 
 environment = os.getenv('ENV', 'local')
-config = dotenv_values(".env")
 
 app = create_app(f"config.{environment.title()}")
 
 if __name__ == '__main__':
     # host should be 0.0.0.0 for docker to work
     logger.info(f"Starting app in {environment} mode")
-    app.run(host=config['HOST'], port=config['PORT'], debug=True)
+    app.run(host= os.getenv('HOST'), port= os.getenv('PORT'), debug=True)

@@ -3,22 +3,23 @@ Entrypoint for the flask application.
 """
 import os
 import sys
-from flask import Flask, redirect, render_template
+from flask import Flask, render_template, session, redirect, url_for, jsonify
 from flask_session import Session
 import logging
 from loguru import logger
-from dotenv import dotenv_values
+from dotenv import dotenv_values, load_dotenv
 import rq
 import rq_dashboard
 from redis import Redis
-from prometheus_flask_exporter.multiprocess import GunicornInternalPrometheusMetrics
 from . import auth
 from . import ops
 from . import stats
+from . import oidc_auth
+from flask_pyoidc.user_session import UserSession
 
+
+load_dotenv()
 environment = os.getenv('ENV', 'local')
-config = dotenv_values(".env")
-sess = Session()
 
 
 def rq_init_app(cedars_rq):
@@ -39,7 +40,7 @@ def rq_init_app(cedars_rq):
     rq_dashboard.blueprint.before_request(auth.rq_admin_check)
     rq_dashboard.web.setup_rq_connection(cedars_rq)
     cedars_rq.register_blueprint(rq_dashboard.blueprint,
-                                    url_prefix=config['RQ_DASHBOARD_URL'])
+                                    url_prefix=os.getenv("RQ_DASHBOARD_URL"))
 
     return cedars_rq
 
@@ -52,17 +53,16 @@ def create_app(config_filename=None):
         cedars_app.config.from_object(config_filename)
 
     cedars_app.config["UPLOAD_FOLDER"] = os.path.join(cedars_app.instance_path)
-    metrics = GunicornInternalPrometheusMetrics(cedars_app, metrics_decorator=auth.admin_required)
-    metrics.info('app_info', 'CEDARS Application', version='1.0.0')
+    cedars_app.config["SESSION_TYPE"] = "redis"
+    cedars_app.config["SESSION_REDIS"] = Redis.from_url(cedars_app.config["RQ"]['redis_url'])
 
-    sess.init_app(cedars_app)
+    Session(cedars_app)
     rq_init_app(cedars_app)
-
+    oidc = oidc_auth.init_app(cedars_app)
     auth.login_manager.init_app(cedars_app)
+
     cedars_app.register_blueprint(auth.bp)
-
     cedars_app.register_blueprint(ops.bp)
-
     cedars_app.register_blueprint(stats.bp)
 
     setup_logging()
@@ -83,6 +83,38 @@ def create_app(config_filename=None):
         else:
             return render_template('index.html', **ops.db.get_info())
 
+
+    @cedars_app.route("/login")
+    @oidc.oidc_auth('default')
+    def login():
+        session_state = UserSession(session)
+        sub = session_state.userinfo['sub']
+        
+        if not auth.is_user_authorized():
+            # We should no longer land here. Ping should prevent access, but this case
+            # should remain here as an additional guard
+            auth.do_logout()
+            return redirect(url_for("auth.unauthorized"))
+        elif auth.do_login(sub):
+            return redirect(url_for("homepage"))
+        else:
+            return redirect(url_for("auth.register_oidc_get"))
+
+
+    @cedars_app.route("/logout")
+    @oidc.oidc_logout
+    def logout():
+        auth.do_logout()
+        return redirect(url_for("homepage"))
+    
+    @oidc.error_view
+    def oidc_error(error=None, error_description=None):
+        if error == 'access_denied' and 'You are not authorized to access this application' in error_description:
+            auth.do_logout()
+            return redirect(url_for("auth.unauthorized"))
+        
+        return jsonify({'error': error, 'message': error_description})
+
     return cedars_app
 
 
@@ -90,19 +122,19 @@ def setup_logging():
     """Setup logging"""
     """Configure Loguru as the primary logger and disable unwanted logs"""
 
-    # 🔴 Remove default Loguru handler (avoid duplicate logs)
+    # ?? Remove default Loguru handler (avoid duplicate logs)
     logger.remove()
 
-    # ✅ Setup Loguru logging (only DEBUG and above)
+    # ? Setup Loguru logging (only DEBUG and above)
     logger.add(sys.stdout,
                format="{time} {level} {message}",
                level="DEBUG",
                colorize=True)
 
-    # 🔴 Suppress Flask's werkzeug logs (disable request logs)
+    # ?? Suppress Flask's werkzeug logs (disable request logs)
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-    # ✅ Redirect Python's `logging` module logs to Loguru
+    # ? Redirect Python's `logging` module logs to Loguru
     class InterceptHandler(logging.Handler):
         def emit(self, record):
             level = logger.level(record.levelname).name if record.levelname in logger._core.levels else "DEBUG"
@@ -110,6 +142,6 @@ def setup_logging():
 
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.DEBUG)
 
-    # 🔴 Suppress RQ Worker Debug Logs
+    # ?? Suppress RQ Worker Debug Logs
     logging.getLogger("rq.worker").setLevel(logging.DEBUG)
     logging.getLogger("rq.queue").setLevel(logging.DEBUG)
