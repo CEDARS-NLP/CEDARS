@@ -26,6 +26,7 @@ ENV VIRTUAL_ENV=/.venv \
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
 COPY . .
+RUN mkdir -p /tmp/prometheus-multiproc
 EXPOSE 8000
 
 CMD [ "gunicorn", "-c", "gunicorn.conf.py", "app.main:app", "--log-level", "warning" ]
