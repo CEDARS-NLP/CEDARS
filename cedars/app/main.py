@@ -55,8 +55,8 @@ def create_app() -> FastAPI:
         Instrumentator().instrument(app).expose(
             app, endpoint="/metrics", include_in_schema=False
         )
-    except ImportError:
-        pass
+    except (ImportError, ValueError):
+        print("Prometheus metrics not enabled (missing package or required folder).")
 
     return app
 
