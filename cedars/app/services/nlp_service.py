@@ -38,10 +38,12 @@ def nlp_status() -> dict:
     """Return per-project NLP progress based on the project's TASK collection."""
     task_col = mongo.db["TASK"]
     in_progress = task_col.count_documents({"complete": False})
-    completed = task_col.count_documents({"complete": True})
+    failed = task_col.count_documents({"failed": True})
+    completed = task_col.count_documents({"complete": True, "failed": {"$ne": True}})
     total_patients = mongo.db["PATIENTS"].count_documents({})
     return {
         "total_patients": total_patients,
         "tasks_in_progress": in_progress,
         "tasks_completed": completed,
+        "tasks_failed": failed,
     }

@@ -73,6 +73,7 @@ def test_nlp_run_and_status(admin_project):
     # No worker executed the jobs, so no TASK docs were created yet.
     assert status["tasks_in_progress"] == 0
     assert status["tasks_completed"] == 0
+    assert status["tasks_failed"] == 0
 
 
 def test_query_requires_admin(admin_project):

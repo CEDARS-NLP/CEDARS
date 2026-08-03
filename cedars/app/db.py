@@ -2107,7 +2107,7 @@ def get_task(task_id):
     return task_db.find_one({"job_id": task_id})
 
 @log_function_call
-def update_db_task_progress(task_id, progress):
+def update_db_task_progress(task_id, progress, failed=False):
     """
     Updates the progress of a task and checks if it has completed.
     This function will also automatically unlock the patient after completion.
@@ -2120,11 +2120,12 @@ def update_db_task_progress(task_id, progress):
         # in the queue
         logger.error(f"Task {task_id} not found in database.")
         return
-    if progress >= 100:
+    if progress >= 100 or failed:
         completed = True
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
-                                 "complete": completed}})
+                                 "complete": completed,
+                                 "failed": bool(failed)}})
     patient_id = (task_id.rsplit(":", 1)[-1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
@@ -2140,7 +2141,7 @@ def report_success(job):
     job.meta['progress'] = 100
     job.save_meta()
 
-    update_db_task_progress(job.get_id(), 100)
+    update_db_task_progress(job.get_id(), 100, failed=False)
 
 @log_function_call
 def report_failure(job):
@@ -2152,7 +2153,8 @@ def report_failure(job):
     """
     job.meta['progress'] = 0
     job.save_meta()
-    update_db_task_progress(job.get_id(), 0)
+    # Failures are terminal and must not remain counted as "in progress".
+    update_db_task_progress(job.get_id(), 0, failed=True)
 
 @log_function_call
 def get_patient_reviewer(patient_id: str):

@@ -57,7 +57,7 @@ export default function QueryPage() {
         hide_duplicates: hideDuplicates,
         skip_after_event: skipAfterEvent,
       });
-      navigate(`/projects/${projectId}/process`);
+      navigate(`/projects/${projectId}/stats`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save query");
     } finally {

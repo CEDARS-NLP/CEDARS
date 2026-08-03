@@ -13,7 +13,6 @@ import ProjectLayout from "@/projects/ProjectLayout";
 import ProjectHome from "@/projects/ProjectHome";
 import DataPage from "@/projects/DataPage";
 import QueryPage from "@/projects/QueryPage";
-import NlpRunPage from "@/projects/NlpRunPage";
 import AdjudicatePage from "@/projects/AdjudicatePage";
 import StatsPage from "@/projects/StatsPage";
 import ExportPage from "@/projects/ExportPage";
@@ -122,7 +121,6 @@ export default function App() {
                 <Route index element={<ProjectHome />} />
                 <Route path="data" element={<DataPage />} />
                 <Route path="query" element={<QueryPage />} />
-                <Route path="process" element={<NlpRunPage />} />
                 <Route path="adjudicate" element={<AdjudicatePage />} />
                 <Route path="stats" element={<StatsPage />} />
                 <Route path="export" element={<ExportPage />} />

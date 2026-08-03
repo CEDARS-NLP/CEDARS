@@ -341,6 +341,7 @@ class NlpProcessor:
                 "description": kwargs.get("description", "NLP Processor"),
                 "user": kwargs.get("user", None),
                 "complete": False,
+                "failed": False,
                 "progress": 0
             }
             # check if the task is completed for the patient already

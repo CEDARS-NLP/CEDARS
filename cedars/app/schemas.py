@@ -104,6 +104,7 @@ class NlpStatusOut(BaseModel):
     total_patients: int
     tasks_in_progress: int
     tasks_completed: int
+    tasks_failed: int = 0
 
 
 # --- adjudication -------------------------------------------------------
