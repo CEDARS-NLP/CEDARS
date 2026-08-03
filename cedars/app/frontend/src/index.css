@@ -1,0 +1,134 @@
+@import "tailwindcss";
+@import "@mskcc/tokens/css/root.css";
+@import "@mskcc/tokens/css/tailwind.css";
+@import "@mskcc/tokens/css/pro.css";
+@import "@mskcc/theme-antd/dist/styles/theme.css";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: var(--msk-font-family-base, "MSK Sans Pro", Verdana, sans-serif);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-2xl: calc(var(--radius) + 8px);
+    --radius-3xl: calc(var(--radius) + 12px);
+    --radius-4xl: calc(var(--radius) + 16px);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-link: var(--link);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/*
+ * Bridge shadcn CSS variables → MSK semantic tokens.
+ * MSK tokens auto-update light/dark via [data-theme] on <html>.
+ */
+:root {
+    --radius: 0.5rem;
+
+    /* Link text color — readable in both light and dark */
+    --link:                 var(--msk-color-content-link);
+
+    /* Surfaces */
+    --background:           var(--msk-color-bg);
+    --foreground:           var(--msk-color-content-primary);
+    --card:                 var(--msk-color-bg);
+    --card-foreground:      var(--msk-color-content-primary);
+    --popover:              var(--msk-color-bg);
+    --popover-foreground:   var(--msk-color-content-primary);
+
+    /* Primary action — MSK brand blue */
+    --primary:              var(--msk-color-bg-action-primary);
+    --primary-foreground:   var(--msk-color-content-inverse);
+
+    /* Secondary / subtle layer */
+    --secondary:            var(--msk-color-bg-layer);
+    --secondary-foreground: var(--msk-color-content-primary);
+
+    /* Muted */
+    --muted:                var(--msk-color-bg-layer);
+    --muted-foreground:     var(--msk-color-content-secondary);
+
+    /* Accent — selected highlight */
+    --accent:               var(--msk-color-bg-action-selected);
+    --accent-foreground:    var(--msk-color-content-action-selected);
+
+    /* Destructive */
+    --destructive:          var(--msk-color-content-feedback-error-decorative);
+
+    /* Chrome */
+    --border:               var(--msk-color-border);
+    --input:                var(--msk-color-border-input);
+    --ring:                 var(--msk-color-bg-action-primary);
+
+    /* Charts — MSK spectrum palette */
+    --chart-1:              var(--msk-color-blue-60);
+    --chart-2:              var(--msk-color-cyan-50);
+    --chart-3:              var(--msk-color-green-50);
+    --chart-4:              var(--msk-color-purple-50);
+    --chart-5:              var(--msk-color-orange-50);
+
+    /*
+     * Sidebar — light clinical style (cool-gray layer).
+     * Dark mode: --msk-color-bg-layer auto-shifts to cool-gray-80 via [data-theme="dark"].
+     */
+    --sidebar:                      var(--msk-color-bg-layer);
+    --sidebar-foreground:           var(--msk-color-content-primary);
+    --sidebar-primary:              var(--msk-color-bg-action-primary);
+    --sidebar-primary-foreground:   var(--msk-color-content-inverse);
+    --sidebar-accent:               var(--msk-color-bg-action-selected);
+    --sidebar-accent-foreground:    var(--msk-color-content-action-selected);
+    --sidebar-border:               var(--msk-color-border);
+    --sidebar-ring:                 var(--msk-color-bg-action-primary);
+}
+
+/* Dark mode: MSK tokens handle bg/text automatically via [data-theme="dark"].
+   We only need to re-declare values not covered by MSK tokens. */
+.dark {
+    --chart-1: var(--msk-color-blue-40);
+    --chart-2: var(--msk-color-cyan-40);
+    --chart-3: var(--msk-color-green-40);
+    --chart-4: var(--msk-color-purple-40);
+    --chart-5: var(--msk-color-orange-40);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

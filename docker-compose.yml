@@ -81,7 +81,7 @@ services:
 
   frontend:
     build:
-      context: ../frontend
+      context: ./cedars/app/frontend
     image: cedars-frontend
     hostname: frontend
     restart: always
