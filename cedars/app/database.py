@@ -109,8 +109,14 @@ def get_meta_db():
 # --- object storage (S3 / MinIO) ------------------------------------------
 
 def get_bucket_name():
-    """Return the configured S3 bucket name."""
-    return os.getenv("S3_BUCKET")
+    """Return the configured S3 bucket name, defaulting to cedars-{project_id}."""
+    explicit = os.getenv("S3_BUCKET")
+    if explicit:
+        return explicit
+    db_name = get_current_project_db_name()
+    prefix = "cedars_proj_"
+    project_id = db_name[len(prefix):] if db_name.startswith(prefix) else db_name
+    return f"cedars-{project_id}"
 
 
 def project_s3_prefix():
@@ -119,14 +125,19 @@ def project_s3_prefix():
 
 
 def _new_s3(resource=False):
-    """Construct a boto3 S3 client or resource from environment credentials."""
+    """Construct a boto3 S3 client or resource from environment credentials.
+
+    Falls back to MINIO_ACCESS_KEY / MINIO_SECRET_KEY when the AWS_* vars are
+    absent, and defaults the endpoint to http://minio:9000 in that case.
+    """
+    in_aws_mode = bool(os.getenv("AWS_ACCESS_KEY_ID"))
     kwargs = {
-        "region_name": os.getenv("REGION"),
-        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
-        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+        "region_name": os.getenv("REGION", "us-east-1"),
+        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("MINIO_ACCESS_KEY"),
+        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("MINIO_SECRET_KEY"),
     }
-    # Optional custom endpoint (e.g. MinIO). Absent for real AWS S3.
-    endpoint = os.getenv("S3_ENDPOINT_URL")
+    # Use explicit endpoint when set; otherwise default to MinIO in self-hosted mode.
+    endpoint = os.getenv("S3_ENDPOINT_URL") or (None if in_aws_mode else "http://minio:9000")
     if endpoint:
         kwargs["endpoint_url"] = endpoint
     factory = boto3.resource if resource else boto3.client
@@ -134,7 +145,7 @@ def _new_s3(resource=False):
 
 
 def get_s3():
-    """Return a boto3 S3 *client*, verifying the bucket exists."""
+    """Return a boto3 S3 *client*, creating the bucket if it does not exist."""
     s3_client = _new_s3(resource=False)
     bucket_name = get_bucket_name()
     try:
@@ -142,11 +153,13 @@ def get_s3():
         logger.info(f"Bucket '{bucket_name}' already exists in object storage")
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
-        if error_code == "404":
-            logger.error(f"Bucket does not exist: {e}")
+        if error_code in ("404", "NoSuchBucket"):
+            logger.info(f"Bucket '{bucket_name}' not found — creating it")
+            s3_client.create_bucket(Bucket=bucket_name)
+            logger.info(f"Bucket '{bucket_name}' created")
         else:
             logger.error(f"Error checking if bucket exists: {e}")
-        raise
+            raise
     return s3_client
 
 
