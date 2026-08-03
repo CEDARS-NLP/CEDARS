@@ -116,8 +116,8 @@ export default function StatsPage() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard label="Patients" value={data.number_of_patients} />
             <StatCard
-              label="Annotated patients"
-              value={data.number_of_annotated_patients}
+              label="Unreviewed patients"
+              value={data.number_of_patients - data.number_of_reviewed}
             />
             <StatCard label="Reviewed patients" value={data.number_of_reviewed} />
           </div>
