@@ -14,15 +14,14 @@ from typing import Optional
 from faker import Faker
 from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
-import flask
-from flask import g
 import requests
 import pandas as pd
 import polars as pl
 from werkzeug.security import check_password_hash
 from bson import ObjectId
 from loguru import logger
-from .database import mongo, s3
+from .database import mongo, s3, get_meta_db, get_bucket_name, project_s3_prefix
+from .queues import task_queue
 from .cedars_enums import ReviewStatus
 from .cedars_enums import log_function_call
 
@@ -240,7 +239,7 @@ def add_user(username, password, is_admin=False):
         "is_admin": is_admin,
         "date_created": datetime.now()
     }
-    mongo.db["USERS"].insert_one(info)
+    get_meta_db()["USERS"].insert_one(info)
     logger.info(f"Added user {username} to database.")
 
 @log_function_call
@@ -637,7 +636,7 @@ def get_user(username):
     Returns:
         user (dict) : The user object from the database.
     """
-    user = mongo.db["USERS"].find_one({"user": username})
+    user = get_meta_db()["USERS"].find_one({"user": username})
     return user
 
 @log_function_call
@@ -1159,7 +1158,7 @@ def get_project_users():
         usernames (list) : List of all usernames for approved users
                            (including the admin) for this project
     """
-    users = mongo.db["USERS"].find({})
+    users = get_meta_db()["USERS"].find({})
 
     return [user["user"] for user in users]
 
@@ -1743,7 +1742,7 @@ def empty_annotations():
     annotations.delete_many({})
 
     # also reset the queue
-    flask.current_app.task_queue.empty()
+    task_queue.empty()
     mongo.db["TASK"].delete_many({})
 
 @log_function_call
@@ -1766,14 +1765,14 @@ def check_password(username, password):
         (bool) : True if the password matches the password of that user from the database.
     """
 
-    user = mongo.db["USERS"].find_one({"user": username})
+    user = get_meta_db()["USERS"].find_one({"user": username})
 
     return "password" in user and check_password_hash(user["password"], password)
 
 @log_function_call
 def is_admin_user(username):
     """check if the user is admin"""
-    user = mongo.db["USERS"].find_one({'user': username})
+    user = get_meta_db()["USERS"].find_one({'user': username})
 
     if user is not None and user["is_admin"]:
         return True
@@ -2126,7 +2125,7 @@ def update_db_task_progress(task_id, progress):
     task_db.update_one({"job_id": task["job_id"]},
                        {"$set": {"progress": progress,
                                  "complete": completed}})
-    patient_id = (task_id.split(":")[1]).strip()
+    patient_id = (task_id.rsplit(":", 1)[-1]).strip()
     # TODO: handle failed patients?
     set_patient_lock_status(patient_id, False)
 
@@ -2264,11 +2263,11 @@ def download_annotations(filename: str = "annotations.csv", get_sentences: bool 
         #Upload to AWS S3
         s3.upload_fileobj(
               Fileobj=data_stream,  
-              Bucket=g.bucket_name,
-              Key=f"annotated_files/{filename}",
+              Bucket=get_bucket_name(),
+              Key=f"{project_s3_prefix()}/annotated_files/{filename}",
               ExtraArgs={"ContentType": "application/csv"}  
         )
-        logger.info(f"File '{filename}' successfully uploaded to bucket '{g.bucket_name}'")
+        logger.info(f"File '{filename}' successfully uploaded to bucket '{get_bucket_name()}'")
             
         return True
     except Exception as e:

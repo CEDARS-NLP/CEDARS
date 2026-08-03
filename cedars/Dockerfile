@@ -24,7 +24,6 @@ ENV VIRTUAL_ENV=/.venv \
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
 COPY . .
-EXPOSE 443
+EXPOSE 8000
 
-#CMD [ "gunicorn", "app.wsgi:app", "--log-level", "warning" ]
-#CMD [ "gunicorn", "app.wsgi:app", "--bind", "0.0.0.0:5002", "--log-level", "warning" ]
+CMD [ "gunicorn", "-c", "gunicorn.conf.py", "app.main:app", "--log-level", "warning" ]

@@ -1,10 +1,18 @@
-"""Initialize database connection."""
+"""Initialize database and object-storage connections (framework-agnostic).
+
+Rewritten for the FastAPI migration. Replaces ``flask_pymongo`` / ``flask.g``
+with a plain :class:`pymongo.MongoClient` whose ``mongo.db`` resolves to the
+*current project's* database via a context variable, so the ~140
+``mongo.db["COLLECTION"]`` call sites in :mod:`app.db` remain unchanged. S3 is
+exposed as lazy boto3 singletons.
+"""
 import os
-import flask_pymongo
+import contextvars
+from urllib.parse import quote_plus
+
 import boto3
-from werkzeug.local import LocalProxy
-from dotenv import dotenv_values, load_dotenv
-from flask import current_app, g
+from pymongo import MongoClient
+from dotenv import load_dotenv
 from loguru import logger
 from botocore.exceptions import ClientError
 
@@ -12,90 +20,158 @@ from botocore.exceptions import ClientError
 load_dotenv()
 
 
-def get_mongo():
+def _build_mongo_uri():
+    """Build the Mongo connection URI from environment (mirrors ``config.py``)."""
+    protocol = os.getenv("DB_PROTOCOL", "mongodb")
+    user = os.getenv("DB_USER")
+    pwd = quote_plus(os.getenv("DB_PWD") or "")
+    name = os.getenv("DB_NAME")
+    params = os.getenv("DB_PARAMS", "")
+    replica_set = os.getenv("DB_REPLICA_SET")
+    if replica_set:
+        return f"{protocol}://{user}:{pwd}@{replica_set}/{name}?{params}"
+    host = os.getenv("DB_HOST")
+    port = os.getenv("DB_PORT")
+    return f"{protocol}://{user}:{pwd}@{host}:{port}/{name}?{params}"
 
-    # https://pymongo.readthedocs.io/en/stable/faq.html#is-pymongo-fork-safe
-    mongo = flask_pymongo.PyMongo(current_app)
 
-    return mongo
+MONGO_URI = _build_mongo_uri()
+
+# The metadata database holds *global* (non project-scoped) state:
+#   - USERS    : global accounts used for authentication
+#   - PROJECTS : registry of all projects (for listing / lookup)
+META_DB_NAME = os.getenv("META_DB_NAME", "cedars_meta")
+
+# Fallback database name used when no project context is bound (maintenance
+# scripts, or the legacy single-project layout).
+DEFAULT_DB_NAME = os.getenv("DB_NAME") or "cedars"
+
+_client = None
+
+
+def get_client():
+    """Return a process-wide :class:`MongoClient` (created lazily)."""
+    global _client  # pylint: disable=global-statement
+    if _client is None:
+        _client = MongoClient(MONGO_URI)
+    return _client
+
+
+# --- project context -------------------------------------------------------
+
+_current_project_db = contextvars.ContextVar("cedars_current_project_db", default=None)
+
+
+def project_db_name(project_id):
+    """Map a ``project_id`` to its dedicated Mongo database name."""
+    return f"cedars_proj_{project_id}"
+
+
+def set_current_project_db(db_name):
+    """Bind the current context to ``db_name``; returns a reset token."""
+    return _current_project_db.set(db_name)
+
+
+def reset_current_project_db(token):
+    """Undo a previous :func:`set_current_project_db` using its token."""
+    _current_project_db.reset(token)
+
+
+def get_current_project_db_name():
+    """Return the database name bound to the current context (or the default)."""
+    return _current_project_db.get() or DEFAULT_DB_NAME
+
+
+class _MongoProxy:
+    """Drop-in replacement for the old ``flask_pymongo.PyMongo`` handle.
+
+    ``mongo.db`` resolves to the *current project's* database so that existing
+    ``mongo.db["COLLECTION"]`` usage keeps working without edits.
+    """
+
+    @property
+    def db(self):
+        return get_client()[get_current_project_db_name()]
+
+    @property
+    def cx(self):
+        return get_client()
+
+
+mongo = _MongoProxy()
+
+
+def get_meta_db():
+    """Return the shared metadata database (global users + project registry)."""
+    return get_client()[META_DB_NAME]
+
+
+# --- object storage (S3 / MinIO) ------------------------------------------
+
+def get_bucket_name():
+    """Return the configured S3 bucket name."""
+    return os.getenv("S3_BUCKET")
+
+
+def project_s3_prefix():
+    """Return an S3 key prefix that isolates the current project's objects."""
+    return get_current_project_db_name()
+
+
+def _new_s3(resource=False):
+    """Construct a boto3 S3 client or resource from environment credentials."""
+    kwargs = {
+        "region_name": os.getenv("REGION"),
+        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+    }
+    # Optional custom endpoint (e.g. MinIO). Absent for real AWS S3.
+    endpoint = os.getenv("S3_ENDPOINT_URL")
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+    factory = boto3.resource if resource else boto3.client
+    return factory("s3", **kwargs)
 
 
 def get_s3():
-
-    from . import db
-    project_id = os.getenv("PROJECT_ID", None)
-    project_info = db.get_info()
-    if project_id is None and "project_id" in project_info:
-        project_id = project_info["project_id"]
-   
-    g.bucket_name = os.getenv("S3_BUCKET") 
-    aws_region = os.getenv("REGION")
-
-    # Check if S3 client already exists in the global context
-    s3 = getattr(g, "s3", None)
-    #Initialize Boto3.client type S3 object
-    if s3 is None:
-        s3 = g.s3 = boto3.client(
-            "s3",
-            region_name=aws_region,
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"), 
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"), 
-        )
-    
-    # Ensure the bucket exists or throw an error
+    """Return a boto3 S3 *client*, verifying the bucket exists."""
+    s3_client = _new_s3(resource=False)
+    bucket_name = get_bucket_name()
     try:
-        # Check if bucket exists
-        s3.head_bucket(Bucket=g.bucket_name)
-        logger.info(f"Bucket '{g.bucket_name}' already exists in AWS S3")
-
-    except s3.exceptions.ClientError as e:
-        error_code = e.response['Error']['Code']
-        # 404 means it doesn't exist
-        if error_code == '404':
+        s3_client.head_bucket(Bucket=bucket_name)
+        logger.info(f"Bucket '{bucket_name}' already exists in object storage")
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code == "404":
             logger.error(f"Bucket does not exist: {e}")
-            raise
         else:
             logger.error(f"Error checking if bucket exists: {e}")
-            raise
+        raise
+    return s3_client
 
-    return s3
 
 def get_s3_resource():
+    """Return a boto3 S3 *resource* (used for versioned delete operations)."""
+    return _new_s3(resource=True)
 
-    g.bucket_name = os.getenv("S3_BUCKET") 
-    aws_region = os.getenv("REGION")
 
-    # Check if S3 resource is already exists in the global context
-    s3_resource = getattr(g,"s3_resource",None)
+class _LazyProxy:
+    """Minimal lazy singleton proxy (replaces werkzeug ``LocalProxy``)."""
 
-    #Initialize Boto3.Resource type S3 object for some of the operations    
-    if s3_resource is None:
-        s3_resource = g.s3_resource = boto3.resource(
-            "s3",
-            region_name=aws_region,
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"), 
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"), 
-        )
-    
-    # Ensure the bucket exists or throw an error
-    try:
-        # Check if bucket exists
-        # s3_resource.head_bucket(Bucket=g.bucket_name)
-        s3_resource.Bucket(g.bucket_name)
-        logger.info(f"Bucket '{g.bucket_name}' already exists in AWS S3")
+    def __init__(self, factory):
+        self._factory = factory
+        self._obj = None
 
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        # 404 means it doesn't exist
-        if error_code == '404':
-            logger.error(f"Bucket does not exist: {e}")
-            raise
-        else:
-            logger.error(f"Error checking if bucket exists: {e}")
-            raise
+    def _get(self):
+        if self._obj is None:
+            self._obj = self._factory()
+        return self._obj
 
-    return s3_resource
-    
-mongo = LocalProxy(get_mongo)
-s3=LocalProxy(get_s3)
-s3_resource = LocalProxy(get_s3_resource)
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+
+# ``mongo`` (the project-scoped handle) is defined above. S3 handles are lazy so
+# that importing this module never touches the network.
+s3 = _LazyProxy(get_s3)
+s3_resource = _LazyProxy(get_s3_resource)

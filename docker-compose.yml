@@ -15,14 +15,16 @@ x-minio-common: &minio-common
     retries: 5
 
 services:
-  web:
+  backend:
     build:
       context: ./cedars
     image: cedars
     restart: always
-    # flask requires SIGINT to stop gracefully
-    # (default stop signal from Compose is SIGTERM)
+    command: gunicorn -c gunicorn.conf.py app.main:app --log-level warning
+    # uvicorn worker handles SIGINT/SIGTERM gracefully
     stop_signal: SIGINT
+    expose:
+      - "8000"
     depends_on:
       - redis
     networks:
@@ -77,17 +79,16 @@ services:
       - selfhosted
       - superbio
 
-  nginx:
-    image: nginx:1.19.2-alpine
-    hostname: nginx
+  frontend:
+    build:
+      context: ../frontend
+    image: cedars-frontend
+    hostname: frontend
     restart: always
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "80:80"
     depends_on:
-      - web
-      - minio
+      - backend
     networks:
       - cedars
     profiles:
@@ -109,7 +110,7 @@ services:
     networks:
       - cedars
     depends_on:
-      - web     
+      - backend
     profiles:
       - cpu
       - gpu
@@ -180,7 +181,7 @@ services:
     env_file:
       - .env
     depends_on:
-      - web
+      - backend
       - redis
     profiles:
       - cpu
@@ -205,7 +206,7 @@ services:
     env_file:
       - .env
     depends_on:
-      - web
+      - backend
       - redis
     profiles:
       - cpu
