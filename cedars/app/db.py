@@ -2075,11 +2075,10 @@ def predict_and_save(text_ids: Optional[list[str]] = None,
 @log_function_call
 def add_task(task):
     """
-    Launch a task and add it to Mongo if it doesn't already exist.
-    # TODO: insert only one
+    Create or reset a task record keyed by job_id.
     """
     task_db = mongo.db["TASK"]
-    task_db.insert_one(task)
+    task_db.update_one({"job_id": task["job_id"]}, {"$set": task}, upsert=True)
 
 @log_function_call
 def get_tasks_in_progress():

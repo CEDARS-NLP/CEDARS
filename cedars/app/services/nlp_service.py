@@ -17,6 +17,15 @@ def run_nlp(project_id: str, username: str) -> int:
     patient_ids = db.get_patient_ids()
     for patient in patient_ids:
         job_id = f"spacy:{project_id}:{patient}"
+        db.add_task({
+            "job_id": job_id,
+            "name": "nlp_processor",
+            "description": f"Processing patient {patient} with spacy",
+            "user": username,
+            "complete": False,
+            "failed": False,
+            "progress": 0,
+        })
         queues.task_queue.enqueue(
             tasks.nlp_task,
             args=(project_id, patient),

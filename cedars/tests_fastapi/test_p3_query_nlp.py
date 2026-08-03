@@ -70,8 +70,8 @@ def test_nlp_run_and_status(admin_project):
 
     status = client.get(f"/api/v1/projects/{pid}/nlp/status").json()
     assert status["total_patients"] == 2
-    # No worker executed the jobs, so no TASK docs were created yet.
-    assert status["tasks_in_progress"] == 0
+    # Enqueued jobs are tracked immediately, even before a worker executes them.
+    assert status["tasks_in_progress"] == 2
     assert status["tasks_completed"] == 0
     assert status["tasks_failed"] == 0
 
