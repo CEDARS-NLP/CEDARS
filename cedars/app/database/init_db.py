@@ -59,6 +59,8 @@ def attach_user_to_project(global_engine,
         conn.execute(project_stmt)
         conn.commit()
 
+    logger.info(f"Successfully added user {user_id} to project {project_id}.")
+
 def initialize_project(global_engine,
                        base_database_url, project_name,
                        current_user_id,
