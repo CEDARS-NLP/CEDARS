@@ -10,16 +10,18 @@ from project_table_creation import ProjectBase
 from global_app_tables import GlobalBase, Projects
 from global_app_tables import UserProjectRelation
 from project_table_creation import ProjectUsers
+from cedars.app.cedars_enums import log_function_call
 
 logger.enable(__name__)
 
+@log_function_call
 def create_project_tables(engine, database_url, project_name) -> None:
     """ """
     ProjectBase.metadata.create_all(engine)
     logger.info("Tables created successfully at %s for project %s",
                 database_url, project_name)
 
-
+@log_function_call
 def populate_project_info(engine, project_id,
                           project_name, user_id) -> None:
     stmt = insert(Projects).values(
@@ -33,6 +35,7 @@ def populate_project_info(engine, project_id,
         conn.execute(stmt)
         conn.commit()
 
+@log_function_call
 def attach_user_to_project(global_engine,
                            project_engine,
                            project_id,
@@ -61,6 +64,7 @@ def attach_user_to_project(global_engine,
 
     logger.info(f"Successfully added user {user_id} to project {project_id}.")
 
+@log_function_call
 def initialize_project(global_engine,
                        base_database_url, project_name,
                        current_user_id,
@@ -86,6 +90,7 @@ def initialize_project(global_engine,
     finally:
         project_engine.dispose()
 
+@log_function_call
 def initialize_application(database_url) -> None:
     """Initialize the application by creating tables in the database."""
     if project_id is None:

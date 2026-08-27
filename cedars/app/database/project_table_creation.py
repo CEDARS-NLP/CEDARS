@@ -21,6 +21,7 @@ from sqlalchemy import (
     Double,
     String,
     Text,
+    Index
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -111,11 +112,20 @@ class Notes(ProjectBase):
 
     text: Mapped[str] = mapped_column(Text, nullable=False)
     text_date: Mapped[date] = mapped_column(Date, nullable=False)
-    text_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    text_tag_1: Mapped[str] = mapped_column(String(100), nullable=False)
-    text_tag_2: Mapped[str] = mapped_column(String(100), nullable=False)
-    text_tag_3: Mapped[str] = mapped_column(String(100), nullable=False)
-    text_tag_4: Mapped[str] = mapped_column(String(100), nullable=False)
+    text_sequence: Mapped[int] = mapped_column(Integer, autoincrement=True,
+                                               nullable=False)
+    text_tag_1: Mapped[str] = mapped_column(String(100),
+                                            default="",
+                                            nullable=False)
+    text_tag_2: Mapped[str] = mapped_column(String(100),
+                                            default="",
+                                            nullable=False)
+    text_tag_3: Mapped[str] = mapped_column(String(100),
+                                            default="",
+                                            nullable=False)
+    text_tag_4: Mapped[str] = mapped_column(String(100),
+                                            default="",
+                                            nullable=False)
 
     reviewed: Mapped[bool] = mapped_column(Boolean,
                                                  default=False,
@@ -135,6 +145,10 @@ class Notes(ProjectBase):
 
     ReviewerLog: Mapped[list["ReviewerLog"]] = relationship(
         back_populates="Notes", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("idx_notes_patient_date", "patient_id", "note_date"),
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -305,6 +319,10 @@ class Results(ProjectBase):
 
     reviewer: Mapped[str] = mapped_column(
         String(100), ForeignKey("ProjectUsers.user_id"), nullable=True
+    )
+
+    last_updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now(timezone.utc), nullable=False
     )
 
     def __repr__(self) -> str:  # for debugging and logging only

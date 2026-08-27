@@ -6,10 +6,13 @@ from sqlalchemy import select
 from sqlalchemy import insert
 
 from global_app_tables import Users
+from cedars.app.cedars_enums import log_function_call
+
 
 logger.enable(__name__)
 
 
+@log_function_call
 def add_user(db_engine, user_id, password_hash=None, uses_orcid=False):
     '''
     Adds a user to the global application database.
@@ -44,8 +47,9 @@ def add_user(db_engine, user_id, password_hash=None, uses_orcid=False):
 
     logger.info(f"Successfully added user {user_id} to database.")
 
+@log_function_call
 def validate_local_user(db_engine, user_id,
-                        entered_password_hash) -> (bool, str):
+                        entered_password_hash) -> (bool, str): # type: ignore
     """
     Validates a local user by checking if the provided password hash matches the stored hash.
     Args:

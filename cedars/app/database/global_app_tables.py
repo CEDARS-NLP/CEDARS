@@ -107,6 +107,10 @@ class UserProjectRelation(GlobalBase):
         String(100), ForeignKey("Users.user_id"), nullable=False
     )
 
+    added_by: Mapped[str] = mapped_column(
+        String(100), ForeignKey("Users.user_id"), nullable=False
+    )
+
     has_admin_privileges: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     def __repr__(self) -> str:  # for debugging and logging only
