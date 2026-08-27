@@ -21,7 +21,8 @@ from sqlalchemy import (
     Double,
     String,
     Text,
-    Index
+    Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -148,7 +149,8 @@ class Notes(ProjectBase):
     )
 
     __table_args__ = (
-        Index("idx_notes_patient_date", "patient_id", "note_date"),
+        Index("idx_notes_patient_date", "patient_id", "text_date"),
+        Index("idx_notes_patient", "patient_id"),
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -159,8 +161,9 @@ class NotesSummary(ProjectBase):
 
     __tablename__ = "NotesSummary"
 
+    # One row per patient: patient_id doubles as the primary key.
     patient_id: Mapped[str] = mapped_column(
-        String(100), ForeignKey("Patients.patient_id"), nullable=False
+        String(100), ForeignKey("Patients.patient_id"), primary_key=True
     )
 
     first_note_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -172,9 +175,18 @@ class NotesSummary(ProjectBase):
 
 
 class Annotations(ProjectBase):
-    """Annotations table."""
+    """Annotations table.
+
+    `status` replaces mongo's 3-state ReviewStatus enum (cedars_enums.ReviewStatus)
+    as a single character: "U"=UNREVIEWED, "R"=REVIEWED, "S"=SKIPPED (annotation
+    falls after a patient's recorded event date and is excluded from review).
+    """
 
     __tablename__ = "Annotations"
+
+    STATUS_UNREVIEWED = "U"
+    STATUS_REVIEWED = "R"
+    STATUS_SKIPPED = "S"
 
     annotation_id: Mapped[int] = mapped_column(
         Integer, primary_key=True, autoincrement=True
@@ -188,6 +200,10 @@ class Annotations(ProjectBase):
         String(100), ForeignKey("Patients.patient_id"), nullable=False
     )
 
+    # Denormalized from Notes.text_date so review-status queries and the
+    # composite indices below don't need to join Notes on every lookup.
+    text_date: Mapped[date] = mapped_column(Date, nullable=False)
+
     sentence: Mapped[str] = mapped_column(Text, nullable=False)
     token: Mapped[str] = mapped_column(String(200), nullable=False)
     isNegated: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -197,9 +213,9 @@ class Annotations(ProjectBase):
     sentence_start: Mapped[int] = mapped_column(Integer, nullable=False)
     sentence_end: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    reviewed: Mapped[bool] = mapped_column(Boolean,
-                                                 default=False,
-                                                 nullable=False)
+    status: Mapped[str] = mapped_column(String(1),
+                                        default=STATUS_UNREVIEWED,
+                                        nullable=False)
 
     Events: Mapped[list["Events"]] = relationship(
         back_populates="Annotations", cascade="all, delete-orphan"
@@ -209,13 +225,39 @@ class Annotations(ProjectBase):
         back_populates="Annotations", cascade="all, delete-orphan"
     )
 
+    __table_args__ = (
+        Index("idx_annotations_patient_text", "patient_id", "text_id"),
+        Index("idx_annotations_patient_isneg_date_text_start",
+             "patient_id", "isNegated", "text_date", "text_id", "note_start_index"),
+        Index("idx_annotations_patient_date_status", "patient_id", "text_date", "status"),
+        Index("idx_annotations_text_status", "text_id", "status"),
+        Index("idx_annotations_patient_status", "patient_id", "status"),
+        Index("idx_annotations_text_isneg_date_sentnum",
+             "text_id", "isNegated", "text_date", "sentence_number"),
+        Index("idx_annotations_text_isneg_date_sentnum_start",
+             "text_id", "isNegated", "text_date", "sentence_number", "note_start_index"),
+        Index("idx_annotations_patient_isneg_status_sentnum_text_date",
+             "patient_id", "isNegated", "status", "sentence_number", "text_id", "text_date"),
+        Index("idx_annotations_patient_start_text_date",
+             "patient_id", "note_start_index", "text_id", "text_date"),
+    )
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Annotations(annotation_id={self.annotation_id!r}, text_id={self.text_id!r})"
 
 class Events(ProjectBase):
-    """Events table."""
+    """Events table.
+
+    One row per patient (patient_id is unique) holding that patient's current
+    clinical-event state - equivalent to the event_date/event_annotation_id
+    fields mongo embedded directly on the PATIENTS document.
+    """
 
     __tablename__ = "Events"
+
+    event_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
 
     patient_id: Mapped[str] = mapped_column(
         String(100), ForeignKey("Patients.patient_id"), nullable=False
@@ -228,6 +270,10 @@ class Events(ProjectBase):
     )
 
     event_date: Mapped[date] = mapped_column(Date, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("patient_id", name="uq_events_patient_id"),
+    )
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Events(patient_id={self.patient_id!r})"
@@ -249,6 +295,12 @@ class PINES(ProjectBase):
     max_predicted_score: Mapped[Decimal] = mapped_column(Double, nullable=False)
     report_type: Mapped[str] = mapped_column(String(100), nullable=True)
     document_type: Mapped[str] = mapped_column(String(100), nullable=True)
+
+    __table_args__ = (
+        # one prediction per note
+        UniqueConstraint("text_id", name="uq_pines_text_id"),
+        Index("idx_pines_patient", "patient_id"),
+    )
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"PINES(patient_id={self.patient_id!r}, text_id={self.text_id!r})"
@@ -333,6 +385,10 @@ class ReviewerLog(ProjectBase):
 
     __tablename__ = "ReviewerLog"
 
+    log_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+
     text_id: Mapped[str] = mapped_column(
         String(100), ForeignKey("Notes.text_id"), nullable=False
     )
@@ -375,6 +431,10 @@ class Task(ProjectBase):
                                           default=0,
                                           nullable=False)
 
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_task_job_id"),
+    )
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Task(job_id={self.job_id!r}, user_id={self.user_id!r})"
 
@@ -404,3 +464,27 @@ class Query(ProjectBase):
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Query(query_id={self.query_id!r})"
+
+
+class ProjectSettings(ProjectBase):
+    """ProjectSettings table.
+
+    One row per project database, holding project-level configuration that
+    mongo kept in the INFO document (e.g. PINES integration settings).
+    """
+
+    __tablename__ = "ProjectSettings"
+
+    # Single-row table: fixed id keeps upserts simple (id=1 always).
+    settings_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+
+    pines_url: Mapped[str] = mapped_column(Text, nullable=True)
+    is_pines_server_enabled: Mapped[bool] = mapped_column(Boolean,
+                                                          default=False,
+                                                          nullable=False)
+
+    def __repr__(self) -> str:  # for debugging and logging only
+        return f"ProjectSettings(settings_id={self.settings_id!r})"
+
