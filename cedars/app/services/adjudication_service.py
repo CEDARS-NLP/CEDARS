@@ -29,7 +29,7 @@ def _load_patient_data(patient_id):
         "hide_duplicates": db.get_search_query("hide_duplicates"),
         "stored_event_date": db.get_event_date(patient_id),
         "stored_annotation_id": db.get_event_annotation_id(patient_id),
-        "patient_comments": (patient or {}).get("comments", ""),
+        "patient_comments": patient.comments if patient is not None else "",
     }
 
 
@@ -47,15 +47,15 @@ def _note_spans(text, annotations_for_note):
     spans = []
     prev_end = 0
     for annotation in annotations_for_note:
-        start = annotation["note_start_index"]
-        end = annotation["note_end_index"]
+        start = annotation.note_start_index
+        end = annotation.note_end_index
         if start < prev_end:
             continue
         spans.append({
             "text": text[start:end],
             "start_pos": start,
             "end_pos": end,
-            "match_source": annotation.get("token") or text[start:end],
+            "match_source": annotation.token or text[start:end],
         })
         prev_end = end
     return spans
@@ -63,7 +63,7 @@ def _note_spans(text, annotations_for_note):
 
 def _sentence_spans(text, current_annotation, annotations_for_sentence):
     """Return the current sentence text + match spans relative to that sentence."""
-    sentence_str = current_annotation["sentence"]
+    sentence_str = current_annotation.sentence
     try:
         sentence_start = text.lower().index(sentence_str.lower())
     except ValueError:
@@ -74,15 +74,15 @@ def _sentence_spans(text, current_annotation, annotations_for_sentence):
     spans = []
     prev_end = sentence_start
     for annotation in annotations_for_sentence:
-        start = annotation["note_start_index"]
-        end = annotation["note_end_index"]
+        start = annotation.note_start_index
+        end = annotation.note_end_index
         if (start < prev_end) and (start != 0):
             continue
         spans.append({
             "text": text[start:end],
             "start_pos": max(0, start - sentence_start),
             "end_pos": max(0, end - sentence_start),
-            "match_source": annotation.get("token") or text[start:end],
+            "match_source": annotation.token or text[start:end],
         })
         prev_end = end
     return sentence_text, spans
@@ -105,7 +105,7 @@ def _build_annotation_view(handler, comments):
     annotations_for_note = handler.get_all_annotations_for_curr_note()
     annotations_for_sentence = handler.get_all_annotations_for_curr_sentence()
 
-    text = note["text"]
+    text = note.text
     sentence_text, sentence_spans = _sentence_spans(text, annotation,
                                                     annotations_for_sentence)
     patient_data = handler.get_patient_data()
@@ -113,13 +113,12 @@ def _build_annotation_view(handler, comments):
         "pos_start": patient_data["current_index"] + 1,
         "total_pos": len(patient_data["annotation_ids"]),
         "patient_id": str(handler.patient_id),
-        "note_id": annotation["note_id"],
-        "note_date": _iso(annotation.get("text_date")),
+        "note_id": annotation.text_id,
+        "note_date": _iso(annotation.text_date),
         "event_date": _iso(patient_data.get("event_date")),
         "note_comment": comments or "",
-        "tags": [note.get("text_tag_1", ""), note.get("text_tag_2", ""),
-                 note.get("text_tag_3", ""), note.get("text_tag_4", ""),
-                 note.get("text_tag_5", "")],
+        "tags": [note.text_tag_1 or "", note.text_tag_2 or "",
+                 note.text_tag_3 or "", note.text_tag_4 or ""],
         "full_note": text,
         "full_note_evidence": _note_spans(text, annotations_for_note),
         "sentence": sentence_text,
@@ -233,7 +232,7 @@ def search_patient(username, project_id, search_value):
         patient = db.get_patient_by_id(search_value)
         if patient is not None:
             is_locked = db.get_patient_lock_status(search_value)
-            patient_id = patient["patient_id"] if not is_locked else None
+            patient_id = patient.patient_id if not is_locked else None
 
     if patient_id is None:
         message = (f"Patient {search_value} is currently being reviewed by another "

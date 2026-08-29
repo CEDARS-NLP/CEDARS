@@ -1,4 +1,4 @@
-"""P2 tests: data upload + ingestion (S3 stubbed, ingest runs against mongomock)."""
+"""P2 tests: data upload + ingestion (S3 stubbed, ingest runs against a throwaway SQLite db)."""
 import os
 import shutil
 from unittest.mock import MagicMock
@@ -69,9 +69,16 @@ def test_ingest_from_existing_s3_file(admin_client, stub_s3):
 
     # Verify the project's database was populated.
     from app import database
-    proj_db = database.get_client()[database.project_db_name(pid)]
-    assert proj_db["NOTES"].count_documents({}) == body["total_rows"]
-    assert proj_db["PATIENTS"].count_documents({}) == body["total_patients"]
+    from app.database.project_table_creation import Notes, Patients
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    engine = database.get_project_engine(pid)
+    with Session(engine) as session:
+        note_count = session.execute(select(func.count()).select_from(Notes)).scalar_one()
+        patient_count = session.execute(select(func.count()).select_from(Patients)).scalar_one()
+    assert note_count == body["total_rows"]
+    assert patient_count == body["total_patients"]
 
 
 def test_list_files(admin_client, stub_s3):

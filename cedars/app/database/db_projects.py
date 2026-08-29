@@ -34,6 +34,30 @@ def update_project_name(global_engine, project_id, new_name) -> None:
 
 
 @log_function_call
+def update_project_description(global_engine, project_id, new_description) -> None:
+    '''
+    Updates a project's description in the global Projects table.
+    '''
+    with session_scope(global_engine) as session:
+        session.execute(
+            update(Projects)
+            .where(Projects.project_id == project_id)
+            .values(description=new_description)
+        )
+
+
+@log_function_call
+def list_projects(global_engine) -> list:
+    '''
+    Every project in the global registry, ordered by creation time.
+    '''
+    with session_scope(global_engine) as session:
+        return session.execute(
+            select(Projects).order_by(Projects.creation_time)
+        ).scalars().all()
+
+
+@log_function_call
 def get_info(global_engine, project_engine, project_id) -> dict:
     '''
     Returns a dict of project metadata, combining the global Projects row with
@@ -53,6 +77,7 @@ def get_info(global_engine, project_engine, project_id) -> dict:
     info = {
         "project_id": project.project_id,
         "project": project.project_name,
+        "description": project.description,
         "investigator": project.investigator,
         "creation_time": project.creation_time,
         "CEDARS_version": project.cedars_version,
@@ -172,3 +197,20 @@ def terminate_project(global_engine, project_engine, project_id) -> None:
         )
 
     logger.info(f"Project {project_id} has been reset to its initial state.")
+
+
+@log_function_call
+def delete_project_registry(global_engine, project_id) -> None:
+    '''
+    Removes a project's rows from the global database (UserProjectRelation,
+    then Projects). Does not touch the project's own database - pair this with
+    init_db.drop_project_database to fully remove a project.
+    '''
+    with session_scope(global_engine) as session:
+        session.execute(
+            delete(UserProjectRelation).where(UserProjectRelation.project_id == project_id)
+        )
+        session.execute(delete(Projects).where(Projects.project_id == project_id))
+
+    logger.info(f"Removed project {project_id} from the global registry.")
+

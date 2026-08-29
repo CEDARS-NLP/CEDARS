@@ -26,7 +26,10 @@ services:
     expose:
       - "8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     networks:
       - cedars
     env_file:
@@ -44,22 +47,30 @@ services:
         reservations:
           memory: '1g'
           cpus: '1.0'
-  db:
-    image: mongo:latest
+  postgres:
+    image: postgres:16-alpine
     ports:
       - "${DB_HOST_PORT}:${DB_PORT}"
     restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${DB_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${DB_PWD}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PWD}
+      # Default/admin database; per-project databases are created at runtime
+      # via CREATE DATABASE (see app.database.create_project_database).
+      POSTGRES_DB: ${DB_ADMIN_NAME:-postgres}
     volumes:
-      - cedars_db:/data/db
-    command: mongod --quiet --logpath /dev/null 
+      - cedars_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - cedars
     profiles:
       - selfhosted
       - superbio
+
 
   minio:
     <<: *minio-common
@@ -183,6 +194,7 @@ services:
     depends_on:
       - backend
       - redis
+      - postgres
     profiles:
       - cpu
       - gpu
@@ -208,6 +220,7 @@ services:
     depends_on:
       - backend
       - redis
+      - postgres
     profiles:
       - cpu
       - gpu

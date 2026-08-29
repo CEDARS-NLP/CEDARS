@@ -5,15 +5,15 @@ sync dependencies to a threadpool, copying the calling task's ``contextvars``
 at dispatch time. A contextvar set inside a *sync* dependency therefore would
 NOT be visible to the endpoint. Setting it inside an *async* dependency (which
 runs in the event-loop task) makes it part of the context that the endpoint's
-threadpool dispatch copies — so ``mongo.db`` resolves to the right project DB.
+threadpool dispatch copies — so ``get_current_project_engine()`` resolves to
+the right project's database.
 """
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Path, status
 
 from . import db
-from .database import (project_db_name, reset_current_project_db,
-                       set_current_project_db)
+from .database import reset_current_project_db, set_current_project_db
 from .security import CurrentUser, get_current_user
 
 
@@ -33,7 +33,7 @@ async def bind_project(project_id: str = Path(...)):
     produced. Runs in the event-loop task so the binding propagates to the
     (threadpool-dispatched) sync endpoint.
     """
-    token = set_current_project_db(project_db_name(project_id))
+    token = set_current_project_db(project_id)
     try:
         yield project_id
     finally:
@@ -44,9 +44,8 @@ def require_project(project_id: str = Depends(bind_project),
                     user: CurrentUser = Depends(get_current_user)) -> ProjectContext:
     """Require an authenticated user and an existing, initialized project.
 
-    ``bind_project`` has already bound the project DB, so ``db.get_info()``
-    resolves to this project's ``INFO`` collection and doubles as an existence
-    check.
+    ``bind_project`` has already bound the project engine, so ``db.get_info()``
+    resolves to this project's metadata and doubles as an existence check.
     """
     info = db.get_info()
     if not info:

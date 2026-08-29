@@ -28,10 +28,9 @@ SEARCH_QUERY_PATTERN = (
 def get_query(_ctx: ProjectContext = Depends(require_project_admin)):
     """Return the current search query and its options."""
     details = db.get_search_query_details()
-    tag_query = details.get("tag_query", {}) if details else {}
     return QueryOut(
         query=details.get("query", "") if details else "",
-        nlp_apply=bool(tag_query.get("nlp_apply", False)),
+        nlp_apply=bool(details.get("apply_pines", False)) if details else False,
         hide_duplicates=bool(details.get("hide_duplicates", True)) if details else True,
         skip_after_event=bool(details.get("skip_after_event", False)) if details else False,
         exclude_negated=bool(details.get("exclude_negated", False)) if details else False,
@@ -51,7 +50,7 @@ def save_query(payload: QueryUpdate,
         pass
 
     use_negation = False  # negation view disabled in the original UI
-    tag_query = {"exact": False, "nlp_apply": bool(payload.nlp_apply)}
+    tag_query = {"exact": False, "apply_pines": bool(payload.nlp_apply)}
 
     new_query_added = db.save_query(search_query, use_negation,
                                     bool(payload.hide_duplicates),

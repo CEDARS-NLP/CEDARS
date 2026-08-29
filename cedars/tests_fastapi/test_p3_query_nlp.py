@@ -1,20 +1,16 @@
 """P3 tests: query save + NLP dispatch (RQ backed by fakeredis, no worker runs)."""
 import pytest
 
-from app import database, queues
+from app import queues
+
+from . import sql_test_helpers as sql
 
 GOOD_PASSWORD = "Abcdef12!!"
 
 
-def _project_db(pid):
-    return database.get_client()[database.project_db_name(pid)]
-
-
 def _seed_patients(pid, n=3):
-    _project_db(pid)["PATIENTS"].insert_many([
-        {"patient_id": str(i), "reviewed": False, "locked": False, "index_no": i}
-        for i in range(1, n + 1)
-    ])
+    for i in range(1, n + 1):
+        sql.seed_patient(pid, str(i), index_no=i)
 
 
 @pytest.fixture()

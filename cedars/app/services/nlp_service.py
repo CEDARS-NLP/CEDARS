@@ -9,7 +9,6 @@ they never collide across projects on the shared Redis instance.
 from rq import Callback, Retry
 
 from .. import db, queues, tasks
-from ..database import mongo
 
 
 def run_nlp(project_id: str, username: str) -> int:
@@ -20,10 +19,8 @@ def run_nlp(project_id: str, username: str) -> int:
         db.add_task({
             "job_id": job_id,
             "name": "nlp_processor",
-            "description": f"Processing patient {patient} with spacy",
-            "user": username,
+            "user_id": username,
             "complete": False,
-            "failed": False,
             "progress": 0,
         })
         queues.task_queue.enqueue(
@@ -44,15 +41,16 @@ def run_nlp(project_id: str, username: str) -> int:
 
 
 def nlp_status() -> dict:
-    """Return per-project NLP progress based on the project's TASK collection."""
-    task_col = mongo.db["TASK"]
-    in_progress = task_col.count_documents({"complete": False})
-    failed = task_col.count_documents({"failed": True})
-    completed = task_col.count_documents({"complete": True, "failed": {"$ne": True}})
-    total_patients = mongo.db["PATIENTS"].count_documents({})
+    """Return per-project NLP progress based on the project's Task table."""
+    total_patients = db.get_total_counts("PATIENTS")
+    in_progress = db.get_total_counts("TASK", complete=False)
+    completed = db.get_total_counts("TASK", complete=True)
     return {
         "total_patients": total_patients,
         "tasks_in_progress": in_progress,
         "tasks_completed": completed,
-        "tasks_failed": failed,
+        # The Task table has no `failed` column (see db_tasks.py) - a failed
+        # job is recorded as complete=True with progress left at 0.
+        "tasks_failed": db.get_total_counts("TASK", complete=True, progress=0),
     }
+

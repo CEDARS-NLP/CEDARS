@@ -140,12 +140,13 @@ def prepare_patients(patient_ids):
     return [str(p_id).strip() for p_id in patient_ids]
 
 
-def emr_to_mongodb(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patients=2000):
-    """Load a tabular file into MongoDB in chunks (ported from ``ops.EMR_to_mongodb``).
+def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patients=2000):
+    """Load a tabular file into the project's SQL database in chunks (ported from
+    ``ops.EMR_to_mongodb``).
 
     Returns a summary dict instead of flashing messages.
     """
-    logger.info("Starting document migration to MongoDB database.")
+    logger.info("Starting document migration to the project's database.")
 
     total_rows = 0
     total_chunks = 0

@@ -74,8 +74,8 @@ def login(payload: LoginRequest, response: Response):
                             "Username and password are required.")
 
     user = db.get_user(username)
-    if user and check_password_hash(user["password"], password):
-        is_admin = bool(user.get("is_admin"))
+    if user and check_password_hash(user.password_hash, password):
+        is_admin = bool(user.is_admin)
         set_auth_cookies(response, username, is_admin)
         return LoginResponse(message="Login successful.",
                              user=UserOut(username=username, is_admin=is_admin))
@@ -100,7 +100,7 @@ def refresh(request: Request, response: Response):
     user = db.get_user(payload["sub"])
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User no longer exists")
-    set_auth_cookies(response, user["user"], bool(user.get("is_admin")))
+    set_auth_cookies(response, user.user_id, bool(user.is_admin))
     return MessageResponse(message="Token refreshed.")
 
 

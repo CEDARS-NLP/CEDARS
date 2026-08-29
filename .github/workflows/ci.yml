@@ -61,10 +61,10 @@ jobs:
           echo "SECRET_KEY=cedars" >> .env
           echo "HOST=localhost" >> .env
           echo "PORT=5000" >> .env
-          echo "DB_PARAMS=\"authSource=admin\"" >> .env
+          echo "DB_PARAMS=" >> .env
           echo "DB_HOST=localhost" >> .env
-          echo "DB_NAME=cedars" >> .env
-          echo "DB_PORT=27017" >> .env
+          echo "GLOBAL_DB_NAME=cedars_global" >> .env
+          echo "DB_PORT=5432" >> .env
           echo "DB_USER=admin" >> .env
           echo "DB_PWD=password" >> .env
           echo "MINIO_HOST=localhost" >> .env

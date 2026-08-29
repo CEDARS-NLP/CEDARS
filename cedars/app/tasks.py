@@ -11,14 +11,13 @@ does.
 from contextlib import contextmanager
 
 from . import db
-from .database import (project_db_name, reset_current_project_db,
-                       set_current_project_db)
+from .database import reset_current_project_db, set_current_project_db
 
 
 @contextmanager
 def project_scope(project_id):
     """Bind the current context to ``project_id``'s database for a job."""
-    token = set_current_project_db(project_db_name(project_id))
+    token = set_current_project_db(project_id)
     try:
         yield
     finally:

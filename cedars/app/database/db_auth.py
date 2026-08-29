@@ -7,7 +7,8 @@ application database and per-project databases.
 
 from loguru import logger
 
-from sqlalchemy import select, insert
+from sqlalchemy import func, select, insert
+from werkzeug.security import check_password_hash
 
 from cedars.app.cedars_enums import log_function_call
 from cedars.app.database.db_session import session_scope
@@ -19,7 +20,7 @@ logger.enable(__name__)
 
 
 @log_function_call
-def add_user(engine, user_id, password_hash=None, uses_orcid=False):
+def add_user(engine, user_id, password_hash=None, uses_orcid=False, is_admin=False):
     '''
     Adds a user to the global application database.
     Args:
@@ -27,6 +28,7 @@ def add_user(engine, user_id, password_hash=None, uses_orcid=False):
         user_id (str): The unique identifier for the user.
                         May be an email or username depending on the authentication method used.
                         If using ORCID, this must be a valid email with the ORCID system.
+        is_admin (bool): Whether this user is a global superuser.
 
     '''
 
@@ -46,7 +48,8 @@ def add_user(engine, user_id, password_hash=None, uses_orcid=False):
             insert(Users).values(
                 user_id=user_id,
                 password_hash=password_hash,
-                uses_orcid=uses_orcid
+                uses_orcid=uses_orcid,
+                is_admin=is_admin,
             )
         )
 
@@ -70,17 +73,36 @@ def get_user(engine, user_id):
 
 
 @log_function_call
-def validate_local_user(engine, user_id,
-                        entered_password_hash) -> tuple[bool, str]:
+def get_user_count(engine) -> int:
+    '''
+    Total number of registered users - used to decide if the next registration
+    should become the first (global-admin) user.
+    '''
+    with session_scope(engine) as session:
+        return session.execute(select(func.count()).select_from(Users)).scalar_one()
+
+
+@log_function_call
+def list_users(engine) -> list[str]:
+    '''
+    Every registered user_id in the global application database.
+    '''
+    with session_scope(engine) as session:
+        return list(session.execute(select(Users.user_id)).scalars().all())
+
+
+@log_function_call
+def validate_local_user(engine, user_id, entered_password) -> tuple[bool, str]:
     """
-    Validates a local user by checking if the provided password hash matches the stored hash.
+    Validates a local user by checking if the provided plaintext password matches
+    the stored werkzeug password hash.
     Args:
         engine: The SQLAlchemy engine for the global application database.
         user_id (str): The unique identifier for the user.
-        entered_password_hash (str): The password hash to validate against the stored hash.
+        entered_password (str): The plaintext password to validate.
 
     Returns:
-        bool: True if the password hash matches, False otherwise.
+        bool: True if the password is correct, False otherwise.
         str: A message indicating the result of the validation.
 
     """
@@ -93,7 +115,7 @@ def validate_local_user(engine, user_id,
             logger.warning(f"User {user_id} not found in the database.")
             return False, "User not found."
 
-        if user_info.password_hash == entered_password_hash:
+        if user_info.password_hash and check_password_hash(user_info.password_hash, entered_password):
             logger.info(f"User {user_id} validated successfully.")
             return True, "Authentication successful."
         else:

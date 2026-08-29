@@ -43,7 +43,7 @@ def upload_and_ingest(
 
     insert_chunk, upsert_chunk = data_service.ingest_chunk_sizes()
     try:
-        summary = data_service.emr_to_mongodb(s3_key, insert_chunk, upsert_chunk)
+        summary = data_service.emr_to_sql(s3_key, insert_chunk, upsert_chunk)
     except Exception as exc:  # noqa: BLE001 - surface ingestion errors to the client
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
                             f"Failed to upload data: {str(exc)}") from exc

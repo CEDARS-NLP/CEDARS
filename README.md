@@ -29,7 +29,7 @@ In order for CEDARS to be sufficiently sensitive and not miss and unacceptable n
 
 ![CEDARS Operational Schema](pics/GitHub%20Docker%20Schema%20C.png)
 
-CEDARS is modular and all information for any given annotation project is stored in one MongoDB database. User credentials, original clinical notes, NLP annotations and patient-specific information are stored in dedicated collections. Once clinical notes have been uploaded, they are passed through the NLP pipeline. Currently only UDPipe is supported and integrated with CEDARS. If desired, the annotation pipeline can include negation and medical concept tagging by NegEx and UMLS respectively.
+CEDARS is modular and all information for any given annotation project is stored in its own PostgreSQL database. User credentials and the project registry are kept in a separate global database; original clinical notes, NLP annotations and patient-specific information are stored in dedicated tables per project. Once clinical notes have been uploaded, they are passed through the NLP pipeline. Currently only UDPipe is supported and integrated with CEDARS. If desired, the annotation pipeline can include negation and medical concept tagging by NegEx and UMLS respectively.
 
 Multiple users can load the web GUI and annotate records at the same time. Once accessed, a given patient record is locked for the user.
 

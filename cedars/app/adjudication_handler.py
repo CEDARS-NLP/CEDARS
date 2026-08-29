@@ -1,8 +1,15 @@
 import datetime
 from loguru import logger
-from bson import ObjectId
 from .cedars_enums import PatientStatus, ReviewStatus
 from .cedars_enums import log_function_call
+from .database.project_table_creation import Annotations
+
+# Maps the SQL Annotations.status single char back onto the mongo-era ReviewStatus enum.
+_REVIEW_ENUM_BY_STATUS = {
+    Annotations.STATUS_UNREVIEWED: ReviewStatus.UNREVIEWED,
+    Annotations.STATUS_REVIEWED: ReviewStatus.REVIEWED,
+    Annotations.STATUS_SKIPPED: ReviewStatus.SKIPPED,
+}
 
 
 class AdjudicationHandler:
@@ -105,16 +112,16 @@ class AdjudicationHandler:
             text_date (ascending)
             sentence_number (ascending)
         """
-        note_id = self.get_curr_annotation()['note_id']
+        note_id = self.get_curr_annotation().text_id
 
         note_annotations = []
         for annotation in self.patient_data['annotations']:
-            if annotation['note_id'] == note_id and annotation['isNegated'] is False:
+            if annotation.text_id == note_id and annotation.isNegated is False:
                 note_annotations.append(annotation)
 
         # Sort by text_date, then by sentence_number
-        sorting_function = lambda entry : (entry['text_date'], 
-                                           entry['sentence_number'])
+        sorting_function = lambda entry : (entry.text_date, 
+                                           entry.sentence_number)
         sorted_annotations = sorted(note_annotations, key=sorting_function)
 
         return sorted_annotations
@@ -130,20 +137,20 @@ class AdjudicationHandler:
             note_start_index (ascending)
         """
         curr_anno = self.get_curr_annotation()
-        note_id = curr_anno['note_id']
-        sentence_number = curr_anno['sentence_number']
+        note_id = curr_anno.text_id
+        sentence_number = curr_anno.sentence_number
 
         note_annotations = []
         for annotation in self.patient_data['annotations']:
-            correct_note = annotation['note_id'] == note_id
-            correct_sentence = annotation['sentence_number'] == sentence_number
-            is_not_negated = annotation['isNegated'] is False
+            correct_note = annotation.text_id == note_id
+            correct_sentence = annotation.sentence_number == sentence_number
+            is_not_negated = annotation.isNegated is False
             if correct_note and correct_sentence and is_not_negated:
                 note_annotations.append(annotation)
 
         # Sort by text_date, then by sentence_number
-        sorting_function = lambda entry : (entry['text_date'], 
-                                           entry['note_start_index'])
+        sorting_function = lambda entry : (entry.text_date, 
+                                           entry.note_start_index)
         sorted_annotations = sorted(note_annotations, key=sorting_function)
 
         return sorted_annotations
@@ -159,20 +166,19 @@ class AdjudicationHandler:
             "pos_start": self.patient_data['current_index'] + 1,
             "total_pos": len(self.patient_data['annotation_ids']),
             "patient_id": self.patient_id,
-            "note_date": self._format_date(annotation.get('text_date')),
+            "note_date": self._format_date(annotation.text_date),
             "event_date": self._format_date(self.patient_data['event_date']),
             "note_comment": comments,
             "highlighted_sentence" : text_highlighter.get_highlighted_sentence(annotation,
                                                                                   note,
                                                                                   annotations_for_sentence),
-            "note_id": annotation["note_id"],
+            "note_id": annotation.text_id,
             "full_note": text_highlighter.get_highlighted_text(note,
                                                                   annotations_for_note),
-            "tags": [note.get("text_tag_1", ""),
-                    note.get("text_tag_2", ""),
-                    note.get("text_tag_3", ""),
-                    note.get("text_tag_4", ""),
-                    note.get("text_tag_5", "")]
+            "tags": [getattr(note, "text_tag_1", "") or "",
+                    getattr(note, "text_tag_2", "") or "",
+                    getattr(note, "text_tag_3", "") or "",
+                    getattr(note, "text_tag_4", "") or ""]
             }
 
         return annotation_data
@@ -294,7 +300,7 @@ class AdjudicationHandler:
 
         for i, anno_id in enumerate(self.patient_data['annotation_ids']):
             review_status = self.patient_data['review_statuses'][i]
-            anno_id = ObjectId(anno_id)
+            anno_id = int(anno_id)
             if (anno_id in annotations_after_event) and (review_status == ReviewStatus.UNREVIEWED):
                 self.patient_data['review_statuses'][i] = ReviewStatus.SKIPPED
 
@@ -355,7 +361,7 @@ class AnnotationFilterStrategy:
         indices_with_duplicates = []
         seen_sentences = set()
         for i, annotation in enumerate(annotations):
-            sentence = annotation['sentence'].lower().strip()
+            sentence = annotation.sentence.lower().strip()
             if sentence in seen_sentences:
                 indices_with_duplicates.append(i)
                 continue
@@ -378,11 +384,11 @@ class AnnotationFilterStrategy:
             # If we are on a new note, then clear the hashset of sentences.
             # This is done so that we only check for the same sentence
             # in that note.
-            if annotation['note_id'] != prev_note_id:
+            if annotation.text_id != prev_note_id:
                 seen_sentences.clear()
 
-            prev_note_id = annotation['note_id']
-            sentence = annotation['sentence'].lower().strip()
+            prev_note_id = annotation.text_id
+            sentence = annotation.sentence.lower().strip()
             if sentence in seen_sentences:
                 indices_with_duplicates.append(i)
                 continue
@@ -404,7 +410,7 @@ class AnnotationFilterStrategy:
         # after a prior one is removed.
         indices_with_duplicates.sort(reverse=True)
         for index in indices_with_duplicates:
-            annotations_with_duplicates.append(annotations[index]["_id"])
+            annotations_with_duplicates.append(str(annotations[index].annotation_id))
             annotations.pop(index)
 
         return annotations, annotations_with_duplicates
@@ -434,9 +440,9 @@ class AnnotationFilterStrategy:
                                                                                  indices_with_duplicates)
 
         filtered_results = {
-            'annotation_ids' : [str(annotation["_id"]) for annotation in annotations],
-            'review_statuses' : [ReviewStatus(int(x["reviewed"])) for x in annotations],
-            'annotations' : [dict(annotation) for annotation in annotations]
+            'annotation_ids' : [str(annotation.annotation_id) for annotation in annotations],
+            'review_statuses' : [_REVIEW_ENUM_BY_STATUS[x.status] for x in annotations],
+            'annotations' : list(annotations)
         }
 
         return filtered_results, annotations_with_duplicates
@@ -449,14 +455,14 @@ class SentenceHighlighter:
         """
         highlighted_note = []
         prev_end_index = 0
-        text = note["text"]
+        text = note.text
 
         annotations = annotations_for_note
         logger.debug(f"Getting highlighted text for : {annotations}")
 
         for annotation in annotations:
-            start_index = annotation['note_start_index']
-            end_index = annotation['note_end_index']
+            start_index = annotation.note_start_index
+            end_index = annotation.note_end_index
             # Make sure the annotations don't overlap
             if start_index < prev_end_index:
                 continue
@@ -475,18 +481,18 @@ class SentenceHighlighter:
         Returns highlighted text for a specific sentence in a note.
         """
         highlighted_note = []
-        text = note["text"]
+        text = note.text
 
-        sentence_start = text.lower().index(current_annotation['sentence'])
-        sentence_end = sentence_start + len(current_annotation['sentence'])
+        sentence_start = text.lower().index(current_annotation.sentence)
+        sentence_end = sentence_start + len(current_annotation.sentence)
         prev_end_index = sentence_start
 
         annotations = annotations_for_sentence
 
         highlighted_note = []
         for annotation in annotations:
-            token_start_index = annotation['note_start_index']
-            token_end_index = annotation['note_end_index']
+            token_start_index = annotation.note_start_index
+            token_end_index = annotation.note_end_index
 
             # Make sure the annotations don't overlap unless it is the first index
             if (token_start_index < prev_end_index) and (token_start_index != 0):

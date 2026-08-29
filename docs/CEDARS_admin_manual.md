@@ -41,13 +41,14 @@ For example:
 ```
 SECRET_KEY=asecurekey
 HOST=0.0.0.0
-DB_HOST=db
-DB_NAME=cedars
-DB_PORT=27017
-DB_HOST_PORT=27018
+DB_HOST=postgres
+DB_PROTOCOL=postgresql
+GLOBAL_DB_NAME=cedars_global
+DB_PORT=5432
+DB_HOST_PORT=5433
 DB_USER=admin
 DB_PWD=password
-DB_PARAMS="authSource=admin"
+DB_PARAMS=""
 MINIO_HOST=minio
 MINIO_PORT=9000
 MINIO_ACCESS_KEY=rootuser
@@ -77,18 +78,18 @@ CEDARS is a flask web application and depends on the following software:
 
     To install poetry, run pipx install poetry or follow the [instructions](https://python-poetry.org/docs/).
 
-3. Mongo 7.0 or later
+3. PostgreSQL 16 or later
 
-    For using Mongo, you have multiple options:
+    For using PostgreSQL, you have multiple options:
     
-     - You might use your own enterprise Mongo instance
-     - You can use a cloud-based service like [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
-     - You can run a local instance of Mongo using Docker
-     - You can run a local instance of Mongo using the [official installation](https://docs.mongodb.com/manual/installation/)
+     - You might use your own enterprise PostgreSQL instance
+     - You can use a cloud-based service (e.g. AWS RDS, Azure Database for PostgreSQL)
+     - You can run a local instance of PostgreSQL using Docker
+     - You can run a local instance of PostgreSQL using the [official installation](https://www.postgresql.org/download/)
 
 4. Minio
 
-    Similar to Mongo, you have multiple options to install MINIO
+    Similar to PostgreSQL, you have multiple options to install MINIO
 
     - You might use your own enterprise MINIO instance
     - You can use a cloud-based service like [MINIO](https://min.io/)
@@ -149,7 +150,7 @@ dzdo systemctl restart docker
 
 ![CEDARS Operational Schema](pics/GitHub%20Docker%20Schema%20C.png)
 
-The CEDARS application runs on a web server and generates an online graphical user interface (GUI) using Flask. All data are stored in a MongoDB instance hosted separately. However, most CEDARS instances are dockerized in order to streamline the project setup process and ensure adequate compatibility of dependencies.
+The CEDARS application runs on a web server and generates an online graphical user interface (GUI) using Flask. All data are stored in a PostgreSQL instance hosted separately (one database per project, plus a global database for accounts/project registry). However, most CEDARS instances are dockerized in order to streamline the project setup process and ensure adequate compatibility of dependencies.
 
 Once the instance is running, electronic health record (EHR) documents are imported and processed through the CEDARS natural language processing (NLP) pipeline. Additional document annotation with a PINES model is optional. A CEDARS annotation project can be set up entirely from the GUI, using the administrator panel. The existing annotations can be downloaded at any point from this interface.
 
@@ -201,7 +202,7 @@ If you are a developer and wish to use a code debugger while working with CEDARS
 The most straightforward way to complete a CEDARS project is via docker containers. This approach allows fast and reliable installation on prems or in the cloud with on-demand access to compute resources, including graphics processing unit \(GPU\). Inclusion of required dependencies in the containers mitigate the problems associated with version incompatibilities inherent to *ad hoc* builds. Docker images can be easily installed in air-gapped environment, which is sometimes an institutional requirement. A CEDARS docker deployment will include:
 
 - CEDARS Flask web server
-- MongoDB database service
+- PostgreSQL database service
 - MINIO object storage service
 - PINES NLP annotation service (optional)
 
@@ -235,14 +236,14 @@ http://<hostaddress>:80
 
 3. Install compose v2  using this [link](https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-compose-on-ubuntu-22-04)
 
-For example to use AWS DocumentDB with tls you can create .env (under CEDARS/cedars) file like this
+For example to connect to a managed AWS RDS PostgreSQL instance with TLS you can create a .env (under CEDARS/cedars) file like this
 ```bash
-DB_HOST=<your-cluster-ip>.docdb.amazonaws.com
-DB_NAME=cedars
-DB_PORT=27017
-DB_USER=<docdbuser>
-DB_PWD=<docDBpassword>
-DB_PARAMS="tls=true&tlsCAFile=global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+DB_HOST=<your-cluster-ip>.rds.amazonaws.com
+GLOBAL_DB_NAME=cedars_global
+DB_PORT=5432
+DB_USER=<postgresuser>
+DB_PWD=<postgrespassword>
+DB_PARAMS="sslmode=require"
 ```
 
 ## Project Execution
@@ -345,7 +346,7 @@ CEDARS is by definition semi-automated, and depending on the specific use case a
 
 ### Project Termination
 
-Once all events have been tallied and the audit results are satisfactory, if desired the CEDARS project database can be deleted from the MongoDB database. This is an irreversible operation.
+Once all events have been tallied and the audit results are satisfactory, if desired the CEDARS project database can be deleted from the PostgreSQL server. This is an irreversible operation.
 
 In future, there will be way to archive CEDARS projects, but this feature is not yet available.
 

@@ -3,9 +3,9 @@
 Replaces the Flask server-side session that held the per-user adjudication state
 (current patient, annotation index, navigation, event date, reviewed ids,
 comments). State is pickled — exactly like flask-session did — so it preserves
-the native objects the :class:`AdjudicationHandler` expects (``ObjectId``,
-``datetime``, ``ReviewStatus`` enums). Keyed by ``(project_id, username)`` so a
-reviewer can work on different projects independently.
+the native objects the :class:`AdjudicationHandler` expects (detached SQLAlchemy
+ORM rows, ``datetime``, ``ReviewStatus`` enums). Keyed by ``(project_id,
+username)`` so a reviewer can work on different projects independently.
 """
 import pickle
 

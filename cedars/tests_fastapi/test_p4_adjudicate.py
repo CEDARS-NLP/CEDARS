@@ -1,10 +1,9 @@
 """P4 tests: the adjudication workflow (seeded notes/annotations, no NLP run)."""
-from datetime import datetime
+from datetime import date
 
 import pytest
-from bson import ObjectId
 
-from app import database
+from . import sql_test_helpers as sql
 
 GOOD_PASSWORD = "Abcdef12!!"
 #            0123456789012345678901234567890123456789
@@ -12,29 +11,14 @@ NOTE_TEXT = "Patient has cancer. No embolism found."
 #   "cancer"  -> [12, 18)   "embolism" -> [23, 31)
 
 
-def _proj_db(pid):
-    return database.get_client()[database.project_db_name(pid)]
-
-
 def _seed_patient(pid, patient="1"):
-    db_ = _proj_db(pid)
-    note_date = datetime(2024, 1, 1)
-    db_["PATIENTS"].insert_one({
-        "patient_id": patient, "reviewed": False, "locked": False, "index_no": 0,
-        "event_date": None, "event_annotation_id": None, "comments": ""})
-    db_["NOTES"].insert_one({
-        "text_id": "N1", "patient_id": patient, "text": NOTE_TEXT,
-        "text_date": note_date, "reviewed": False, "text_tag_1": "oncology"})
-    db_["ANNOTATIONS"].insert_many([
-        {"_id": ObjectId(), "patient_id": patient, "note_id": "N1",
-         "sentence": "Patient has cancer.", "note_start_index": 12, "note_end_index": 18,
-         "sentence_number": 0, "isNegated": False, "reviewed": 0,
-         "text_date": note_date, "token": "cancer"},
-        {"_id": ObjectId(), "patient_id": patient, "note_id": "N1",
-         "sentence": "No embolism found.", "note_start_index": 23, "note_end_index": 31,
-         "sentence_number": 1, "isNegated": False, "reviewed": 0,
-         "text_date": note_date, "token": "embolism"},
-    ])
+    note_date = date(2024, 1, 1)
+    sql.seed_patient(pid, patient, index_no=0)
+    sql.seed_note(pid, "N1", patient, NOTE_TEXT, note_date, text_tag_1="oncology")
+    sql.seed_annotation(pid, "N1", patient, note_date, "Patient has cancer.", "cancer",
+                        note_start_index=12, note_end_index=18, sentence_number=0)
+    sql.seed_annotation(pid, "N1", patient, note_date, "No embolism found.", "embolism",
+                        note_start_index=23, note_end_index=31, sentence_number=1)
 
 
 @pytest.fixture()
@@ -71,7 +55,7 @@ def test_next_returns_first_annotation_with_offsets(reviewer):
         ("cancer", 12, 18), ("embolism", 23, 31)]
 
     # Patient is now locked.
-    assert _proj_db(pid)["PATIENTS"].find_one({"patient_id": "1"})["locked"] is True
+    assert sql.get_patient(pid, "1").locked is True
 
 
 def test_adjudicate_advances_then_completes(reviewer):
@@ -89,7 +73,7 @@ def test_adjudicate_advances_then_completes(reviewer):
     assert done["complete"] is True
     assert done["patient_complete"] is True
     # Patient marked reviewed.
-    assert _proj_db(pid)["PATIENTS"].find_one({"patient_id": "1"})["reviewed"] is True
+    assert sql.get_patient(pid, "1").reviewed is True
 
 
 def test_navigation_shift(reviewer):
@@ -133,12 +117,12 @@ def test_unlock_releases_patient(reviewer):
     client, pid = reviewer
     _seed_patient(pid)
     client.get(f"/api/v1/projects/{pid}/adjudicate/next")
-    assert _proj_db(pid)["PATIENTS"].find_one({"patient_id": "1"})["locked"] is True
+    assert sql.get_patient(pid, "1").locked is True
 
     resp = client.post(f"/api/v1/projects/{pid}/adjudicate/unlock")
     assert resp.status_code == 200
     assert "Unlocking patient" in resp.json()["message"]
-    assert _proj_db(pid)["PATIENTS"].find_one({"patient_id": "1"})["locked"] is False
+    assert sql.get_patient(pid, "1").locked is False
 
 
 def test_no_patients_returns_complete(reviewer):

@@ -18,8 +18,8 @@ class CurrentUser:  # pylint: disable=too-few-public-methods
     """Lightweight authenticated-user object (mirrors the old ``User``)."""
 
     def __init__(self, data):
-        self.username = data["user"]
-        self.is_admin = bool(data.get("is_admin", False))
+        self.username = data.user_id
+        self.is_admin = bool(data.is_admin)
 
 
 def _create_token(username, is_admin, token_type, expires_delta):

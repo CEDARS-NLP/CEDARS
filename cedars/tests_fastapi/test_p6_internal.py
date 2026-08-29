@@ -1,8 +1,9 @@
 """P6 tests: internal processes + project termination."""
 import pytest
 
-from app import database
 from app.routers import internal as internal_router
+
+from . import sql_test_helpers as sql
 
 GOOD_PASSWORD = "Abcdef12!!"
 
@@ -69,8 +70,7 @@ def test_internal_requires_admin(admin_project):
 def test_terminate_project(admin_project):
     client, pid = admin_project
     # Seed some data into the project database.
-    database.get_client()[database.project_db_name(pid)]["PATIENTS"].insert_one(
-        {"patient_id": "1"})
+    sql.seed_patient(pid, "1")
 
     resp = client.delete(f"/api/v1/projects/{pid}")
     assert resp.status_code == 200

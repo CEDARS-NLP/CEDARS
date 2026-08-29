@@ -1,18 +1,14 @@
 """P5 tests: project statistics + annotation export (download)."""
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from bson import ObjectId
 
-from app import database
 from app.services import download_service
 
+from . import sql_test_helpers as sql
+
 GOOD_PASSWORD = "Abcdef12!!"
-
-
-def _proj_db(pid):
-    return database.get_client()[database.project_db_name(pid)]
 
 
 @pytest.fixture()
@@ -27,19 +23,18 @@ def admin_project(client):
 
 
 def _seed_stats(pid):
-    db_ = _proj_db(pid)
-    db_["PATIENTS"].insert_many([
-        {"patient_id": "1", "reviewed": True, "reviewed_by": "AdminUser"},
-        {"patient_id": "2", "reviewed": False},
-    ])
-    now = datetime(2024, 1, 1)
-    db_["ANNOTATIONS"].insert_many([
-        {"_id": ObjectId(), "patient_id": "1", "token": "cancer", "isNegated": False},
-        {"_id": ObjectId(), "patient_id": "1", "token": "cancer", "isNegated": False},
-        {"_id": ObjectId(), "patient_id": "2", "token": "sepsis", "isNegated": False},
-        {"_id": ObjectId(), "patient_id": "2", "token": "ignored", "isNegated": True},
-    ])
-    _ = now
+    note_date = date(2024, 1, 1)
+    sql.seed_patient(pid, "1", index_no=0, reviewed=True, last_reviewed_by="AdminUser")
+    sql.seed_patient(pid, "2", index_no=1, reviewed=False)
+
+    sql.seed_note(pid, "N1", "1", "cancer cancer", note_date)
+    sql.seed_note(pid, "N2", "2", "sepsis ignored", note_date)
+
+    sql.seed_annotation(pid, "N1", "1", note_date, "cancer", "cancer", sentence_number=0)
+    sql.seed_annotation(pid, "N1", "1", note_date, "cancer", "cancer", sentence_number=1)
+    sql.seed_annotation(pid, "N2", "2", note_date, "sepsis", "sepsis", sentence_number=0)
+    sql.seed_annotation(pid, "N2", "2", note_date, "ignored", "ignored", sentence_number=1,
+                        is_negated=True)
 
 
 def test_stats(admin_project):

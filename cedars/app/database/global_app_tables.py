@@ -42,6 +42,13 @@ class Users(GlobalBase):
         String(500), nullable=True
     )
 
+    # Global superuser flag (first registered user, or explicitly promoted).
+    # Distinct from per-project admin status (ProjectUsers.is_admin /
+    # UserProjectRelation.has_admin_privileges).
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
     sign_up_time: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now(timezone.utc), nullable=False
     )
@@ -74,6 +81,8 @@ class Projects(GlobalBase):
     )
 
     project_name: Mapped[str] = mapped_column(Text, nullable=False)
+
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     creation_time: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now(timezone.utc), nullable=False
