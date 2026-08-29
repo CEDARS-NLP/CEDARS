@@ -7,18 +7,15 @@
 
 2. 20 GB memory /var directory for storing docker dependencies and data. Might vary depending on your data needs. 
 
-2. In order to run, you will need two `.env` files
-    - The first .env file will be placed under the ROOT DIR
-    - The second the `.env` file under the `CEDARS/cedars` directory.
-    - There are `.sample.env` files available with best default configurations - just **RENAME** them .env to use defaults.
+2. For Docker Compose, copy the root `.env.sample` to root `.env`. For direct local Python development, copy `cedars/.env.sample` to `cedars/.env` instead.
 
     ```bash
     CEDARS/
     │
-    ├── .env
+    ├── .env                  # Docker Compose configuration
     ├── docker-compose.yml
     ├── cedars/
-    │   ├── .env
+    │   ├── .env              # Direct local Python configuration
     │   ├── Dockerfile
     │   └── ...
     ```
