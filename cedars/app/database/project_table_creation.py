@@ -283,6 +283,10 @@ class PINES(ProjectBase):
 
     __tablename__ = "PINES"
 
+    prediction_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+
     patient_id: Mapped[str] = mapped_column(
         String(100), ForeignKey("Patients.patient_id"), nullable=False
     )

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Double,
     String,
     Text,
+    Integer,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -107,6 +108,9 @@ class UserProjectRelation(GlobalBase):
 
     __tablename__ = "UserProjectRelation"
 
+    relation_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
 
     project_id: Mapped[str] = mapped_column(
         String(100), ForeignKey("Projects.project_id"), nullable=False
