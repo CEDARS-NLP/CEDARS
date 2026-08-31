@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from loguru import logger
 from sqlalchemy.orm import Session, sessionmaker
 
-from cedars.app.cedars_enums import log_function_call
+from ..cedars_enums import log_function_call
 
 logger.enable(__name__)
 

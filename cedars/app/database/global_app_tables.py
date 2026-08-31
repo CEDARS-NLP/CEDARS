@@ -5,7 +5,7 @@ This module defines the global tables for the CEDARS application.
 """
 from __future__ import annotations
 
-from cedars.app.database.project_table_creation import Results
+from .project_table_creation import Results
 from loguru import logger
 from datetime import datetime, timezone
 from decimal import Decimal

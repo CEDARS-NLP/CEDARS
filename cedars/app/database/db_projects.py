@@ -10,10 +10,10 @@ from loguru import logger
 
 from sqlalchemy import select, update, delete
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.global_app_tables import Projects, UserProjectRelation
-from cedars.app.database.project_table_creation import ProjectBase, ProjectSettings
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .global_app_tables import Projects, UserProjectRelation
+from .project_table_creation import ProjectBase, ProjectSettings
 
 logger.enable(__name__)
 

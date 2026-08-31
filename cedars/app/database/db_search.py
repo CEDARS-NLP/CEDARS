@@ -9,9 +9,9 @@ from typing import Optional
 
 from sqlalchemy import select, func, exists, and_
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.project_table_creation import (
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .project_table_creation import (
     Annotations, Events, Notes, NotesSummary, PINES, Patients, Results,
 )
 

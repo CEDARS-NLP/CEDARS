@@ -10,10 +10,10 @@ from loguru import logger
 from sqlalchemy import func, select, insert
 from werkzeug.security import check_password_hash
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.global_app_tables import Users
-from cedars.app.database.project_table_creation import ProjectUsers
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .global_app_tables import Users
+from .project_table_creation import ProjectUsers
 
 
 logger.enable(__name__)

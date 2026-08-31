@@ -15,12 +15,12 @@ import requests
 from loguru import logger
 from sqlalchemy import select
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_inserts import insert_pines_prediction
-from cedars.app.database.db_search import get_note_prediction_from_db
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.db_tasks import update_db_task_progress
-from cedars.app.database.project_table_creation import Notes
+from ..cedars_enums import log_function_call
+from .db_inserts import insert_pines_prediction
+from .db_search import get_note_prediction_from_db
+from .db_session import session_scope
+from .db_tasks import update_db_task_progress
+from .project_table_creation import Notes
 
 logger.enable(__name__)
 

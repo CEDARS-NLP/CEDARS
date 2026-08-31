@@ -12,9 +12,9 @@ import polars as pl
 from loguru import logger
 from sqlalchemy import select
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.project_table_creation import Results
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .project_table_creation import Results
 
 logger.enable(__name__)
 

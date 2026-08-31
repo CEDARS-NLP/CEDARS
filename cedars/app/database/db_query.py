@@ -10,9 +10,9 @@ from loguru import logger
 
 from sqlalchemy import select, update, insert
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.project_table_creation import Query
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .project_table_creation import Query
 
 logger.enable(__name__)
 

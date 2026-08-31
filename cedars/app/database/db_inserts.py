@@ -11,12 +11,12 @@ from sqlalchemy import select, update, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from cedars.app.database.project_table_creation import (
+from .project_table_creation import (
     Annotations, Notes, NotesSummary, PINES, Patients, ProjectUsers, Results,
 )
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.global_app_tables import UserProjectRelation
+from ..cedars_enums import log_function_call
+from .db_session import session_scope
+from .global_app_tables import UserProjectRelation
 
 
 logger.enable(__name__)

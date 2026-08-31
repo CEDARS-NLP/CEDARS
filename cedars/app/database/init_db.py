@@ -10,13 +10,13 @@ from loguru import logger
 
 from sqlalchemy import insert, text
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database import (dispose_project_engine, get_admin_engine,
-                                 get_global_engine, get_project_engine,
-                                 project_db_name)
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.global_app_tables import GlobalBase, Projects, UserProjectRelation
-from cedars.app.database.project_table_creation import ProjectBase, ProjectSettings, ProjectUsers
+from ..cedars_enums import log_function_call
+from . import (dispose_project_engine, get_admin_engine,
+               get_global_engine, get_project_engine,
+               project_db_name)
+from .db_session import session_scope
+from .global_app_tables import GlobalBase, Projects, UserProjectRelation
+from .project_table_creation import ProjectBase, ProjectSettings, ProjectUsers
 
 logger.enable(__name__)
 
@@ -187,7 +187,7 @@ def migrate_all_projects(revision: str = "head") -> None:
     Fans out `alembic_project.ini` migrations to every project in the global
     registry - run this after authoring a new project-schema revision.
     '''
-    from cedars.app.database.db_projects import list_projects
+    from .db_projects import list_projects
 
     for project in list_projects(get_global_engine()):
         run_alembic_upgrade("alembic_project.ini", revision, project_id=project.project_id)

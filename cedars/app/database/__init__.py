@@ -10,8 +10,8 @@ selection) so ``app.db``'s ~98 facade functions can keep taking zero
 engine/session arguments. S3 is exposed as lazy boto3 singletons, unchanged.
 
 This lives in ``__init__.py`` (making ``database/`` a regular package) so that
-both ``from cedars.app.database import get_global_engine`` and submodule
-imports like ``from cedars.app.database.db_session import session_scope``
+both ``from app.database import get_global_engine`` and submodule
+imports like ``from app.database.db_session import session_scope``
 resolve correctly - a bare ``database.py`` alongside this package would be
 permanently shadowed by the package and silently unimportable.
 """

@@ -17,8 +17,8 @@ from loguru import logger
 
 from sqlalchemy import delete, func, insert, select, update
 
-from cedars.app.cedars_enums import log_function_call
-from cedars.app.database.db_search import (
+from ..cedars_enums import log_function_call
+from .db_search import (
     get_all_patient_ids,
     get_annotation,
     get_first_note_date_for_patient,
@@ -33,8 +33,8 @@ from cedars.app.database.db_search import (
     get_event_date,
     patient_results_exist,
 )
-from cedars.app.database.db_session import session_scope
-from cedars.app.database.project_table_creation import (
+from .db_session import session_scope
+from .project_table_creation import (
     Annotations, Events, Notes, NotesSummary, Patients, ReviewerLog, Results,
 )
 
