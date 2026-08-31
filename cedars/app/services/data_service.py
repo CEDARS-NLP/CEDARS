@@ -17,8 +17,10 @@ import pyarrow.parquet as pq
 from loguru import logger
 from werkzeug.utils import secure_filename
 
-from .. import db
-from ..database import get_bucket_name, project_s3_prefix, s3
+from ..database import (get_bucket_name, get_current_project_engine,
+                        project_s3_prefix, s3)
+from ..database.db_inserts import bulk_insert_notes, bulk_upsert_patients
+from ..database.db_updates import update_notes_summary
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "json", "parquet", "pickle", "pkl", "xml", "csv.gz"}
 
@@ -163,13 +165,13 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
         chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
         all_patient_ids.extend(chunk_patient_ids)
 
-        inserted_count = db.bulk_insert_notes(notes_to_insert)
+        inserted_count = bulk_insert_notes(get_current_project_engine(), notes_to_insert)
         logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
 
-    notes_summary_count = db.update_notes_summary()
+    notes_summary_count = update_notes_summary(get_current_project_engine())
     logger.info(f"Updated {notes_summary_count} notes summary")
-    upserted_count_patients, _ = db.bulk_upsert_patients(all_patient_ids,
-                                                         chunk_size_upsert_patients)
+    upserted_count_patients, _ = bulk_upsert_patients(
+        get_current_project_engine(), all_patient_ids, chunk_size_upsert_patients)
     logger.info(f"Upserted {upserted_count_patients} patients")
 
     unique_patients = len(set(all_patient_ids))

@@ -7,7 +7,11 @@ original single-project Flask app.
 """
 from fastapi import APIRouter, Depends
 
-from .. import db
+from ..database import get_global_engine
+from ..database.db_projects import (delete_project_registry, list_projects,
+                                    update_project_description,
+                                    update_project_name)
+from ..database.init_db import drop_project_database, initialize_project
 from ..dependencies import (ProjectContext, require_project,
                             require_project_admin)
 from ..schemas import MessageResponse, ProjectCreate, ProjectOut, ProjectUpdate
@@ -37,24 +41,25 @@ def _to_project_out(project, role: str) -> ProjectOut:
 def list_projects(user: CurrentUser = Depends(get_current_user)):
     """List all projects (global roles: every user may open any project)."""
     role = _role_for(user)
-    return [_to_project_out(project, role) for project in db.list_projects()]
+    return [_to_project_out(project, role) for project in list_projects(get_global_engine())]
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
 def create_project(payload: ProjectCreate, admin: CurrentUser = Depends(require_admin)):
     """Create a new project (admin only) with its own database + registry entry."""
     name = (payload.name or "").strip()
-    project_id = db.create_project(project_name=name,
-                                   investigator_name=admin.username,
-                                   description=payload.description or "")
-    project = next((p for p in db.list_projects() if p.project_id == project_id), None)
+    project_id = initialize_project(name, admin.username, "0.1.0",
+                                    description=payload.description or "")
+    project = next((p for p in list_projects(get_global_engine())
+                    if p.project_id == project_id), None)
     return _to_project_out(project, role="admin")
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(ctx: ProjectContext = Depends(require_project)):
     """Return a single project's details."""
-    project = next((p for p in db.list_projects() if p.project_id == ctx.project_id), None)
+    project = next((p for p in list_projects(get_global_engine())
+                    if p.project_id == ctx.project_id), None)
     return _to_project_out(project, role=_role_for(ctx.user))
 
 
@@ -63,17 +68,19 @@ def update_project(payload: ProjectUpdate,
                    ctx: ProjectContext = Depends(require_project_admin)):
     """Update a project's name/description (admin only)."""
     if payload.name is not None and payload.name.strip():
-        db.update_project_name(payload.name.strip())
+        update_project_name(get_global_engine(), ctx.project_id, payload.name.strip())
     if payload.description is not None:
-        db.update_project_description(payload.description)
+        update_project_description(get_global_engine(), ctx.project_id, payload.description)
 
-    project = next((p for p in db.list_projects() if p.project_id == ctx.project_id), None)
+    project = next((p for p in list_projects(get_global_engine())
+                    if p.project_id == ctx.project_id), None)
     return _to_project_out(project, role="admin")
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)
 def delete_project(ctx: ProjectContext = Depends(require_project_admin)):
     """Terminate a project: drop its database and registry entry (admin only)."""
-    db.drop_database(ctx.project_id)
+    drop_project_database(ctx.project_id)
+    delete_project_registry(get_global_engine(), ctx.project_id)
     return MessageResponse(message="Project Terminated.")
 

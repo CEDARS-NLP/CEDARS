@@ -2,8 +2,10 @@ import os
 from loguru import logger
 from tenacity import retry, wait_exponential
 import requests
-from . import db
 from .cedars_enums import log_function_call
+from .database import get_current_project_engine, get_current_project_id, get_global_engine
+from .database.db_projects import (create_pines_info, get_info,
+                                   is_pines_api_running, update_pines_api_status)
 
 @log_function_call
 def load_pines_url(project_id, superbio_api_token = None):
@@ -126,7 +128,8 @@ def init_pines_connection(superbio_api_token = None):
         (bool) : True if a valid pines url has been found.
                             False if not valid pines url available.
     '''
-    project_info = db.get_info()
+    project_info = get_info(get_global_engine(), get_current_project_engine(),
+                            get_current_project_id())
     project_id = project_info["project_id"]
 
     try:
@@ -140,7 +143,7 @@ def init_pines_connection(superbio_api_token = None):
         logger.error(f"Got error when trying to access PINES server : {e}")
         pines_url, is_url_from_api = None, False
 
-    db.create_pines_info(pines_url, is_url_from_api)
+    create_pines_info(get_current_project_engine(), pines_url, is_url_from_api)
     if pines_url is not None:
         return True
 
@@ -227,7 +230,7 @@ def kill_pines_api(project_id, superbio_api_token):
         - superbio_api_token(str / None) : API token for the superbio server running PINES.
     '''
 
-    if db.is_pines_api_running() and superbio_api_token is not None:
+    if is_pines_api_running(get_current_project_engine()) and superbio_api_token is not None:
         # kill PINES server if using superbio API
         logger.info("Killing PINES server.")
         api_url = os.getenv("SUPERBIO_API_URL")
@@ -243,4 +246,4 @@ def kill_pines_api(project_id, superbio_api_token):
                 logger.error(f"Failed to shutdown remote PINES server due to error {e}.")
 
             # Set pines server status to False and delete the old url.
-            db.update_pines_api_status(False)
+            update_pines_api_status(get_current_project_engine(), False)

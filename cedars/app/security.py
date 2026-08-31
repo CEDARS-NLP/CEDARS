@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
 
-from . import db
+from .database import get_global_engine
+from .database.db_auth import get_user
 from .settings import settings
 
 
@@ -88,7 +89,7 @@ def get_current_user(request: Request) -> CurrentUser:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Not authenticated")
     payload = decode_token(token, "access")
-    user_data = db.get_user(payload["sub"])
+    user_data = get_user(get_global_engine(), payload["sub"])
     if user_data is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="User no longer exists")

@@ -10,8 +10,9 @@ does.
 """
 from contextlib import contextmanager
 
-from . import db
-from .database import reset_current_project_db, set_current_project_db
+from .database import (get_current_project_engine, reset_current_project_db,
+                       set_current_project_db)
+from .database.external_services import report_failure, report_success
 
 
 @contextmanager
@@ -34,11 +35,11 @@ def nlp_task(project_id, patient_id, **kwargs):
 def on_nlp_success(job, connection, result, *args, **kwargs):
     """RQ success callback: mark the task complete within its project scope."""
     with project_scope(job.args[0]):
-        db.report_success(job)
+        report_success(get_current_project_engine(), job)
 
 
 def on_nlp_failure(job, connection, exc_type, exc_value, traceback):
     """RQ failure callback: record the failure within its project scope."""
     with project_scope(job.args[0]):
-        db.report_failure(job)
+        report_failure(get_current_project_engine(), job)
 

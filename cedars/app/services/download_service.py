@@ -2,12 +2,14 @@
 
 Lists/creates/downloads/deletes the annotation CSV exports stored in S3 under
 the project's ``annotated_files/`` prefix. Generation runs on the ops queue via
-:func:`app.ops_tasks.download_annotations` (which calls ``db.download_annotations``).
+:func:`app.ops_tasks.download_annotations`.
 """
 from datetime import datetime
 
-from .. import db, ops_tasks, queues
-from ..database import get_bucket_name, project_s3_prefix, s3, s3_resource
+from .. import ops_tasks, queues
+from ..database import (get_bucket_name, get_current_project_id, get_global_engine,
+                        project_s3_prefix, s3, s3_resource)
+from ..database.db_projects import get_proj_name
 
 
 def _annotated_prefix() -> str:
@@ -32,7 +34,7 @@ def list_files() -> list[dict]:
 
 def get_download_filename(is_full_download: bool = False) -> str:
     """Compose the export filename (ported verbatim)."""
-    project_name = db.get_proj_name()
+    project_name = get_proj_name(get_global_engine(), get_current_project_id())
     timestamp = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
     if is_full_download:
         return f"annotations_full_{project_name}_{timestamp}.csv"

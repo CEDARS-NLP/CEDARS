@@ -8,15 +8,20 @@ they never collide across projects on the shared Redis instance.
 """
 from rq import Callback, Retry
 
-from .. import db, queues, tasks
+from .. import queues, tasks
+from ..database import get_current_project_engine
+from ..database.db_search import get_patient_ids, get_total_counts
+from ..database.db_tasks import add_task
+from ..database.project_table_creation import Patients, Task
 
 
 def run_nlp(project_id: str, username: str) -> int:
     """Enqueue an NLP job per patient; returns the number dispatched."""
-    patient_ids = db.get_patient_ids()
+    project_engine = get_current_project_engine()
+    patient_ids = get_patient_ids(project_engine)
     for patient in patient_ids:
         job_id = f"spacy:{project_id}:{patient}"
-        db.add_task({
+        add_task(project_engine, {
             "job_id": job_id,
             "name": "nlp_processor",
             "user_id": username,
@@ -42,15 +47,16 @@ def run_nlp(project_id: str, username: str) -> int:
 
 def nlp_status() -> dict:
     """Return per-project NLP progress based on the project's Task table."""
-    total_patients = db.get_total_counts("PATIENTS")
-    in_progress = db.get_total_counts("TASK", complete=False)
-    completed = db.get_total_counts("TASK", complete=True)
+    project_engine = get_current_project_engine()
+    total_patients = get_total_counts(project_engine, Patients)
+    in_progress = get_total_counts(project_engine, Task, complete=False)
+    completed = get_total_counts(project_engine, Task, complete=True)
     return {
         "total_patients": total_patients,
         "tasks_in_progress": in_progress,
         "tasks_completed": completed,
         # The Task table has no `failed` column (see db_tasks.py) - a failed
         # job is recorded as complete=True with progress left at 0.
-        "tasks_failed": db.get_total_counts("TASK", complete=True, progress=0),
+        "tasks_failed": get_total_counts(project_engine, Task, complete=True, progress=0),
     }
 

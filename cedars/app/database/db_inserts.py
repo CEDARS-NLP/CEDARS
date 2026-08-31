@@ -26,7 +26,7 @@ def _upsert_ignore(engine, table):
     '''
     Returns an `insert()` construct for `table` that is a no-op on conflicting
     primary keys, using the dialect-appropriate "ON CONFLICT DO NOTHING" syntax.
-    Equivalent to mongo's `$setOnInsert` + `upsert=True` used throughout db.py.
+    Equivalent to mongo's `$setOnInsert` + `upsert=True` behavior.
     '''
     dialect = engine.dialect.name
     if dialect == "postgresql":

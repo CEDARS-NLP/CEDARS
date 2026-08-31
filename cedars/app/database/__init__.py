@@ -4,10 +4,10 @@ Each project owns its own PostgreSQL *database* on a shared server (created at
 project-creation time via ``CREATE DATABASE``); a separate, dedicated
 "global" database holds cross-project state (Users/Projects/UserProjectRelation).
 ``mongo.db``-style per-collection access has been replaced by per-project
-SQLAlchemy engines, resolved for the current request via a context variable
-(the same pattern the old mongo proxy used for project-scoped database
-selection) so ``app.db``'s ~98 facade functions can keep taking zero
-engine/session arguments. S3 is exposed as lazy boto3 singletons, unchanged.
+SQLAlchemy engines, resolved for the current request via a context variable.
+Database operations take their engine explicitly, while application workflows
+obtain the correct project engine from this module. S3 is exposed as lazy boto3
+singletons, unchanged.
 
 This lives in ``__init__.py`` (making ``database/`` a regular package) so that
 both ``from app.database import get_global_engine`` and submodule

@@ -11,9 +11,20 @@ from datetime import datetime
 
 from loguru import logger
 
-from .. import db, ops_tasks, queues
+from .. import ops_tasks, queues
 from ..adjudication_handler import AdjudicationHandler
 from ..cedars_enums import PatientStatus
+from ..database import get_current_project_engine
+from ..database.db_inserts import add_comment
+from ..database.db_query import get_search_query
+from ..database.db_search import (get_all_annotations_for_patient,
+                                  get_annotation_note, get_annotations_post_event,
+                                  get_event_annotation_id, get_event_date,
+                                  get_patient_by_id, get_patient_lock_status,
+                                  get_patients_to_annotate)
+from ..database.db_updates import (batch_mark_annotation_reviewed,
+                                  mark_patient_reviewed, revert_skipped_annotations,
+                                  set_patient_lock_status)
 from . import review_state
 
 DATE_FORMAT = "%Y-%m-%d"
@@ -23,12 +34,13 @@ DATE_FORMAT = "%Y-%m-%d"
 
 def _load_patient_data(patient_id):
     """Read the raw inputs needed to initialize a patient (ported verbatim)."""
-    patient = db.get_patient_by_id(patient_id)
+    project_engine = get_current_project_engine()
+    patient = get_patient_by_id(project_engine, patient_id)
     return {
-        "raw_annotations": db.get_all_annotations_for_patient(patient_id),
-        "hide_duplicates": db.get_search_query("hide_duplicates"),
-        "stored_event_date": db.get_event_date(patient_id),
-        "stored_annotation_id": db.get_event_annotation_id(patient_id),
+        "raw_annotations": get_all_annotations_for_patient(project_engine, patient_id),
+        "hide_duplicates": get_search_query(project_engine, "hide_duplicates"),
+        "stored_event_date": get_event_date(project_engine, patient_id),
+        "stored_annotation_id": get_event_annotation_id(project_engine, patient_id),
         "patient_comments": patient.comments if patient is not None else "",
     }
 
@@ -98,7 +110,7 @@ def _build_annotation_view(handler, comments):
     """
     annotation = handler.get_curr_annotation()
     annotation_id = handler.get_curr_annotation_id()
-    note = db.get_annotation_note(annotation_id)
+    note = get_annotation_note(get_current_project_engine(), annotation_id)
     if not note:
         return None
 
@@ -146,10 +158,11 @@ def _setup_patient(username, project_id, patient_id):
         raw["raw_annotations"], raw["hide_duplicates"],
         raw["stored_event_date"], raw["stored_annotation_id"])
 
-    db.batch_mark_annotation_reviewed(annotations_with_duplicates, username)
+    project_engine = get_current_project_engine()
+    batch_mark_annotation_reviewed(project_engine, annotations_with_duplicates, username)
 
     if len(patient_data["annotation_ids"]) > 0:
-        db.set_patient_lock_status(patient_id, True)
+        set_patient_lock_status(project_engine, patient_id, True)
 
     patient_status = handler.get_patient_status()
 
@@ -157,7 +170,7 @@ def _setup_patient(username, project_id, patient_id):
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
         queues.ops_queue.enqueue(ops_tasks.upsert_patient_records,
                                  project_id, patient_id, datetime.now(), username)
-        db.set_patient_lock_status(patient_id, False)
+        set_patient_lock_status(project_engine, patient_id, False)
         return None
 
     state = {
@@ -165,7 +178,7 @@ def _setup_patient(username, project_id, patient_id):
         "patient_data": patient_data,
         "reviewed_annotation_ids": [],
         "patient_comments": raw["patient_comments"],
-        "skip_after_event": db.get_search_query(query_key="skip_after_event"),
+        "skip_after_event": get_search_query(project_engine, query_key="skip_after_event"),
     }
     review_state.set_state(username, project_id, state)
 
@@ -178,7 +191,7 @@ def _load_next_patient(username, project_id):
     """Select and set up the next reviewable patient (adjudicate_records GET)."""
     visited = set()
     while True:
-        patient_id = db.get_patients_to_annotate()
+        patient_id = get_patients_to_annotate(get_current_project_engine())
         if patient_id is None or patient_id in visited:
             return {"complete": True}
         visited.add(patient_id)
@@ -192,12 +205,14 @@ def _release_patient(username, project_id, state):
     patient_id = state.get("patient_id")
     if patient_id is not None:
         if state.get("patient_comments") is not None:
-            db.add_comment(patient_id, state["patient_comments"].strip())
+            add_comment(get_current_project_engine(), patient_id,
+                        state["patient_comments"].strip())
         if state.get("reviewed_annotation_ids") is not None:
-            db.batch_mark_annotation_reviewed(state["reviewed_annotation_ids"], username)
+            batch_mark_annotation_reviewed(get_current_project_engine(),
+                                           state["reviewed_annotation_ids"], username)
         queues.ops_queue.enqueue(ops_tasks.upsert_patient_records,
                                  project_id, patient_id, datetime.now(), username)
-        db.set_patient_lock_status(patient_id, False)
+        set_patient_lock_status(get_current_project_engine(), patient_id, False)
     review_state.clear_state(username, project_id)
 
 
@@ -229,9 +244,9 @@ def search_patient(username, project_id, search_value):
     patient_id = None
     is_locked = False
     if search_value:
-        patient = db.get_patient_by_id(search_value)
+        patient = get_patient_by_id(get_current_project_engine(), search_value)
         if patient is not None:
-            is_locked = db.get_patient_lock_status(search_value)
+            is_locked = get_patient_lock_status(get_current_project_engine(), search_value)
             patient_id = patient.patient_id if not is_locked else None
 
     if patient_id is None:
@@ -265,12 +280,13 @@ def save_action(username, project_id, action, comment, event_date):
     is_shift_performed = False
 
     if action == "new_date":
-        db.revert_skipped_annotations(patient_id)
+        revert_skipped_annotations(get_current_project_engine(), patient_id)
         handler.reset_all_skipped()
         new_date = datetime.strptime(event_date, DATE_FORMAT)
         annotations_after_event = []
         if skip_after_event:
-            annotations_after_event = db.get_annotations_post_event(patient_id, new_date)
+            annotations_after_event = get_annotations_post_event(
+                get_current_project_engine(), patient_id, new_date)
         db_results_updated = True
         handler.mark_event_date(new_date, current_annotation_id, annotations_after_event)
         queues.ops_queue.enqueue(
@@ -297,7 +313,7 @@ def save_action(username, project_id, action, comment, event_date):
     state["patient_data"] = handler.get_patient_data()
 
     if handler.is_patient_reviewed() and not is_shift_performed:
-        db.mark_patient_reviewed(patient_id, reviewed_by=username)
+        mark_patient_reviewed(get_current_project_engine(), patient_id, reviewed_by=username)
         if not db_results_updated:
             queues.ops_queue.enqueue(
                 ops_tasks.update_patient_data, project_id, patient_id,

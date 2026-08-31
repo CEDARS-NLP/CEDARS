@@ -12,8 +12,10 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Path, status
 
-from . import db
-from .database import reset_current_project_db, set_current_project_db
+from .database import (get_current_project_engine, get_current_project_id,
+                       get_global_engine, reset_current_project_db,
+                       set_current_project_db)
+from .database.db_projects import get_info
 from .security import CurrentUser, get_current_user
 
 
@@ -44,10 +46,11 @@ def require_project(project_id: str = Depends(bind_project),
                     user: CurrentUser = Depends(get_current_user)) -> ProjectContext:
     """Require an authenticated user and an existing, initialized project.
 
-    ``bind_project`` has already bound the project engine, so ``db.get_info()``
+    ``bind_project`` has already bound the project engine, so ``get_info``
     resolves to this project's metadata and doubles as an existence check.
     """
-    info = db.get_info()
+    info = get_info(get_global_engine(), get_current_project_engine(),
+                    get_current_project_id())
     if not info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Project not found")

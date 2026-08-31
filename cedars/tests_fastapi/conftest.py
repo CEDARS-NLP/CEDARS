@@ -2,9 +2,8 @@
 
 Uses file-backed SQLite databases (one per test, in a throwaway temp dir)
 instead of a live PostgreSQL server: `_build_pg_uri` is patched to emit sqlite
-URLs, so every function in `cedars.app.database` and `cedars.app.db` that
-calls `get_global_engine()`/`get_project_engine()` transparently gets a SQLite
-engine instead. SQLite is a fully supported dialect in the SQL layer (see
+URLs, so `cedars.app.database` engine providers transparently create SQLite
+engines. SQLite is a fully supported dialect in the SQL layer (see
 `db_inserts._upsert_ignore`'s dialect-aware ON CONFLICT branch), so this
 exercises the same code paths a real Postgres deployment would use.
 """

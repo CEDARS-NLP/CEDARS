@@ -2,7 +2,7 @@
 
 The web layer is served by FastAPI (see :mod:`app.main`). This package init is
 intentionally minimal so that importing the data / NLP / adjudication modules
-(``app.db``, ``app.nlpprocessor``, ``app.adjudication_handler`` ...) never pulls
+(``app.database``, ``app.nlpprocessor``, ``app.adjudication_handler`` ...) never pulls
 in the web framework. This also keeps the RQ workers lightweight.
 """
 import sys

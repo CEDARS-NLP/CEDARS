@@ -1,10 +1,10 @@
 '''
 external_services.py
 
-Functions from db.py that call out to external systems (the PINES HTTP API,
-RQ job objects) rather than only reading/writing the database. Kept separate
-from the pure-DB modules; these call into db_search/db_inserts/db_tasks for
-their database-facing steps.
+Functions that call out to external systems (the PINES HTTP API, RQ job
+objects) rather than only reading/writing the database. Kept separate from the
+pure-DB modules; these call into db_search/db_inserts/db_tasks for their
+database-facing steps.
 '''
 
 import re

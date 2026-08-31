@@ -21,6 +21,17 @@ from .project_table_creation import ProjectBase, ProjectSettings, ProjectUsers
 logger.enable(__name__)
 
 
+def _parse_version(cedars_version) -> float:
+    """Best-effort conversion of a "0.1.0"-style version string to a float."""
+    if isinstance(cedars_version, (int, float)):
+        return float(cedars_version)
+    try:
+        return float(cedars_version)
+    except (TypeError, ValueError):
+        parts = str(cedars_version).split(".")[:2]
+        return float(".".join(parts)) if parts else 0.0
+
+
 @log_function_call
 def create_project_database(project_id: str) -> None:
     '''
@@ -126,6 +137,7 @@ def initialize_project(project_name, current_user_id, cedars_version: float,
     '''
     if project_id is None:
         project_id = str(uuid4())
+    cedars_version = _parse_version(cedars_version)
 
     logger.info(f"Initializing project: {project_name} ({project_id})")
     create_project_database(project_id)

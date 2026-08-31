@@ -6,9 +6,21 @@ from datetime import datetime
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
-from . import db
 from .api import check_is_pines_available
 from .cedars_enums import ReviewStatus
+from .database import get_current_project_engine
+from .database.db_inserts import insert_one_annotation
+from .database.db_projects import get_pines_url
+from .database.db_query import get_search_query
+from .database.db_search import (get_annotated_notes_for_patient,
+                                 get_documents_to_annotate, get_note_prediction_from_db,
+                                 get_patient_ids, get_total_counts)
+from .database.db_tasks import add_task, get_task, get_tasks_in_progress
+from .database.db_updates import (mark_note_reviewed, mark_patient_reviewed,
+                                  set_patient_lock_status, update_annotation_reviewed,
+                                  upsert_patient_records)
+from .database.external_services import predict_and_save
+from .database.project_table_creation import Notes
 
 logger.enable(__name__)
 
@@ -139,7 +151,7 @@ class NlpProcessor:
                 cls.nlp_model = spacy.load(model_name)
                 # TODO make sure this is correct
                 cls.matcher = Matcher(cls.nlp_model.vocab)
-                cls.query = db.get_search_query()
+                cls.query = get_search_query(get_current_project_engine())
             except Exception as exc:
                 logger.critical("Spacy model %s failed to load.", model_name)
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
@@ -155,7 +167,7 @@ class NlpProcessor:
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
 
-        if db.get_search_query("tag_query")["nlp_apply"] is True:
+        if get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
             # This healthcheck for PINES will also trigger a startup if PINES is inactive
             is_pines_available = check_is_pines_available()
             if is_pines_available:
@@ -174,23 +186,24 @@ class NlpProcessor:
             documents_to_process = []
             if patient_id is not None:
                 # get all note for patient which are not reviewed
-                documents_to_process = db.get_documents_to_annotate(patient_id)
+                documents_to_process = get_documents_to_annotate(
+                    get_current_project_engine(), patient_id)
             else:
                 # get all notes which are not in annotation collection.
-                documents_to_process = db.get_documents_to_annotate()
+                documents_to_process = get_documents_to_annotate(get_current_project_engine())
 
             document_list = [document for document in documents_to_process]
             if len(document_list) == 0:
                 # no notes found to annotate
                 logger.info(f"No documents to process for patient {patient_id}")
-                if db.get_search_query("tag_query")["nlp_apply"] is True:
+                if get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
                     self.process_patient_pines(patient_id)
                 return
 
             if patient_id is not None:
-                logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES', patient_id=patient_id)} to process")
+                logger.info(f"Found {len(document_list)}/{get_total_counts(get_current_project_engine(), Notes, patient_id=patient_id)} to process")
             else:
-                logger.info(f"Found {len(document_list)}/{db.get_total_counts('NOTES')} documents to process")
+                logger.info(f"Found {len(document_list)}/{get_total_counts(get_current_project_engine(), Notes)} documents to process")
 
             logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
             annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
@@ -227,7 +240,7 @@ class NlpProcessor:
                         annotation['note_id'] = document["text_id"]
                         annotation["text_date"] = document["text_date"]
                         annotation["patient_id"] = document["patient_id"]
-                        db.insert_one_annotation(annotation)
+                        insert_one_annotation(get_current_project_engine(), annotation)
                         if not has_negation:
                             if match_count == 0:
                                 docs_with_annotations += 1
@@ -236,17 +249,17 @@ class NlpProcessor:
                     sentence_start = sentence_end + 1
 
                 if match_count == 0:
-                    db.mark_note_reviewed(document["text_id"], reviewed_by="CEDARS")
+                    mark_note_reviewed(get_current_project_engine(), document["text_id"], reviewed_by="CEDARS")
                 count += 1
                 if (count) % 10 == 0:
                     logger.info(f"Processed {count} / {len(document_list)} documents")
 
             # Mark the patient as reviewed if no annotations are found.
             if docs_with_annotations == 0:
-                db.mark_patient_reviewed(patient_id, "CEDARS")
+                mark_patient_reviewed(get_current_project_engine(), patient_id, "CEDARS")
 
             # check if nlp processing is enabled
-            if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
+            if docs_with_annotations > 0 and get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
                 logger.info(f"Checking PINES server status.... (patient : {patient_id})")
 
                 is_pines_ready = False
@@ -268,13 +281,15 @@ class NlpProcessor:
                     # Store the error to be raised after the patient update
                     pines_error = e
                 finally:
-                    db.upsert_patient_records(patient_id, datetime.now(), updated_by="PINES")
+                    upsert_patient_records(get_current_project_engine(), patient_id,
+                                           datetime.now(), updated_by="PINES")
 
                     if pines_error is not None:
                         raise pines_error
 
             else:
-                db.upsert_patient_records(patient_id, datetime.now(), updated_by="CEDARS")
+                upsert_patient_records(get_current_project_engine(), patient_id,
+                                       datetime.now(), updated_by="CEDARS")
 
         except Exception as exc:
             logger.error(f"Error in nplprocessor for patient {patient_id} - process_notes: {str(exc)}")
@@ -293,29 +308,30 @@ class NlpProcessor:
             b. Above threshold: Update the pines database
         """
 
-        notes = db.get_annotated_notes_for_patient(patient_id)
+        project_engine = get_current_project_engine()
+        notes = get_annotated_notes_for_patient(project_engine, patient_id)
         logger.info(f"Found {len(notes)} annotated notes for patient {patient_id}")
         if len(notes) == 0:
-            db.mark_patient_reviewed(patient_id, reviewed_by="CEDARS")
+            mark_patient_reviewed(project_engine, patient_id, reviewed_by="CEDARS")
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
 
-        clf_threshold = db.predict_and_save(notes)
+        clf_threshold = predict_and_save(project_engine, get_pines_url(project_engine), notes)
         if clf_threshold is None:
             clf_threshold = default_threshold
 
         logger.debug(f"PINES marking patient {patient_id} with a classification threshold of {clf_threshold}")
         scores = []
         for note_id in notes:
-            score = db.get_note_prediction_from_db(note_id)
+            score = get_note_prediction_from_db(project_engine, note_id)
             scores.append(score)
             if score < clf_threshold:
-                updated_annots = db.update_annotation_reviewed(note_id)
-                db.mark_note_reviewed(note_id, reviewed_by="PINES")
+                updated_annots = update_annotation_reviewed(project_engine, note_id)
+                mark_note_reviewed(project_engine, note_id, reviewed_by="PINES")
                 logger.info(f"Marked {updated_annots} annotations as reviewed for note {note_id} with score {score}")
 
         if max(scores) < clf_threshold:
-            db.mark_patient_reviewed(patient_id, reviewed_by="PINES")
+            mark_patient_reviewed(project_engine, patient_id, reviewed_by="PINES")
             logger.debug(f"Marked patient {patient_id} as reviewed")
 
     def automatic_nlp_processor(self, patient_id=None, **kwargs):
@@ -327,7 +343,7 @@ class NlpProcessor:
 
         # Retrieve all patient ids where patient was not reviewed
         if not patient_id:
-            patient_ids = db.get_patient_ids()
+            patient_ids = get_patient_ids(get_current_project_engine())
             logger.info(f"Found {len(patient_ids)} patients to process")
         else:
             patient_ids = [patient_id]
@@ -345,12 +361,13 @@ class NlpProcessor:
             }
             # check if the task is completed for the patient already
             # if not, add the task to the database
-            existing_task = db.get_task(task["job_id"])
+            project_engine = get_current_project_engine()
+            existing_task = get_task(project_engine, task["job_id"])
 
             if not existing_task or existing_task["complete"] is False:
                 if not existing_task:
-                    db.add_task(task)
-                db.set_patient_lock_status(patient_id, True)
+                    add_task(project_engine, task)
+                set_patient_lock_status(project_engine, patient_id, True)
                 try:
                     self.process_notes(patient_id)
                 except Exception as exc:
@@ -362,8 +379,8 @@ class NlpProcessor:
                 # when we have the user-lock mapping - we can add the check here.
                 
                 # Only unlock this patient if process_notes completed without any errors
-                db.set_patient_lock_status(patient_id, False)
+                set_patient_lock_status(project_engine, patient_id, False)
             else:
                 logger.info(f"Task {task['job_id']} already completed")
 
-        logger.info(f"jobs in progress: {len(list(db.get_tasks_in_progress()))}")
+        logger.info(f"jobs in progress: {len(list(get_tasks_in_progress(get_current_project_engine())))}")

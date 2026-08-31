@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from passvalidate import PasswordPolicy
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .. import db
+from ..database import get_global_engine
+from ..database.db_auth import add_user, get_user, list_users
 from ..schemas import (LoginRequest, LoginResponse, MessageResponse,
                        RegisterRequest, UserOut)
 from ..security import (CurrentUser, clear_auth_cookies, decode_token,
@@ -40,7 +41,8 @@ def register(payload: RegisterRequest):
     is_admin = payload.is_admin
 
     password_ok, password_issues = _password_policy().check_password(password)
-    existing_user = db.get_user(username)
+    global_engine = get_global_engine()
+    existing_user = get_user(global_engine, username)
 
     if password != payload.confirm_password:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Passwords do not match.")
@@ -55,12 +57,12 @@ def register(payload: RegisterRequest):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "\n".join(password_issues))
 
     # Preserve the original behavior: the first registered user is an admin.
-    if len(db.get_project_users()) == 0:
+    if len(list_users(global_engine)) == 0:
         is_admin = True
 
-    db.add_user(username=username,
-                password=generate_password_hash(password),
-                is_admin=is_admin)
+    add_user(global_engine, user_id=username,
+             password_hash=generate_password_hash(password),
+             is_admin=is_admin)
     return UserOut(username=username, is_admin=is_admin)
 
 
@@ -73,7 +75,7 @@ def login(payload: LoginRequest, response: Response):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Username and password are required.")
 
-    user = db.get_user(username)
+    user = get_user(get_global_engine(), username)
     if user and check_password_hash(user.password_hash, password):
         is_admin = bool(user.is_admin)
         set_auth_cookies(response, username, is_admin)
@@ -97,7 +99,7 @@ def refresh(request: Request, response: Response):
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     payload = decode_token(token, "refresh")
-    user = db.get_user(payload["sub"])
+    user = get_user(get_global_engine(), payload["sub"])
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User no longer exists")
     set_auth_cookies(response, user.user_id, bool(user.is_admin))
