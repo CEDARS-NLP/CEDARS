@@ -6,6 +6,8 @@ spanning both the global application database (Projects) and a project's own
 database (ProjectSettings). Equivalent to mongo's INFO collection.
 '''
 
+from __future__ import annotations
+
 from loguru import logger
 
 from sqlalchemy import select, update, delete
