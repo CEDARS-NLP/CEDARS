@@ -207,9 +207,9 @@ services:
     ports:
         - 6379:6379
     # Run the init script
-    command: sh -c "./init.sh"
+    # command: sh -c "./init.sh"
     # Run as privileged to allow the container to change the vm.overcommit_memory setting
-    privileged: true
+    # privileged: true
     volumes:
         - redis_data:/redis/data
     healthcheck:

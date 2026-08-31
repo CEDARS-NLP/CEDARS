@@ -18,6 +18,12 @@ RUN touch README.md
 
 RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 
+FROM redis:7.2-alpine
+
+COPY redis.conf /usr/local/etc/redis/redis.conf
+
+CMD ["redis-server", "/usr/local/etc/redis/redis.conf", "--loglevel", "warning"]
+
 FROM python:3.9-slim as runtime
 
 ENV VIRTUAL_ENV=/.venv \
