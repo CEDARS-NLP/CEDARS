@@ -11,6 +11,7 @@ from __future__ import annotations
 from loguru import logger
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -68,29 +69,28 @@ class Patients(ProjectBase):
                                              default=False,
                                              nullable=False)
 
-    # One-to-many relationship back to destinations, for convenient ORM navigation.
-    Notes: Mapped[list["Notes"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    notes: Mapped[list["Notes"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
     )
 
-    NotesSummary: Mapped[list["NotesSummary"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    notes_summary: Mapped[Optional["NotesSummary"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan", uselist=False
     )
 
-    Annotations: Mapped[list["Annotations"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    annotations: Mapped[list["Annotations"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
     )
 
-    Events: Mapped[list["Events"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    event: Mapped[Optional["Events"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan", uselist=False
     )
 
-    PINES: Mapped[list["PINES"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    pines_predictions: Mapped[list["PINES"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
     )
 
-    Results: Mapped[list["Results"]] = relationship(
-        back_populates="Patients", cascade="all, delete-orphan"
+    result: Mapped[Optional["Results"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan", uselist=False
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -132,20 +132,23 @@ class Notes(ProjectBase):
                                                  default=False,
                                                  nullable=False)
 
-    Annotations: Mapped[list["Annotations"]] = relationship(
-        back_populates="Notes", cascade="all, delete-orphan"
+    patient: Mapped["Patients"] = relationship(back_populates="notes")
+
+    annotations: Mapped[list["Annotations"]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
     )
 
-    PINES: Mapped[list["PINES"]] = relationship(
-        back_populates="Notes", cascade="all, delete-orphan"
+    pines_prediction: Mapped[Optional["PINES"]] = relationship(
+        back_populates="note", cascade="all, delete-orphan", uselist=False
     )
 
-    Results: Mapped[list["Results"]] = relationship(
-        back_populates="Notes", cascade="all, delete-orphan"
+    reviewer_logs: Mapped[list["ReviewerLog"]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
     )
 
-    ReviewerLog: Mapped[list["ReviewerLog"]] = relationship(
-        back_populates="Notes", cascade="all, delete-orphan"
+    max_score_results: Mapped[list["Results"]] = relationship(
+        back_populates="max_score_note",
+        foreign_keys="Results.max_score_note_id",
     )
 
     __table_args__ = (
@@ -169,6 +172,8 @@ class NotesSummary(ProjectBase):
     first_note_date: Mapped[date] = mapped_column(Date, nullable=False)
     last_note_date: Mapped[date] = mapped_column(Date, nullable=False)
     num_notes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    patient: Mapped["Patients"] = relationship(back_populates="notes_summary")
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"NotesSummary(patient_id={self.patient_id!r})"
@@ -217,12 +222,17 @@ class Annotations(ProjectBase):
                                         default=STATUS_UNREVIEWED,
                                         nullable=False)
 
-    Events: Mapped[list["Events"]] = relationship(
-        back_populates="Annotations", cascade="all, delete-orphan"
+    note: Mapped["Notes"] = relationship(back_populates="annotations")
+
+    patient: Mapped["Patients"] = relationship(back_populates="annotations")
+
+    event_references: Mapped[list["Events"]] = relationship(
+        back_populates="event_annotation",
+        foreign_keys="Events.annotation_id",
     )
 
-    ReviewerLog: Mapped[list["ReviewerLog"]] = relationship(
-        back_populates="Annotations", cascade="all, delete-orphan"
+    reviewer_logs: Mapped[list["ReviewerLog"]] = relationship(
+        back_populates="annotation", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -275,6 +285,13 @@ class Events(ProjectBase):
         UniqueConstraint("patient_id", name="uq_events_patient_id"),
     )
 
+    patient: Mapped["Patients"] = relationship(back_populates="event")
+
+    event_annotation: Mapped[Optional["Annotations"]] = relationship(
+        back_populates="event_references",
+        foreign_keys=[annotation_id],
+    )
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Events(patient_id={self.patient_id!r})"
 
@@ -306,6 +323,10 @@ class PINES(ProjectBase):
         Index("idx_pines_patient", "patient_id"),
     )
 
+    patient: Mapped["Patients"] = relationship(back_populates="pines_predictions")
+
+    note: Mapped["Notes"] = relationship(back_populates="pines_prediction")
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"PINES(patient_id={self.patient_id!r}, text_id={self.text_id!r})"
 
@@ -329,16 +350,19 @@ class ProjectUsers(ProjectBase):
         DateTime, default=datetime.now(timezone.utc), nullable=False
     )
 
-    Results: Mapped[list["Results"]] = relationship(
-        back_populates="ProjectUsers", cascade="all, delete-orphan"
+    results_reviewed: Mapped[list["Results"]] = relationship(
+        back_populates="reviewer_user",
+        foreign_keys="Results.reviewer",
     )
 
-    ReviewerLog: Mapped[list["ReviewerLog"]] = relationship(
-        back_populates="ProjectUsers", cascade="all, delete-orphan"
+    reviewer_logs: Mapped[list["ReviewerLog"]] = relationship(
+        back_populates="reviewer_user",
+        foreign_keys="ReviewerLog.reviewer",
     )
 
-    Task: Mapped[list["Task"]] = relationship(
-        back_populates="ProjectUsers", cascade="all, delete-orphan"
+    tasks: Mapped[list["Task"]] = relationship(
+        back_populates="user",
+        foreign_keys="Task.user_id",
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -381,6 +405,18 @@ class Results(ProjectBase):
         DateTime, default=datetime.now(timezone.utc), nullable=False
     )
 
+    patient: Mapped["Patients"] = relationship(back_populates="result")
+
+    max_score_note: Mapped[Optional["Notes"]] = relationship(
+        back_populates="max_score_results",
+        foreign_keys=[max_score_note_id],
+    )
+
+    reviewer_user: Mapped[Optional["ProjectUsers"]] = relationship(
+        back_populates="results_reviewed",
+        foreign_keys=[reviewer],
+    )
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"Results(patient_id={self.patient_id!r})"
 
@@ -407,6 +443,17 @@ class ReviewerLog(ProjectBase):
 
     timestamp: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now(timezone.utc), nullable=False
+    )
+
+    note: Mapped["Notes"] = relationship(back_populates="reviewer_logs")
+
+    annotation: Mapped[Optional["Annotations"]] = relationship(
+        back_populates="reviewer_logs"
+    )
+
+    reviewer_user: Mapped["ProjectUsers"] = relationship(
+        back_populates="reviewer_logs",
+        foreign_keys=[reviewer],
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -437,6 +484,11 @@ class Task(ProjectBase):
 
     __table_args__ = (
         UniqueConstraint("job_id", name="uq_task_job_id"),
+    )
+
+    user: Mapped["ProjectUsers"] = relationship(
+        back_populates="tasks",
+        foreign_keys=[user_id],
     )
 
     def __repr__(self) -> str:  # for debugging and logging only

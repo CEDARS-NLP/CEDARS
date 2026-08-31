@@ -5,7 +5,6 @@ This module defines the global tables for the CEDARS application.
 """
 from __future__ import annotations
 
-from .project_table_creation import Results
 from loguru import logger
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -58,12 +57,19 @@ class Users(GlobalBase):
                                              default=False,
                                              nullable=False)
 
-    Projects: Mapped[list["Projects"]] = relationship(
-        back_populates="Users", cascade="all, delete-orphan"
+    created_projects: Mapped[list["Projects"]] = relationship(
+        back_populates="investigator_user",
+        foreign_keys="Projects.investigator",
     )
 
-    UserProjectRelation: Mapped[list["UserProjectRelation"]] = relationship(
-        back_populates="Users", cascade="all, delete-orphan"
+    project_memberships: Mapped[list["UserProjectRelation"]] = relationship(
+        back_populates="user",
+        foreign_keys="UserProjectRelation.user_id",
+    )
+
+    memberships_added: Mapped[list["UserProjectRelation"]] = relationship(
+        back_populates="added_by_user",
+        foreign_keys="UserProjectRelation.added_by",
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -95,8 +101,14 @@ class Projects(GlobalBase):
 
     cedars_version: Mapped[Decimal] = mapped_column(Double, nullable=False)
 
-    UserProjectRelation: Mapped[list["UserProjectRelation"]] = relationship(
-        back_populates="Projects", cascade="all, delete-orphan"
+    investigator_user: Mapped["Users"] = relationship(
+        back_populates="created_projects",
+        foreign_keys=[investigator],
+    )
+
+    memberships: Mapped[list["UserProjectRelation"]] = relationship(
+        back_populates="project",
+        foreign_keys="UserProjectRelation.project_id",
     )
 
     def __repr__(self) -> str:  # for debugging and logging only
@@ -125,6 +137,21 @@ class UserProjectRelation(GlobalBase):
     )
 
     has_admin_privileges: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    project: Mapped["Projects"] = relationship(
+        back_populates="memberships",
+        foreign_keys=[project_id],
+    )
+
+    user: Mapped["Users"] = relationship(
+        back_populates="project_memberships",
+        foreign_keys=[user_id],
+    )
+
+    added_by_user: Mapped["Users"] = relationship(
+        back_populates="memberships_added",
+        foreign_keys=[added_by],
+    )
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"UserProjectRelation(project_id={self.project_id!r}, investigator={self.user_id!r})"
