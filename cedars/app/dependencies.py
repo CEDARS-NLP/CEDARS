@@ -15,6 +15,7 @@ from fastapi import Depends, HTTPException, Path, status
 from .database import (get_current_project_engine, get_current_project_id,
                        get_global_engine, reset_current_project_db,
                        set_current_project_db)
+from .database.db_auth import get_project_membership
 from .database.db_projects import get_info
 from .security import CurrentUser, get_current_user
 
@@ -54,12 +55,17 @@ def require_project(project_id: str = Depends(bind_project),
     if not info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Project not found")
+    if get_project_membership(get_global_engine(), project_id, user.username) is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have access to this project.")
     return ProjectContext(project_id=project_id, user=user, info=info)
 
 
 def require_project_admin(ctx: ProjectContext = Depends(require_project)) -> ProjectContext:
-    """Require the authenticated user to be an admin (project-management ops)."""
-    if not ctx.user.is_admin:
+    """Require the authenticated user to be an admin for this project."""
+    membership = get_project_membership(get_global_engine(), ctx.project_id,
+                                        ctx.user.username)
+    if membership is None or not membership.has_admin_privileges:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="You do not have admin access.")
     return ctx

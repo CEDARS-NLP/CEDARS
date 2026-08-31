@@ -1,7 +1,7 @@
 """Authentication routes: register / login / logout / refresh / me.
 
 Ports the working parts of the original Flask ``auth`` blueprint (username +
-password, password policy, first-user-is-admin) to FastAPI with JWT cookies.
+password, password policy) to FastAPI with JWT cookies.
 The deprecated OIDC and Superbio-token flows are intentionally omitted.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -9,7 +9,7 @@ from passvalidate import PasswordPolicy
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..database import get_global_engine
-from ..database.db_auth import add_user, get_user, list_users
+from ..database.db_auth import add_user, get_user
 from ..schemas import (LoginRequest, LoginResponse, MessageResponse,
                        RegisterRequest, UserOut)
 from ..security import (CurrentUser, clear_auth_cookies, decode_token,
@@ -35,10 +35,9 @@ def _password_policy() -> PasswordPolicy:
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest):
-    """Register a new user (first registered user always becomes an admin)."""
+    """Register a new user without assigning workflow admin status."""
     username = (payload.username or "").strip()
     password = payload.password or ""
-    is_admin = payload.is_admin
 
     password_ok, password_issues = _password_policy().check_password(password)
     global_engine = get_global_engine()
@@ -56,14 +55,10 @@ def register(payload: RegisterRequest):
     if password_ok is False:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "\n".join(password_issues))
 
-    # Preserve the original behavior: the first registered user is an admin.
-    if len(list_users(global_engine)) == 0:
-        is_admin = True
-
     add_user(global_engine, user_id=username,
              password_hash=generate_password_hash(password),
-             is_admin=is_admin)
-    return UserOut(username=username, is_admin=is_admin)
+             is_admin=False)
+    return UserOut(username=username, is_admin=False)
 
 
 @router.post("/login", response_model=LoginResponse)

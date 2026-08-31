@@ -1,4 +1,6 @@
 import { NavLink, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import {
   Database,
@@ -15,6 +17,15 @@ import {
   Info,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+
+interface ProjectDetail {
+  id: string;
+  name: string;
+  description: string;
+  owner: string;
+  role: string;
+  created_at: string;
+}
 
 // Project workflow navigation (mirrors the original Flask menu, role-gated).
 const adminNav = [
@@ -70,6 +81,12 @@ export default function AppSidebar() {
   const { user, logout } = useAuth();
   const { projectId } = useParams();
   const [dark, setDark] = useDarkMode();
+  const { data: project } = useQuery<ProjectDetail>({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get<ProjectDetail>(`/projects/${projectId}`),
+    enabled: Boolean(projectId),
+  });
+  const isProjectAdmin = project?.role === "admin";
 
   return (
     <aside className="flex h-screen w-56 flex-col bg-sidebar text-sidebar-foreground">
@@ -99,7 +116,7 @@ export default function AppSidebar() {
             <div className="mb-2 px-2.5 text-xs font-medium uppercase tracking-wider text-sidebar-foreground/40">
               Project
             </div>
-            {(user?.is_admin ? adminNav : annotatorNav).map((item) => (
+            {(isProjectAdmin ? adminNav : annotatorNav).map((item) => (
               <NavLink
                 key={item.label}
                 to={`/projects/${projectId}${item.suffix}`}
@@ -178,7 +195,6 @@ export default function AppSidebar() {
           </div>
           <div className="flex-1 truncate text-xs text-sidebar-foreground/70">
             {user?.username}
-            {user?.is_admin ? " (admin)" : ""}
           </div>
           <button
             onClick={logout}

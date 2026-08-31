@@ -11,7 +11,6 @@ export default function RegisterPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -20,7 +19,7 @@ export default function RegisterPage() {
     setError("");
     setIsSubmitting(true);
     try {
-      await register(username, password, confirmPassword, isAdmin);
+      await register(username, password, confirmPassword);
       navigate("/projects");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -117,15 +116,6 @@ export default function RegisterPage() {
                 required
               />
             </div>
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input
-                type="checkbox"
-                checked={isAdmin}
-                onChange={(e) => setIsAdmin(e.target.checked)}
-                className="h-4 w-4 rounded border-border"
-              />
-              Register as administrator
-            </label>
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? "Creating account..." : "Create account"}
             </Button>

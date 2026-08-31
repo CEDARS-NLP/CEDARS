@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, FolderOpen } from "lucide-react";
 import { api } from "@/api/client";
-import { useAuth } from "@/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -44,7 +43,6 @@ function formatDate(dateStr: string): string {
 
 export default function ProjectListPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
 
   const {
     data: projects,
@@ -65,14 +63,12 @@ export default function ProjectListPage() {
             Manage your clinical event detection projects
           </p>
         </div>
-        {user?.is_admin && (
-          <Button asChild>
-            <Link to="/projects/new">
-              <Plus className="mr-1.5 h-4 w-4" />
-              New project
-            </Link>
-          </Button>
-        )}
+        <Button asChild>
+          <Link to="/projects/new">
+            <Plus className="mr-1.5 h-4 w-4" />
+            New project
+          </Link>
+        </Button>
       </div>
       <div aria-live="polite">
         {isLoading && (

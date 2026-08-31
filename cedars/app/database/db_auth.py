@@ -7,12 +7,12 @@ application database and per-project databases.
 
 from loguru import logger
 
-from sqlalchemy import func, select, insert
+from sqlalchemy import delete, func, insert, select, update
 from werkzeug.security import check_password_hash
 
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
-from .global_app_tables import Users
+from .global_app_tables import UserProjectRelation, Users
 from .project_table_creation import ProjectUsers
 
 
@@ -157,3 +157,112 @@ def get_project_users(project_engine) -> list[str]:
         user_ids = session.execute(select(ProjectUsers.user_id)).scalars().all()
 
     return list(user_ids)
+
+
+@log_function_call
+def get_project_membership(global_engine, project_id, user_id):
+    '''
+    Retrieves the user's membership row for a project from the global database.
+
+    Returns:
+        UserProjectRelation row, or None if the user is not assigned to the project.
+    '''
+    with session_scope(global_engine) as session:
+        return session.execute(
+            select(UserProjectRelation).where(
+                UserProjectRelation.project_id == project_id,
+                UserProjectRelation.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+
+
+@log_function_call
+def list_user_project_memberships(global_engine, user_id) -> dict[str, bool]:
+    '''
+    Returns project_id -> has_admin_privileges for every project assigned to a user.
+    '''
+    with session_scope(global_engine) as session:
+        rows = session.execute(
+            select(UserProjectRelation.project_id,
+                   UserProjectRelation.has_admin_privileges)
+            .where(UserProjectRelation.user_id == user_id)
+        ).all()
+
+    return {project_id: bool(is_admin) for project_id, is_admin in rows}
+
+
+@log_function_call
+def list_project_members(global_engine, project_id) -> list[dict]:
+    '''
+    Returns membership rows for a project from the global database.
+    '''
+    with session_scope(global_engine) as session:
+        rows = session.execute(
+            select(UserProjectRelation.user_id,
+                   UserProjectRelation.has_admin_privileges,
+                   UserProjectRelation.added_by)
+            .where(UserProjectRelation.project_id == project_id)
+            .order_by(UserProjectRelation.user_id)
+        ).all()
+
+    return [
+        {
+            "username": user_id,
+            "role": "admin" if has_admin_privileges else "annotator",
+            "added_by": added_by,
+        }
+        for user_id, has_admin_privileges, added_by in rows
+    ]
+
+
+@log_function_call
+def count_project_admins(global_engine, project_id) -> int:
+    '''
+    Counts users with admin privileges for a project.
+    '''
+    with session_scope(global_engine) as session:
+        return session.execute(
+            select(func.count()).select_from(UserProjectRelation).where(
+                UserProjectRelation.project_id == project_id,
+                UserProjectRelation.has_admin_privileges.is_(True),
+            )
+        ).scalar_one()
+
+
+@log_function_call
+def set_project_member_admin(global_engine, project_engine,
+                             project_id, user_id, is_admin) -> None:
+    '''
+    Updates a member's project role in both membership tables.
+    '''
+    with session_scope(global_engine) as session:
+        session.execute(
+            update(UserProjectRelation)
+            .where(UserProjectRelation.project_id == project_id,
+                   UserProjectRelation.user_id == user_id)
+            .values(has_admin_privileges=is_admin)
+        )
+
+    with session_scope(project_engine) as session:
+        session.execute(
+            update(ProjectUsers)
+            .where(ProjectUsers.user_id == user_id)
+            .values(is_admin=is_admin)
+        )
+
+
+@log_function_call
+def remove_project_member(global_engine, project_engine, project_id, user_id) -> None:
+    '''
+    Removes a member from both the global and project-local membership tables.
+    '''
+    with session_scope(global_engine) as session:
+        session.execute(
+            delete(UserProjectRelation).where(
+                UserProjectRelation.project_id == project_id,
+                UserProjectRelation.user_id == user_id,
+            )
+        )
+
+    with session_scope(project_engine) as session:
+        session.execute(delete(ProjectUsers).where(ProjectUsers.user_id == user_id))

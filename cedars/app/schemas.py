@@ -2,7 +2,7 @@
 
 Models are grouped by workflow area and expanded as each phase is ported.
 """
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -13,7 +13,6 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     confirm_password: str
-    is_admin: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -54,6 +53,24 @@ class ProjectOut(BaseModel):
     owner: Optional[str] = None
     role: Optional[str] = None
     created_at: Optional[str] = None
+
+
+ProjectRole = Literal["admin", "annotator"]
+
+
+class ProjectMemberCreate(BaseModel):
+    username: str
+    role: ProjectRole = "annotator"
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: ProjectRole
+
+
+class ProjectMemberOut(BaseModel):
+    username: str
+    role: ProjectRole
+    added_by: str
 
 
 # --- data ---------------------------------------------------------------

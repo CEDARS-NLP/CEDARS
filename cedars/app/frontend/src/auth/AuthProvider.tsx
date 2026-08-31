@@ -25,8 +25,7 @@ interface AuthContextValue {
   register: (
     username: string,
     password: string,
-    confirmPassword: string,
-    isAdmin: boolean
+    confirmPassword: string
   ) => Promise<void>;
   logout: () => void;
 }
@@ -62,14 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (
       username: string,
       password: string,
-      confirmPassword: string,
-      isAdmin: boolean
+      confirmPassword: string
     ) => {
       await api.post<User>("/auth/register", {
         username,
         password,
         confirm_password: confirmPassword,
-        is_admin: isAdmin,
       });
       await login(username, password);
     },
