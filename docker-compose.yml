@@ -1,4 +1,9 @@
 # Settings and configurations that are common for all containers
+x-cedars-common: &cedars-common
+  build:
+    context: ./cedars
+  image: cedars
+
 x-minio-common: &minio-common
   image: quay.io/minio/minio:${MINIO_VERSION}
   command: server --console-address ":9001" http://minio/data{1...2}
@@ -16,9 +21,7 @@ x-minio-common: &minio-common
 
 services:
   backend:
-    build:
-      context: ./cedars
-    image: cedars
+    <<: *cedars-common
     restart: always
     command: gunicorn -c gunicorn.conf.py app.main:app --log-level warning
     # uvicorn worker handles SIGINT/SIGTERM gracefully
@@ -97,9 +100,7 @@ services:
       - superbio
 
   global-db-init:
-    build:
-      context: ./cedars
-    image: cedars
+    <<: *cedars-common
     restart: "no"
     command: python -c "from app.database.init_db import initialize_application; initialize_application()"
     env_file:
@@ -226,7 +227,7 @@ services:
       - superbio
 
   worker-task:
-    image: cedars
+    <<: *cedars-common
     command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
@@ -252,7 +253,7 @@ services:
           cpus: '1.0'
     
   worker-ops:
-    image: cedars
+    <<: *cedars-common
     command: python -m app.make_rq ops
     scale: 1
     networks:
