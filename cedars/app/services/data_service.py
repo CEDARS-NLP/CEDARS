@@ -21,6 +21,7 @@ from ..database import (get_bucket_name, get_current_project_engine,
                         project_s3_prefix, s3)
 from ..database.db_inserts import bulk_insert_notes, bulk_upsert_patients
 from ..database.db_updates import update_notes_summary
+from ..database.db_session import session_scope
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "json", "parquet", "pickle", "pkl", "xml", "csv.gz"}
 
@@ -154,25 +155,30 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
     total_chunks = 0
     all_patient_ids: list = []
 
-    for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
-        total_chunks += 1
-        rows_in_chunk = len(chunk)
-        total_rows += rows_in_chunk
-        logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
+    with session_scope(get_current_project_engine()) as session:
+        '''
+        Insert all patients, notes and notes_summary in a single transaction.
+        If any of the inserts fail, the entire transaction will be rolled back.
+        '''
 
-        notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
+        for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
+            total_chunks += 1
+            rows_in_chunk = len(chunk)
+            total_rows += rows_in_chunk
+            logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
 
-        chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
-        all_patient_ids.extend(chunk_patient_ids)
+            notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
 
-        inserted_count = bulk_insert_notes(get_current_project_engine(), notes_to_insert)
-        logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
+            chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
+            all_patient_ids.extend(chunk_patient_ids)
 
-    notes_summary_count = update_notes_summary(get_current_project_engine())
-    logger.info(f"Updated {notes_summary_count} notes summary")
-    upserted_count_patients, _ = bulk_upsert_patients(
-        get_current_project_engine(), all_patient_ids, chunk_size_upsert_patients)
-    logger.info(f"Upserted {upserted_count_patients} patients")
+            inserted_count = bulk_insert_notes(session, notes_to_insert)
+            logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
+
+        notes_summary_count = update_notes_summary(session)
+        logger.info(f"Updated {notes_summary_count} notes summary")
+        upserted_count_patients, _ = bulk_upsert_patients(session, all_patient_ids, chunk_size_upsert_patients)
+        logger.info(f"Upserted {upserted_count_patients} patients")
 
     unique_patients = len(set(all_patient_ids))
     logger.info(

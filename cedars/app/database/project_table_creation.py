@@ -113,8 +113,7 @@ class Notes(ProjectBase):
 
     text: Mapped[str] = mapped_column(Text, nullable=False)
     text_date: Mapped[date] = mapped_column(Date, nullable=False)
-    text_sequence: Mapped[int] = mapped_column(Integer, autoincrement=True,
-                                               nullable=False)
+    text_sequence: Mapped[int] = mapped_column(Integer, nullable=True)
     text_tag_1: Mapped[str] = mapped_column(String(100),
                                             default="",
                                             nullable=False)

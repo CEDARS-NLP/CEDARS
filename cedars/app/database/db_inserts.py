@@ -95,14 +95,14 @@ def _format_note(note: dict) -> dict:
 
 
 @log_function_call
-def bulk_insert_notes(project_engine, notes: list[dict],
+def bulk_insert_notes(session, notes: list[dict],
                       chunk_size_insert_notes: int = 1000) -> int:
     '''
     Bulk insert notes into the database, in chunks to bound memory/transaction size
     on very large uploads.
 
     Args:
-        - project_engine: SQLAlchemy engine for the project database.
+        - session: SQLAlchemy session for the project database.
         - notes: List of dictionaries, where each dictionary represents a note to be
                  inserted. Dict format: {'text_id': str, 'patient_id': str, 'text': str,
                  'text_date': str|datetime, 'text_tag_1'..'text_tag_4': str (optional)}
@@ -115,16 +115,15 @@ def bulk_insert_notes(project_engine, notes: list[dict],
     formatted_notes = [_format_note(note) for note in notes]
     logger.debug("Finished formatting notes. Proceeding with bulk insert.")
 
-    with session_scope(project_engine) as session:
-        for i in range(0, len(formatted_notes), chunk_size_insert_notes):
-            session.execute(insert(Notes), formatted_notes[i:i + chunk_size_insert_notes])
+    for i in range(0, len(formatted_notes), chunk_size_insert_notes):
+        session.execute(insert(Notes), formatted_notes[i:i + chunk_size_insert_notes])
 
     logger.info(f"Successfully bulk inserted {len(formatted_notes)} notes into the database.")
     return len(formatted_notes)
 
 
 @log_function_call
-def bulk_upsert_patients(project_engine, patient_ids: list[str],
+def bulk_upsert_patients(session, patient_ids: list[str],
                          chunk_size_upsert_patients: int = 2000) -> tuple[int, int]:
     '''
     Creates default Patients and Results entries for each of `patient_ids` that
@@ -133,6 +132,7 @@ def bulk_upsert_patients(project_engine, patient_ids: list[str],
     untouched (mongo's $setOnInsert semantics).
 
     Args:
+        - session: SQLAlchemy session for the project database.
         - patient_ids (list[str]) : List of all uploaded patient IDs in order.
         - chunk_size_upsert_patients: number of patient/result rows per insert statement.
 
@@ -140,70 +140,70 @@ def bulk_upsert_patients(project_engine, patient_ids: list[str],
         tuple[int, int]: (patients_inserted, results_inserted). Row counts reflect
         rows actually inserted; conflicting (pre-existing) patient_ids are skipped.
     '''
-    with session_scope(project_engine) as session:
-        number_of_patients_in_db = session.execute(
-            select(Patients.patient_id)
-        ).scalars().all()
-        starting_index = len(number_of_patients_in_db)
 
-        notes_summary_by_patient = {
-            row.patient_id: row
-            for row in session.execute(select(NotesSummary)).scalars().all()
-        }
+    number_of_patients_in_db = session.execute(
+        select(Patients.patient_id)
+    ).scalars().all()
+    starting_index = len(number_of_patients_in_db)
 
-        patient_rows = []
-        results_rows = []
-        now = datetime.now()
+    notes_summary_by_patient = {
+        row.patient_id: row
+        for row in session.execute(select(NotesSummary)).scalars().all()
+    }
 
-        for offset, p_id in enumerate(patient_ids):
-            p_id = str(p_id).strip()
-            index_no = starting_index + offset
-            summary = notes_summary_by_patient.get(p_id)
+    patient_rows = []
+    results_rows = []
+    now = datetime.now()
 
-            patient_rows.append({
-                "patient_id": p_id,
-                "admin_locked": False,
-                "comments": "",
-                "index_no": index_no,
-                "locked": False,
-                "reviewed": False,
-                "last_reviewed_by": None,
-                "updated": False,
-            })
+    for offset, p_id in enumerate(patient_ids):
+        p_id = str(p_id).strip()
+        index_no = starting_index + offset
+        summary = notes_summary_by_patient.get(p_id)
 
-            results_rows.append({
-                "patient_id": p_id,
-                "comments": "",
-                "event_date": None,
-                "event_information": None,
-                "index_no": index_no,
-                "first_note_date": summary.first_note_date if summary else None,
-                "last_note_date": summary.last_note_date if summary else None,
-                "max_score": None,
-                "max_score_note_date": None,
-                "max_score_note_id": None,
-                "reviewed_notes": 0,
-                "reviewed_sentences": 0,
-                "total_notes": summary.num_notes if summary else 0,
-                "total_sentences": 0,
-                "reviewer": None,
-                "last_updated_at": now,
-            })
+        patient_rows.append({
+            "patient_id": p_id,
+            "admin_locked": False,
+            "comments": "",
+            "index_no": index_no,
+            "locked": False,
+            "reviewed": False,
+            "last_reviewed_by": None,
+            "updated": False,
+        })
 
-        total_uploaded_patients = 0
-        total_uploaded_results = 0
+        results_rows.append({
+            "patient_id": p_id,
+            "comments": "",
+            "event_date": None,
+            "event_information": None,
+            "index_no": index_no,
+            "first_note_date": summary.first_note_date if summary else None,
+            "last_note_date": summary.last_note_date if summary else None,
+            "max_score": None,
+            "max_score_note_date": None,
+            "max_score_note_id": None,
+            "reviewed_notes": 0,
+            "reviewed_sentences": 0,
+            "total_notes": summary.num_notes if summary else 0,
+            "total_sentences": 0,
+            "reviewer": None,
+            "last_updated_at": now,
+        })
 
-        logger.info("Performing chunked upserts on the Patients table.")
-        for i in range(0, len(patient_rows), chunk_size_upsert_patients):
-            chunk = patient_rows[i:i + chunk_size_upsert_patients]
-            result = session.execute(_upsert_ignore(project_engine, Patients), chunk)
-            total_uploaded_patients += result.rowcount if result.rowcount and result.rowcount > 0 else 0
+    total_uploaded_patients = 0
+    total_uploaded_results = 0
 
-        logger.info("Performing chunked upserts on the Results table.")
-        for i in range(0, len(results_rows), chunk_size_upsert_patients):
-            chunk = results_rows[i:i + chunk_size_upsert_patients]
-            result = session.execute(_upsert_ignore(project_engine, Results), chunk)
-            total_uploaded_results += result.rowcount if result.rowcount and result.rowcount > 0 else 0
+    logger.info("Performing chunked upserts on the Patients table.")
+    for i in range(0, len(patient_rows), chunk_size_upsert_patients):
+        chunk = patient_rows[i:i + chunk_size_upsert_patients]
+        result = session.execute(_upsert_ignore(project_engine, Patients), chunk)
+        total_uploaded_patients += result.rowcount if result.rowcount and result.rowcount > 0 else 0
+
+    logger.info("Performing chunked upserts on the Results table.")
+    for i in range(0, len(results_rows), chunk_size_upsert_patients):
+        chunk = results_rows[i:i + chunk_size_upsert_patients]
+        result = session.execute(_upsert_ignore(project_engine, Results), chunk)
+        total_uploaded_results += result.rowcount if result.rowcount and result.rowcount > 0 else 0
 
     logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
     return total_uploaded_patients, total_uploaded_results

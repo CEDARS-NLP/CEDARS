@@ -5,6 +5,7 @@ files, and upload-or-select a file then load it into the project's database.
 Ingestion runs synchronously, matching the original behavior.
 """
 from typing import Optional
+from loguru import logger
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
@@ -45,6 +46,7 @@ def upload_and_ingest(
     try:
         summary = data_service.emr_to_sql(s3_key, insert_chunk, upsert_chunk)
     except Exception as exc:  # noqa: BLE001 - surface ingestion errors to the client
+        logger.exception("Data ingestion failed. Rolling back transaction.")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
                             f"Failed to upload data: {str(exc)}") from exc
 

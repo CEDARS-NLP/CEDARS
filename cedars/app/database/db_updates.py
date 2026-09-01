@@ -483,22 +483,21 @@ def update_patient_results(project_engine, update_existing_results: bool = False
 # ---------------------------------------------------------------------------
 
 @log_function_call
-def update_notes_summary(project_engine) -> None:
+def update_notes_summary(session) -> None:
     '''
     Rebuilds the NotesSummary table from Notes (per-patient min/max date and count).
     '''
-    with session_scope(project_engine) as session:
-        agg = select(
-            Notes.patient_id.label("patient_id"),
-            func.min(Notes.text_date).label("first_note_date"),
-            func.max(Notes.text_date).label("last_note_date"),
-            func.count().label("num_notes"),
-        ).group_by(Notes.patient_id)
+    agg = select(
+        Notes.patient_id.label("patient_id"),
+        func.min(Notes.text_date).label("first_note_date"),
+        func.max(Notes.text_date).label("last_note_date"),
+        func.count().label("num_notes"),
+    ).group_by(Notes.patient_id)
 
-        session.execute(delete(NotesSummary))
-        session.execute(
-            insert(NotesSummary).from_select(
-                ["patient_id", "first_note_date", "last_note_date", "num_notes"],
-                agg,
-            )
+    session.execute(delete(NotesSummary))
+    session.execute(
+        insert(NotesSummary).from_select(
+            ["patient_id", "first_note_date", "last_note_date", "num_notes"],
+            agg,
         )
+    )
