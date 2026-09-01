@@ -98,7 +98,13 @@ class Patients(ProjectBase):
 
 
 class Notes(ProjectBase):
-    """Notes table. patient_id is a foreign key into Patients.patient_id."""
+    """Notes table. patient_id is a foreign key into Patients.patient_id.
+    
+    The foreign key constraint is DEFERRABLE INITIALLY DEFERRED to allow for
+    transactional insertion of parents (Patients) and children (Notes) in
+    any order within a single transaction, validating only at commit time.
+    This serves as a safety net against insertion order bugs.
+    """
 
     __tablename__ = "Notes"
 
@@ -107,8 +113,9 @@ class Notes(ProjectBase):
     )
 
     # Foreign key column, linking each note to a patient.
+    # DEFERRABLE INITIALLY DEFERRED allows flexible insertion order within transactions.
     patient_id: Mapped[str] = mapped_column(
-        String(100), ForeignKey("Patients.patient_id"), nullable=False
+        String(100), ForeignKey("Patients.patient_id", deferrable=True, initially="DEFERRED"), nullable=False
     )
 
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -159,13 +166,20 @@ class Notes(ProjectBase):
         return f"Notes(text_id={self.text_id!r}, patient_id={self.patient_id!r})"
 
 class NotesSummary(ProjectBase):
-    """NotesSummary table."""
+    """NotesSummary table.
+    
+    The foreign key constraint is DEFERRABLE INITIALLY DEFERRED to allow for
+    transactional insertion of parents (Patients) and children (NotesSummary) in
+    any order within a single transaction, validating only at commit time.
+    This serves as a safety net against insertion order bugs.
+    """
 
     __tablename__ = "NotesSummary"
 
     # One row per patient: patient_id doubles as the primary key.
+    # DEFERRABLE INITIALLY DEFERRED allows flexible insertion order within transactions.
     patient_id: Mapped[str] = mapped_column(
-        String(100), ForeignKey("Patients.patient_id"), primary_key=True
+        String(100), ForeignKey("Patients.patient_id", deferrable=True, initially="DEFERRED"), primary_key=True
     )
 
     first_note_date: Mapped[date] = mapped_column(Date, nullable=False)
