@@ -167,24 +167,16 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
     logger.info(f"Collected {len(unique_patient_ids)} unique patient IDs")
 
     # PHASE 2: Create all Patients records (parent table, must happen BEFORE notes due to FK constraints)
-    logger.info("Creating Patients records...")
-    upserted_count_patients, _ = bulk_upsert_patients(
-        get_current_project_engine(), unique_patient_ids, chunk_size_upsert_patients)
-    logger.info(f"Upserted {upserted_count_patients} patients")
-
-    # PHASE 3: Insert Notes in chunks (child table, now all parent FKs are satisfied)
-    logger.info("Inserting Notes records...")
-    total_rows = 0
-    total_chunks = 0
-<<<<<<< HEAD
-    all_patient_ids: list = []
-
     with session_scope(get_current_project_engine()) as session:
-        '''
-        Insert all patients, notes and notes_summary in a single transaction.
-        If any of the inserts fail, the entire transaction will be rolled back.
-        '''
+        logger.info("Creating Patients records...")
+        upserted_count_patients, _ = bulk_upsert_patients(
+            session, unique_patient_ids, chunk_size_upsert_patients)
+        logger.info(f"Upserted {upserted_count_patients} patients")
 
+        # PHASE 3: Insert Notes in chunks (child table, now all parent FKs are satisfied)
+        logger.info("Inserting Notes records...")
+        total_rows = 0
+        total_chunks = 0
         for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
             total_chunks += 1
             rows_in_chunk = len(chunk)
@@ -192,33 +184,13 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
             logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
 
             notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
-
-            chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
-            all_patient_ids.extend(chunk_patient_ids)
-
             inserted_count = bulk_insert_notes(session, notes_to_insert)
             logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
 
+        # PHASE 4: Update NotesSummary (child table, references Patients.patient_id)
+        logger.info("Updating NotesSummary...")
         notes_summary_count = update_notes_summary(session)
         logger.info(f"Updated {notes_summary_count} notes summary")
-        upserted_count_patients, _ = bulk_upsert_patients(session, all_patient_ids, chunk_size_upsert_patients)
-        logger.info(f"Upserted {upserted_count_patients} patients")
-=======
-    for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
-        total_chunks += 1
-        rows_in_chunk = len(chunk)
-        total_rows += rows_in_chunk
-        logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
-
-        notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
-        inserted_count = bulk_insert_notes(get_current_project_engine(), notes_to_insert)
-        logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
-
-    # PHASE 4: Update NotesSummary (child table, references Patients.patient_id)
-    logger.info("Updating NotesSummary...")
-    notes_summary_count = update_notes_summary(get_current_project_engine())
-    logger.info(f"Updated {notes_summary_count} notes summary")
->>>>>>> 3d537e76d446f0b5bbc48f03197609f6655c7ffb
 
     logger.info(
         f"Completed document migration. Total rows: {total_rows}, "
