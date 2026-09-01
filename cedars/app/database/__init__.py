@@ -36,12 +36,18 @@ def _enable_sqlite_fk_pragma(dbapi_conn, connection_record):
     SQLite disables FK constraints by default for compatibility. This event
     listener re-enables them on every connection to ensure constraint violations
     are caught immediately (especially important in tests to prevent hidden bugs).
+    
+    This is a no-op for PostgreSQL connections (which natively enforce FK constraints).
     """
-    if dbapi_conn.connection.execute("PRAGMA compile_options").fetchone()[0] == "SQLITE_OMIT_PRAGMA":
-        return  # FK pragmas not supported on this build
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON")
-    cursor.close()
+    # Only execute for SQLite connections (identified by module name)
+    if dbapi_conn.__class__.__module__ == 'sqlite3':
+        try:
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys = ON")
+            cursor.close()
+        except Exception:
+            # Silently ignore errors (e.g., if pragmas not supported on this build)
+            pass
 
 
 def _build_pg_uri(db_name: str) -> str:
