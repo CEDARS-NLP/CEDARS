@@ -24,10 +24,24 @@ import boto3
 from dotenv import load_dotenv
 from loguru import logger
 from botocore.exceptions import ClientError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 
 
 load_dotenv()
+
+
+def _enable_sqlite_fk_pragma(dbapi_conn, connection_record):
+    """Enable foreign key constraint enforcement for SQLite connections.
+    
+    SQLite disables FK constraints by default for compatibility. This event
+    listener re-enables them on every connection to ensure constraint violations
+    are caught immediately (especially important in tests to prevent hidden bugs).
+    """
+    if dbapi_conn.connection.execute("PRAGMA compile_options").fetchone()[0] == "SQLITE_OMIT_PRAGMA":
+        return  # FK pragmas not supported on this build
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON")
+    cursor.close()
 
 
 def _build_pg_uri(db_name: str) -> str:
@@ -72,6 +86,8 @@ def get_global_engine():
     if _global_engine is None:
         _global_engine = create_engine(_build_pg_uri(GLOBAL_DB_NAME),
                                        pool_pre_ping=True, future=True)
+        # Enable FK constraints for SQLite connections (no-op for PostgreSQL)
+        event.listen(_global_engine, "connect", _enable_sqlite_fk_pragma)
     return _global_engine
 
 
@@ -81,6 +97,8 @@ def get_admin_engine():
     if _admin_engine is None:
         _admin_engine = create_engine(_build_pg_uri(ADMIN_DB_NAME),
                                       isolation_level="AUTOCOMMIT", future=True)
+        # Enable FK constraints for SQLite connections (no-op for PostgreSQL)
+        event.listen(_admin_engine, "connect", _enable_sqlite_fk_pragma)
     return _admin_engine
 
 
@@ -89,9 +107,12 @@ def get_project_engine(project_id: str):
     if project_id not in _project_engines:
         with _engine_lock:
             if project_id not in _project_engines:
-                _project_engines[project_id] = create_engine(
+                engine = create_engine(
                     _build_pg_uri(project_db_name(project_id)),
                     pool_pre_ping=True, future=True)
+                # Enable FK constraints for SQLite connections (no-op for PostgreSQL)
+                event.listen(engine, "connect", _enable_sqlite_fk_pragma)
+                _project_engines[project_id] = engine
     return _project_engines[project_id]
 
 

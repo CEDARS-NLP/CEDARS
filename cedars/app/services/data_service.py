@@ -146,14 +146,35 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
     """Load a tabular file into the project's SQL database in chunks (ported from
     ``ops.EMR_to_mongodb``).
 
+    Respects foreign key constraints by inserting parent records (Patients) before
+    child records (Notes, NotesSummary). This requires two passes over the input file:
+    - Pass 1: Collect all patient IDs from the file
+    - Pass 2: Insert notes once all patients exist
+
     Returns a summary dict instead of flashing messages.
     """
     logger.info("Starting document migration to the project's database.")
 
+    # PHASE 1: Collect all unique patient IDs from the input file (first pass, minimal memory)
+    logger.info("Collecting all patient IDs from input file...")
+    all_patient_ids: list = []
+    for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
+        chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
+        all_patient_ids.extend(chunk_patient_ids)
+    
+    unique_patient_ids = list(dict.fromkeys(all_patient_ids))  # Preserve insertion order, remove duplicates
+    logger.info(f"Collected {len(unique_patient_ids)} unique patient IDs")
+
+    # PHASE 2: Create all Patients records (parent table, must happen BEFORE notes due to FK constraints)
+    logger.info("Creating Patients records...")
+    upserted_count_patients, _ = bulk_upsert_patients(
+        get_current_project_engine(), unique_patient_ids, chunk_size_upsert_patients)
+    logger.info(f"Upserted {upserted_count_patients} patients")
+
+    # PHASE 3: Insert Notes in chunks (child table, now all parent FKs are satisfied)
+    logger.info("Inserting Notes records...")
     total_rows = 0
     total_chunks = 0
-    all_patient_ids: list = []
-
     for chunk in load_pandas_dataframe(filepath, chunk_size_insert_notes):
         total_chunks += 1
         rows_in_chunk = len(chunk)
@@ -161,27 +182,21 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
         logger.info(f"Processing chunk {total_chunks} with {rows_in_chunk} rows")
 
         notes_to_insert = [prepare_note(row.to_dict()) for _, row in chunk.iterrows()]
-
-        chunk_patient_ids = prepare_patients(list(chunk["patient_id"].unique()))
-        all_patient_ids.extend(chunk_patient_ids)
-
         inserted_count = bulk_insert_notes(get_current_project_engine(), notes_to_insert)
         logger.info(f"Inserted {inserted_count} notes from chunk {total_chunks}")
 
+    # PHASE 4: Update NotesSummary (child table, references Patients.patient_id)
+    logger.info("Updating NotesSummary...")
     notes_summary_count = update_notes_summary(get_current_project_engine())
     logger.info(f"Updated {notes_summary_count} notes summary")
-    upserted_count_patients, _ = bulk_upsert_patients(
-        get_current_project_engine(), all_patient_ids, chunk_size_upsert_patients)
-    logger.info(f"Upserted {upserted_count_patients} patients")
 
-    unique_patients = len(set(all_patient_ids))
     logger.info(
         f"Completed document migration. Total rows: {total_rows}, "
-        f"chunks: {total_chunks}, unique patients: {unique_patients}")
+        f"chunks: {total_chunks}, unique patients: {len(unique_patient_ids)}")
 
     return {
         "total_rows": total_rows,
         "total_chunks": total_chunks,
-        "total_patients": unique_patients,
+        "total_patients": len(unique_patient_ids),
         "notes_inserted": total_rows,
     }
