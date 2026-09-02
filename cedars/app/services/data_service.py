@@ -169,9 +169,10 @@ def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patient
     # PHASE 2: Create all Patients records (parent table, must happen BEFORE notes due to FK constraints)
     with session_scope(get_current_project_engine()) as session:
         logger.info("Creating Patients records...")
-        upserted_count_patients, _ = bulk_upsert_patients(
+        # upserted_count_patients, _ = 
+        bulk_upsert_patients(
             session, unique_patient_ids, chunk_size_upsert_patients)
-        logger.info(f"Upserted {upserted_count_patients} patients")
+        # logger.info(f"Upserted {upserted_count_patients} patients")
 
         # PHASE 3: Insert Notes in chunks (child table, now all parent FKs are satisfied)
         logger.info("Inserting Notes records...")

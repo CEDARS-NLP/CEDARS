@@ -22,18 +22,18 @@ from .global_app_tables import UserProjectRelation
 logger.enable(__name__)
 
 
-def _upsert_ignore(engine, table):
+def _upsert_ignore(engine_dialect, table):
     '''
     Returns an `insert()` construct for `table` that is a no-op on conflicting
     primary keys, using the dialect-appropriate "ON CONFLICT DO NOTHING" syntax.
     Equivalent to mongo's `$setOnInsert` + `upsert=True` behavior.
     '''
-    dialect = engine.dialect.name
-    if dialect == "postgresql":
+
+    if engine_dialect == "postgresql":
         return pg_insert(table).on_conflict_do_nothing()
-    if dialect == "sqlite":
+    if engine_dialect == "sqlite":
         return sqlite_insert(table).on_conflict_do_nothing()
-    raise NotImplementedError(f"No conflict-ignoring insert implemented for dialect {dialect!r}.")
+    raise NotImplementedError(f"No conflict-ignoring insert implemented for dialect {engine_dialect!r}.")
 
 
 @log_function_call
@@ -190,23 +190,23 @@ def bulk_upsert_patients(session, patient_ids: list[str],
             "last_updated_at": now,
         })
 
-    total_uploaded_patients = 0
-    total_uploaded_results = 0
+    #total_uploaded_patients = 0
+    #total_uploaded_results = 0
 
     logger.info("Performing chunked upserts on the Patients table.")
     for i in range(0, len(patient_rows), chunk_size_upsert_patients):
         chunk = patient_rows[i:i + chunk_size_upsert_patients]
-        result = session.execute(_upsert_ignore(project_engine, Patients), chunk)
-        total_uploaded_patients += result.rowcount if result.rowcount and result.rowcount > 0 else 0
+        result = session.execute(insert(Patients), chunk)
+        #total_uploaded_patients += result.rowcount if result.rowcount and result.rowcount > 0 else 0
 
     logger.info("Performing chunked upserts on the Results table.")
     for i in range(0, len(results_rows), chunk_size_upsert_patients):
         chunk = results_rows[i:i + chunk_size_upsert_patients]
-        result = session.execute(_upsert_ignore(project_engine, Results), chunk)
-        total_uploaded_results += result.rowcount if result.rowcount and result.rowcount > 0 else 0
+        result = session.execute(insert(Results), chunk)
+        #total_uploaded_results += result.rowcount if result.rowcount and result.rowcount > 0 else 0
 
-    logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
-    return total_uploaded_patients, total_uploaded_results
+    #logger.info(f"Inserted {total_uploaded_patients} patients and {total_uploaded_results} results.")
+    #return total_uploaded_patients, total_uploaded_results
 
 
 @log_function_call
