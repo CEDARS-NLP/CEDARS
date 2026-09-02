@@ -1,9 +1,10 @@
 """Date normalization helpers for SQL date columns and API boundaries."""
 
 from datetime import date, datetime
+from typing import Union
 
 
-def normalize_date(value: str | date | datetime) -> date:
+def normalize_date(value: Union[str, date, datetime]) -> date:
     """Return a SQL-compatible date from supported ingestion values."""
     if isinstance(value, datetime):
         return value.date()

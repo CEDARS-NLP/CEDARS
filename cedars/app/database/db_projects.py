@@ -8,6 +8,8 @@ database (ProjectSettings). Equivalent to mongo's INFO collection.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from loguru import logger
 
 from sqlalchemy import select, update, delete
@@ -98,7 +100,7 @@ def get_info(global_engine, project_engine, project_id) -> dict:
 
 
 @log_function_call
-def get_proj_name(global_engine, project_id) -> str | None:
+def get_proj_name(global_engine, project_id) -> Optional[str]:
     '''
     Returns the display name of a project, or None if it does not exist.
     '''
@@ -111,7 +113,7 @@ def get_proj_name(global_engine, project_id) -> str | None:
 
 
 @log_function_call
-def get_curr_version(global_engine, project_id) -> float | None:
+def get_curr_version(global_engine, project_id) -> Optional[float]:
     '''
     Returns the CEDARS version a project was created with.
     '''
@@ -155,7 +157,7 @@ def update_pines_api_url(project_engine, new_url: str) -> None:
 
 
 @log_function_call
-def get_pines_url(project_engine) -> str | None:
+def get_pines_url(project_engine) -> Optional[str]:
     '''
     Retrieves the configured PINES url for this project.
     '''

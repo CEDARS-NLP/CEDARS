@@ -5,7 +5,7 @@ Saving and retrieving the current (and historical) regex/tag search query for a 
 '''
 
 from datetime import date
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 from loguru import logger
 
@@ -29,8 +29,8 @@ class QueryDetails(TypedDict, total=False):
     tag_query_exact: bool
     apply_pines: bool
     apply_llm: bool
-    date_min: date | None
-    date_max: date | None
+    date_min: Optional[date]
+    date_max: Optional[date]
 
 
 @log_function_call

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Optional
+
 import pandas as pd
 import pyarrow.parquet as pq
 from loguru import logger
@@ -58,7 +60,7 @@ def list_uploaded_files() -> list[dict]:
     return files
 
 
-def upload_source_file(fileobj, filename: str, content_type: str | None = None) -> str:
+def upload_source_file(fileobj, filename: str, content_type: Optional[str] = None) -> str:
     """Upload a source file to the project's ``uploaded_files/`` prefix; return its key."""
     key = f"{_uploaded_prefix()}{secure_filename(filename)}"
     extra_args = {"ContentType": content_type} if content_type else {}
