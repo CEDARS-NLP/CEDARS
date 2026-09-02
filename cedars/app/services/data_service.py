@@ -2,7 +2,7 @@
 
 Ports the framework-agnostic helpers from the original Flask ``ops`` blueprint
 (``allowed_data_file``, ``load_pandas_dataframe``, ``prepare_note``,
-``prepare_patients``, ``EMR_to_mongodb``) with the Flask bits removed (``flash``
+``prepare_patients``, ``emr_to_sql``) with the Flask bits removed (``flash``
 -> exceptions/logging, ``g.bucket_name`` -> :func:`get_bucket_name`). Object keys
 are prefixed per project for isolation.
 """
@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import datetime
-
 import pandas as pd
 import pyarrow.parquet as pq
 from loguru import logger
@@ -20,6 +18,7 @@ from werkzeug.utils import secure_filename
 from ..database import (get_bucket_name, get_current_project_engine,
                         project_s3_prefix, s3)
 from ..database.db_inserts import bulk_insert_notes, bulk_upsert_patients
+from ..database.date_utils import normalize_date
 from ..database.db_updates import update_notes_summary
 from ..database.db_session import session_scope
 
@@ -125,13 +124,7 @@ def load_pandas_dataframe(filepath, chunk_size=1000):
 def prepare_note(note_info):
     """Normalize a note row for insertion (ported from ``ops.prepare_note``)."""
     logger.debug(f"Formatting note info for note {note_info['text_id']}.")
-    date_format = "%Y-%m-%d"
-    text_date = note_info["text_date"]
-    if isinstance(text_date, str):
-        note_info["text_date"] = datetime.strptime(text_date, date_format)
-    else:
-        # Source already carries a datetime-like value (parquet/pickle/etc.).
-        note_info["text_date"] = pd.to_datetime(text_date).to_pydatetime()
+    note_info["text_date"] = normalize_date(note_info["text_date"])
     note_info["reviewed"] = False
     note_info["text_id"] = str(note_info["text_id"]).strip()
     note_info["patient_id"] = str(note_info["patient_id"]).strip()
@@ -145,7 +138,7 @@ def prepare_patients(patient_ids):
 
 def emr_to_sql(filepath, chunk_size_insert_notes=1000, chunk_size_upsert_patients=2000):
     """Load a tabular file into the project's SQL database in chunks (ported from
-    ``ops.EMR_to_mongodb``).
+    the original MongoDB ingestion workflow).
 
     Respects foreign key constraints by inserting parent records (Patients) before
     child records (Notes, NotesSummary). This requires two passes over the input file:

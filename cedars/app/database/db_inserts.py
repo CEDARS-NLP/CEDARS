@@ -14,6 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from .project_table_creation import (
     Annotations, Notes, NotesSummary, PINES, Patients, ProjectUsers, Results,
 )
+from .date_utils import normalize_date
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
 from .global_app_tables import UserProjectRelation
@@ -70,26 +71,13 @@ def add_user_to_project(global_engine, project_engine,
 
 def _format_note(note: dict) -> dict:
     '''
-    Returns a copy of `note` with `text_date` parsed into a `datetime`.
+    Returns a copy of `note` with `text_date` normalized to a `date`.
     '''
     logger.debug(f"Formatting note info for note {note['text_id']}.")
-    date_format = "%Y-%m-%d"
     text_date = note["text_date"]
 
     formatted = dict(note)
-    if isinstance(text_date, str):
-        try:
-            formatted["text_date"] = datetime.strptime(text_date, date_format)
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid date format for text_date: {text_date} for note "
-                f"{note['text_id']}. Expected format: {date_format}"
-            ) from exc
-    elif not isinstance(text_date, datetime):
-        raise ValueError(
-            f"Unexpected type for text_date: {type(text_date)} for note "
-            f"{note['text_id']}. Expected str or datetime."
-        )
+    formatted["text_date"] = normalize_date(text_date)
 
     return formatted
 
@@ -104,8 +92,8 @@ def bulk_insert_notes(session, notes: list[dict],
     Args:
         - session: SQLAlchemy session for the project database.
         - notes: List of dictionaries, where each dictionary represents a note to be
-                 inserted. Dict format: {'text_id': str, 'patient_id': str, 'text': str,
-                 'text_date': str|datetime, 'text_tag_1'..'text_tag_4': str (optional)}
+             inserted. Dict format: {'text_id': str, 'patient_id': str, 'text': str,
+             'text_date': str|date|datetime, 'text_tag_1'..'text_tag_4': str (optional)}
         - chunk_size_insert_notes: Number of notes inserted per transaction/statement.
 
     Returns:

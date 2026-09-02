@@ -4,7 +4,8 @@ db_query.py
 Saving and retrieving the current (and historical) regex/tag search query for a project.
 '''
 
-from datetime import datetime
+from datetime import date
+from typing import TypedDict
 
 from loguru import logger
 
@@ -15,6 +16,21 @@ from .db_session import session_scope
 from .project_table_creation import Query
 
 logger.enable(__name__)
+
+
+class QueryDetails(TypedDict, total=False):
+    """Serialized settings for the currently active project query."""
+
+    query_id: int
+    query: str
+    exclude_negated: bool
+    hide_duplicates: bool
+    skip_after_event: bool
+    tag_query_exact: bool
+    apply_pines: bool
+    apply_llm: bool
+    date_min: date | None
+    date_max: date | None
 
 
 @log_function_call
@@ -31,8 +47,8 @@ def save_query(project_engine, query, exclude_negated, hide_duplicates,  # pylin
     Returns:
         bool: True if the query was saved, False if an identical query is already current.
     '''
-    date_min = date_min or datetime.now()
-    date_max = date_max or datetime.now()
+    date_min = date_min or date.today()
+    date_max = date_max or date.today()
 
     with session_scope(project_engine) as session:
         current = session.execute(
@@ -88,12 +104,12 @@ def get_search_query(project_engine, query_key="query"):
 
 
 @log_function_call
-def get_search_query_details(project_engine) -> dict:
+def get_search_query_details(project_engine) -> QueryDetails:
     '''
     Returns the full currently active query as a dict.
 
     Returns:
-        dict, or {} if there is no current query.
+        QueryDetails, or {} if there is no current query.
     '''
     with session_scope(project_engine) as session:
         current = session.execute(

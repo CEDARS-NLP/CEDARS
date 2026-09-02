@@ -1,9 +1,9 @@
 '''
 db_tasks.py
 
-Background task/job bookkeeping for a project (mirrors mongo's TASK collection).
+Background task/job bookkeeping for a project.
 '''
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 
 from loguru import logger
 
@@ -17,8 +17,18 @@ from .project_table_creation import Task
 logger.enable(__name__)
 
 
+class TaskData(TypedDict, total=False):
+    """Fields accepted when creating or resetting a SQL task."""
+
+    job_id: str
+    name: str
+    user_id: str
+    complete: bool
+    progress: int
+
+
 @log_function_call
-def add_task(project_engine, task: dict) -> None:
+def add_task(project_engine, task: TaskData) -> None:
     '''
     Creates or resets a task record keyed by job_id.
 
@@ -26,9 +36,20 @@ def add_task(project_engine, task: dict) -> None:
         task (dict): keys matching the Task columns (job_id, name, user_id,
                      complete, progress).
     '''
-    task = dict(task)
+    unknown = set(task) - {"job_id", "name", "user_id", "complete", "progress"}
+    if unknown:
+        raise ValueError(f"Unsupported task field(s): {', '.join(sorted(unknown))}")
+
+    task = {
+        key: task[key]
+        for key in ("job_id", "name", "user_id", "complete", "progress")
+        if key in task
+    }
     task.setdefault("complete", False)
     task.setdefault("progress", 0)
+    missing = [key for key in ("job_id", "name", "user_id") if key not in task]
+    if missing:
+        raise ValueError(f"Missing required task field(s): {', '.join(missing)}")
 
     with session_scope(project_engine) as session:
         existing = session.execute(

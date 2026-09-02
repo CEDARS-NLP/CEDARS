@@ -54,12 +54,10 @@ def save_query(payload: QueryUpdate,
         pass
 
     use_negation = False  # negation view disabled in the original UI
-    tag_query = {"exact": False, "apply_pines": bool(payload.nlp_apply)}
-
     new_query_added = save_search_query(
         get_current_project_engine(), search_query, use_negation,
         bool(payload.hide_duplicates), bool(payload.skip_after_event),
-        tag_query_exact=tag_query["exact"], apply_pines=tag_query["apply_pines"],
+        tag_query_exact=False, apply_pines=bool(payload.nlp_apply),
         apply_llm=False)
     if new_query_added:
         project_engine = get_current_project_engine()

@@ -289,7 +289,7 @@ def get_event_annotation_id(project_engine, patient_id):
 # ---------------------------------------------------------------------------
 
 @log_function_call
-def get_all_notes(project_engine, patient_id):
+def get_all_notes(project_engine, patient_id) -> list[Notes]:
     '''
     Every note for a patient.
     '''
@@ -299,7 +299,7 @@ def get_all_notes(project_engine, patient_id):
 
 
 @log_function_call
-def get_patient_notes(project_engine, patient_id, reviewed=False):
+def get_patient_notes(project_engine, patient_id, reviewed=False) -> list[Notes]:
     '''
     Notes for a patient filtered by reviewed status.
     '''
@@ -319,7 +319,7 @@ def get_note_date(project_engine, text_id):
 
 
 @log_function_call
-def get_documents_to_annotate(project_engine, patient_id=None):
+def get_documents_to_annotate(project_engine, patient_id=None) -> list[Notes]:
     '''
     Notes with no annotations that have not been marked reviewed, optionally
     restricted to a single patient. Implemented as a `NOT EXISTS` correlated

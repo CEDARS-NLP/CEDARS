@@ -11,7 +11,7 @@ from .cedars_enums import ReviewStatus
 from .database import get_current_project_engine
 from .database.db_inserts import insert_one_annotation
 from .database.db_projects import get_pines_url
-from .database.db_query import get_search_query
+from .database.db_query import get_search_query, get_search_query_details
 from .database.db_search import (get_annotated_notes_for_patient,
                                  get_documents_to_annotate, get_note_prediction_from_db,
                                  get_patient_ids, get_total_counts)
@@ -166,8 +166,12 @@ class NlpProcessor:
         """
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
+        project_engine = get_current_project_engine()
+        query_details = get_search_query_details(project_engine)
+        self.query = query_details.get("query", "")
+        apply_pines = query_details.get("apply_pines", False)
 
-        if get_search_query(get_current_project_engine(), "apply_pines") is True:
+        if apply_pines is True:
             # This healthcheck for PINES will also trigger a startup if PINES is inactive
             is_pines_available = check_is_pines_available()
             if is_pines_available:
@@ -196,7 +200,7 @@ class NlpProcessor:
             if len(document_list) == 0:
                 # no notes found to annotate
                 logger.info(f"No documents to process for patient {patient_id}")
-                if get_search_query(get_current_project_engine(), "apply_pines") is True:
+                if apply_pines is True:
                     self.process_patient_pines(patient_id)
                 return
 
@@ -259,7 +263,7 @@ class NlpProcessor:
                 mark_patient_reviewed(get_current_project_engine(), patient_id, "CEDARS")
 
             # check if nlp processing is enabled
-            if docs_with_annotations > 0 and get_search_query(get_current_project_engine(), "apply_pines") is True:
+            if docs_with_annotations > 0 and apply_pines is True:
                 logger.info(f"Checking PINES server status.... (patient : {patient_id})")
 
                 is_pines_ready = False
