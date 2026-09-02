@@ -364,7 +364,7 @@ class NlpProcessor:
             project_engine = get_current_project_engine()
             existing_task = get_task(project_engine, task["job_id"])
 
-            if not existing_task or existing_task["complete"] is False:
+            if not existing_task or existing_task.complete is False:
                 if not existing_task:
                     add_task(project_engine, task)
                 set_patient_lock_status(project_engine, patient_id, True)

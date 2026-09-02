@@ -2,6 +2,8 @@
 import pytest
 
 from app import queues
+from app import nlpprocessor
+from app.database.project_table_creation import Task
 
 from . import sql_test_helpers as sql
 
@@ -70,6 +72,26 @@ def test_nlp_run_and_status(admin_project):
     assert status["tasks_in_progress"] == 2
     assert status["tasks_completed"] == 0
     assert status["tasks_failed"] == 0
+
+
+@pytest.mark.parametrize("complete, should_process", [(False, True), (True, False)])
+def test_automatic_nlp_processor_uses_task_attributes(monkeypatch, complete, should_process):
+    """Existing ORM tasks are checked through their attributes, not as mappings."""
+    processor = object.__new__(nlpprocessor.NlpProcessor)
+    existing_task = Task(job_id="job-1", name="nlp_processor", user_id="user-1",
+                         complete=complete, progress=0)
+    processed = []
+
+    monkeypatch.setattr(nlpprocessor, "get_patient_ids", lambda engine: ["patient-1"])
+    monkeypatch.setattr(nlpprocessor, "get_current_project_engine", lambda: object())
+    monkeypatch.setattr(nlpprocessor, "get_task", lambda engine, job_id: existing_task)
+    monkeypatch.setattr(nlpprocessor, "get_tasks_in_progress", lambda engine: [])
+    monkeypatch.setattr(nlpprocessor, "set_patient_lock_status", lambda *args: None)
+    monkeypatch.setattr(processor, "process_notes", lambda patient_id: processed.append(patient_id))
+
+    processor.automatic_nlp_processor(job_id="job-1", user="user-1")
+
+    assert processed == (["patient-1"] if should_process else [])
 
 
 def test_query_requires_admin(admin_project):

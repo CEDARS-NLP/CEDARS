@@ -3,6 +3,7 @@ db_tasks.py
 
 Background task/job bookkeeping for a project (mirrors mongo's TASK collection).
 '''
+from typing import List, Optional
 
 from loguru import logger
 
@@ -41,7 +42,7 @@ def add_task(project_engine, task: dict) -> None:
 
 
 @log_function_call
-def get_tasks_in_progress(project_engine):
+def get_tasks_in_progress(project_engine) -> List[Task]:
     '''
     Every task that has not yet completed.
     '''
@@ -50,7 +51,7 @@ def get_tasks_in_progress(project_engine):
 
 
 @log_function_call
-def get_task(project_engine, job_id):
+def get_task(project_engine, job_id) -> Optional[Task]:
     '''
     A task by job_id, regardless of completion status, or None.
     '''
@@ -59,7 +60,7 @@ def get_task(project_engine, job_id):
 
 
 @log_function_call
-def get_task_in_progress(project_engine, job_id):
+def get_task_in_progress(project_engine, job_id) -> Optional[Task]:
     '''
     A task by job_id, only if it has not yet completed, else None.
     '''
