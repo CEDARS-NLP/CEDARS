@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from sqlalchemy import insert, text
+from sqlalchemy import insert, select, text
 
 from ..cedars_enums import log_function_call
 from . import (dispose_project_engine, get_admin_engine,
@@ -16,7 +16,9 @@ from . import (dispose_project_engine, get_admin_engine,
                project_db_name)
 from .db_session import session_scope
 from .global_app_tables import GlobalBase, Projects, UserProjectRelation
-from .project_table_creation import ProjectBase, ProjectSettings, ProjectUsers
+from .project_table_creation import (
+    ProjectBase, ProjectSettings, ProjectUsers, SYSTEM_REVIEWERS,
+)
 
 logger.enable(__name__)
 
@@ -97,6 +99,28 @@ def create_project_settings(project_engine) -> None:
 
 
 @log_function_call
+def seed_system_reviewers(project_engine) -> None:
+    '''
+    Adds the non-human principals used by automatic review workflows.
+    '''
+    with session_scope(project_engine) as session:
+        existing_ids = set(session.scalars(
+            select(ProjectUsers.user_id).where(
+                ProjectUsers.user_id.in_(SYSTEM_REVIEWERS)
+            )
+        ))
+        missing = [
+            {"user_id": reviewer, "is_admin": False}
+            for reviewer in SYSTEM_REVIEWERS
+            if reviewer not in existing_ids
+        ]
+        if missing:
+            session.execute(insert(ProjectUsers), missing)
+
+    logger.info("Seeded system reviewer principals.")
+
+
+@log_function_call
 def attach_user_to_project(global_engine, project_engine,
                            project_id, user_id, is_admin) -> None:
     '''
@@ -145,6 +169,7 @@ def initialize_project(project_name, current_user_id, cedars_version: float,
     global_engine = get_global_engine()
 
     create_project_tables(project_engine, project_name)
+    seed_system_reviewers(project_engine)
     populate_project_info(global_engine, project_id, project_name,
                           current_user_id, cedars_version, description)
     create_project_settings(project_engine)

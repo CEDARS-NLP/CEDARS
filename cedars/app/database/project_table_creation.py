@@ -29,6 +29,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 logger.enable(__name__)
 
+SYSTEM_REVIEWERS = ("CEDARS", "PINES")
+
 
 class ProjectBase(DeclarativeBase):
     """Shared declarative base for all ORM models."""

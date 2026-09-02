@@ -13,7 +13,7 @@ from werkzeug.security import check_password_hash
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
 from .global_app_tables import UserProjectRelation, Users
-from .project_table_creation import ProjectUsers
+from .project_table_creation import ProjectUsers, SYSTEM_REVIEWERS
 
 
 logger.enable(__name__)
@@ -256,6 +256,9 @@ def remove_project_member(global_engine, project_engine, project_id, user_id) ->
     '''
     Removes a member from both the global and project-local membership tables.
     '''
+    if user_id in SYSTEM_REVIEWERS:
+        raise ValueError(f"Cannot remove system reviewer {user_id!r}.")
+
     with session_scope(global_engine) as session:
         session.execute(
             delete(UserProjectRelation).where(
