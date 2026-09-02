@@ -3,7 +3,7 @@
 Ports the enqueue logic from the original Flask ``ops.do_nlp_processing`` and the
 status views (``queue_stats`` / ``job_status``). The Superbio/EC2 spin-down
 branch is dropped; the self-hosted PINES path is preserved (the worker checks
-``tag_query.nlp_apply`` when processing). Job IDs are namespaced by project so
+the query's ``apply_pines`` setting when processing). Job IDs are namespaced by project so
 they never collide across projects on the shared Redis instance.
 """
 from rq import Callback, Retry

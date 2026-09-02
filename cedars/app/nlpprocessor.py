@@ -167,7 +167,7 @@ class NlpProcessor:
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
 
-        if get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
+        if get_search_query(get_current_project_engine(), "apply_pines") is True:
             # This healthcheck for PINES will also trigger a startup if PINES is inactive
             is_pines_available = check_is_pines_available()
             if is_pines_available:
@@ -196,7 +196,7 @@ class NlpProcessor:
             if len(document_list) == 0:
                 # no notes found to annotate
                 logger.info(f"No documents to process for patient {patient_id}")
-                if get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
+                if get_search_query(get_current_project_engine(), "apply_pines") is True:
                     self.process_patient_pines(patient_id)
                 return
 
@@ -205,8 +205,8 @@ class NlpProcessor:
             else:
                 logger.info(f"Found {len(document_list)}/{get_total_counts(get_current_project_engine(), Notes)} documents to process")
 
-            logger.debug(f"document sample: {document_list[0].get('text', '')[:100]}")
-            annotations = self.nlp_model.pipe([document.get("text", "").lower() for document in document_list],
+            logger.debug(f"document sample: {document_list[0].text[:100]}")
+            annotations = self.nlp_model.pipe([document.text.lower() for document in document_list],
                                             n_process=processes,
                                             batch_size=batch_size)
             logger.info(f"Starting to process document annotations: {len(document_list)}")
@@ -237,9 +237,9 @@ class NlpProcessor:
                                         "sentence_start" : sentence_start,
                                         "sentence_end" : sentence_end
                                         }
-                        annotation['note_id'] = document["text_id"]
-                        annotation["text_date"] = document["text_date"]
-                        annotation["patient_id"] = document["patient_id"]
+                        annotation['note_id'] = document.text_id
+                        annotation["text_date"] = document.text_date
+                        annotation["patient_id"] = document.patient_id
                         insert_one_annotation(get_current_project_engine(), annotation)
                         if not has_negation:
                             if match_count == 0:
@@ -249,7 +249,7 @@ class NlpProcessor:
                     sentence_start = sentence_end + 1
 
                 if match_count == 0:
-                    mark_note_reviewed(get_current_project_engine(), document["text_id"], reviewed_by="CEDARS")
+                    mark_note_reviewed(get_current_project_engine(), document.text_id, reviewed_by="CEDARS")
                 count += 1
                 if (count) % 10 == 0:
                     logger.info(f"Processed {count} / {len(document_list)} documents")
@@ -259,7 +259,7 @@ class NlpProcessor:
                 mark_patient_reviewed(get_current_project_engine(), patient_id, "CEDARS")
 
             # check if nlp processing is enabled
-            if docs_with_annotations > 0 and get_search_query(get_current_project_engine(), "tag_query")["nlp_apply"] is True:
+            if docs_with_annotations > 0 and get_search_query(get_current_project_engine(), "apply_pines") is True:
                 logger.info(f"Checking PINES server status.... (patient : {patient_id})")
 
                 is_pines_ready = False
@@ -353,10 +353,8 @@ class NlpProcessor:
             task = {
                 "job_id": kwargs.get("job_id", None),
                 "name": "nlp_processor",
-                "description": kwargs.get("description", "NLP Processor"),
-                "user": kwargs.get("user", None),
+                "user_id": kwargs.get("user", None),
                 "complete": False,
-                "failed": False,
                 "progress": 0
             }
             # check if the task is completed for the patient already
