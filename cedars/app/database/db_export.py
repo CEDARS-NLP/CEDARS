@@ -68,7 +68,11 @@ def download_annotations(project_engine, s3_client, bucket_name: str, s3_prefix:
             ).all()
 
         logger.info("Creating dataframe for Results")
-        df = pl.DataFrame(rows, orient="row", schema=_SCHEMA, infer_schema_length=None)
+        # polars raises a ShapeError building an empty row-oriented frame even with a schema.
+        if rows:
+            df = pl.DataFrame(rows, orient="row", schema=_SCHEMA, infer_schema_length=None)
+        else:
+            df = pl.DataFrame(schema=_SCHEMA)
 
         for col in ("first_note_date", "last_note_date", "event_date"):
             df = df.with_columns(pl.col(col).dt.date().alias(col))
