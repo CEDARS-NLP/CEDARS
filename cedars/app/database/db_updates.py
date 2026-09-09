@@ -85,6 +85,10 @@ def batch_mark_annotation_reviewed(project_engine, annotation_ids, reviewed_by) 
     Marks a batch of annotations as reviewed, logs each review, and marks any
     notes with no more unreviewed annotations as reviewed.
     '''
+    if len(annotation_ids) == 0:
+        logger.warning("No annotation IDs provided to batch_mark_annotation_reviewed.")
+        return
+
     logger.debug(f"Marking annotations {annotation_ids} as reviewed.")
 
     with session_scope(project_engine) as session:
