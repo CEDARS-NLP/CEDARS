@@ -19,7 +19,7 @@ export default function ExportPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  const { data: files } = useQuery<DownloadFile[]>({
+  const { data: files, isError: filesFailed, error: filesError } = useQuery<DownloadFile[]>({
     queryKey: ["downloads", projectId],
     queryFn: () => api.get<DownloadFile[]>(`/projects/${projectId}/download/files`),
     enabled: !!projectId,
@@ -56,22 +56,26 @@ export default function ExportPage() {
   }
 
   async function downloadFile(name: string) {
-    const res = await fetch(
-      `/api/v1/projects/${projectId}/download/file/${encodeURIComponent(name)}`,
-      { credentials: "include" }
-    );
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cedars_${name}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = await api.getBlob(`/projects/${projectId}/download/file/${encodeURIComponent(name)}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cedars_${name}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Download failed");
+    }
   }
 
   async function removeFile(name: string) {
-    await api.delete(`/projects/${projectId}/download/file/${encodeURIComponent(name)}`);
-    queryClient.invalidateQueries({ queryKey: ["downloads", projectId] });
+    try {
+      await api.delete(`/projects/${projectId}/download/file/${encodeURIComponent(name)}`);
+      queryClient.invalidateQueries({ queryKey: ["downloads", projectId] });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Delete failed");
+    }
   }
 
   return (
@@ -114,7 +118,11 @@ export default function ExportPage() {
           <CardTitle className="text-base">Available exports</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {!files || files.length === 0 ? (
+          {filesFailed ? (
+            <p className="text-sm text-destructive">
+              Failed to load exports: {filesError instanceof Error ? filesError.message : "unknown error"}
+            </p>
+          ) : !files || files.length === 0 ? (
             <p className="text-sm text-muted-foreground">No exports generated yet.</p>
           ) : (
             files.map((f) => (

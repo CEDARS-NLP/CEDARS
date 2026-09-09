@@ -3,7 +3,7 @@
 Ports the Flask ``ops`` download routes: list generated files, create a compact
 or full export (background job), poll job status, download, and delete.
 """
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..dependencies import require_project_admin
 from ..schemas import (DownloadFileOut, JobIdResponse, JobStatusResponse,
@@ -11,6 +11,13 @@ from ..schemas import (DownloadFileOut, JobIdResponse, JobStatusResponse,
 from ..services import download_service
 
 router = APIRouter(prefix="/projects/{project_id}/download", tags=["download"])
+
+
+def _validate_filename(filename: str) -> None:
+    """Reject filenames that could escape the project's S3 prefix."""
+    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid filename.")
 
 
 @router.get("/files", response_model=list[DownloadFileOut])
@@ -40,6 +47,7 @@ def check(job_id: str, _ctx=Depends(require_project_admin)):
 @router.get("/file/{filename}")
 def download(filename: str, _ctx=Depends(require_project_admin)):
     """Download a generated export as a CSV attachment."""
+    _validate_filename(filename)
     data = download_service.get_file_bytes(filename)
     return Response(
         content=data,
@@ -51,5 +59,6 @@ def download(filename: str, _ctx=Depends(require_project_admin)):
 @router.delete("/file/{filename}", response_model=MessageResponse)
 def delete(filename: str, _ctx=Depends(require_project_admin)):
     """Delete a generated export from storage."""
+    _validate_filename(filename)
     download_service.delete_file(filename)
     return MessageResponse(message=f"Deleted {filename}.")

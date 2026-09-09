@@ -90,7 +90,7 @@ def download_annotations(project_engine, s3_client, bucket_name: str, s3_prefix:
             Fileobj=data_stream,
             Bucket=bucket_name,
             Key=f"{s3_prefix}/annotated_files/{filename}",
-            ExtraArgs={"ContentType": "application/csv"},
+            ExtraArgs={"ContentType": "text/csv"},
         )
         logger.info(f"File '{filename}' successfully uploaded to bucket '{bucket_name}'")
         return True

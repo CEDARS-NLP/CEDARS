@@ -62,6 +62,30 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Fetch a binary response (e.g. file download), sharing the 401-refresh/redirect logic. */
+async function requestBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      const retry = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+      if (retry.ok) return retry.blob();
+    }
+    window.location.href = "/login";
+    throw new Error("Session expired");
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: "Request failed" }));
+    const detail = error.detail;
+    const message = typeof detail === "string" ? detail : `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -71,4 +95,5 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  getBlob: (path: string) => requestBlob(path),
 };
