@@ -6,6 +6,7 @@ Exports a project's RESULTS table as a CSV, streamed in chunks to S3.
 
 from io import BytesIO, StringIO
 from math import ceil
+from datetime import datetime
 
 import pandas as pd
 import polars as pl
@@ -56,48 +57,61 @@ def download_annotations(project_engine, s3_client, bucket_name: str, s3_prefix:
     Returns:
         bool: True on success, False on failure.
     '''
-    try:
-        logger.info("Starting download task")
-        csv_buffer = StringIO()
-        pd.DataFrame(columns=list(_SCHEMA.keys())).to_csv(csv_buffer, index=False, header=True)
+    #try:
+    logger.info("Starting download task")
+    csv_buffer = StringIO()
+    schema_keys = list(_SCHEMA.keys())
+    pd.DataFrame(columns=schema_keys).to_csv(csv_buffer, index=False, header=True)
 
-        logger.info("Retrieving Results from db")
-        with session_scope(project_engine) as session:
-            rows = session.execute(
-                select(*(getattr(Results, col) for col in _SCHEMA)).order_by(Results.index_no)
-            ).all()
+    logger.info("Retrieving Results from db")
+    with session_scope(project_engine) as session:
+        rows = session.execute(
+            select(*(getattr(Results, col) for col in _SCHEMA)).order_by(Results.index_no)
+        ).all()
+        rows = [list(row) for row in rows]  # convert Row objects to lists
 
-        logger.info("Creating dataframe for Results")
-        # polars raises a ShapeError building an empty row-oriented frame even with a schema.
-        if rows:
-            df = pl.DataFrame(rows, orient="row", schema=_SCHEMA, infer_schema_length=None)
-        else:
-            df = pl.DataFrame(schema=_SCHEMA)
+    # convert date columns to datetime64[ns] for polars
+    date_cols = ["event_date", "first_note_date",
+                 "last_note_date", "max_score_note_date"]
+    for col in date_cols:
+        col_index = schema_keys.index(col)
+        for row_no in range(len(rows)):
+            row = rows[row_no]
+            if row[col_index] is not None:
+                logger.info(f"Converting {col} value '{row[col_index]}' to datetime")
+                logger.info(f"{dir(row[col_index])}")
+                row[col_index] = datetime.combine(row[col_index].today(), datetime.min.time())
 
-        for col in ("first_note_date", "last_note_date", "event_date"):
-            df = df.with_columns(pl.col(col).dt.date().alias(col))
 
-        logger.info("Uploading results to csv buffer")
-        chunk_size = 1000
-        for chunk_index in range(0, df.shape[0], chunk_size):
-            chunk = df.slice(chunk_index, chunk_size)
-            logger.info(
-                f"Sending chunk {ceil(chunk_index / chunk_size) + 1}/"
-                f"{ceil(df.shape[0] / chunk_size)} to csv buffer"
-            )
-            csv_buffer.write(chunk.to_pandas().to_csv(header=False, index=False))
+    logger.info(f"Creating dataframe for Results")
 
-        csv_buffer.seek(0)
-        data_stream = BytesIO(csv_buffer.getvalue().encode("utf-8"))
+    # polars raises a ShapeError building an empty row-oriented frame even with a schema.
+    df = pl.DataFrame(rows, orient="row", schema=_SCHEMA, infer_schema_length=None)
 
-        s3_client.upload_fileobj(
-            Fileobj=data_stream,
-            Bucket=bucket_name,
-            Key=f"{s3_prefix}/annotated_files/{filename}",
-            ExtraArgs={"ContentType": "text/csv"},
+    for col in ("first_note_date", "last_note_date", "event_date"):
+        df = df.with_columns(pl.col(col).dt.date().alias(col))
+
+    logger.info("Uploading results to csv buffer")
+    chunk_size = 1000
+    for chunk_index in range(0, df.shape[0], chunk_size):
+        chunk = df.slice(chunk_index, chunk_size)
+        logger.info(
+            f"Sending chunk {ceil(chunk_index / chunk_size) + 1}/"
+            f"{ceil(df.shape[0] / chunk_size)} to csv buffer"
         )
-        logger.info(f"File '{filename}' successfully uploaded to bucket '{bucket_name}'")
-        return True
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.error(f"Failed to upload annotations to s3: {filename}, error: {exc}")
-        return False
+        csv_buffer.write(chunk.to_pandas().to_csv(header=False, index=False))
+
+    csv_buffer.seek(0)
+    data_stream = BytesIO(csv_buffer.getvalue().encode("utf-8"))
+
+    s3_client.upload_fileobj(
+        Fileobj=data_stream,
+        Bucket=bucket_name,
+        Key=f"{s3_prefix}/annotated_files/{filename}",
+        ExtraArgs={"ContentType": "text/csv"},
+    )
+    logger.info(f"File '{filename}' successfully uploaded to bucket '{bucket_name}'")
+    return True
+    #except Exception as exc:  # pylint: disable=broad-except
+    #    logger.error(f"Failed to upload annotations to s3: {filename}, error: {exc}")
+    #    return False
