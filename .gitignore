@@ -1,3 +1,4 @@
+cedars/.testenv/
 venv/
 __pycache__/
 *.pyc

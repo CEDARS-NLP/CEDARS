@@ -28,7 +28,7 @@ def run_nlp(project_id: str, username: str) -> int:
             "complete": False,
             "progress": 0,
         })
-        queues.task_queue.enqueue(
+        queues.get_task_queue(project_id).enqueue(
             tasks.nlp_task,
             args=(project_id, patient),
             job_id=job_id,

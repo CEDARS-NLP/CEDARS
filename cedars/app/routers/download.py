@@ -39,9 +39,9 @@ def create_full(ctx=Depends(require_project_admin)):
 
 
 @router.get("/check/{job_id}", response_model=JobStatusResponse)
-def check(job_id: str, _ctx=Depends(require_project_admin)):
+def check(job_id: str, ctx=Depends(require_project_admin)):
     """Poll the status of an export-generation job."""
-    return JobStatusResponse(**download_service.check_job(job_id))
+    return JobStatusResponse(**download_service.check_job(ctx.project_id, job_id))
 
 
 @router.get("/file/{filename}")

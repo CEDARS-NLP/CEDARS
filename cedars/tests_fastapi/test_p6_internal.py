@@ -24,7 +24,7 @@ def test_internal_status(admin_project):
     resp = client.get(f"/api/v1/projects/{pid}/internal")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert "rq_dashboard_url" in body
+    assert body["rq_dashboard_url"] == f"/api/v1/projects/{pid}/rq/"
     assert body["queue_length"] == 0
     assert body["failed_jobs"] == 0
 
@@ -65,6 +65,47 @@ def test_internal_requires_admin(admin_project):
     client.post("/api/v1/auth/login",
                 json={"username": "Plain", "password": GOOD_PASSWORD})
     assert client.get(f"/api/v1/projects/{pid}/internal").status_code == 403
+
+
+def test_rq_dashboard_allows_project_admin(admin_project):
+    client, pid = admin_project
+    resp = client.get(f"/api/v1/projects/{pid}/rq/")
+    assert resp.status_code == 200, resp.text
+
+
+def test_rq_dashboard_rejects_non_admin_member(admin_project):
+    client, pid = admin_project
+    client.post("/api/v1/auth/register", json={
+        "username": "Plain", "password": GOOD_PASSWORD,
+        "confirm_password": GOOD_PASSWORD, "is_admin": False})
+    client.post("/api/v1/auth/login",
+                json={"username": "Plain", "password": GOOD_PASSWORD})
+    assert client.get(f"/api/v1/projects/{pid}/rq/").status_code == 403
+
+
+def test_rq_dashboard_rejects_other_projects_admin(client):
+    client.post("/api/v1/auth/register", json={
+        "username": "AdminOne", "password": GOOD_PASSWORD,
+        "confirm_password": GOOD_PASSWORD, "is_admin": False})
+    client.post("/api/v1/auth/login",
+                json={"username": "AdminOne", "password": GOOD_PASSWORD})
+    pid_one = client.post("/api/v1/projects", json={"name": "One"}).json()["id"]
+
+    client.post("/api/v1/auth/register", json={
+        "username": "AdminTwo", "password": GOOD_PASSWORD,
+        "confirm_password": GOOD_PASSWORD, "is_admin": False})
+    client.post("/api/v1/auth/login",
+                json={"username": "AdminTwo", "password": GOOD_PASSWORD})
+    client.post("/api/v1/projects", json={"name": "Two"})
+
+    # AdminTwo is currently logged in but is not a member of project one.
+    assert client.get(f"/api/v1/projects/{pid_one}/rq/").status_code == 403
+
+
+def test_rq_dashboard_requires_authentication(client, admin_project):
+    _, pid = admin_project
+    client.post("/api/v1/auth/logout")
+    assert client.get(f"/api/v1/projects/{pid}/rq/").status_code == 401
 
 
 def test_terminate_project(admin_project):

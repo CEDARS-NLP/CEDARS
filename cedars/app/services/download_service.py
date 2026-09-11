@@ -44,14 +44,14 @@ def get_download_filename(is_full_download: bool = False) -> str:
 def create_download(project_id: str, is_full: bool = False) -> str:
     """Enqueue generation of an annotations export; returns the job id."""
     filename = get_download_filename(is_full)
-    job = queues.ops_queue.enqueue(ops_tasks.download_annotations,
-                                   project_id, filename, is_full)
+    job = queues.get_ops_queue(project_id).enqueue(ops_tasks.download_annotations,
+                                                    project_id, filename, is_full)
     return job.get_id()
 
 
-def check_job(job_id: str) -> dict:
+def check_job(project_id: str, job_id: str) -> dict:
     """Report the status of a generation job."""
-    job = queues.ops_queue.fetch_job(job_id)
+    job = queues.get_ops_queue(project_id).fetch_job(job_id)
     if job is None:
         return {"status": "not_found"}
     if job.is_finished:

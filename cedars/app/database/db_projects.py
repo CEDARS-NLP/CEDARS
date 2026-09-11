@@ -16,7 +16,7 @@ from sqlalchemy import select, update, delete
 
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
-from .global_app_tables import Projects, UserProjectRelation
+from .global_app_tables import Projects, ProjectRedisCredentials, UserProjectRelation
 from .project_table_creation import ProjectBase, ProjectSettings
 
 logger.enable(__name__)
@@ -207,12 +207,16 @@ def terminate_project(global_engine, project_engine, project_id) -> None:
 def delete_project_registry(global_engine, project_id) -> None:
     '''
     Removes a project's rows from the global database (UserProjectRelation,
-    then Projects). Does not touch the project's own database - pair this with
-    init_db.drop_project_database to fully remove a project.
+    ProjectRedisCredentials, then Projects). Does not touch the project's own
+    database or its Redis ACL user - pair this with init_db.drop_project_database
+    to fully remove a project.
     '''
     with session_scope(global_engine) as session:
         session.execute(
             delete(UserProjectRelation).where(UserProjectRelation.project_id == project_id)
+        )
+        session.execute(
+            delete(ProjectRedisCredentials).where(ProjectRedisCredentials.project_id == project_id)
         )
         session.execute(delete(Projects).where(Projects.project_id == project_id))
 

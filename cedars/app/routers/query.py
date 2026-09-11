@@ -14,7 +14,7 @@ from ..database.db_deletes import empty_annotations
 from ..database.db_query import get_search_query_details, save_query as save_search_query
 from ..database.db_updates import reset_patient_reviewed
 from ..dependencies import ProjectContext, require_project, require_project_admin
-from ..queues import task_queue
+from ..queues import get_task_queue
 from ..schemas import (NlpRunResponse, NlpStatusOut, QueryOut, QueryUpdate,
                        SaveQueryResponse)
 from ..services import nlp_service
@@ -62,7 +62,7 @@ def save_query(payload: QueryUpdate,
     if new_query_added:
         project_engine = get_current_project_engine()
         empty_annotations(project_engine)
-        task_queue.empty()
+        get_task_queue(ctx.project_id).empty()
         reset_patient_reviewed(project_engine)
 
     dispatched = nlp_service.run_nlp(ctx.project_id, ctx.user.username)

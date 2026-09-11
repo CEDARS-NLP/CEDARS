@@ -10,10 +10,12 @@ from loguru import logger
 
 from sqlalchemy import insert, select, text
 
+from .. import queues
 from ..cedars_enums import log_function_call
 from . import (dispose_project_engine, get_admin_engine,
                get_global_engine, get_project_engine,
                project_db_name)
+from . import redis_acl
 from .db_session import session_scope
 from .global_app_tables import GlobalBase, Projects, UserProjectRelation
 from .project_table_creation import (
@@ -172,6 +174,9 @@ def initialize_project(project_name, current_user_id, cedars_version: float,
     seed_system_reviewers(project_engine)
     populate_project_info(global_engine, project_id, project_name,
                           current_user_id, cedars_version, description)
+    # Requires the project's row in the global Projects table (FK target),
+    # so this must run after populate_project_info.
+    redis_acl.create_project_redis_user(queues.get_admin_redis(), global_engine, project_id)
     create_project_settings(project_engine)
     attach_user_to_project(global_engine, project_engine, project_id,
                            current_user_id, is_admin=True)
@@ -241,6 +246,9 @@ def drop_project_database(project_id: str) -> None:
     admin_engine = get_admin_engine()
     with admin_engine.connect() as conn:
         conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+
+    redis_acl.revoke_project_redis_user(queues.get_admin_redis(), get_global_engine(), project_id)
+    queues.forget_project_redis(project_id)
 
     logger.info(f"Dropped database {db_name} for project {project_id}.")
 

@@ -155,3 +155,17 @@ class UserProjectRelation(GlobalBase):
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"UserProjectRelation(project_id={self.project_id!r}, investigator={self.user_id!r})"
+
+
+class ProjectRedisCredentials(GlobalBase):
+    """Per-project Redis ACL identity, used to scope RQ queues/dashboard access."""
+
+    __tablename__ = "ProjectRedisCredentials"
+
+    project_id: Mapped[str] = mapped_column(
+        String(100), ForeignKey("Projects.project_id"), primary_key=True
+    )
+
+    redis_username: Mapped[str] = mapped_column(String(150), nullable=False)
+
+    redis_secret: Mapped[str] = mapped_column(String(200), nullable=False)

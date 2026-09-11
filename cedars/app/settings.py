@@ -36,7 +36,6 @@ class Settings:  # pylint: disable=too-few-public-methods
 
     # --- misc ---
     ENV = os.getenv("ENV", "local")
-    RQ_DASHBOARD_URL = os.getenv("RQ_DASHBOARD_URL", "/rq")
 
     # Password policy (mirrors the original passvalidate configuration)
     PW_MIN_LENGTH = 8

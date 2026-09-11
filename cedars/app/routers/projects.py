@@ -21,6 +21,7 @@ from ..database.db_projects import (delete_project_registry,
 from ..database.init_db import drop_project_database, initialize_project
 from ..dependencies import (ProjectContext, require_project,
                             require_project_admin)
+from ..rq_dashboard_gateway import forget_dashboard_app
 from ..schemas import (MessageResponse, ProjectCreate, ProjectMemberCreate,
                        ProjectMemberOut, ProjectMemberUpdate, ProjectOut,
                        ProjectUpdate)
@@ -107,6 +108,7 @@ def delete_project(ctx: ProjectContext = Depends(require_project_admin)):
     """Terminate a project: drop its database and registry entry (admin only)."""
     drop_project_database(ctx.project_id)
     delete_project_registry(get_global_engine(), ctx.project_id)
+    forget_dashboard_app(ctx.project_id)
     return MessageResponse(message="Project Terminated.")
 
 

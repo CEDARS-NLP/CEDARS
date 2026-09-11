@@ -168,8 +168,8 @@ def _setup_patient(username, project_id, patient_id):
 
     if patient_status == PatientStatus.NO_ANNOTATIONS:
         logger.info(f"Patient {patient_id} has no annotations. Showing next patient")
-        queues.ops_queue.enqueue(ops_tasks.upsert_patient_records,
-                                 project_id, patient_id, datetime.now(), username)
+        queues.get_ops_queue(project_id).enqueue(ops_tasks.upsert_patient_records,
+                                                  project_id, patient_id, datetime.now(), username)
         set_patient_lock_status(project_engine, patient_id, False)
         return None
 
@@ -210,8 +210,8 @@ def _release_patient(username, project_id, state):
         if state.get("reviewed_annotation_ids") is not None:
             batch_mark_annotation_reviewed(get_current_project_engine(),
                                            state["reviewed_annotation_ids"], username)
-        queues.ops_queue.enqueue(ops_tasks.upsert_patient_records,
-                                 project_id, patient_id, datetime.now(), username)
+        queues.get_ops_queue(project_id).enqueue(ops_tasks.upsert_patient_records,
+                                                  project_id, patient_id, datetime.now(), username)
         set_patient_lock_status(get_current_project_engine(), patient_id, False)
     review_state.clear_state(username, project_id)
 
@@ -289,7 +289,7 @@ def save_action(username, project_id, action, comment, event_date):
                 get_current_project_engine(), patient_id, new_date)
         db_results_updated = True
         handler.mark_event_date(new_date, current_annotation_id, annotations_after_event)
-        queues.ops_queue.enqueue(
+        queues.get_ops_queue(project_id).enqueue(
             ops_tasks.enter_patient_date, project_id, patient_id, new_date,
             current_annotation_id, username, state["patient_comments"],
             state["reviewed_annotation_ids"], datetime.now(), skip_after_event,
@@ -297,7 +297,7 @@ def save_action(username, project_id, action, comment, event_date):
     elif action == "del_date":
         db_results_updated = True
         handler.delete_event_date()
-        queues.ops_queue.enqueue(
+        queues.get_ops_queue(project_id).enqueue(
             ops_tasks.delete_patient_date, project_id, patient_id,
             current_annotation_id, username, state["patient_comments"],
             state["reviewed_annotation_ids"], datetime.now(),
@@ -315,7 +315,7 @@ def save_action(username, project_id, action, comment, event_date):
     if handler.is_patient_reviewed() and not is_shift_performed:
         mark_patient_reviewed(get_current_project_engine(), patient_id, reviewed_by=username)
         if not db_results_updated:
-            queues.ops_queue.enqueue(
+            queues.get_ops_queue(project_id).enqueue(
                 ops_tasks.update_patient_data, project_id, patient_id,
                 state["patient_comments"], username,
                 state["reviewed_annotation_ids"], datetime.now())

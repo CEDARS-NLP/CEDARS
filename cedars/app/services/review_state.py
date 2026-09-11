@@ -21,16 +21,16 @@ def _key(username: str, project_id: str) -> str:
 
 def get_state(username: str, project_id: str):
     """Return the reviewer's saved state, or ``None``."""
-    raw = queues.redis_conn.get(_key(username, project_id))
+    raw = queues.get_project_redis(project_id).get(_key(username, project_id))
     return pickle.loads(raw) if raw else None
 
 
 def set_state(username: str, project_id: str, state: dict):
     """Persist the reviewer's state (with a sliding TTL)."""
-    queues.redis_conn.set(_key(username, project_id), pickle.dumps(state),
-                          ex=STATE_TTL_SECONDS)
+    queues.get_project_redis(project_id).set(_key(username, project_id), pickle.dumps(state),
+                                             ex=STATE_TTL_SECONDS)
 
 
 def clear_state(username: str, project_id: str):
     """Delete the reviewer's saved state."""
-    queues.redis_conn.delete(_key(username, project_id))
+    queues.get_project_redis(project_id).delete(_key(username, project_id))

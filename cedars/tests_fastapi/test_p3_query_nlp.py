@@ -39,7 +39,7 @@ def test_save_query_dispatches_nlp(admin_project):
     assert body["dispatched"] == 3
 
     # One job per patient landed on the (fake) task queue, project-namespaced.
-    job_ids = queues.task_queue.job_ids
+    job_ids = queues.get_task_queue(pid).job_ids
     assert len(job_ids) == 3
     assert all(jid.startswith(f"spacy:{pid}:") for jid in job_ids)
 

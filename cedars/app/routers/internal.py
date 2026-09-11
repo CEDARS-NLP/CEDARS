@@ -11,17 +11,16 @@ from .. import ops_tasks, queues
 from ..api import check_is_pines_available
 from ..dependencies import ProjectContext, require_project_admin
 from ..schemas import InternalStatusOut, PinesStatusOut, SimpleJobResponse
-from ..settings import settings
 
 router = APIRouter(prefix="/projects/{project_id}/internal", tags=["internal"])
 
 
 @router.get("", response_model=InternalStatusOut)
-def internal_status(_ctx: ProjectContext = Depends(require_project_admin)):
-    """Return the RQ dashboard URL and task-queue health counters."""
-    queue = queues.task_queue
+def internal_status(ctx: ProjectContext = Depends(require_project_admin)):
+    """Return this project's dashboard URL and task-queue health counters."""
+    queue = queues.get_task_queue(ctx.project_id)
     return InternalStatusOut(
-        rq_dashboard_url=settings.RQ_DASHBOARD_URL,
+        rq_dashboard_url=f"/api/v1/projects/{ctx.project_id}/rq/",
         queue_length=len(queue),
         failed_jobs=len(FailedJobRegistry(queue=queue)),
         successful_jobs=len(FinishedJobRegistry(queue=queue)),
@@ -31,7 +30,8 @@ def internal_status(_ctx: ProjectContext = Depends(require_project_admin)):
 @router.post("/update_results", response_model=SimpleJobResponse)
 def update_results(ctx: ProjectContext = Depends(require_project_admin)):
     """Rebuild the RESULTS collection (background)."""
-    job = queues.ops_queue.enqueue(ops_tasks.update_patient_results, ctx.project_id, True)
+    job = queues.get_ops_queue(ctx.project_id).enqueue(ops_tasks.update_patient_results,
+                                                       ctx.project_id, True)
     return SimpleJobResponse(job_id=job.get_id(),
                              message="Rebuilding results collection.")
 
@@ -39,8 +39,9 @@ def update_results(ctx: ProjectContext = Depends(require_project_admin)):
 @router.post("/unlock_all", response_model=SimpleJobResponse)
 def unlock_all(ctx: ProjectContext = Depends(require_project_admin)):
     """Unlock all patients in the project (background)."""
-    job = queues.ops_queue.enqueue(ops_tasks.remove_all_locked, ctx.project_id)
+    job = queues.get_ops_queue(ctx.project_id).enqueue(ops_tasks.remove_all_locked, ctx.project_id)
     return SimpleJobResponse(job_id=job.get_id(), message="Unlocking all patients.")
+
 
 
 @router.get("/pines/status", response_model=PinesStatusOut)

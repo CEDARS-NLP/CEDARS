@@ -54,9 +54,13 @@ ENV=dev
 PINES_API_URL=http://pines:8036
 REDIS_URL=redis
 REDIS_PORT=6379
-RQ_DASHBOARD_URL=/rq
 PORT=5001
 ```
+
+Each project's RQ job-queue dashboard is available to that project's admins at
+`/api/v1/projects/{project_id}/rq/` (linked from the project's "Internal
+processes" page). It requires Redis 6+ (ACL support), since every project is
+given its own Redis ACL user so it can only see its own queues/jobs.
 
 CEDARS is a flask web application and depends on the following software:
 
