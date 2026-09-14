@@ -112,3 +112,15 @@ def get_ops_queue(project_id: str) -> ProjectQueue:
     """Return ``project_id``'s operations queue."""
     return ProjectQueue(ops_queue_name(project_id), connection=get_project_redis(project_id),
                         default_timeout=OPERATION_TIMEOUT)
+
+
+def get_task_queue_admin(project_id: str) -> ProjectQueue:
+    """Return ``project_id``'s NLP task queue backed by admin connection."""
+    return ProjectQueue(task_queue_name(project_id), connection=get_admin_redis(),
+                        default_timeout=JOB_TIMEOUT)
+
+
+def get_ops_queue_admin(project_id: str) -> ProjectQueue:
+    """Return ``project_id``'s operations queue backed by admin connection."""
+    return ProjectQueue(ops_queue_name(project_id), connection=get_admin_redis(),
+                        default_timeout=OPERATION_TIMEOUT)

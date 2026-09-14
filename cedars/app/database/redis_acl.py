@@ -63,7 +63,7 @@ def create_project_redis_user(admin_redis: Redis, global_engine, project_id: str
 
     try:
         admin_redis.execute_command(
-            "ACL", "SETUSER", username, "on", f">{secret}", "resetkeys",
+            "ACL", "SETUSER", username, "on", f">{secret}", "resetkeys", "resetchannels", "&*",
             *_key_patterns(project_id), "+@all",
         )
     except Exception:  # noqa: BLE001 - ACL support varies by backend (see docstring)
@@ -130,7 +130,7 @@ def ensure_project_redis_user(admin_redis: Redis, global_engine, project_id: str
     username, secret = get_project_redis_credentials(global_engine, project_id)
     try:
         admin_redis.execute_command(
-            "ACL", "SETUSER", username, "on", f">{secret}", "resetkeys",
+            "ACL", "SETUSER", username, "on", f">{secret}", "resetkeys", "resetchannels", "&*",
             *_key_patterns(project_id), "+@all",
         )
     except Exception:  # noqa: BLE001 - see create_project_redis_user
