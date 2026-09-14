@@ -71,9 +71,10 @@ def get_admin_redis() -> Redis:
 def get_project_redis_url(project_id: str) -> str:
     """Build the ACL-scoped Redis URL for ``project_id`` (used by rq-dashboard)."""
     from .database import get_global_engine
-    from .database.redis_acl import get_project_redis_credentials
+    from .database.redis_acl import ensure_project_redis_user
 
-    username, secret = get_project_redis_credentials(get_global_engine(), project_id)
+    admin_redis = get_admin_redis()
+    username, secret = ensure_project_redis_user(admin_redis, get_global_engine(), project_id)
     protocol = os.getenv("REDIS_PROTOCOL", "redis")
     host, port = _redis_host_port()
     return f"{protocol}://{username}:{secret}@{host}:{port}/0"

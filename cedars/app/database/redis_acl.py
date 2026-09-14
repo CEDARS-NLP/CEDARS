@@ -119,3 +119,20 @@ def get_project_redis_credentials(global_engine, project_id: str):
         raise RuntimeError(
             f"No Redis credentials provisioned for project {project_id}.")
     return row.redis_username, row.redis_secret
+
+
+@log_function_call
+def ensure_project_redis_user(admin_redis: Redis, global_engine, project_id: str):
+    '''
+    Ensures the Redis ACL user for ``project_id`` exists in Redis memory
+    with the credentials stored in the global registry.
+    '''
+    username, secret = get_project_redis_credentials(global_engine, project_id)
+    try:
+        admin_redis.execute_command(
+            "ACL", "SETUSER", username, "on", f">{secret}", "resetkeys",
+            *_key_patterns(project_id), "+@all",
+        )
+    except Exception:  # noqa: BLE001 - see create_project_redis_user
+        logger.warning(f"Failed to set Redis ACL user {username} in Redis.")
+    return username, secret

@@ -51,3 +51,10 @@ def test_redis_credentials_are_provisioned_on_project_creation(project_id):
 def test_missing_credentials_raise(project_id):
     with pytest.raises(RuntimeError):
         get_project_redis_credentials(get_global_engine(), "no-such-project")
+
+
+def test_ensure_project_redis_user(project_id):
+    username, secret = get_project_redis_credentials(get_global_engine(), project_id)
+    ensured_user, ensured_secret = queues.get_project_redis_url(project_id).split("://")[1].split("@")[0].split(":")
+    assert ensured_user == username
+    assert ensured_secret == secret
