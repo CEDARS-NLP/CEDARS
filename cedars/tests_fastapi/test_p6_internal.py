@@ -39,10 +39,16 @@ def test_update_results_and_unlock_all(admin_project):
 
 def test_pines_status_mocked(admin_project, monkeypatch):
     client, pid = admin_project
-    monkeypatch.setattr(internal_router, "check_is_pines_available", lambda *a, **k: True)
+    monkeypatch.setattr(internal_router, "get_pines_health", lambda: {
+        "available": True,
+        "url": "http://pines:8036",
+        "model": "test-model",
+        "classification_threshold": 0.5,
+    })
     resp = client.get(f"/api/v1/projects/{pid}/internal/pines/status")
     assert resp.status_code == 200
     assert resp.json()["available"] is True
+    assert resp.json()["model"] == "test-model"
 
 
 def test_pines_status_handles_unreachable(admin_project, monkeypatch):

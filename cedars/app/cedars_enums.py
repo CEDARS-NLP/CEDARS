@@ -48,3 +48,10 @@ class PatientStatus(Enum):
     REVIEWED_WITH_EVENT = 1
     REVIEWED_NO_EVENT = 2
     UNDER_REVIEW = 3
+
+
+class PinesStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

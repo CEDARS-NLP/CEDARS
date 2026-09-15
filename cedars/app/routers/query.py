@@ -7,8 +7,9 @@ query, and ``/nlp/status`` reports progress.
 """
 import re
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..api import check_is_pines_available
 from ..database import get_current_project_engine
 from ..database.db_deletes import empty_annotations
 from ..database.db_query import get_search_query_details, save_query as save_search_query
@@ -46,6 +47,11 @@ def save_query(payload: QueryUpdate,
                ctx: ProjectContext = Depends(require_project_admin)):
     """Save the query and dispatch NLP (matches the Flask upload_query action)."""
     search_query = payload.query or ""
+    if payload.nlp_apply and not check_is_pines_available():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "PINES is enabled but its model server is unavailable or unhealthy.",
+        )
     # Parity with the original: only a malformed *pattern* is rejected (never
     # happens for a constant pattern), so any user query is accepted.
     try:
@@ -76,6 +82,12 @@ def save_query(payload: QueryUpdate,
 @router.post("/nlp/run", response_model=NlpRunResponse)
 def run_nlp(ctx: ProjectContext = Depends(require_project_admin)):
     """Re-run NLP for all patients without changing the query."""
+    details = get_search_query_details(get_current_project_engine())
+    if details.get("apply_pines", False) and not check_is_pines_available():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "PINES is enabled but its model server is unavailable or unhealthy.",
+        )
     dispatched = nlp_service.run_nlp(ctx.project_id, ctx.user.username)
     return NlpRunResponse(dispatched=dispatched,
                           message=f"Dispatched NLP for {dispatched} patient(s).")

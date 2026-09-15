@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from .database import (get_current_project_engine, reset_current_project_db,
                        set_current_project_db)
 from .database.external_services import report_failure, report_success
+from .cedars_enums import PinesStatus
+from .database.db_updates import set_patient_pines_status
 
 
 @contextmanager
@@ -25,11 +27,11 @@ def project_scope(project_id):
         reset_current_project_db(token)
 
 
-def nlp_task(project_id, patient_id, **kwargs):
+def nlp_task(project_id, patient_id, query_id, **kwargs):
     """RQ task: run the spaCy keyword/negation pipeline for one patient."""
     from .nlpprocessor import NlpProcessor  # lazy import keeps spaCy out of the web process
     with project_scope(project_id):
-        NlpProcessor().automatic_nlp_processor(patient_id, **kwargs)
+        NlpProcessor().automatic_nlp_processor(patient_id, query_id=query_id, **kwargs)
 
 
 def on_nlp_success(job, connection, result, *args, **kwargs):
@@ -42,4 +44,9 @@ def on_nlp_failure(job, connection, exc_type, exc_value, traceback):
     """RQ failure callback: record the failure within its project scope."""
     with project_scope(job.args[0]):
         report_failure(get_current_project_engine(), job)
+        if len(job.args) >= 3 and job.args[2] is not None:
+            set_patient_pines_status(
+                get_current_project_engine(), job.args[1], job.args[2],
+                PinesStatus.FAILED, exc_value,
+            )
 

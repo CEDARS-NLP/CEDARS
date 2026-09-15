@@ -56,8 +56,14 @@ def save_query(project_engine, query, exclude_negated, hide_duplicates,  # pylin
         ).scalar_one_or_none()
 
         if (current is not None and current.query == query
+            and current.exclude_negated == exclude_negated
+            and current.hide_duplicates == hide_duplicates
                 and current.skip_after_event == skip_after_event
-                and current.tag_query_exact == tag_query_exact):
+            and current.tag_query_exact == tag_query_exact
+            and current.apply_pines == apply_pines
+            and current.apply_llm == apply_llm
+            and current.date_min == date_min
+            and current.date_max == date_max):
             logger.info(f"Query already saved: {query}.")
             return False
 

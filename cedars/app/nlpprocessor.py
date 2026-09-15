@@ -1,15 +1,14 @@
 """
 This module contatins the class to perform NLP operations for the CEDARS project
 """
-from time import sleep
 from datetime import datetime
 import spacy
 from spacy.matcher import Matcher
 from loguru import logger
-from .api import check_is_pines_available
-from .cedars_enums import ReviewStatus
+from .cedars_enums import PinesStatus, ReviewStatus
 from .database import get_current_project_engine
 from .database.db_inserts import insert_one_annotation
+from .database.db_deletes import delete_patient_pines_predictions
 from .database.db_projects import get_pines_url
 from .database.db_query import get_search_query, get_search_query_details
 from .database.db_search import (get_annotated_notes_for_patient,
@@ -17,6 +16,7 @@ from .database.db_search import (get_annotated_notes_for_patient,
                                  get_patient_ids, get_total_counts)
 from .database.db_tasks import add_task, get_task, get_tasks_in_progress
 from .database.db_updates import (mark_note_reviewed, mark_patient_reviewed,
+                                  set_patient_pines_status,
                                   set_patient_lock_status, update_annotation_reviewed,
                                   upsert_patient_records)
 from .database.external_services import predict_and_save
@@ -171,14 +171,6 @@ class NlpProcessor:
         self.query = query_details.get("query", "")
         apply_pines = query_details.get("apply_pines", False)
 
-        if apply_pines is True:
-            # This healthcheck for PINES will also trigger a startup if PINES is inactive
-            is_pines_available = check_is_pines_available()
-            if is_pines_available:
-                logger.info(f"Run initial PINES healthcheck for {patient_id}, got status : ACTIVE")
-            else:
-                logger.info(f"Run initial PINES healthcheck for {patient_id}, got status : INACTIVE")
-
         # load previosly processed documents
         # document_processed = load_progress()
         spacy_patterns = query_to_patterns(self.query)
@@ -264,32 +256,10 @@ class NlpProcessor:
 
             # check if nlp processing is enabled
             if docs_with_annotations > 0 and apply_pines is True:
-                logger.info(f"Checking PINES server status.... (patient : {patient_id})")
-
-                is_pines_ready = False
-                while is_pines_ready is not True:
-                    is_pines_ready = check_is_pines_available()
-                    logger.info(f"Run PINES healthcheck for {patient_id}, got response : {is_pines_ready} .")
-                    sleep(5)
-
-                logger.info(f"PINES server is ready (patient : {patient_id})")
                 logger.info(f"Processing {docs_with_annotations} documents for patient {patient_id} with PINES")
-
-                # Save and raise any error PINES encounters only after running upsert_patient_records
-                pines_error = None
-                try:
-                    self.process_patient_pines(patient_id)
-                except Exception as e:
-                    logger.error(f"An error was thrown when processing documents for patient {patient_id} with PINES : {e}")
-                    
-                    # Store the error to be raised after the patient update
-                    pines_error = e
-                finally:
-                    upsert_patient_records(get_current_project_engine(), patient_id,
-                                           datetime.now(), updated_by="PINES")
-
-                    if pines_error is not None:
-                        raise pines_error
+                self.process_patient_pines(patient_id)
+                upsert_patient_records(get_current_project_engine(), patient_id,
+                                       datetime.now(), updated_by="PINES")
 
             else:
                 upsert_patient_records(get_current_project_engine(), patient_id,
@@ -299,7 +269,7 @@ class NlpProcessor:
             logger.error(f"Error in nplprocessor for patient {patient_id} - process_notes: {str(exc)}")
             raise exc
 
-    def process_patient_pines(self, patient_id: str, default_threshold: float = 0.5) -> None:
+    def process_patient_pines(self, patient_id: str) -> None:
         """
         For each patient who are unreviewed,
 
@@ -320,9 +290,15 @@ class NlpProcessor:
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
 
-        clf_threshold = predict_and_save(project_engine, get_pines_url(project_engine), notes)
+        pines_url = get_pines_url(project_engine)
+        if not pines_url:
+            raise RuntimeError("PINES URL is not configured for this project")
+        delete_patient_pines_predictions(project_engine, patient_id)
+        clf_threshold = predict_and_save(
+            project_engine, pines_url, notes, force_update=True
+        )
         if clf_threshold is None:
-            clf_threshold = default_threshold
+            raise RuntimeError("PINES did not return a classification threshold")
 
         logger.debug(f"PINES marking patient {patient_id} with a classification threshold of {clf_threshold}")
         scores = []
@@ -354,6 +330,15 @@ class NlpProcessor:
             logger.info(f"Processing patient {patient_id}")
 
         for patient_id in patient_ids:
+            query_id = kwargs.get("query_id")
+            query_details = (
+                get_search_query_details(get_current_project_engine())
+                if query_id is not None else {}
+            )
+            if query_id is not None and query_details.get("query_id") != query_id:
+                logger.info(f"Skipping patient {patient_id}; query {query_id} is no longer current")
+                continue
+            apply_pines = bool(query_id is not None and query_details.get("apply_pines", False))
             task = {
                 "job_id": kwargs.get("job_id", None),
                 "name": "nlp_processor",
@@ -370,11 +355,25 @@ class NlpProcessor:
                 if not existing_task:
                     add_task(project_engine, task)
                 set_patient_lock_status(project_engine, patient_id, True)
+                if apply_pines:
+                    set_patient_pines_status(
+                        project_engine, patient_id, query_id, PinesStatus.RUNNING
+                    )
                 try:
                     self.process_notes(patient_id)
                 except Exception as exc:
                     logger.error(f"Error processing notes for patient {patient_id}: {exc}")
+                    if apply_pines:
+                        set_patient_pines_status(
+                            project_engine, patient_id, query_id,
+                            PinesStatus.FAILED, exc,
+                        )
                     raise exc
+
+                if apply_pines:
+                    set_patient_pines_status(
+                        project_engine, patient_id, query_id, PinesStatus.SUCCEEDED
+                    )
 
                 #finally:
                 # TODO: make sure the patient is not unlocked if locked by a user.

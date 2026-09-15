@@ -10,7 +10,7 @@ from sqlalchemy import delete
 
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
-from .project_table_creation import Annotations, ProjectBase, Task
+from .project_table_creation import Annotations, PINES, ProjectBase, Task
 
 logger.enable(__name__)
 
@@ -22,10 +22,18 @@ def empty_annotations(project_engine) -> None:
     responsible for clearing any associated external task queue (e.g. RQ)
     separately - this only touches the database.
     '''
-    logger.info("Deleting all data in the Annotations and Task tables.")
+    logger.info("Deleting all data in the Annotations, PINES, and Task tables.")
     with session_scope(project_engine) as session:
         session.execute(delete(Annotations))
+        session.execute(delete(PINES))
         session.execute(delete(Task))
+
+
+@log_function_call
+def delete_patient_pines_predictions(project_engine, patient_id: str) -> None:
+    '''Delete cached predictions before recomputing a patient with PINES.'''
+    with session_scope(project_engine) as session:
+        session.execute(delete(PINES).where(PINES.patient_id == patient_id))
 
 
 @log_function_call

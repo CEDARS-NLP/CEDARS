@@ -219,22 +219,33 @@ def insert_one_annotation(project_engine, annotation: dict) -> None:
 
 @log_function_call
 def insert_pines_prediction(project_engine, text_id, patient_id, text_date,
-                           predicted_score, report_type=None, document_type=None) -> None:
+                           predicted_score, predicted_label, model_name,
+                           classification_threshold, report_type=None,
+                           document_type=None) -> None:
     '''
-    Records a PINES prediction for a note. One row per text_id (enforced by a
-    unique constraint on PINES.text_id).
+    Inserts or replaces the PINES prediction for a note.
     '''
     with session_scope(project_engine) as session:
-        session.execute(
-            insert(PINES).values(
-                text_id=text_id,
-                patient_id=patient_id,
-                text_date=text_date,
-                max_predicted_score=predicted_score,
-                report_type=report_type,
-                document_type=document_type,
+        values = {
+            "text_id": text_id,
+            "patient_id": patient_id,
+            "text_date": text_date,
+            "max_predicted_score": predicted_score,
+            "predicted_label": str(predicted_label),
+            "model_name": model_name,
+            "classification_threshold": classification_threshold,
+            "report_type": report_type,
+            "document_type": document_type,
+        }
+        existing = session.execute(
+            select(PINES.prediction_id).where(PINES.text_id == text_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            session.execute(insert(PINES).values(**values))
+        else:
+            session.execute(
+                update(PINES).where(PINES.prediction_id == existing).values(**values)
             )
-        )
 
 
 @log_function_call

@@ -3,11 +3,11 @@ bypassing the app layer, for setting up test fixtures.
 """
 from datetime import date, datetime
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
 
 from app import database
-from app.database.project_table_creation import Annotations, Notes, Patients
+from app.database.project_table_creation import Annotations, Notes, Patients, Query
 
 
 def get_patient(project_id, patient_id):
@@ -53,3 +53,25 @@ def seed_annotation(project_id, text_id, patient_id, text_date: date, sentence, 
             sentence_number=sentence_number, sentence_start=0, sentence_end=len(sentence),
             status=status))
         return result.inserted_primary_key[0]
+
+
+def get_current_query(project_id):
+    """Fetch the current Query row directly."""
+    engine = database.get_project_engine(project_id)
+    with Session(engine) as session:
+        return session.execute(
+            select(Query).where(Query.current == True)  # noqa: E712
+        ).scalar_one_or_none()
+
+
+def set_patient_pines_state(project_id, patient_id, query_id, status):
+    """Set query-scoped PINES state for an adjudication test."""
+    engine = database.get_project_engine(project_id)
+    with engine.begin() as conn:
+        conn.execute(
+            update(Patients).where(Patients.patient_id == patient_id).values(
+                pines_query_id=query_id,
+                pines_status=status,
+                pines_error=None,
+            )
+        )

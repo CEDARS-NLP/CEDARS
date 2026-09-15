@@ -67,6 +67,12 @@ class Patients(ProjectBase):
 
     last_reviewed_by: Mapped[str] = mapped_column(String(100), nullable=True)
 
+    pines_query_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("Query.query_id"), nullable=True
+    )
+    pines_status: Mapped[str] = mapped_column(String(20), nullable=True)
+    pines_error: Mapped[str] = mapped_column(String(500), nullable=True)
+
     updated: Mapped[bool] = mapped_column(Boolean,
                                              default=False,
                                              nullable=False)
@@ -329,6 +335,9 @@ class PINES(ProjectBase):
 
     text_date: Mapped[date] = mapped_column(Date, nullable=False)
     max_predicted_score: Mapped[Decimal] = mapped_column(Double, nullable=False)
+    predicted_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    classification_threshold: Mapped[Decimal] = mapped_column(Double, nullable=False)
     report_type: Mapped[str] = mapped_column(String(100), nullable=True)
     document_type: Mapped[str] = mapped_column(String(100), nullable=True)
 

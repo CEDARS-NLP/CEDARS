@@ -2,7 +2,6 @@
 
 Ports the working parts of the original Flask ``auth`` blueprint (username +
 password, password policy) to FastAPI with JWT cookies.
-The deprecated OIDC and Superbio-token flows are intentionally omitted.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from passvalidate import PasswordPolicy

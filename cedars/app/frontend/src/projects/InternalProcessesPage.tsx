@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Unlock, ExternalLink, Activity } from "lucide-react";
+import { RefreshCw, Unlock, ExternalLink, Activity, RotateCcw } from "lucide-react";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,12 @@ interface InternalStatus {
   queue_length: number;
   failed_jobs: number;
   successful_jobs: number;
+}
+
+interface PinesStatus {
+  available: boolean;
+  model?: string | null;
+  classification_threshold?: number | null;
 }
 
 /** Technical admin operations (ports internal_processes.html). */
@@ -25,11 +31,23 @@ export default function InternalProcessesPage() {
     refetchInterval: 5000,
   });
 
-  const { data: pines } = useQuery<{ available: boolean }>({
+  const { data: pines, refetch: refetchPines } = useQuery<PinesStatus>({
     queryKey: ["pines-status", projectId],
     queryFn: () => api.get<{ available: boolean }>(`/projects/${projectId}/internal/pines/status`),
     enabled: !!projectId,
   });
+
+  async function retryPines() {
+    try {
+      const result = await api.post<{ dispatched: number; message: string }>(
+        `/projects/${projectId}/internal/pines/retry`
+      );
+      setMessage(result.message);
+      await refetchPines();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "PINES retry failed");
+    }
+  }
 
   async function runOp(path: string, confirmMsg?: string) {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
@@ -136,6 +154,20 @@ export default function InternalProcessesPage() {
               {pines?.available ? "available" : "unavailable"}
             </span>
           </div>
+          {pines?.available && pines.model && (
+            <div className="text-xs text-muted-foreground">
+              Model: {pines.model} · threshold: {pines.classification_threshold}
+            </div>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={retryPines}
+            disabled={!pines?.available}
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Retry failed PINES jobs
+          </Button>
           {data?.rq_dashboard_url && (
             <a
               href={data.rq_dashboard_url}

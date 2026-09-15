@@ -12,7 +12,7 @@ from sqlalchemy import select, func, exists, and_
 from ..cedars_enums import log_function_call
 from .db_session import session_scope
 from .project_table_creation import (
-    Annotations, Events, Notes, NotesSummary, PINES, Patients, Results,
+    Annotations, Events, Notes, NotesSummary, PINES, Patients, Query, Results,
 )
 
 # ---------------------------------------------------------------------------
@@ -189,10 +189,70 @@ def get_patients_to_annotate(project_engine) -> Optional[str]:
     The first patient (in upload order) that has unreviewed annotations.
     '''
     for patient_id in get_patient_ids(project_engine):
-        if len(get_patient_annotation_ids(project_engine, patient_id)) > 0:
+        if (is_patient_ready_for_adjudication(project_engine, patient_id)
+                and len(get_patient_annotation_ids(project_engine, patient_id)) > 0):
             return patient_id
 
     return None
+
+
+@log_function_call
+def is_patient_ready_for_adjudication(project_engine, patient_id: str) -> bool:
+    '''Whether the patient has completed PINES for the current query, if required.'''
+    with session_scope(project_engine) as session:
+        current_query = session.execute(
+            select(Query).where(Query.current == True)  # noqa: E712
+        ).scalar_one_or_none()
+        if current_query is None or not current_query.apply_pines:
+            return True
+
+        patient = session.get(Patients, patient_id)
+        return bool(
+            patient is not None
+            and patient.pines_query_id == current_query.query_id
+            and patient.pines_status == "succeeded"
+        )
+
+
+@log_function_call
+def get_pines_status_counts(project_engine) -> dict[str, int]:
+    '''Patient counts by PINES status for the current PINES-enabled query.'''
+    with session_scope(project_engine) as session:
+        current_query = session.execute(
+            select(Query).where(Query.current == True)  # noqa: E712
+        ).scalar_one_or_none()
+        counts = {status: 0 for status in ("pending", "running", "succeeded", "failed")}
+        if current_query is None or not current_query.apply_pines:
+            return counts
+        rows = session.execute(
+            select(Patients.pines_status, func.count())
+            .where(Patients.pines_query_id == current_query.query_id)
+            .group_by(Patients.pines_status)
+        ).all()
+    for status, count in rows:
+        if status in counts:
+            counts[status] = count
+    return counts
+
+
+@log_function_call
+def get_patient_ids_by_pines_status(project_engine, status: str) -> list[str]:
+    '''Patient IDs with a given status for the current PINES-enabled query.'''
+    with session_scope(project_engine) as session:
+        current_query = session.execute(
+            select(Query).where(Query.current == True)  # noqa: E712
+        ).scalar_one_or_none()
+        if current_query is None or not current_query.apply_pines:
+            return []
+        stmt = (
+            select(Patients.patient_id)
+            .where(
+                Patients.pines_query_id == current_query.query_id,
+                Patients.pines_status == status,
+            )
+            .order_by(Patients.index_no)
+        )
+        return list(session.execute(stmt).scalars().all())
 
 
 @log_function_call

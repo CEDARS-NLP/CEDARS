@@ -122,6 +122,10 @@ class NlpStatusOut(BaseModel):
     tasks_in_progress: int
     tasks_completed: int
     tasks_failed: int = 0
+    pines_pending: int = 0
+    pines_running: int = 0
+    pines_succeeded: int = 0
+    pines_failed: int = 0
 
 
 # --- adjudication -------------------------------------------------------
@@ -155,6 +159,7 @@ class AdjudicateResponse(BaseModel):
     patient_complete: Optional[bool] = None
     annotation: Optional[AnnotationView] = None
     message: Optional[str] = None
+    workflow_status: Optional[str] = None
 
 
 class AdjudicateAction(BaseModel):
@@ -207,3 +212,10 @@ class SimpleJobResponse(BaseModel):
 
 class PinesStatusOut(BaseModel):
     available: bool
+    model: Optional[str] = None
+    classification_threshold: Optional[float] = None
+
+
+class PinesRetryResponse(BaseModel):
+    dispatched: int
+    message: str

@@ -21,6 +21,12 @@ interface SaveResponse {
   message: string;
 }
 
+interface PinesStatus {
+  available: boolean;
+  model?: string | null;
+  classification_threshold?: number | null;
+}
+
 /** Define the CEDARS search query and dispatch NLP processing. */
 export default function QueryPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -36,6 +42,13 @@ export default function QueryPage() {
     queryKey: ["query", projectId],
     queryFn: () => api.get<QueryData>(`/projects/${projectId}/query`),
     enabled: !!projectId,
+  });
+
+  const { data: pinesStatus, isFetching: checkingPines } = useQuery<PinesStatus>({
+    queryKey: ["pines-status", projectId],
+    queryFn: () => api.get<PinesStatus>(`/projects/${projectId}/internal/pines/status`),
+    enabled: !!projectId && nlpApply,
+    refetchInterval: nlpApply ? 10000 : false,
   });
 
   useEffect(() => {
@@ -129,9 +142,22 @@ export default function QueryPage() {
               />
               Apply PINES model (NLP classification)
             </label>
+            {nlpApply && pinesStatus && !pinesStatus.available && (
+              <p className="text-sm text-destructive">
+                PINES is unavailable. Start the model server before saving this query.
+              </p>
+            )}
+            {nlpApply && pinesStatus?.available && pinesStatus.model && (
+              <p className="text-xs text-muted-foreground">
+                PINES model: {pinesStatus.model}; threshold: {pinesStatus.classification_threshold}
+              </p>
+            )}
           </div>
 
-          <Button onClick={handleSave} disabled={saving || !query.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={saving || !query.trim() || (nlpApply && (checkingPines || pinesStatus?.available === false))}
+          >
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

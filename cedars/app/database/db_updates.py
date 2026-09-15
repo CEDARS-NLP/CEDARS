@@ -12,12 +12,13 @@ mongo implementation that was never enforced there.
 '''
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from loguru import logger
 
 from sqlalchemy import delete, func, insert, select, update
 
-from ..cedars_enums import log_function_call
+from ..cedars_enums import PinesStatus, log_function_call
 from .db_search import (
     get_all_patient_ids,
     get_annotation,
@@ -291,10 +292,46 @@ def reset_patient_reviewed(project_engine) -> None:
     '''
     with session_scope(project_engine) as session:
         session.execute(
-            update(Patients).values(reviewed=False, last_reviewed_by="", comments="")
+            update(Patients).values(
+                reviewed=False,
+                last_reviewed_by="",
+                comments="",
+                pines_query_id=None,
+                pines_status=None,
+                pines_error=None,
+            )
         )
         session.execute(update(Notes).values(reviewed=False))
         session.execute(delete(Events))
+
+
+@log_function_call
+def initialize_patient_pines_status(project_engine, patient_ids: list[str], query_id: int) -> None:
+    '''Mark dispatched patients as awaiting PINES for the current query.'''
+    if not patient_ids:
+        return
+    with session_scope(project_engine) as session:
+        session.execute(
+            update(Patients).where(Patients.patient_id.in_(patient_ids)).values(
+                pines_query_id=query_id,
+                pines_status=PinesStatus.PENDING.value,
+                pines_error=None,
+            )
+        )
+
+
+@log_function_call
+def set_patient_pines_status(project_engine, patient_id: str, query_id: int,
+                             status: PinesStatus, error: Optional[str] = None) -> None:
+    '''Update PINES state only while the patient still belongs to this query.'''
+    safe_error = str(error)[:500] if error else None
+    with session_scope(project_engine) as session:
+        session.execute(
+            update(Patients).where(
+                Patients.patient_id == patient_id,
+                Patients.pines_query_id == query_id,
+            ).values(pines_status=status.value, pines_error=safe_error)
+        )
 
 
 @log_function_call

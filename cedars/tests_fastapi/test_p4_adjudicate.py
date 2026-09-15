@@ -3,6 +3,8 @@ from datetime import date
 
 import pytest
 
+from app.routers import query as query_router
+
 from . import sql_test_helpers as sql
 
 GOOD_PASSWORD = "Abcdef12!!"
@@ -129,3 +131,28 @@ def test_no_patients_returns_complete(reviewer):
     client, pid = reviewer
     resp = client.get(f"/api/v1/projects/{pid}/adjudicate/next").json()
     assert resp["complete"] is True
+
+
+def test_pines_patient_is_blocked_until_current_query_succeeds(reviewer, monkeypatch):
+    client, pid = reviewer
+    sql.seed_patient(pid, "1", index_no=0)
+    monkeypatch.setattr(query_router, "check_is_pines_available", lambda: True)
+    saved = client.put(f"/api/v1/projects/{pid}/query", json={
+        "query": "cancer", "nlp_apply": True,
+        "hide_duplicates": True, "skip_after_event": False})
+    assert saved.status_code == 200
+    sql.seed_note(pid, "N1", "1", NOTE_TEXT, date(2024, 1, 1), text_tag_1="oncology")
+    sql.seed_annotation(pid, "N1", "1", date(2024, 1, 1),
+                        "Patient has cancer.", "cancer",
+                        note_start_index=12, note_end_index=18, sentence_number=0)
+
+    blocked = client.get(f"/api/v1/projects/{pid}/adjudicate/next").json()
+    assert blocked["complete"] is False
+    assert blocked["workflow_status"] == "processing"
+    assert blocked["annotation"] is None
+
+    query_id = sql.get_current_query(pid).query_id
+    sql.set_patient_pines_state(pid, "1", query_id, "succeeded")
+    ready = client.get(f"/api/v1/projects/{pid}/adjudicate/next").json()
+    assert ready["patient_id"] == "1"
+    assert ready["annotation"] is not None

@@ -7,7 +7,6 @@ pure-DB modules; these call into db_search/db_inserts/db_tasks for their
 database-facing steps.
 '''
 
-import re
 from time import sleep
 from typing import Optional
 
@@ -26,50 +25,51 @@ logger.enable(__name__)
 
 
 @log_function_call
-def get_prediction(pines_url: str, note: str) -> tuple[float, float]:
+def get_prediction(pines_url: str, note: str) -> tuple[float, str, str, float]:
     '''
     Calls the PINES /predict HTTP endpoint for a single note's text.
-    Retries up to 3 times (with a 300s backoff) on a 502 response.
+    Retries transient connection and 502/503 failures up to 3 times.
 
     Returns:
-        tuple[float, float]: (score, classification_threshold)
+        (positive-class score, label, model name, classification threshold)
     '''
     url = f"{pines_url}/predict"
     data = {"text": note}
-    log_notes = None
-    try:
-        logger.info(f"Calling PINES /predict endpoint at: {url}")
-        response = requests.post(url, json=data, timeout=3600, verify=False)
-        request_status = response.status_code
-        logger.debug(f"Got response code {request_status} from URL {url}.")
-
-        if request_status == 502:
-            for num_retries in range(1, 4):
-                # A 502 can mean the PINES server is overloaded; wait and retry.
-                logger.info("Got PINES request status 502, sleeping for 300s before retrying.")
-                sleep(300)
-                logger.info(f"Trying to reach {url}. Retry no: {num_retries}")
-                response = requests.post(url, json=data, timeout=3600, verify=False)
-                request_status = response.status_code
-                if request_status != 502:
-                    break
-
-        response.raise_for_status()
-        res = response.json()["prediction"]
-        score = res.get("score")
-        label = res.get("label")
-        clf_threshold = res.get("classification_threshold")
-        if isinstance(label, str):
-            score = 1 - score if "0" in label else score
-        else:
-            score = 1 - score if label == 0 else score
-
-        log_notes = re.sub(r'\d', '*', note[:20])
-        logger.debug(f"Got prediction for note: {log_notes} with score: {score} and label: {label}")
-        return score, clf_threshold
-    except requests.exceptions.RequestException as exc:
-        logger.error(f"Failed to get prediction for note: {log_notes}")
-        raise exc
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            logger.info(f"Calling PINES /predict endpoint at {url}; attempt {attempt}")
+            response = requests.post(url, json=data, timeout=(5, 300))
+            if response.status_code in (502, 503) and attempt < 3:
+                sleep(attempt)
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            prediction = payload.get("prediction")
+            if not isinstance(prediction, dict):
+                raise ValueError("PINES response is missing prediction")
+            score = prediction.get("score")
+            label = prediction.get("label")
+            model_name = payload.get("model")
+            threshold = payload.get("classification_threshold")
+            if not isinstance(score, (int, float)) or not 0 <= score <= 1:
+                raise ValueError("PINES response has an invalid score")
+            if label is None:
+                raise ValueError("PINES response is missing label")
+            if not isinstance(model_name, str) or not model_name.strip():
+                raise ValueError("PINES response is missing model")
+            if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+                raise ValueError("PINES response has an invalid classification_threshold")
+            is_negative = label == 0 or str(label).upper() in {"0", "LABEL_0"}
+            positive_score = 1 - float(score) if is_negative else float(score)
+            return positive_score, str(label), model_name, float(threshold)
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < 3:
+                sleep(attempt)
+                continue
+            raise
+    raise RuntimeError("PINES prediction failed") from last_error
 
 
 @log_function_call
@@ -97,23 +97,33 @@ def predict_and_save(project_engine, pines_url: str, text_ids: Optional[list[str
             "text_tag_3": n.text_tag_3,
         } for n in notes]
 
-    clf_threshold = None
+    thresholds = set()
+    models = set()
     for note in note_dicts:
         text_id = note["text_id"]
         if force_update or get_note_prediction_from_db(project_engine, text_id) is None:
             logger.info(f"Predicting for note: {text_id}")
-            prediction, clf_threshold = get_prediction(pines_url, note["text"])
+            prediction, label, model_name, clf_threshold = get_prediction(
+                pines_url, note["text"]
+            )
+            thresholds.add(clf_threshold)
+            models.add(model_name)
             insert_pines_prediction(
                 project_engine,
                 text_id=text_id,
                 patient_id=note["patient_id"],
                 text_date=note["text_date"],
                 predicted_score=prediction,
+                predicted_label=label,
+                model_name=model_name,
+                classification_threshold=clf_threshold,
                 report_type=note["text_tag_3"],
                 document_type=note["text_tag_1"],
             )
 
-    return clf_threshold
+    if len(thresholds) > 1 or len(models) > 1:
+        raise ValueError("PINES returned inconsistent model metadata for one patient")
+    return next(iter(thresholds), None)
 
 
 @log_function_call

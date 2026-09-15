@@ -8,9 +8,13 @@ from fastapi import APIRouter, Depends
 from rq.registry import FailedJobRegistry, FinishedJobRegistry
 
 from .. import ops_tasks, queues
-from ..api import check_is_pines_available
+from ..api import check_is_pines_available, get_pines_health
+from ..database import get_current_project_engine
+from ..database.db_search import get_patient_ids_by_pines_status
 from ..dependencies import ProjectContext, require_project_admin
-from ..schemas import InternalStatusOut, PinesStatusOut, SimpleJobResponse
+from ..schemas import (InternalStatusOut, PinesRetryResponse, PinesStatusOut,
+                       SimpleJobResponse)
+from ..services import nlp_service
 
 router = APIRouter(prefix="/projects/{project_id}/internal", tags=["internal"])
 
@@ -48,7 +52,26 @@ def unlock_all(ctx: ProjectContext = Depends(require_project_admin)):
 def pines_status(_ctx: ProjectContext = Depends(require_project_admin)):
     """Report whether the PINES model server is reachable."""
     try:
-        available = bool(check_is_pines_available())
+        health = get_pines_health()
     except Exception:  # noqa: BLE001 - unavailable/unreachable PINES is a normal state
-        available = False
-    return PinesStatusOut(available=available)
+        return PinesStatusOut(available=False)
+    return PinesStatusOut(
+        available=True,
+        model=health["model"],
+        classification_threshold=health["classification_threshold"],
+    )
+
+
+@router.post("/pines/retry", response_model=PinesRetryResponse)
+def retry_failed_pines(ctx: ProjectContext = Depends(require_project_admin)):
+    '''Requeue patients whose PINES processing failed for the current query.'''
+    if not check_is_pines_available():
+        return PinesRetryResponse(dispatched=0, message="PINES is unavailable; retry not queued.")
+    patient_ids = get_patient_ids_by_pines_status(get_current_project_engine(), "failed")
+    dispatched = nlp_service.run_nlp(
+        ctx.project_id, ctx.user.username, patient_ids=patient_ids
+    )
+    return PinesRetryResponse(
+        dispatched=dispatched,
+        message=f"Queued {dispatched} failed PINES patient(s) for retry.",
+    )

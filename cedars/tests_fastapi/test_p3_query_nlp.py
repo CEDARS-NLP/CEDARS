@@ -3,6 +3,7 @@ import pytest
 
 from app import queues
 from app import nlpprocessor
+from app.routers import query as query_router
 from app.database.project_table_creation import Task
 
 from . import sql_test_helpers as sql
@@ -44,9 +45,10 @@ def test_save_query_dispatches_nlp(admin_project):
     assert all(jid.startswith(f"spacy:{pid}:") for jid in job_ids)
 
 
-def test_get_query_returns_saved(admin_project):
+def test_get_query_returns_saved(admin_project, monkeypatch):
     client, pid = admin_project
     _seed_patients(pid, 1)
+    monkeypatch.setattr(query_router, "check_is_pines_available", lambda: True)
     client.put(f"/api/v1/projects/{pid}/query", json={
         "query": "sepsis", "nlp_apply": True,
         "hide_duplicates": False, "skip_after_event": True})
@@ -56,6 +58,20 @@ def test_get_query_returns_saved(admin_project):
     assert got["nlp_apply"] is True
     assert got["hide_duplicates"] is False
     assert got["skip_after_event"] is True
+
+
+def test_unavailable_pines_rejects_query_without_mutation(admin_project, monkeypatch):
+    client, pid = admin_project
+    _seed_patients(pid, 1)
+    monkeypatch.setattr(query_router, "check_is_pines_available", lambda: False)
+
+    resp = client.put(f"/api/v1/projects/{pid}/query", json={
+        "query": "sepsis", "nlp_apply": True,
+        "hide_duplicates": True, "skip_after_event": False})
+
+    assert resp.status_code == 503
+    assert sql.get_current_query(pid) is None
+    assert queues.get_task_queue(pid).job_ids == []
 
 
 def test_nlp_run_and_status(admin_project):

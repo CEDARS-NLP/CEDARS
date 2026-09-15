@@ -41,7 +41,6 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
     deploy:
       resources:
         limits:
@@ -72,7 +71,6 @@ services:
       - cedars
     profiles:
       - selfhosted
-      - superbio
 
   global-db-bootstrap:
     image: postgres:16-alpine
@@ -97,7 +95,6 @@ services:
       - cedars
     profiles:
       - selfhosted
-      - superbio
 
   global-db-init:
     <<: *cedars-common
@@ -112,7 +109,6 @@ services:
       - cedars
     profiles:
       - selfhosted
-      - superbio
 
 
   minio:
@@ -131,7 +127,6 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
 
   frontend:
     build:
@@ -149,7 +144,6 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
 
   prometheus:
     user: root
@@ -169,18 +163,24 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
 
   pines:
     build:
       context: ./PINES
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8036/healthcheck')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     deploy:
       mode: replicated
       replicas: ${PINES_WORKERS}
     restart: on-failure:5
     networks:
-      - cedars
-    profiles: [cpu]
+      cedars:
+        aliases:
+          - pines
+    profiles: [cpu, selfhosted]
 
   pines-gpu:
     build:
@@ -196,8 +196,10 @@ services:
       replicas: ${PINES_WORKERS}
     restart: on-failure:5
     networks:
-      - cedars
-    profiles: [gpu]
+      cedars:
+        aliases:
+          - pines
+    profiles: [gpu, selfhosted]
 
   redis:
     build:
@@ -224,7 +226,6 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
 
   worker-task:
     <<: *cedars-common
@@ -242,7 +243,6 @@ services:
       - cpu
       - gpu
       - selfhosted   
-      - superbio
     deploy:
       resources:
         limits:
@@ -268,7 +268,6 @@ services:
       - cpu
       - gpu
       - selfhosted
-      - superbio
     deploy:
       resources:
         limits:

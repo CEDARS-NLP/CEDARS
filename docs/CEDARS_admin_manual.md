@@ -155,6 +155,8 @@ The CEDARS application runs on a web server and generates an online graphical us
 
 Once the instance is running, electronic health record (EHR) documents are imported and processed through the CEDARS natural language processing (NLP) pipeline. Additional document annotation with a PINES model is optional. A CEDARS annotation project can be set up entirely from the GUI, using the administrator panel. The existing annotations can be downloaded at any point from this interface.
 
+When PINES is selected for a query, CEDARS checks the self-hosted PINES health endpoint before changing the query. If PINES is unavailable, the query is rejected without clearing existing annotations or dispatching jobs. During processing, patients remain unavailable to annotators until every applicable note has been processed successfully. Failed patients are shown in the internal processes page and can be retried after PINES is healthy. Notes below the configured PINES classification threshold are automatically reviewed by PINES; notes at or above the threshold remain available for human review.
+
 Annotators can connect to the CEDARS app by accessing a web URL provided by the administrator. CEDARS performs the operations to pull selected documents from the database, process them and present them to the annotators. Data entered by users is processed by CEDARS and saved to the database. Multiple users can work on one CEDARS project at the same time. The application will automatically select individual patient records for each user. Record locking is implemented to prevent collisions and inconsistencies.
 
 ### Installing CEDARS

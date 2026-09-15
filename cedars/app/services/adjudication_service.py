@@ -21,7 +21,9 @@ from ..database.db_search import (get_all_annotations_for_patient,
                                   get_annotation_note, get_annotations_post_event,
                                   get_event_annotation_id, get_event_date,
                                   get_patient_by_id, get_patient_lock_status,
-                                  get_patients_to_annotate)
+                                  get_patients_to_annotate,
+                                  get_pines_status_counts,
+                                  is_patient_ready_for_adjudication)
 from ..database.db_updates import (batch_mark_annotation_reviewed,
                                   mark_patient_reviewed, revert_skipped_annotations,
                                   set_patient_lock_status)
@@ -193,7 +195,20 @@ def _load_next_patient(username, project_id):
     while True:
         patient_id = get_patients_to_annotate(get_current_project_engine())
         if patient_id is None or patient_id in visited:
-            return {"complete": True}
+            pines = get_pines_status_counts(get_current_project_engine())
+            if pines["failed"]:
+                return {
+                    "complete": False,
+                    "workflow_status": "blocked_failed",
+                    "message": "PINES processing failed for one or more patients. Contact a project administrator.",
+                }
+            if pines["pending"] or pines["running"]:
+                return {
+                    "complete": False,
+                    "workflow_status": "processing",
+                    "message": "PINES processing is still in progress.",
+                }
+            return {"complete": True, "workflow_status": "complete"}
         visited.add(patient_id)
         result = _setup_patient(username, project_id, patient_id)
         if result is not None:
@@ -247,12 +262,21 @@ def search_patient(username, project_id, search_value):
         patient = get_patient_by_id(get_current_project_engine(), search_value)
         if patient is not None:
             is_locked = get_patient_lock_status(get_current_project_engine(), search_value)
-            patient_id = patient.patient_id if not is_locked else None
+            is_ready = is_patient_ready_for_adjudication(
+                get_current_project_engine(), search_value
+            )
+            patient_id = patient.patient_id if not is_locked and is_ready else None
+        else:
+            is_ready = False
 
     if patient_id is None:
-        message = (f"Patient {search_value} is currently being reviewed by another "
-                   "user. Showing next patient" if is_locked
-                   else f"Patient {search_value} does not exist. Showing next patient")
+        if is_locked:
+            message = (f"Patient {search_value} is currently being reviewed by another "
+                       "user. Showing next patient")
+        elif patient is not None and not is_ready:
+            message = f"Patient {search_value} is awaiting successful PINES processing."
+        else:
+            message = f"Patient {search_value} does not exist. Showing next patient"
         result = _load_next_patient(username, project_id)
         result["message"] = message
         return result

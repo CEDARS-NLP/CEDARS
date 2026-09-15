@@ -1,26 +1,27 @@
-"""NLP orchestration service.
+"""NLP orchestration service."""
+from uuid import uuid4
 
-Ports the enqueue logic from the original Flask ``ops.do_nlp_processing`` and the
-status views (``queue_stats`` / ``job_status``). The Superbio/EC2 spin-down
-branch is dropped; the self-hosted PINES path is preserved (the worker checks
-the query's ``apply_pines`` setting when processing). Job IDs are namespaced by project so
-they never collide across projects on the shared Redis instance.
-"""
 from rq import Callback, Retry
 
 from .. import queues, tasks
 from ..database import get_current_project_engine
-from ..database.db_search import get_patient_ids, get_total_counts
+from ..database.db_query import get_search_query_details
+from ..database.db_search import get_patient_ids, get_pines_status_counts, get_total_counts
 from ..database.db_tasks import add_task
+from ..database.db_updates import initialize_patient_pines_status
 from ..database.project_table_creation import Patients, Task
 
 
-def run_nlp(project_id: str, username: str) -> int:
+def run_nlp(project_id: str, username: str, patient_ids=None) -> int:
     """Enqueue an NLP job per patient; returns the number dispatched."""
     project_engine = get_current_project_engine()
-    patient_ids = get_patient_ids(project_engine)
+    query = get_search_query_details(project_engine)
+    query_id = query.get("query_id")
+    patient_ids = list(patient_ids) if patient_ids is not None else get_patient_ids(project_engine)
+    if query_id is not None and query.get("apply_pines", False):
+        initialize_patient_pines_status(project_engine, patient_ids, query_id)
     for patient in patient_ids:
-        job_id = f"spacy:{project_id}:{patient}"
+        job_id = f"spacy:{project_id}:{query_id}:{uuid4().hex}:{patient}"
         add_task(project_engine, {
             "job_id": job_id,
             "name": "nlp_processor",
@@ -30,7 +31,7 @@ def run_nlp(project_id: str, username: str) -> int:
         })
         queues.get_task_queue(project_id).enqueue(
             tasks.nlp_task,
-            args=(project_id, patient),
+            args=(project_id, patient, query_id),
             job_id=job_id,
             description=f"Processing patient {patient} with spacy",
             retry=Retry(max=3),
@@ -51,6 +52,7 @@ def nlp_status() -> dict:
     total_patients = get_total_counts(project_engine, Patients)
     in_progress = get_total_counts(project_engine, Task, complete=False)
     completed = get_total_counts(project_engine, Task, complete=True)
+    pines = get_pines_status_counts(project_engine)
     return {
         "total_patients": total_patients,
         "tasks_in_progress": in_progress,
@@ -58,5 +60,9 @@ def nlp_status() -> dict:
         # The Task table has no `failed` column (see db_tasks.py) - a failed
         # job is recorded as complete=True with progress left at 0.
         "tasks_failed": get_total_counts(project_engine, Task, complete=True, progress=0),
+        "pines_pending": pines["pending"],
+        "pines_running": pines["running"],
+        "pines_succeeded": pines["succeeded"],
+        "pines_failed": pines["failed"],
     }
 
