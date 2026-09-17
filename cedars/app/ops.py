@@ -432,6 +432,12 @@ def do_nlp_processing():
     nlp_processor = nlpprocessor.NlpProcessor()
     pt_ids = db.get_patient_ids()
     superbio_api_token = session.get('superbio_api_token')
+    pines_inf_mode = os.getenv("BERT_INFERENCE_TYPE", None)
+    sqs_conn_details = {}
+    if pines_inf_mode is not None and pines_inf_mode == 'SQS_Inference':
+        sqs_conn_details = {'aws_region' : os.getenv("AWS_REGION", None),
+                            'inference_queue_url' : os.getenv("INFERENCE_QUEUE_URL", None),
+                            'response_queue_url' : os.getenv("RESPONSE_QUEUE_URL", None)}
 
     # add task to the queue
     for patient in pt_ids:
@@ -447,6 +453,8 @@ def do_nlp_processing():
                 "user": current_user.username,
                 "job_id": f'spacy:{patient}',
                 "superbio_api_token" : superbio_api_token,
+                "pines_inf_mode" : pines_inf_mode,
+                "sqs_conn_details" : sqs_conn_details,
                 "description": f"Processing patient {patient} with spacy"
             }
         )
