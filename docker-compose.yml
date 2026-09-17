@@ -18,7 +18,7 @@ services:
   web:
     build:
       context: ./cedars
-    image: cedars-web:release
+    image: cedars-web:latest
     ports:
       - 5001:5001
     restart: always
@@ -132,7 +132,7 @@ services:
   pines-gpu:
     build:
       context: ./PINES
-    image: cedars-pines-gpu:release
+    image: cedars-pines-gpu:latest
     deploy:
       resources:
         reservations:
@@ -153,7 +153,7 @@ services:
     build:
         context: ./redis
         dockerfile: Dockerfile
-    image: cedars-redis:release
+    image: cedars-redis:latest
     restart: always
     ports:
         - 6379:6379
@@ -179,7 +179,7 @@ services:
   worker-task:
     build:
       context: ./cedars
-    image: cedars-web:release
+    image: cedars-web:latest
     command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
@@ -206,7 +206,7 @@ services:
   worker-ops:
     build:
       context: ./cedars
-    image: cedars-web:release
+    image: cedars-web:latest
     command: python -m app.make_rq ops
     scale: 1
     networks:
