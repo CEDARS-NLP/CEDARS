@@ -5,9 +5,9 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
 
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-  
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
   WebServerInstanceType:
     Description: CEDARS CPU EC2 instance type
     Type: String
@@ -15,14 +15,7 @@ Parameters:
     AllowedValues:
       - t3.xlarge
       - t3.2xlarge
-  
-  MinioBucketTitle:
-    Type: String
-    Default: cedars-minio-bucket
-    Description: Lowercase project identifier (used for S3 bucket names)
-    AllowedPattern: "^[a-z0-9-]+$"
-    ConstraintDescription: must contain only lowercase letters, numbers, and hyphens
-  
+
   ModelS3Path:
     Type: String
     Default: s3://impactvte-20241126180226478700000001/models/mets-mbert-8k-cedars/
@@ -32,15 +25,22 @@ Parameters:
       - s3://impactvte-20241126180226478700000001/models/mets-mbert-8k-cedars/
 
 Resources:
-# -----------------------
-# SQS Queue
-# -----------------------
+  # -----------------------
+  # SQS Queue
+  # -----------------------
   InferenceQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: bert-inference
       VisibilityTimeout: 900
       MessageRetentionPeriod: 86400
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: InferenceQueue
 
   ResponseQueue:
     Type: AWS::SQS::Queue
@@ -48,20 +48,17 @@ Resources:
       QueueName: bert-response
       VisibilityTimeout: 900
       MessageRetentionPeriod: 86400
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: ResponseQueue
 
-# -----------------------
-# Minio Storage Bucket
-# -----------------------
-  CedarsBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "${MinioBucketTitle}"
-      VersioningConfiguration:
-        Status: Enabled
-
-# -----------------------
-# Web Server Security Rules
-# -----------------------
+  # -----------------------
+  # Web Server Security Rules
+  # -----------------------
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -87,67 +84,54 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServerSecurityGroup
 
-# -----------------------
-# Web Server IAM Role
-# -----------------------
-  SenderRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: SQSSenderPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                  - sqs:GetQueueAttributes
-                Resource: !GetAtt InferenceQueue.Arn
+  # -----------------------
+  # Web Server IAM Role
+  # -----------------------
+  #userServiceRoleCedarsWebApp:
+  #  Type: AWS::IAM::Role
+  #  Properties:
+  #    AssumeRolePolicyDocument:
+  #      Version: '2012-10-17'
+  #      Statement:
+  #        - Effect: Allow
+  #          Principal:
+  #            Service: ec2.amazonaws.com
+  #          Action: sts:AssumeRole
+  #    ManagedPolicyArns: 
+  #      - 'arn:aws:iam::aws:policy/AmazonSQSFullAccess'
+  #    RoleName: userServiceRoleCedarsWebApp
+  #    PermissionsBoundary: arn:aws:iam::${AWS::AccountId}:policy/AutomationOrUserServiceRolePermissions
+  #    Tags:
+  #      - Key: cost-center
+  #        Value: '99424'
+  #      - Key: owner-email
+  #        Value: manthas@mskcc.org
+  #      - Key: resource-name
+  #        Value: userServiceRoleCedarsWebApp
 
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !GetAtt ResponseQueue.Arn
+  #WebAppInstanceProfile:
+  #  Type: AWS::IAM::InstanceProfile
+  #  Properties:
+  #    Roles:
+  #      - arn:aws:iam::730335493184:role/userServiceRoleCedarsWebApp
 
-        - PolicyName: MinioS3Access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub "arn:aws:s3:::${CedarsBucket}"
-                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
-
-  SenderInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref SenderRole
-
-# -----------------------
-# Web Server EC2
-# -----------------------
+  # -----------------------
+  # Web Server EC2
+  # -----------------------
   WebServer:
     Type: AWS::EC2::Instance
     Properties:
-      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       InstanceType: !Ref WebServerInstanceType
-      IamInstanceProfile: !Ref SenderInstanceProfile
+      IamInstanceProfile: arn:aws:iam::730335493184:instance-profile/userServiceRoleCedarsWebApp
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
@@ -156,8 +140,15 @@ Resources:
             DeleteOnTermination: true
       SecurityGroupIds:
         - !Ref WebServerSecurityGroup
-      UserData:
-        Fn::Base64: !Sub |
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServer
+      UserData: !Base64
+        Fn::Sub: |
           #!/bin/bash
           set -e
 
@@ -206,7 +197,6 @@ Resources:
           MINIO_ACCESS_KEY=rootuser
           MINIO_SECRET_KEY=$MINIO_PASSWORD
           MINIO_VERSION=RELEASE.2024-05-10T01-41-38Z
-          S3_BUCKET_NAME=${CedarsBucket}
           AWS_REGION=${AWS::Region}
           MINIO_CONNECTION_TYPE=LOCAL_DOCKER
           ENV=prod
@@ -234,7 +224,6 @@ Resources:
           MINIO_PORT=9000
           MINIO_ACCESS_KEY=rootuser
           MINIO_SECRET_KEY=$MINIO_PASSWORD
-          S3_BUCKET_NAME=${CedarsBucket}
           AWS_REGION=${AWS::Region}
           MINIO_CONNECTION_TYPE=LOCAL_DOCKER
           ENV=dev
@@ -257,132 +246,81 @@ Resources:
           docker compose --profile selfhosted --profile cpu up -d
           echo "Docker is now running"
 
+  # -----------------------
+  # IAM Inference Roles
+  # -----------------------
+  #userServiceRoleBERTInferenceInstance:
+  #  Type: AWS::IAM::Role
+  #  Properties:
+  #    AssumeRolePolicyDocument:
+  #      Version: '2012-10-17'
+  #      Statement:
+  #        - Effect: Allow
+  #          Principal:
+  #            Service: ec2.amazonaws.com
+  #          Action: sts:AssumeRole
+  #    ManagedPolicyArns:
+  #      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+  #      - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+  #      - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+  #      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  #    RoleName: userServiceRoleBERTInferenceInstance
+  #    PermissionsBoundary: arn:aws:iam::${AWS::AccountId}:policy/AutomationOrUserServiceRolePermissions
+  #    Tags:
+  #      - Key: cost-center
+  #        Value: '99424'
+  #      - Key: owner-email
+  #        Value: manthas@mskcc.org
+  #      - Key: resource-name
+  #        Value: userServiceRoleBERTInferenceInstance
 
-# -----------------------
-# S3 Bucket CleanUp
-# -----------------------
-  BucketCleanupRole:
-    Type: AWS::IAM::Role
+  #BERTInferenceInstanceProfile:
+  #  Type: AWS::IAM::InstanceProfile
+  #  Properties:
+  #    Roles:
+  #      - !Ref userServiceRoleBERTInferenceInstance
+
+  # -----------------------
+  # Launch Template
+  # -----------------------
+  SQSBERTSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: S3Cleanup
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:ListBucketVersions
-                  - s3:DeleteObject
-                  - s3:DeleteObjectVersion
-                Resource:
-                  - !Sub "arn:aws:s3:::${CedarsBucket}"
-                  - !Sub "arn:aws:s3:::${CedarsBucket}/*"
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: "*"
+      GroupDescription: Security Group For BERT inference connections
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: WebServerSecurityGroup
 
-  BucketCleanupFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      Runtime: python3.10
-      Handler: index.handler
-      Role: !GetAtt BucketCleanupRole.Arn
-      Timeout: 300
-      Code:
-        ZipFile: |
-          import boto3
-          import cfnresponse
-          import logging
-          
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-
-          def handler(event, context):
-              logger.info(f"Event: {event}")
-              bucket_name = event["ResourceProperties"]["BucketName"]
-              
-              try:
-                  if event["RequestType"] == "Delete":
-                      s3 = boto3.resource("s3")
-                      bucket = s3.Bucket(bucket_name)
-                      
-                      logger.info(f"Deleting all objects and versions from bucket: {bucket_name}")
-                      
-                      # Delete all object versions and delete markers
-                      bucket.object_versions.all().delete()
-                      
-                      logger.info(f"Successfully emptied bucket: {bucket_name}")
-                  
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-              except Exception as e:
-                  logger.error(f"Error: {str(e)}")
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
-
-  
-  EmptyBucketOnDelete:
-    Type: Custom::EmptyS3Bucket
-    DependsOn: CedarsBucket
-    Properties:
-      ServiceToken: !GetAtt BucketCleanupFunction.Arn
-      BucketName: !Ref CedarsBucket
-
-# -----------------------
-# IAM Roles
-# -----------------------
-  BERTInferenceInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
-        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-
-  BERTInferenceInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref BERTInferenceInstanceRole
-  
-
-
-# -----------------------
-# Launch Template
-# -----------------------
-  LaunchTemplate:
+  SQSBERTLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
         InstanceType: g4dn.xlarge
         ImageId: !Sub ami-073d9221f657bc5ff
+        SecurityGroupIds:
+          - !Ref SQSBERTSecurityGroup
         IamInstanceProfile:
-          Name: !Ref BERTInferenceInstanceProfile
+          Arn: arn:aws:iam::730335493184:instance-profile/userServiceRoleBERTInferenceInstance
         BlockDeviceMappings:
-          - DeviceName: /dev/xvda   # Root volume (use /dev/sda1 for some AMIs)
+          - DeviceName: /dev/xvda # Root volume (use /dev/sda1 for some AMIs)
             Ebs:
-              VolumeSize: 64        # Size in GB
+              VolumeSize: 64 # Size in GB
               VolumeType: gp3
               DeleteOnTermination: true
               Encrypted: true
-        UserData:
-          Fn::Base64: !Sub |
+        UserData: !Base64
+          Fn::Sub: |
             #!/bin/bash
             set -e
 
@@ -427,32 +365,43 @@ Resources:
             docker run -d --restart unless-stopped --env-file .env bert-worker
             echo "Docker is now running"
 
-# -----------------------
-# Auto Scaling Group
-# -----------------------
-  AutoScalingGroup:
+  # -----------------------
+  # Auto Scaling Group
+  # -----------------------
+  SQSBERTAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       MinSize: 0
       MaxSize: 1
       DesiredCapacity: 0
-      VPCZoneIdentifier: !Ref SubnetIds
+      VPCZoneIdentifier:
+        - !Ref SubnetId
       LaunchTemplate:
-        LaunchTemplateId: !Ref LaunchTemplate
-        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+        LaunchTemplateId: !Ref SQSBERTLaunchTemplate
+        Version: !GetAtt SQSBERTLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+          PropagateAtLaunch: true
+        - Key: owner-email
+          Value: manthas@mskcc.org
+          PropagateAtLaunch: true
+        - Key: resource-name
+          Value: SQSBERTAutoScalingGroup
+          PropagateAtLaunch: true
 
-# -----------------------
-# Scale Policies
-# -----------------------
-  ScaleUpPolicy:
+  # -----------------------
+  # Scale Policies
+  # -----------------------
+  SQSBERTScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AutoScalingGroupName: !Ref AutoScalingGroup
+      AutoScalingGroupName: !Ref SQSBERTAutoScalingGroup
       AdjustmentType: ChangeInCapacity
       ScalingAdjustment: 1
       Cooldown: 60
 
-  QueueDepthHigh:
+  SQSBERTQueueDepthHigh:
     Type: AWS::CloudWatch::Alarm
     Properties:
       Namespace: AWS/SQS
@@ -466,17 +415,24 @@ Resources:
         - Name: QueueName
           Value: !GetAtt InferenceQueue.QueueName
       AlarmActions:
-        - !Ref ScaleUpPolicy
+        - !Ref SQSBERTScaleUpPolicy
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: SQSBERTQueueDepthHigh
 
-  ScaleDownPolicy:
+  SQSBERTScaleDownPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AutoScalingGroupName: !Ref AutoScalingGroup
+      AutoScalingGroupName: !Ref SQSBERTAutoScalingGroup
       AdjustmentType: ChangeInCapacity
       ScalingAdjustment: -1
       Cooldown: 1800 # 30 minute cooldown
 
-  QueueDepthLow:
+  SQSBERTQueueDepthLow:
     Type: AWS::CloudWatch::Alarm
     Properties:
       Namespace: AWS/SQS
@@ -490,12 +446,19 @@ Resources:
         - Name: QueueName
           Value: !GetAtt InferenceQueue.QueueName
       AlarmActions:
-        - !Ref ScaleDownPolicy
+        - !Ref SQSBERTScaleDownPolicy
+      Tags:
+        - Key: cost-center
+          Value: '99424'
+        - Key: owner-email
+          Value: manthas@mskcc.org
+        - Key: resource-name
+          Value: SQSBERTQueueDepthLow
 
 Outputs:
   InferenceQueueURL:
     Value: !Ref InferenceQueue
-  
+
   ResponseQueueURL:
     Value: !Ref ResponseQueue
 
@@ -503,5 +466,5 @@ Outputs:
     Value: !Join
       - ''
       - - http://
-        - !GetAtt WebServer.PublicDnsName
+        - !GetAtt WebServer.PrivateDnsName
     Description: Website URL
