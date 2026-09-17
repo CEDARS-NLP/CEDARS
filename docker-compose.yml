@@ -18,6 +18,7 @@ services:
   web:
     build:
       context: ./cedars
+    image: cedars-web:release
     ports:
       - 5001:5001
     restart: always
@@ -44,7 +45,7 @@ services:
           memory: '1g'
           cpus: '1.0'
   db:
-    image: mongo:latest
+    image: mongo:7.0
     ports:
       - "${DB_HOST_PORT}:${DB_PORT}"
     restart: always
@@ -99,7 +100,7 @@ services:
 
   prometheus:
     user: root
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.1
     container_name: prometheus
     restart: unless-stopped
     ports:
@@ -131,6 +132,7 @@ services:
   pines-gpu:
     build:
       context: ./PINES
+    image: cedars-pines-gpu:release
     deploy:
       resources:
         reservations:
@@ -142,14 +144,16 @@ services:
       replicas: ${PINES_WORKERS}
     restart: on-failure:5
     networks:
-      - cedars
+      cedars:
+        aliases:
+          - pines
     profiles: [gpu]
 
   redis:
     build:
         context: ./redis
         dockerfile: Dockerfile
-    image: redis:7.2-alpine
+    image: cedars-redis:release
     restart: always
     ports:
         - 6379:6379
@@ -175,6 +179,7 @@ services:
   worker-task:
     build:
       context: ./cedars
+    image: cedars-web:release
     command: python -m app.make_rq task
     scale: ${WORKER_SCALE}
     networks:
@@ -201,6 +206,7 @@ services:
   worker-ops:
     build:
       context: ./cedars
+    image: cedars-web:release
     command: python -m app.make_rq ops
     scale: 1
     networks:
