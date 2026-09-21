@@ -27,6 +27,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from ..schemas import ProjectRole
+
 logger.enable(__name__)
 
 SYSTEM_REVIEWERS = ("CEDARS", "PINES")
@@ -368,7 +370,9 @@ class ProjectUsers(ProjectBase):
         String(100), primary_key=True
     )
 
-    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ProjectRole.ANNOTATOR.value
+    )
 
     date_registered: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now(timezone.utc), nullable=False
@@ -389,8 +393,32 @@ class ProjectUsers(ProjectBase):
         foreign_keys="Task.user_id",
     )
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role in {ProjectRole.ADMIN.value, ProjectRole.INVESTIGATOR.value}
+
+    @is_admin.setter
+    def is_admin(self, value: bool) -> None:
+        self.role = ProjectRole.ADMIN.value if value else ProjectRole.ANNOTATOR.value
+
     def __repr__(self) -> str:  # for debugging and logging only
         return f"ProjectUsers(user_id={self.user_id!r})"
+
+
+class ProjectAuditLog(ProjectBase):
+    """Project-local audit trail for membership and project actions."""
+
+    __tablename__ = "ProjectAuditLog"
+
+    audit_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[str] = mapped_column(String(100), nullable=True)
+    details: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    def __repr__(self) -> str:
+        return f"ProjectAuditLog(audit_id={self.audit_id!r}, action={self.action!r})"
 
 
 class Results(ProjectBase):

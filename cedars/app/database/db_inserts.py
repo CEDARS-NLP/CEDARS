@@ -46,13 +46,14 @@ def add_user_to_project(global_engine, project_engine,
     '''
     Adds a new user to the database.
     '''
+    role = "admin" if has_admin_privileges else "annotator"
     with session_scope(global_engine) as session:
         session.execute(
             insert(UserProjectRelation).values(
                 user_id=username,
                 project_id=project_id,
                 added_by=added_by,
-                has_admin_privileges=has_admin_privileges
+                role=role,
             )
         )
 
@@ -62,7 +63,7 @@ def add_user_to_project(global_engine, project_engine,
         session.execute(
             insert(ProjectUsers).values(
                 user_id=username,
-                is_admin=has_admin_privileges
+                role=role,
             )
         )
 

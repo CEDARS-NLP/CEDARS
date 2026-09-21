@@ -5,18 +5,39 @@ User authentication and project-membership lookups against the global
 application database and per-project databases.
 '''
 
+from typing import Optional
+
 from loguru import logger
 
 from sqlalchemy import delete, func, insert, select, update
 from werkzeug.security import check_password_hash
 
 from ..cedars_enums import log_function_call
+from ..schemas import ProjectRole
 from .db_session import session_scope
 from .global_app_tables import UserProjectRelation, Users
-from .project_table_creation import ProjectUsers, SYSTEM_REVIEWERS
+from .project_table_creation import ProjectAuditLog, ProjectUsers, SYSTEM_REVIEWERS
 
 
 logger.enable(__name__)
+
+
+def _normalize_project_role(role) -> str:
+    if isinstance(role, ProjectRole):
+        return role.value
+    if isinstance(role, bool):
+        return ProjectRole.ADMIN.value if role else ProjectRole.ANNOTATOR.value
+    if isinstance(role, str):
+        try:
+            return ProjectRole(role).value
+        except ValueError as exc:  # pragma: no cover - defensive validation path
+            raise ValueError(f"Unsupported project role: {role!r}") from exc
+    raise ValueError(f"Unsupported project role value: {role!r}")
+
+
+def is_project_admin_role(role) -> bool:
+    normalized = _normalize_project_role(role)
+    return normalized in {ProjectRole.ADMIN.value, ProjectRole.INVESTIGATOR.value}
 
 
 @log_function_call
@@ -140,7 +161,7 @@ def is_admin_user(project_engine, user_id) -> bool:
             select(ProjectUsers).where(ProjectUsers.user_id == user_id)
         ).scalar_one_or_none()
 
-    return bool(project_user is not None and project_user.is_admin)
+    return bool(project_user is not None and is_project_admin_role(project_user.role))
 
 
 @log_function_call
@@ -177,18 +198,18 @@ def get_project_membership(global_engine, project_id, user_id):
 
 
 @log_function_call
-def list_user_project_memberships(global_engine, user_id) -> dict[str, bool]:
+def list_user_project_memberships(global_engine, user_id) -> dict[str, str]:
     '''
-    Returns project_id -> has_admin_privileges for every project assigned to a user.
+    Returns project_id -> role for every project assigned to a user.
     '''
     with session_scope(global_engine) as session:
         rows = session.execute(
             select(UserProjectRelation.project_id,
-                   UserProjectRelation.has_admin_privileges)
+                   UserProjectRelation.role)
             .where(UserProjectRelation.user_id == user_id)
         ).all()
 
-    return {project_id: bool(is_admin) for project_id, is_admin in rows}
+    return {project_id: role for project_id, role in rows}
 
 
 @log_function_call
@@ -199,7 +220,7 @@ def list_project_members(global_engine, project_id) -> list[dict]:
     with session_scope(global_engine) as session:
         rows = session.execute(
             select(UserProjectRelation.user_id,
-                   UserProjectRelation.has_admin_privileges,
+                   UserProjectRelation.role,
                    UserProjectRelation.added_by)
             .where(UserProjectRelation.project_id == project_id)
             .order_by(UserProjectRelation.user_id)
@@ -208,10 +229,10 @@ def list_project_members(global_engine, project_id) -> list[dict]:
     return [
         {
             "username": user_id,
-            "role": "admin" if has_admin_privileges else "annotator",
+            "role": role,
             "added_by": added_by,
         }
-        for user_id, has_admin_privileges, added_by in rows
+        for user_id, role, added_by in rows
     ]
 
 
@@ -224,30 +245,45 @@ def count_project_admins(global_engine, project_id) -> int:
         return session.execute(
             select(func.count()).select_from(UserProjectRelation).where(
                 UserProjectRelation.project_id == project_id,
-                UserProjectRelation.has_admin_privileges.is_(True),
+                UserProjectRelation.role.in_({ProjectRole.ADMIN.value, ProjectRole.INVESTIGATOR.value}),
             )
         ).scalar_one()
 
 
 @log_function_call
+def write_project_audit(project_engine, actor: str, action: str, target: Optional[str] = None, details: str = "") -> None:
+    """Record an auditable action in the project's database."""
+    with session_scope(project_engine) as session:
+        session.execute(
+            insert(ProjectAuditLog).values(
+                actor=actor,
+                action=action,
+                target=target,
+                details=details,
+            )
+        )
+
+
+@log_function_call
 def set_project_member_admin(global_engine, project_engine,
-                             project_id, user_id, is_admin) -> None:
+                             project_id, user_id, role) -> None:
     '''
     Updates a member's project role in both membership tables.
     '''
+    normalized = _normalize_project_role(role)
     with session_scope(global_engine) as session:
         session.execute(
             update(UserProjectRelation)
             .where(UserProjectRelation.project_id == project_id,
                    UserProjectRelation.user_id == user_id)
-            .values(has_admin_privileges=is_admin)
+            .values(role=normalized)
         )
 
     with session_scope(project_engine) as session:
         session.execute(
             update(ProjectUsers)
             .where(ProjectUsers.user_id == user_id)
-            .values(is_admin=is_admin)
+            .values(role=normalized)
         )
 
 

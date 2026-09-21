@@ -11,6 +11,13 @@ def _register(client, username, password=GOOD_PASSWORD, is_admin=False):
     })
 
 
+def test_project_role_schema_accepts_investigator_role():
+    from cedars.app.schemas import ProjectMemberCreate
+
+    payload = ProjectMemberCreate(username="InvestigatorUser", role="investigator")
+    assert payload.role == "investigator"
+
+
 def test_health(client):
     assert client.get("/api/v1/health").json() == {"status": "ok"}
 

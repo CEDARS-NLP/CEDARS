@@ -20,6 +20,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from ..schemas import ProjectRole
+
 
 class GlobalBase(DeclarativeBase):
     """Shared declarative base for all ORM models."""
@@ -136,7 +138,9 @@ class UserProjectRelation(GlobalBase):
         String(100), ForeignKey("Users.user_id"), nullable=False
     )
 
-    has_admin_privileges: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ProjectRole.ANNOTATOR.value
+    )
 
     project: Mapped["Projects"] = relationship(
         back_populates="memberships",
@@ -152,6 +156,14 @@ class UserProjectRelation(GlobalBase):
         back_populates="memberships_added",
         foreign_keys=[added_by],
     )
+
+    @property
+    def has_admin_privileges(self) -> bool:
+        return self.role in {ProjectRole.ADMIN.value, ProjectRole.INVESTIGATOR.value}
+
+    @has_admin_privileges.setter
+    def has_admin_privileges(self, value: bool) -> None:
+        self.role = ProjectRole.ADMIN.value if value else ProjectRole.ANNOTATOR.value
 
     def __repr__(self) -> str:  # for debugging and logging only
         return f"UserProjectRelation(project_id={self.project_id!r}, investigator={self.user_id!r})"

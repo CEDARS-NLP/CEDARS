@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..database import get_current_project_engine, get_global_engine
 from ..database.db_auth import (count_project_admins, get_project_membership,
-                                get_user, list_project_members,
+                                get_user, is_project_admin_role,
+                                list_project_members,
                                 list_user_project_memberships,
                                 remove_project_member,
                                 set_project_member_admin)
@@ -30,9 +31,14 @@ from ..security import CurrentUser, get_current_user
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-def _role_for(is_project_admin: bool) -> str:
-    """Map a project membership flag onto the UI role label."""
-    return "admin" if is_project_admin else "annotator"
+def _role_for(role_or_admin) -> str:
+    """Map project membership state onto the UI role label."""
+    if isinstance(role_or_admin, bool):
+        return "admin" if role_or_admin else "annotator"
+    role = str(role_or_admin or "annotator")
+    if role in {"admin", "investigator"}:
+        return role
+    return "annotator"
 
 
 def _to_project_out(project, role: str) -> ProjectOut:
@@ -48,7 +54,7 @@ def _to_project_out(project, role: str) -> ProjectOut:
 
 
 def _role_is_admin(role: str) -> bool:
-    return role == "admin"
+    return is_project_admin_role(role)
 
 
 def _member_out(member: dict) -> ProjectMemberOut:
@@ -61,7 +67,7 @@ def list_projects(user: CurrentUser = Depends(get_current_user)):
     global_engine = get_global_engine()
     memberships = list_user_project_memberships(global_engine, user.username)
     return [
-        _to_project_out(project, _role_for(memberships[project.project_id]))
+        _to_project_out(project, _role_for(memberships.get(project.project_id, "annotator")))
         for project in list_project_rows(global_engine)
         if project.project_id in memberships
     ]
@@ -86,7 +92,8 @@ def get_project(ctx: ProjectContext = Depends(require_project)):
                     if p.project_id == ctx.project_id), None)
     membership = get_project_membership(get_global_engine(), ctx.project_id,
                                         ctx.user.username)
-    return _to_project_out(project, role=_role_for(membership.has_admin_privileges))
+    role = _role_for(getattr(membership, "role", "annotator")) if membership else "annotator"
+    return _to_project_out(project, role=role)
 
 
 @router.put("/{project_id}", response_model=ProjectOut)
@@ -152,16 +159,16 @@ def update_project_member(username: str, payload: ProjectMemberUpdate,
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "Project member not found.")
-    if username == ctx.info.get("investigator") and payload.role != "admin":
+    if username == ctx.info.get("investigator") and not is_project_admin_role(payload.role):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Project investigator must remain an admin.")
-    if membership.has_admin_privileges and payload.role != "admin" and \
+                            "Project investigator must remain an admin-level role.")
+    if membership.has_admin_privileges and not is_project_admin_role(payload.role) and \
             count_project_admins(global_engine, ctx.project_id) <= 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "A project must have at least one admin.")
+                            "A project must have at least one admin-level role.")
 
     set_project_member_admin(global_engine, get_current_project_engine(),
-                             ctx.project_id, username, _role_is_admin(payload.role))
+                             ctx.project_id, username, payload.role)
     return ProjectMemberOut(username=username, role=payload.role,
                             added_by=membership.added_by)
 
@@ -181,7 +188,7 @@ def delete_project_member(username: str,
     if membership.has_admin_privileges and \
             count_project_admins(global_engine, ctx.project_id) <= 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "A project must have at least one admin.")
+                            "A project must have at least one admin-level role.")
 
     remove_project_member(global_engine, get_current_project_engine(),
                           ctx.project_id, username)

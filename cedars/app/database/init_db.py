@@ -112,7 +112,7 @@ def seed_system_reviewers(project_engine) -> None:
             )
         ))
         missing = [
-            {"user_id": reviewer, "is_admin": False}
+            {"user_id": reviewer, "role": "annotator"}
             for reviewer in SYSTEM_REVIEWERS
             if reviewer not in existing_ids
         ]
@@ -129,13 +129,14 @@ def attach_user_to_project(global_engine, project_engine,
     Registers a user as a member of a project in both the global database
     (UserProjectRelation) and the project's own database (ProjectUsers).
     '''
+    role = "admin" if is_admin else "annotator"
     with session_scope(global_engine) as session:
         session.execute(
             insert(UserProjectRelation).values(
                 project_id=project_id,
                 user_id=user_id,
                 added_by=user_id,
-                has_admin_privileges=is_admin
+                role=role,
             )
         )
 
@@ -143,7 +144,7 @@ def attach_user_to_project(global_engine, project_engine,
         session.execute(
             insert(ProjectUsers).values(
                 user_id=user_id,
-                is_admin=is_admin
+                role=role,
             )
         )
 

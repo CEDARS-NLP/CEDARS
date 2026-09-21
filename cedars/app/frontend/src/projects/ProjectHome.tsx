@@ -8,6 +8,7 @@ import { useProject } from "./useProject";
 export default function ProjectHome() {
   const { projectId } = useParams<{ projectId: string }>();
   const project = useProject();
-  const target = project?.role === "admin" ? "stats" : "adjudicate";
+  const isAdminLevelRole = project?.role === "admin" || project?.role === "investigator";
+  const target = isAdminLevelRole ? "stats" : "adjudicate";
   return <Navigate to={`/projects/${projectId}/${target}`} replace />;
 }

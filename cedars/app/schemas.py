@@ -2,7 +2,8 @@
 
 Models are grouped by workflow area and expanded as each phase is ported.
 """
-from typing import Literal, Optional
+from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -55,12 +56,15 @@ class ProjectOut(BaseModel):
     created_at: Optional[str] = None
 
 
-ProjectRole = Literal["admin", "annotator"]
+class ProjectRole(str, Enum):
+    INVESTIGATOR = "investigator"
+    ADMIN = "admin"
+    ANNOTATOR = "annotator"
 
 
 class ProjectMemberCreate(BaseModel):
     username: str
-    role: ProjectRole = "annotator"
+    role: ProjectRole = ProjectRole.ANNOTATOR
 
 
 class ProjectMemberUpdate(BaseModel):

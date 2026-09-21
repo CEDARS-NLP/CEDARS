@@ -86,7 +86,7 @@ export default function AppSidebar() {
     queryFn: () => api.get<ProjectDetail>(`/projects/${projectId}`),
     enabled: Boolean(projectId),
   });
-  const isProjectAdmin = project?.role === "admin";
+  const isProjectAdmin = project?.role === "admin" || project?.role === "investigator";
 
   return (
     <aside className="flex h-screen w-56 flex-col bg-sidebar text-sidebar-foreground">

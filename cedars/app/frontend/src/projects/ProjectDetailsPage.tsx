@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useProject } from "./useProject";
 
-type ProjectRole = "admin" | "annotator";
+type ProjectRole = "investigator" | "admin" | "annotator";
 
 interface ProjectMember {
   username: string;
@@ -29,7 +29,7 @@ export default function ProjectDetailsPage() {
   const [memberUsername, setMemberUsername] = useState("");
   const [memberRole, setMemberRole] = useState<ProjectRole>("annotator");
   const [message, setMessage] = useState("");
-  const isAdmin = project?.role === "admin";
+  const isAdmin = project?.role === "admin" || project?.role === "investigator";
 
   const { data: members } = useQuery<ProjectMember[]>({
     queryKey: ["project-members", projectId],
