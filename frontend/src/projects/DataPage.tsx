@@ -12,6 +12,7 @@ import {
   Clock,
   AlertTriangle,
   ChevronDown,
+  FlaskConical,
 } from "lucide-react";
 import { api } from "@/api/client";
 import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
@@ -47,6 +48,18 @@ const REQUIRED_FIELDS = [
 const OPTIONAL_FIELDS = [
   { key: "source_ref", label: "Source ref", description: "Source reference / accession number" },
 ] as const;
+
+/**
+ * Bundled demo dataset — 5 synthetic patients, 103 notes, VTE/anticoagulation
+ * themed. Lives in `public/sample-data/` so it is served as a static file and
+ * runs through the exact same preview → column mapping → upload path as a
+ * user's own file.
+ */
+const SAMPLE_DATASET = {
+  url: "/sample-data/simulated_patients.csv",
+  filename: "simulated_patients.csv",
+  description: "5 synthetic patients · 103 notes",
+} as const;
 
 /** Normalize a column name for matching: lowercase, trim, collapse spaces/underscores */
 function normalizeCol(name: string): string {
@@ -175,6 +188,7 @@ export default function DataPage() {
   // Upload state
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [loadingSample, setLoadingSample] = useState(false);
 
   // Column mapping state (shown after file is selected)
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -337,6 +351,28 @@ export default function DataPage() {
     }
   }
 
+  /** Fetch the bundled demo CSV and feed it through the normal file flow */
+  async function handleLoadSample() {
+    setUploadError("");
+    setLoadingSample(true);
+    try {
+      const resp = await fetch(SAMPLE_DATASET.url);
+      if (!resp.ok) {
+        throw new Error(`Sample dataset is unavailable (HTTP ${resp.status}).`);
+      }
+      const blob = await resp.blob();
+      await handleFileSelected(
+        new File([blob], SAMPLE_DATASET.filename, { type: "text/csv" })
+      );
+    } catch (err) {
+      setUploadError(
+        err instanceof Error ? err.message : "Could not load the sample dataset."
+      );
+    } finally {
+      setLoadingSample(false);
+    }
+  }
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -419,17 +455,36 @@ export default function DataPage() {
             <span className="font-medium text-foreground">text</span>, and{" "}
             <span className="font-medium text-foreground">note_date</span> columns
           </p>
-          <label>
-            <Button variant="outline" size="sm" asChild>
-              <span>Browse files</span>
+          <div className="flex items-center gap-2">
+            <label>
+              <Button variant="outline" size="sm" asChild>
+                <span>Browse files</span>
+              </Button>
+              <input
+                type="file"
+                accept=".csv,.json"
+                className="hidden"
+                onChange={handleFileInput}
+              />
+            </label>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLoadSample}
+              disabled={loadingSample}
+            >
+              {loadingSample ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <FlaskConical className="mr-1.5 h-4 w-4" />
+              )}
+              Use sample dataset
             </Button>
-            <input
-              type="file"
-              accept=".csv,.json"
-              className="hidden"
-              onChange={handleFileInput}
-            />
-          </label>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            No data handy? The sample dataset ({SAMPLE_DATASET.description}) is synthetic
+            and safe to experiment with.
+          </p>
           {uploadError && (
             <p className="mt-3 text-sm text-destructive">{uploadError}</p>
           )}
