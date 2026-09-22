@@ -22,6 +22,52 @@ logger = logging.getLogger(__name__)
 # LiteLLM prefix plus a "/v1" api_base suffix.
 _OPENAI_COMPATIBLE = ("vllm", "lmstudio", "tgi", "openai_compatible")
 
+# Claude families that removed the sampling params (temperature/top_p/top_k).
+# Sending temperature to one of these returns 400 "`temperature` is deprecated
+# for this model". Matched as a prefix on the bare model name, so dated and
+# point-release variants (claude-fable-5-1, claude-opus-4-8-2026…) are covered.
+#
+# This list exists because LiteLLM's model map cannot be relied on here: for a
+# Bedrock inference-profile ID like "us.anthropic.claude-sonnet-5" it reports
+# temperature as *supported*, so drop_params never fires and the 400 reaches the
+# caller. (For the bare "claude-sonnet-5" it falls back to a minimal param set
+# and raises UnsupportedParamsError instead — same request, different failure.)
+# Revisit when LiteLLM's bedrock map learns these models.
+_NO_SAMPLING_PARAMS = (
+    "claude-opus-5",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+# Bedrock IDs carry an optional cross-region inference-profile prefix
+# ("us.", "eu.", "apac.", "global.", "us-gov.") and a vendor prefix
+# ("anthropic."), neither of which is part of the model family name.
+_BEDROCK_PREFIXES = re.compile(r"^(?:us|eu|apac|global|us-gov)\.|^anthropic\.")
+
+
+def strip_bedrock_prefixes(model: str) -> str:
+    """Reduce a Bedrock model/inference-profile ID to its bare model name.
+
+    ``us.anthropic.claude-sonnet-5`` -> ``claude-sonnet-5``. Leaves non-Bedrock
+    model names untouched.
+    """
+    previous = None
+    while previous != model:
+        previous = model
+        model = _BEDROCK_PREFIXES.sub("", model, count=1)
+    return model
+
+
+def supports_temperature(model: str) -> bool:
+    """Whether ``model`` accepts a ``temperature`` param.
+
+    See ``_NO_SAMPLING_PARAMS`` — the newest Claude families reject it outright.
+    """
+    return not strip_bedrock_prefixes(model).startswith(_NO_SAMPLING_PARAMS)
+
 
 def build_litellm_model(provider: str, model: str) -> str:
     """Build the LiteLLM model string.
@@ -142,11 +188,18 @@ async def complete(
     Extra keyword args (``response_format``, ``num_retries``, ``max_tokens``…)
     pass straight through to LiteLLM. Returns the raw LiteLLM response; callers
     map exceptions to their own domain errors.
+
+    Two layers of unsupported-param defence, because one isn't enough:
+    ``drop_params=True`` lets LiteLLM silently drop any param its model map
+    knows the target rejects, and ``supports_temperature`` covers the models
+    that map doesn't know about yet.
     """
+    if supports_temperature(model):
+        litellm_kwargs.setdefault("temperature", temperature)
+    litellm_kwargs.setdefault("drop_params", True)
     return await litellm.acompletion(
         model=build_litellm_model(provider, model),
         messages=messages,
-        temperature=temperature,
         timeout=timeout,
         **build_connection_kwargs(provider, api_base, api_key),
         **litellm_kwargs,

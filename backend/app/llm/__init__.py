@@ -7,6 +7,8 @@ from app.llm.client import (
     complete_json,
     extract_json,
     extract_token_usage,
+    strip_bedrock_prefixes,
+    supports_temperature,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "complete_json",
     "extract_json",
     "extract_token_usage",
+    "strip_bedrock_prefixes",
+    "supports_temperature",
 ]

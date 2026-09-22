@@ -5,12 +5,7 @@ import re
 
 import litellm
 
-from app.llm.client import (
-    build_connection_kwargs,
-    build_litellm_model,
-    extract_json,
-    extract_token_usage,
-)
+from app.llm.client import complete, extract_json, extract_token_usage
 from app.predictors.base import BasePredictor, PredictionResult, PredictorError, TokenUsage
 
 logger = logging.getLogger(__name__)
@@ -99,15 +94,17 @@ class LLMPredictor(BasePredictor):
         )
 
         try:
-            response = await litellm.acompletion(
-                model=build_litellm_model(self.provider, self.model),
+            response = await complete(
+                provider=self.provider,
+                model=self.model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
+                api_base=self.api_base,
+                api_key=self.api_key,
                 temperature=self.temperature,
                 timeout=self.timeout,
-                **build_connection_kwargs(self.provider, self.api_base, self.api_key),
             )
         except litellm.AuthenticationError as e:
             raise PredictorError(f"Authentication failed for {self.provider}: {e}") from e
@@ -134,12 +131,14 @@ class LLMPredictor(BasePredictor):
 
     async def healthcheck(self) -> bool:
         try:
-            response = await litellm.acompletion(
-                model=build_litellm_model(self.provider, self.model),
+            response = await complete(
+                provider=self.provider,
+                model=self.model,
                 messages=[{"role": "user", "content": "Reply with: OK"}],
+                api_base=self.api_base,
+                api_key=self.api_key,
                 max_tokens=5,
                 timeout=10,
-                **build_connection_kwargs(self.provider, self.api_base, self.api_key),
             )
             return bool(response.choices)
         except Exception:
