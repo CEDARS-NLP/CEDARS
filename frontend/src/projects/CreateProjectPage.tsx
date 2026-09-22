@@ -12,6 +12,14 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  CUSTOM_MODEL,
+  PROVIDERS,
+  bedrockModelWarning,
+  defaultModelFor,
+  modelPresets,
+  presetFor,
+} from "@/lib/llmModels";
 
 interface CreateProjectResponse {
   id: string;
@@ -25,10 +33,39 @@ export default function CreateProjectPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [llmProvider, setLlmProvider] = useState("openai");
-  const [llmModel, setLlmModel] = useState("gpt-4o-mini");
+  const [llmModel, setLlmModel] = useState(defaultModelFor("openai"));
+  // True when the model ID is typed by hand instead of picked from the presets.
+  const [customModel, setCustomModel] = useState(false);
   const [llmApiBase, setLlmApiBase] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [error, setError] = useState("");
+
+  const presets = modelPresets(llmProvider);
+  const selectedPreset = presetFor(llmProvider, llmModel);
+  const modelWarning = bedrockModelWarning(llmProvider, llmModel);
+  // Bedrock authenticates with the deployment's AWS credentials — no endpoint,
+  // no API key.
+  const usesConnectionFields = llmProvider !== "bedrock";
+
+  function handleProviderChange(next: string) {
+    setLlmProvider(next);
+    setLlmModel(defaultModelFor(next));
+    setCustomModel(modelPresets(next).length === 0);
+    if (next === "bedrock") {
+      setLlmApiBase("");
+      setLlmApiKey("");
+    }
+  }
+
+  function handleModelChange(next: string) {
+    if (next === CUSTOM_MODEL) {
+      setCustomModel(true);
+      setLlmModel("");
+    } else {
+      setCustomModel(false);
+      setLlmModel(next);
+    }
+  }
 
   const mutation = useMutation({
     mutationFn: (data: { name: string; description: string; llm_provider: string; llm_model: string; llm_api_base: string | null; llm_api_key: string | null }) =>
@@ -98,25 +135,53 @@ export default function CreateProjectPage() {
                   <select
                     id="llmProvider"
                     value={llmProvider}
-                    onChange={(e) => setLlmProvider(e.target.value)}
+                    onChange={(e) => handleProviderChange(e.target.value)}
                     className="flex w-full rounded-md border bg-background px-3 py-2 text-sm"
                   >
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="vllm">vLLM</option>
-                    <option value="ollama">Ollama (local)</option>
-                    <option value="bedrock">AWS Bedrock</option>
+                    {PROVIDERS.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="llmModel">Model</Label>
-                  <Input
-                    id="llmModel"
-                    type="text"
-                    placeholder="gpt-4o-mini"
-                    value={llmModel}
-                    onChange={(e) => setLlmModel(e.target.value)}
-                  />
+                  {presets.length > 0 && (
+                    <select
+                      id="llmModel"
+                      value={customModel ? CUSTOM_MODEL : llmModel}
+                      onChange={(e) => handleModelChange(e.target.value)}
+                      className="flex w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    >
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                      <option value={CUSTOM_MODEL}>Custom model ID…</option>
+                    </select>
+                  )}
+                  {(customModel || presets.length === 0) && (
+                    <Input
+                      id={presets.length > 0 ? "llmModelCustom" : "llmModel"}
+                      type="text"
+                      className="font-mono"
+                      placeholder={
+                        llmProvider === "bedrock"
+                          ? "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                          : llmProvider === "ollama" || llmProvider === "vllm"
+                          ? "llama3"
+                          : "gpt-4o-mini"
+                      }
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                    />
+                  )}
+                  {selectedPreset && (
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-mono">{selectedPreset.id}</span> — {selectedPreset.hint}
+                    </p>
+                  )}
+                  {modelWarning && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{modelWarning}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="llmApiBase">API base URL (optional)</Label>
@@ -126,6 +191,7 @@ export default function CreateProjectPage() {
                     placeholder="http://localhost:11434"
                     value={llmApiBase}
                     onChange={(e) => setLlmApiBase(e.target.value)}
+                    disabled={!usesConnectionFields}
                   />
                 </div>
                 <div className="space-y-2">
@@ -137,8 +203,15 @@ export default function CreateProjectPage() {
                     placeholder="sk-… (leave blank for local/self-hosted)"
                     value={llmApiKey}
                     onChange={(e) => setLlmApiKey(e.target.value)}
+                    disabled={!usesConnectionFields}
                   />
                 </div>
+                {!usesConnectionFields && (
+                  <p className="text-xs text-muted-foreground">
+                    Bedrock needs no endpoint or API key — requests are signed with the
+                    deployment's AWS credentials.
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>

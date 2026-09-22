@@ -8,6 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  CUSTOM_MODEL,
+  PROVIDERS,
+  bedrockModelWarning,
+  defaultModelFor,
+  isCustomModel,
+  modelPresets,
+  presetFor,
+} from "@/lib/llmModels";
+import {
   Database,
   BarChart3,
   MessageSquareText,
@@ -118,14 +127,6 @@ interface ProjectData {
   llm_api_key_set: boolean;
 }
 
-const PROVIDERS = [
-  { value: "openai", label: "OpenAI" },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "vllm", label: "vLLM" },
-  { value: "ollama", label: "Ollama (local)" },
-  { value: "bedrock", label: "AWS Bedrock" },
-];
-
 function ProjectSettings({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -137,6 +138,9 @@ function ProjectSettings({ projectId }: { projectId: string }) {
 
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
+  // True when the model ID is typed by hand rather than picked from the preset
+  // list — either the user chose "Custom", or the provider has no presets.
+  const [customModel, setCustomModel] = useState(false);
   const [apiBase, setApiBase] = useState("");
   // Empty string = leave stored key unchanged. Reset after each successful save.
   const [apiKey, setApiKey] = useState("");
@@ -155,6 +159,9 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   const syncFromProject = (p: ProjectData) => {
     setProvider(p.llm_provider || "");
     setModel(p.llm_model || "");
+    // A stored model that predates (or deliberately departs from) the preset
+    // list stays editable as free text — never silently rewritten to a preset.
+    setCustomModel(isCustomModel(p.llm_provider || "", p.llm_model || ""));
     setApiBase(p.llm_api_base || "");
     setApiKey("");
     setClearApiKey(false);
@@ -166,6 +173,10 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   // new provider (prevents a stale Ollama api_base leaking into a Bedrock call).
   const onProviderChange = (next: string) => {
     setProvider(next);
+    // Model IDs are provider-specific — a Bedrock ARN-style ID is meaningless to
+    // OpenAI — so reset to the new provider's recommended model.
+    setModel(defaultModelFor(next));
+    setCustomModel(modelPresets(next).length === 0);
     if (next === "bedrock") {
       setApiBase("");
       setClearApiKey(true); // remove any stored key on save
@@ -173,6 +184,17 @@ function ProjectSettings({ projectId }: { projectId: string }) {
     } else if (next === "ollama") {
       setClearApiKey(true);
       setApiKey("");
+    }
+    setDirty(true);
+  };
+
+  const onModelChange = (next: string) => {
+    if (next === CUSTOM_MODEL) {
+      setCustomModel(true);
+      setModel("");
+    } else {
+      setCustomModel(false);
+      setModel(next);
     }
     setDirty(true);
   };
@@ -209,6 +231,9 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   });
 
   const missingLlm = !project?.llm_provider || !project?.llm_model;
+  const presets = modelPresets(provider);
+  const selectedPreset = presetFor(provider, model);
+  const modelWarning = bedrockModelWarning(provider, model);
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -254,16 +279,41 @@ function ProjectSettings({ projectId }: { projectId: string }) {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Model</Label>
-                <Input
-                  value={model}
-                  onChange={(e) => { setModel(e.target.value); setDirty(true); }}
-                  placeholder={
-                    provider === "bedrock"
-                      ? "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-                      : "gpt-4o-mini"
-                  }
-                  className="h-8 text-sm"
-                />
+                {presets.length > 0 && (
+                  <select
+                    value={customModel ? CUSTOM_MODEL : model}
+                    onChange={(e) => onModelChange(e.target.value)}
+                    className="flex w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                  >
+                    {!customModel && model === "" && <option value="">— Select —</option>}
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                    <option value={CUSTOM_MODEL}>Custom model ID…</option>
+                  </select>
+                )}
+                {(customModel || presets.length === 0) && (
+                  <Input
+                    value={model}
+                    onChange={(e) => { setModel(e.target.value); setDirty(true); }}
+                    placeholder={
+                      provider === "bedrock"
+                        ? "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                        : provider === "ollama" || provider === "vllm"
+                        ? "llama3"
+                        : "gpt-4o-mini"
+                    }
+                    className="h-8 text-sm font-mono"
+                  />
+                )}
+                {selectedPreset && (
+                  <p className="text-[10px] text-muted-foreground">
+                    <span className="font-mono">{selectedPreset.id}</span> — {selectedPreset.hint}
+                  </p>
+                )}
+                {modelWarning && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400">{modelWarning}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">API base (optional)</Label>
