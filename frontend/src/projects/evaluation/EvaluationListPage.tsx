@@ -8,13 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { UnifiedSessionListItem } from "@/projects/types";
 import { Plus, Copy, Trash2 } from "lucide-react";
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-yellow-500/20 text-yellow-400",
-  reviewing: "bg-blue-500/20 text-blue-400",
-  committed: "bg-purple-500/20 text-purple-400",
-  completed: "bg-green-500/20 text-green-400",
-  discarded: "bg-zinc-500/20 text-zinc-400",
-};
+import { STATUS_STYLES, statusLabel } from "./sessionStatus";
 
 export default function EvaluationListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -70,8 +64,8 @@ export default function EvaluationListPage() {
         <div>
           <h1 className="text-2xl font-bold">Evaluation sessions</h1>
           <p className="text-sm text-muted-foreground">
-            Configure search queries, run LLM classification, review results,
-            then commit to run on the full corpus.
+            Define an event, check the model against your own judgment on a small
+            sample, then run the version you trust across every patient.
           </p>
         </div>
         <Button
@@ -84,9 +78,9 @@ export default function EvaluationListPage() {
       </div>
 
       {hasCommitted && (
-        <div className="rounded-md border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-300">
-          A committed pipeline is running. Cancel it before creating a new
-          session.
+        <div className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+          A committed session is running on the full project. Cancel or finish it
+          before starting another.
         </div>
       )}
 
@@ -95,7 +89,7 @@ export default function EvaluationListPage() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            No evaluation sessions yet. Select "New session" to get started.
+            No sessions yet. Start one to define an event and try it on a sample.
           </CardContent>
         </Card>
       ) : (
@@ -113,8 +107,8 @@ export default function EvaluationListPage() {
                   <CardTitle className="text-base">
                     {s.event_name || "Untitled session"}
                   </CardTitle>
-                  <Badge className={STATUS_COLORS[s.status] ?? ""}>
-                    {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
+                  <Badge className={STATUS_STYLES[s.status] ?? ""}>
+                    {statusLabel(s.status)}
                   </Badge>
                 </div>
                 <div
@@ -150,10 +144,10 @@ export default function EvaluationListPage() {
                   {s.search_queries.length === 1 ? "y" : "ies"}
                 </span>
                 <span>Sample: {s.sample_size} patients</span>
-                {s.metrics && (
+                {!!s.metrics?.total_reviewed && (
                   <span>
-                    F1: {(s.metrics.f1 * 100).toFixed(1)}% | Reviewed:{" "}
-                    {s.metrics.total_reviewed}
+                    {s.metrics.total_reviewed} judged, F1{" "}
+                    {(s.metrics.f1 * 100).toFixed(0)}%
                   </span>
                 )}
                 <span className="ml-auto">

@@ -3,6 +3,7 @@
 import logging
 import math
 import random
+from datetime import UTC, timedelta
 from types import SimpleNamespace
 
 from sqlalchemy import delete, func, select
@@ -30,6 +31,12 @@ _USE_DB_LOCKING = "sqlite" not in settings.database_url
 # Bounds both DB round-trips (avoids an N+1 over patients) and peak memory
 # (avoids loading every matched note — potentially millions — at once).
 _LLM_PATIENT_BATCH_SIZE = 100
+
+# A sample LLM run writes progress to session.metrics after every patient. If a
+# run has been "running" for longer than this without a write, the worker that
+# owned it is gone and the user may start a new run — otherwise a killed worker
+# would lock the session out of classification permanently.
+_STALLED_LLM_RUN = timedelta(minutes=15)
 
 
 async def _enqueue_eval_pipeline_run(run_id: str) -> None:
@@ -270,9 +277,14 @@ async def execute_search_queries(
     notes = result.scalars().all()
 
     queries = session.search_queries or []
-    include_queries = [q for q in queries if q.get("type") == "include"]
 
-    for query_index, query_def in enumerate(include_queries):
+    # query_index must be the position in the full query list: the UI asks for
+    # matches by the index it displays (queries/{index}/matches). Numbering only
+    # the include queries mis-attributed previews whenever an exclude query came
+    # earlier in the list.
+    for query_index, query_def in enumerate(queries):
+        if query_def.get("type") != "include":
+            continue
         query_str = query_def.get("query", "")
         if not query_str:
             continue
@@ -497,10 +509,19 @@ async def run_llm_on_sample(
         )
     ).scalar_one()
 
-    # Check if already running
+    # Check if already running — unless the run has stalled (see _STALLED_LLM_RUN)
     metrics = session.metrics or {}
     if metrics.get("llm_status") == "running":
-        raise ValueError("LLM classification is already running for this session.")
+        last_progress = session.updated_at
+        if last_progress is not None and last_progress.tzinfo is None:
+            last_progress = last_progress.replace(tzinfo=UTC)
+        if last_progress is not None and now_utc() - last_progress < _STALLED_LLM_RUN:
+            raise ValueError("LLM classification is already running for this session.")
+        logger.warning(
+            "Restarting stalled sample LLM run for session %s (no progress since %s)",
+            session_id,
+            last_progress,
+        )
 
     # Validate LLM config
     from app.projects.models import Project
@@ -965,6 +986,7 @@ async def compute_metrics(
             fn += 1
 
     total_reviewed = tp + fp + tn + fn
+    total_pending = sum(1 for pr in all_results if not pr.review_judgment)
     accuracy = (tp + tn) / total_reviewed if total_reviewed > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
@@ -980,15 +1002,26 @@ async def compute_metrics(
         "recall": round(recall, 4),
         "f1": round(f1, 4),
         "total_reviewed": total_reviewed,
+        "total_pending": total_pending,
     }
 
-    # Persist metrics on session
+    # Persist metrics on session, keeping the classification run's own keys.
+    # Replacing the dict wholesale dropped llm_status/llm_total/token_usage, so
+    # the UI forgot that the sample run had finished.
     session = (
         await db.execute(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
         )
     ).scalar_one()
-    session.metrics = metrics
+    existing = session.metrics or {}
+    session.metrics = {
+        **{
+            key: value
+            for key, value in existing.items()
+            if key.startswith("llm_") or key == "token_usage"
+        },
+        **metrics,
+    }
     session.updated_at = now_utc()
     db.add(session)
     await db.commit()

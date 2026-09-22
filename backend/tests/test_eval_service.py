@@ -1,6 +1,6 @@
 """Tests for evaluation service: session CRUD and search execution."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -323,6 +323,35 @@ class TestExecuteSearchQueries:
             assert match.matched_tokens == ["troponin"]
             assert match.is_negated is False
             assert match.query_index == 0
+
+    async def test_query_index_counts_excluded_queries(self, seeded_db):
+        """query_index must be the position in the saved list, not among includes.
+
+        The note preview panel asks for matches by the index of the row the user
+        expanded. When an exclude query sits above an include query, numbering
+        only the includes attributed matches to the wrong row.
+        """
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[
+                {"query": "aspirin", "type": "exclude"},
+                {"query": "troponin", "type": "include"},
+            ],
+        )
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=_mock_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        matches = result.scalars().all()
+        assert len(matches) == 5
+        assert {m.query_index for m in matches} == {1}
 
     async def test_execute_search_no_queries(self, seeded_db):
         """Session with no queries should produce no matches."""
@@ -687,6 +716,41 @@ class TestLlmRun:
         assert stats["patients_classified"] == 0
         assert stats["patients_no_match"] == 5
 
+    async def test_run_llm_rejects_concurrent_run(self, seeded_db):
+        """A run that is genuinely in flight blocks a second one."""
+        session = await _create_session_with_search(seeded_db)
+        session.metrics = {"llm_status": "running", "llm_total": 5, "llm_completed": 2}
+        session.updated_at = datetime.now(UTC)
+        seeded_db.add(session)
+        await seeded_db.commit()
+
+        with pytest.raises(ValueError, match="already running"):
+            await eval_service.run_llm_on_sample(seeded_db, session.id, "proj-1")
+
+    async def test_run_llm_restarts_stalled_run(self, seeded_db):
+        """A killed worker must not lock the session out of classification.
+
+        There is no UI path to clear llm_status, so a run with no progress for
+        longer than _STALLED_LLM_RUN is treated as dead and may be restarted.
+        """
+        session = await _create_session_with_search(seeded_db)
+        session.metrics = {"llm_status": "running", "llm_total": 5, "llm_completed": 2}
+        session.updated_at = datetime.now(UTC) - eval_service._STALLED_LLM_RUN - timedelta(minutes=1)
+        seeded_db.add(session)
+        await seeded_db.commit()
+
+        mock_pool = AsyncMock()
+        with patch("arq.create_pool", new_callable=AsyncMock, return_value=mock_pool):
+            stats = await eval_service.run_llm_on_sample(seeded_db, session.id, "proj-1")
+
+        assert stats["status"] == "started"
+        assert stats["matched_patients"] == 5
+        mock_pool.enqueue_job.assert_awaited_once()
+
+        restarted = await eval_service.get_session(seeded_db, session.id)
+        assert restarted.metrics["llm_status"] == "running"
+        assert restarted.metrics["llm_completed"] == 0
+
 
 class TestListPatientResults:
     async def test_list_patient_results_paginated(self, seeded_db):
@@ -833,6 +897,74 @@ class TestReview:
         assert metrics["tp"] == 3  # positive + correct
         assert metrics["fp"] == 2  # positive + wrong
         assert metrics["accuracy"] > 0
+
+    async def test_compute_metrics_counts_pending(self, seeded_db):
+        """total_pending is the unjudged remainder, not a constant."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        await eval_service.update_llm_config(
+            seeded_db, session.id, event_name="MI Detection",
+        )
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=_mock_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
+
+        metrics = await eval_service.compute_metrics(seeded_db, session.id)
+        assert metrics["total_reviewed"] == 0
+        assert metrics["total_pending"] == 5
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        await eval_service.submit_judgment(
+            seeded_db, patient_result_id=listing["results"][0].id,
+            judgment="correct", user_id="user-1",
+        )
+
+        metrics = await eval_service.compute_metrics(seeded_db, session.id)
+        assert metrics["total_reviewed"] == 1
+        assert metrics["total_pending"] == 4
+
+    async def test_compute_metrics_preserves_llm_progress(self, seeded_db):
+        """Metrics must not erase the record that the sample run finished.
+
+        compute_metrics used to replace session.metrics wholesale, dropping
+        llm_status and llm_completed — so the UI lost track of whether the
+        sample had been classified as soon as anyone was judged.
+        """
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
+
+        before = await eval_service.get_session(seeded_db, session.id)
+        assert before.metrics["llm_status"] == "completed"
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        await eval_service.submit_judgment(
+            seeded_db, patient_result_id=listing["results"][0].id,
+            judgment="correct", user_id="user-1",
+        )
+        await eval_service.compute_metrics(seeded_db, session.id)
+
+        after = await eval_service.get_session(seeded_db, session.id)
+        assert after.metrics["llm_status"] == "completed"
+        assert after.metrics["llm_completed"] == before.metrics["llm_completed"]
+        assert after.metrics["token_usage"] == before.metrics["token_usage"]
+        assert after.metrics["total_reviewed"] == 1
 
 
 class TestCommit:

@@ -317,7 +317,7 @@ async def run_llm_endpoint(
 # ── Results & review ─────────────────────────────────────────────
 
 
-@router.get("/sessions/{session_id}/results/next", response_model=NextResultResponse)
+@router.get("/sessions/{session_id}/results/next", response_model=NextResultResponse | None)
 async def next_unreviewed_endpoint(
     project_id: str,
     session_id: str,
@@ -325,12 +325,13 @@ async def next_unreviewed_endpoint(
     db: AsyncSession = Depends(get_session),
     _user: User = Depends(require_project_role("admin", "annotator")),
 ):
-    """Get the next unreviewed patient result for sequential review."""
+    """Get the next unreviewed patient result for sequential review.
+
+    Returns null once everything is reviewed — finishing the queue is the goal of
+    the workflow, not an error, and the client renders it as a completion state.
+    """
     await _get_session_or_404(db, project_id, session_id)
-    result = await get_next_unreviewed_result(db, session_id, after_id)
-    if result is None:
-        raise_not_found("No unreviewed results")
-    return result
+    return await get_next_unreviewed_result(db, session_id, after_id)
 
 
 @router.get("/sessions/{session_id}/results")

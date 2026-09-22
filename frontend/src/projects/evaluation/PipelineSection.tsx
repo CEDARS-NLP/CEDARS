@@ -77,11 +77,9 @@ export default function PipelineSection({
 
   if (isLoading || !stats) {
     return (
-      <div className="rounded-lg border p-4">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading pipeline status...
-        </div>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading pipeline status…
       </div>
     );
   }
@@ -92,10 +90,14 @@ export default function PipelineSection({
   const progress = stats.total > 0 ? (processed / stats.total) * 100 : 0;
 
   return (
-    <div className="rounded-lg border p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Full pipeline</h2>
-        <div className="flex items-center gap-2">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {isRunning
+            ? "Running the committed configuration over every patient in the project."
+            : "The committed configuration has been run over the whole project."}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
           {isRunning && (
             <>
               <Button
@@ -115,7 +117,7 @@ export default function PipelineSection({
                 size="sm"
                 onClick={() => cancelMutation.mutate()}
                 disabled={cancelMutation.isPending}
-                className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-300 dark:hover:bg-amber-500/10"
               >
                 {cancelMutation.isPending ? (
                   <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Cancelling...</>
@@ -159,33 +161,33 @@ export default function PipelineSection({
           <div className="text-muted-foreground">Total</div>
         </div>
         <div>
-          <div className="text-lg font-semibold tabular-nums text-green-600">{stats.completed}</div>
+          <div className="text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{stats.completed}</div>
           <div className="text-muted-foreground">Matched</div>
         </div>
         <div>
-          <div className="text-lg font-semibold tabular-nums text-zinc-500">{stats.no_match}</div>
+          <div className="text-lg font-semibold tabular-nums text-muted-foreground">{stats.no_match}</div>
           <div className="text-muted-foreground">No match</div>
         </div>
         <div>
-          <div className="text-lg font-semibold tabular-nums text-red-600">{stats.failed}</div>
+          <div className="text-lg font-semibold tabular-nums text-destructive">{stats.failed}</div>
           <div className="text-muted-foreground">Failed</div>
         </div>
         <div>
-          <div className="text-lg font-semibold tabular-nums text-amber-600">{stats.queued + stats.processing}</div>
+          <div className="text-lg font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats.queued + stats.processing}</div>
           <div className="text-muted-foreground">Pending</div>
         </div>
       </div>
 
       {/* Status message */}
       {isDone && !stats.is_cancelled && (
-        <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+        <div className="flex items-center gap-2 rounded-md border border-emerald-600/30 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4" />
           Pipeline complete. {stats.completed} patients matched, {stats.no_match} no match.
           {stats.failed > 0 && ` ${stats.failed} failed.`}
         </div>
       )}
       {stats.is_cancelled && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <XCircle className="h-4 w-4" />
           Pipeline was cancelled. {processed} of {stats.total} patients processed.
         </div>

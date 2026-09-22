@@ -7,15 +7,13 @@ interface MetricsPanelProps {
   sessionId: string;
 }
 
-function MetricCard({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="flex-1 rounded-lg bg-muted/50 p-3 text-center">
-      <div className="text-xs font-medium uppercase text-muted-foreground">{label}</div>
-      <div className={`text-2xl font-bold ${color}`}>{value}</div>
-    </div>
-  );
-}
-
+/**
+ * Agreement between the model and the reviewer, so far.
+ *
+ * No polling: every judgment invalidates this query, which is the only thing
+ * that can change the numbers. The old 5-second interval was the single
+ * chattiest request on the page.
+ */
 export default function MetricsPanel({ projectId, sessionId }: MetricsPanelProps) {
   const { data: metrics } = useQuery({
     queryKey: ["eval-metrics", projectId, sessionId],
@@ -23,31 +21,45 @@ export default function MetricsPanel({ projectId, sessionId }: MetricsPanelProps
       api.get<UnifiedMetrics>(
         `/projects/${projectId}/evaluation/sessions/${sessionId}/metrics`
       ),
-    refetchInterval: 5000,
   });
 
   if (!metrics || metrics.total_reviewed === 0) {
     return (
-      <div className="rounded-lg border p-4">
-        <h2 className="text-lg font-semibold">Metrics</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Review patient results to see live metrics.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Judge a few patients and the model&rsquo;s accuracy against you appears
+        here.
+      </p>
     );
   }
 
+  const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
+
   return (
-    <div className="rounded-lg border p-4 space-y-3">
-      <h2 className="text-lg font-semibold">Live metrics</h2>
-      <div className="flex gap-3">
-        <MetricCard label="Accuracy" value={`${(metrics.accuracy * 100).toFixed(1)}%`} color="text-green-400" />
-        <MetricCard label="Precision" value={`${(metrics.precision * 100).toFixed(1)}%`} color="text-blue-400" />
-        <MetricCard label="Recall" value={`${(metrics.recall * 100).toFixed(1)}%`} color="text-blue-400" />
-        <MetricCard label="F1 score" value={`${(metrics.f1 * 100).toFixed(1)}%`} color="text-yellow-400" />
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label="Accuracy" value={pct(metrics.accuracy)} />
+        <Metric label="Precision" value={pct(metrics.precision)} />
+        <Metric label="Recall" value={pct(metrics.recall)} />
+        <Metric label="F1" value={pct(metrics.f1)} />
       </div>
-      <div className="text-center text-xs text-muted-foreground">
-        Based on {metrics.total_reviewed} reviewed patients ({metrics.total_pending} remaining)
+
+      <p className="text-sm text-muted-foreground">
+        Across {metrics.total_reviewed} judged{" "}
+        {metrics.total_reviewed === 1 ? "patient" : "patients"}: {metrics.tp}{" "}
+        correctly flagged, {metrics.fp} flagged in error, {metrics.fn} missed,{" "}
+        {metrics.tn} correctly passed over.
+        {metrics.total_pending > 0 && ` ${metrics.total_pending} left to judge.`}
+      </p>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-2xl font-semibold tabular-nums text-foreground">
+        {value}
       </div>
     </div>
   );

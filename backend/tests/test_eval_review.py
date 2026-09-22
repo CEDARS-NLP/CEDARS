@@ -34,8 +34,8 @@ async def create_eval_session(client, project_id):
 
 
 @pytest.mark.asyncio
-async def test_next_unreviewed_returns_404_when_no_results(client):
-    """Next endpoint returns 404 when no unreviewed results exist."""
+async def test_next_unreviewed_returns_null_when_no_results(client):
+    """Next endpoint returns null when nothing is left to review."""
     await register_and_login(client)
     project_id = await create_project(client)
     session = await create_eval_session(client, project_id)
@@ -43,7 +43,8 @@ async def test_next_unreviewed_returns_404_when_no_results(client):
     resp = await client.get(
         f"/api/v1/projects/{project_id}/evaluation/sessions/{session['id']}/results/next"
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.json() is None
 
 
 @pytest.mark.asyncio

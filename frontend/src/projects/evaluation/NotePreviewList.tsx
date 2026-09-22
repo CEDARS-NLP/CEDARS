@@ -29,9 +29,11 @@ function HighlightedText({ text, matches }: { text: string; matches: NoteWithMat
     if (pos.start > lastEnd) {
       parts.push(<span key={`t-${lastEnd}`}>{text.slice(lastEnd, pos.start)}</span>);
     }
+    // Highlight with the background, not the text colour — the old blue/red text
+    // shades were only legible on the dark theme.
     const cls = pos.is_negated
-      ? "bg-red-500/20 text-red-300 line-through"
-      : "bg-blue-500/20 text-blue-300 font-medium";
+      ? "bg-destructive/15 text-destructive line-through"
+      : "bg-primary/20 font-medium text-foreground";
     parts.push(
       <span key={`h-${pos.start}`} className={cls}>
         {text.slice(pos.start, pos.end)}

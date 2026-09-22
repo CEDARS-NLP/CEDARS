@@ -258,10 +258,11 @@ export default function EvalReviewPanel({
       <div className="flex flex-col items-center justify-center rounded-lg border-2 border-emerald-300 bg-emerald-50/50 py-16 dark:border-emerald-700 dark:bg-emerald-950/20">
         <Check className="mb-3 h-10 w-10 text-emerald-500" />
         <p className="text-lg font-medium text-foreground">
-          All patients reviewed
+          Every sample patient is judged
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Check the metrics panel to see evaluation results.
+          The agreement figures above cover all of them. Step 5 runs this
+          configuration on the whole project.
         </p>
       </div>
     );
