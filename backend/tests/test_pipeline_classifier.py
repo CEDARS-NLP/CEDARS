@@ -133,6 +133,34 @@ class TestClassifyPatient:
                     event_config=_mock_event_config(),
                 )
 
+    async def test_empty_object_raises_instead_of_defaulting(self):
+        """An answer-free reply must fail, not become a negative at 50%.
+
+        This is what Bedrock returned for every patient while
+        ``response_format={"type": "json_object"}`` was still on the wire: valid
+        JSON with nothing in it. Defaulting produced a whole sample of confident
+        negatives that the model never made.
+        """
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _mock_response("{}")
+
+            from app.pipeline.classifier import classify_patient
+
+            with pytest.raises(ValueError, match="event_detected"):
+                await classify_patient(
+                    excerpts=[{"note_id": "n1", "text": "troponin"}],
+                    event_config=_mock_event_config(),
+                )
+
+    async def test_score_is_probability_of_event(self):
+        """``score`` reads as "how likely is the event", like a PINES score."""
+        from app.pipeline.classifier import ClassificationResult
+
+        positive = ClassificationResult(label="positive", confidence=0.9, reasoning="")
+        negative = ClassificationResult(label="negative", confidence=0.9, reasoning="")
+        assert positive.score == pytest.approx(0.9)
+        assert negative.score == pytest.approx(0.1)
+
     async def test_empty_excerpts_returns_negative(self):
         from app.pipeline.classifier import classify_patient
 

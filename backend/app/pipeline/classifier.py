@@ -4,6 +4,7 @@ Instead of one LLM call per note, sends all matched excerpts for a patient
 in a single call and gets a unified classification decision.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -43,6 +44,17 @@ class ClassificationResult:
     event_date: str | None = None  # ISO date string
     evidence: list[dict] | None = None
     token_usage: dict | None = field(default=None)
+
+    @property
+    def score(self) -> float:
+        """Probability the event occurred, on the same 0-1 scale as PINES.
+
+        ``confidence`` is how sure the model is of its own call, so a firm
+        negative carries a high one. Stored raw as ``predicted_score`` it sorted
+        confident negatives above likely positives in the review queue and read
+        as "95% likely" beside a negative label. Matches app.predictors.llm.
+        """
+        return self.confidence if self.label == "positive" else 1.0 - self.confidence
 
 
 def _build_user_prompt(excerpts: list[dict], event_config) -> str:
@@ -106,7 +118,19 @@ async def classify_patient(
     except Exception as e:
         raise ValueError(f"Classification failed: {e}") from e
 
-    detected = data.get("event_detected", False)
+    if not isinstance(data, dict) or "event_detected" not in data:
+        # Never infer an answer from a reply that doesn't contain one. Defaulting
+        # to (False, 0.5) turned a broken integration into a plausible result:
+        # every patient came back negative at 50%, indistinguishable in the UI
+        # from the model actually clearing them.
+        raise ValueError(
+            "Classification response has no 'event_detected' field: "
+            f"{json.dumps(data)[:200]}"
+        )
+
+    detected = bool(data.get("event_detected"))
+    if "confidence" not in data:
+        logger.warning("Classification response omitted 'confidence'; recording 0.5")
     confidence = float(data.get("confidence", 0.5))
     reasoning = data.get("reasoning", "")
     event_date = data.get("event_date") if detected else None

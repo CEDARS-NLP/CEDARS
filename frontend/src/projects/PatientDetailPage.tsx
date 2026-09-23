@@ -325,7 +325,7 @@ export default function PatientDetailPage() {
                                     ? "Positive"
                                     : "Negative"}
                                   {ann.predicted_score !== null &&
-                                    ` (${(ann.predicted_score * 100).toFixed(0)}%)`}
+                                    ` (${(ann.predicted_score * 100).toFixed(0)}% likely)`}
                                 </span>
                               )}
                               {ann.is_negated && <span>Negated</span>}

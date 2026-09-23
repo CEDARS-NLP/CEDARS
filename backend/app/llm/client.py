@@ -42,6 +42,21 @@ _NO_SAMPLING_PARAMS = (
     "claude-mythos-5",
 )
 
+# Providers whose ``response_format={"type": "json_object"}`` LiteLLM passes
+# through to a native JSON mode. Everywhere else it *emulates* the param by
+# forcing a synthetic tool call, and on Bedrock (litellm 1.82) that emulation
+# loses the answer: the reply comes back with finish_reason "tool_calls", an
+# empty tool_calls list, and a literal "{}" as the message content. "{}" parses
+# as valid JSON, so callers saw a successful response with every field absent
+# and filled in their defaults — a confident-looking classification that the
+# model never made. Dropping the param costs nothing: every JSON call site also
+# asks for JSON in the prompt, and extract_json handles code fences and prose.
+#
+# drop_params=True does not cover this. It only drops params LiteLLM's model map
+# reports as unsupported, and for Bedrock Anthropic the map reports
+# response_format as supported precisely because of the emulation.
+_NATIVE_JSON_MODE = ("openai", "azure", "ollama", *_OPENAI_COMPATIBLE)
+
 # Bedrock IDs carry an optional cross-region inference-profile prefix
 # ("us.", "eu.", "apac.", "global.", "us-gov.") and a vendor prefix
 # ("anthropic."), neither of which is part of the model family name.
@@ -189,13 +204,17 @@ async def complete(
     pass straight through to LiteLLM. Returns the raw LiteLLM response; callers
     map exceptions to their own domain errors.
 
-    Two layers of unsupported-param defence, because one isn't enough:
+    Three layers of unsupported-param defence, because one isn't enough:
     ``drop_params=True`` lets LiteLLM silently drop any param its model map
-    knows the target rejects, and ``supports_temperature`` covers the models
-    that map doesn't know about yet.
+    knows the target rejects, ``supports_temperature`` covers the models that
+    map doesn't know about yet, and ``_NATIVE_JSON_MODE`` covers the param the
+    map wrongly claims *is* supported.
     """
     if supports_temperature(model):
         litellm_kwargs.setdefault("temperature", temperature)
+    if litellm_kwargs.get("response_format") and provider not in _NATIVE_JSON_MODE:
+        litellm_kwargs.pop("response_format")
+        logger.debug("Dropped response_format for provider %s (see _NATIVE_JSON_MODE)", provider)
     litellm_kwargs.setdefault("drop_params", True)
     return await litellm.acompletion(
         model=build_litellm_model(provider, model),

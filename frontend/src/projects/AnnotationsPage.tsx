@@ -1134,7 +1134,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                     </Badge>
                   )}
                   <span className="text-sm tabular-nums text-muted-foreground">
-                    {formatScore(current.predicted_score)} confidence
+                    {formatScore(current.predicted_score)} likely
                   </span>
                 </div>
 

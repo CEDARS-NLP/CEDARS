@@ -253,7 +253,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                     pr.finding_reasoning = classification.reasoning
                     pr.finding_evidence = classification.evidence or []
                     pr.event_date = classification.event_date
-                    pr.predicted_score = classification.confidence
+                    pr.predicted_score = classification.score
                     pr.token_usage = classification.token_usage
                     pr.status = PatientResultStatus.COMPLETED
                     pr.completed_at = now_utc()
@@ -281,7 +281,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                             note_id=note_id,
                             sentence_text=keyword_text,
                             matched_tokens=",".join(set(all_tokens)),
-                            predicted_score=classification.confidence,
+                            predicted_score=classification.score,
                             predicted_label=1 if classification.label == "positive" else 0,
                             predictor_model=config.get("llm_model", ""),
                             reasoning=classification.reasoning or "",

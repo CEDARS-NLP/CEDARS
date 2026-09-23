@@ -118,6 +118,39 @@ class TestCompleteParams:
         assert acompletion.call_args.kwargs["max_tokens"] == 128
 
 
+class TestJsonModeParam:
+    """``response_format`` only reaches providers that implement it natively.
+
+    On Bedrock, LiteLLM emulates it with a forced tool call and returns a literal
+    "{}" — which parsed cleanly and made every classification a default answer.
+    """
+
+    @pytest.fixture
+    def acompletion(self):
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock:
+            yield mock
+
+    @pytest.mark.parametrize("provider", ["bedrock", "anthropic"])
+    async def test_dropped_for_emulating_providers(self, acompletion, provider):
+        await complete(
+            provider=provider,
+            model="claude-haiku-4-5",
+            messages=[{"role": "user", "content": "hi"}],
+            response_format={"type": "json_object"},
+        )
+        assert "response_format" not in acompletion.call_args.kwargs
+
+    @pytest.mark.parametrize("provider", ["openai", "ollama", "vllm", "lmstudio"])
+    async def test_kept_for_native_providers(self, acompletion, provider):
+        await complete(
+            provider=provider,
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            response_format={"type": "json_object"},
+        )
+        assert acompletion.call_args.kwargs["response_format"] == {"type": "json_object"}
+
+
 class TestBuildLitellmModel:
     def test_bedrock_prefix(self):
         assert (

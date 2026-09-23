@@ -707,7 +707,7 @@ async def _execute_sample_llm_impl(
                     finding_reasoning=classification.reasoning,
                     finding_evidence=classification.evidence,
                     event_date=classification.event_date,
-                    predicted_score=classification.confidence,
+                    predicted_score=classification.score,
                     token_usage=classification.token_usage,
                     status=PatientResultStatus.COMPLETED,
                     completed_at=now_utc(),

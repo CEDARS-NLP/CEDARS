@@ -180,7 +180,7 @@ async def process_single_patient(
                     patient_id=task.patient_id,
                     note_id=matches[0].note_id,
                     sentence_text="; ".join(m.matched_text for m in matches[:5]),
-                    predicted_score=classification.confidence,
+                    predicted_score=classification.score,
                     predicted_label=1 if classification.label == "positive" else 0,
                     predictor_model=config["llm_model"],
                     reasoning=classification.reasoning,

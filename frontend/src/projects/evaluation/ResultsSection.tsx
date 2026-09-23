@@ -72,7 +72,7 @@ function PatientCard({
         )}
         {result.predicted_score !== null && (
           <span className="text-xs text-muted-foreground tabular-nums">
-            confidence {result.predicted_score.toFixed(2)}
+            {(result.predicted_score * 100).toFixed(0)}% likely
           </span>
         )}
         <span className="ml-auto text-xs text-muted-foreground">
