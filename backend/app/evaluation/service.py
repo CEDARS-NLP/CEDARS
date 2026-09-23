@@ -672,6 +672,17 @@ async def _execute_sample_llm_impl(
         for note in batch_result.scalars().all():
             notes_by_patient.setdefault(note.patient_id, []).append(note)
 
+        # How many notes the search looked at per patient. Without this,
+        # notes_searched was set to the matched count too, so the review panel
+        # always read "N notes searched · N matched" — hiding the one number
+        # that shows what the queries actually skipped.
+        totals_stmt = (
+            select(Note.patient_id, func.count())
+            .where(Note.patient_id.in_(batch_ids))
+            .group_by(Note.patient_id)
+        )
+        notes_total = dict((await db.execute(totals_stmt)).all())
+
         for patient_id in batch_ids:
             # Already ordered by (patient_id, note_date) in the query above.
             notes = notes_by_patient.get(patient_id, [])
@@ -690,7 +701,7 @@ async def _execute_sample_llm_impl(
                 pr = PatientResult(
                     session_id=session_id,
                     patient_id=patient_id,
-                    notes_searched=len(notes),
+                    notes_searched=notes_total.get(patient_id, len(notes)),
                     notes_matched=len(notes),
                     finding_label=classification.label,
                     finding_reasoning=classification.reasoning,
@@ -713,7 +724,7 @@ async def _execute_sample_llm_impl(
                 pr = PatientResult(
                     session_id=session_id,
                     patient_id=patient_id,
-                    notes_searched=len(notes),
+                    notes_searched=notes_total.get(patient_id, len(notes)),
                     notes_matched=len(notes),
                     status=PatientResultStatus.FAILED,
                     error_message=str(exc),
@@ -877,15 +888,22 @@ async def get_next_unreviewed_result(
     session_id: str,
     after_id: int | None = None,
 ) -> dict | None:
-    """Get the next unreviewed patient result for sequential review."""
+    """Get the next unreviewed patient result for sequential review.
+
+    Sample results only (pipeline_run_id IS NULL), matching compute_metrics. A
+    committed session's full-project results are not judged one at a time, and
+    counting them here made the queue disagree with the metrics above it.
+    """
     total_stmt = select(func.count()).where(
         PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.is_(None),
         PatientResult.status == PatientResultStatus.COMPLETED,
     )
     total_results = (await db.execute(total_stmt)).scalar() or 0
 
     unreviewed_stmt = select(func.count()).where(
         PatientResult.session_id == session_id,
+        PatientResult.pipeline_run_id.is_(None),
         PatientResult.status == PatientResultStatus.COMPLETED,
         PatientResult.review_judgment.is_(None),
     )
@@ -898,6 +916,7 @@ async def get_next_unreviewed_result(
         select(PatientResult)
         .where(
             PatientResult.session_id == session_id,
+            PatientResult.pipeline_run_id.is_(None),
             PatientResult.status == PatientResultStatus.COMPLETED,
             PatientResult.review_judgment.is_(None),
         )
@@ -913,6 +932,7 @@ async def get_next_unreviewed_result(
             select(PatientResult)
             .where(
                 PatientResult.session_id == session_id,
+                PatientResult.pipeline_run_id.is_(None),
                 PatientResult.status == PatientResultStatus.COMPLETED,
                 PatientResult.review_judgment.is_(None),
             )

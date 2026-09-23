@@ -18,6 +18,7 @@ from app.annotations.models import Annotation  # noqa: F401
 from app.evaluation.models import (
     EvaluationSession,
     PatientResult,
+    PatientResultStatus,
     SearchMatch,
     SessionStatus,
 )
@@ -716,6 +717,29 @@ class TestLlmRun:
         assert stats["patients_classified"] == 0
         assert stats["patients_no_match"] == 5
 
+    async def test_run_llm_records_notes_searched_vs_matched(self, seeded_db):
+        """notes_searched is every note the search read, not just the matches.
+
+        Each seeded patient has 2 notes and only 1 mentions troponin, so the
+        review panel should read "2 notes searched · 1 matched". Setting both to
+        the matched count made every patient look like the queries skipped
+        nothing.
+        """
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        assert listing["results"]
+        for pr in listing["results"]:
+            assert pr.notes_searched == 2
+            assert pr.notes_matched == 1
+
     async def test_run_llm_rejects_concurrent_run(self, seeded_db):
         """A run that is genuinely in flight blocks a second one."""
         session = await _create_session_with_search(seeded_db)
@@ -794,6 +818,74 @@ class TestListPatientResults:
             seeded_db, session.id, label_filter="negative",
         )
         assert pos["total"] + neg["total"] == 5
+
+
+class TestReviewQueue:
+    async def test_queue_empties_and_ignores_pipeline_results(self, seeded_db):
+        """The queue serves sample results only, and runs out when all are judged.
+
+        A committed session's full-project results share the session_id, so
+        without the pipeline_run_id filter they joined the sample review queue
+        and its counts stopped agreeing with the metrics shown above it.
+        """
+        session = await _create_session_with_search(seeded_db)
+
+        mock_result = ClassificationResult(
+            label="positive", confidence=0.9, reasoning="Match",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+        with patch.object(eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result):
+            await eval_service.execute_sample_llm(session.id, "proj-1", db_session=seeded_db)
+
+        first = await eval_service.get_next_unreviewed_result(seeded_db, session.id)
+        assert first is not None
+        assert first["total_results"] == 5
+        assert first["total_unreviewed"] == 5
+
+        listing = await eval_service.list_patient_results(seeded_db, session.id)
+        for pr in listing["results"]:
+            await eval_service.submit_judgment(
+                seeded_db, patient_result_id=pr.id,
+                judgment="correct", user_id="user-1",
+            )
+
+        assert await eval_service.get_next_unreviewed_result(seeded_db, session.id) is None
+
+        # An unjudged full-project result must not reopen the sample queue.
+        from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
+        config = EventConfig(
+            project_id="proj-1",
+            name="MI Detection",
+            description="Myocardial infarction",
+            include_criteria="Troponin elevation",
+            exclude_criteria="",
+            llm_provider="openai",
+            llm_model="gpt-4o",
+        )
+        seeded_db.add(config)
+        await seeded_db.flush()
+        run = PipelineRun(
+            project_id="proj-1",
+            event_config_id=config.id,
+            run_type="full",
+            status=PipelineRunStatus.RUNNING,
+        )
+        seeded_db.add(run)
+        await seeded_db.flush()
+
+        seeded_db.add(
+            PatientResult(
+                session_id=session.id,
+                patient_id="pat-1",
+                pipeline_run_id=run.id,
+                status=PatientResultStatus.COMPLETED,
+                finding_label="positive",
+                predicted_score=0.9,
+            )
+        )
+        await seeded_db.commit()
+
+        assert await eval_service.get_next_unreviewed_result(seeded_db, session.id) is None
 
 
 class TestReview:

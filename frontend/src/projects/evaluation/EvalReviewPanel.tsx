@@ -97,20 +97,16 @@ export default function EvalReviewPanel({
   const queryClient = useQueryClient();
   const [afterId, setAfterId] = useState<number | null>(null);
   const [showDateOverride, setShowDateOverride] = useState(false);
-  const [dateValue, setDateValue] = useState("");
+  const [dateEdit, setDateEdit] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [noteIndex, setNoteIndex] = useState(0);
+  const [shownId, setShownId] = useState<number | undefined>(undefined);
 
-  const {
-    data: current,
-    isLoading,
-    refetch,
-  } = useQuery<NextEvalResult>({
+  const { data: current, isLoading } = useQuery<NextEvalResult | null>({
     queryKey: ["eval-next-result", projectId, sessionId, afterId],
     queryFn: () => {
       const params = afterId != null ? `?after_id=${afterId}` : "";
-      return api.get<NextEvalResult>(
+      return api.get<NextEvalResult | null>(
         `/projects/${projectId}/evaluation/sessions/${sessionId}/results/next${params}`
       );
     },
@@ -126,29 +122,30 @@ export default function EvalReviewPanel({
     enabled: !!current,
   });
 
-  // Sort notes: evidence notes first (positive signal), then chronologically
+  // The notes the model cited come first; the rest stay in date order.
+  const contextNotes = noteContext?.notes;
   const sortedNotes = useMemo(() => {
-    if (!noteContext?.notes) return [];
-    const notes = [...noteContext.notes];
-    // If there are evidence notes, put them first; otherwise keep chrono order
-    const evidenceNotes = notes.filter((n) => n.is_evidence);
-    const otherNotes = notes.filter((n) => !n.is_evidence);
-    if (evidenceNotes.length > 0) {
-      return [...evidenceNotes, ...otherNotes];
-    }
-    return notes; // already chronologically ordered from backend
-  }, [noteContext?.notes]);
+    if (!contextNotes) return [];
+    const evidence = contextNotes.filter((n) => n.is_evidence);
+    if (evidence.length === 0) return contextNotes;
+    return [...evidence, ...contextNotes.filter((n) => !n.is_evidence)];
+  }, [contextNotes]);
 
-  // Reset note index when patient changes
-  useEffect(() => {
+  // Start each patient on their first note, and close any date override left
+  // open by the previous one. Done during render rather than in an effect: as an
+  // effect it painted one frame of the new patient with the old note index.
+  if (current?.id !== shownId) {
+    setShownId(current?.id);
     setNoteIndex(0);
-  }, [current?.id]);
+    setShowDateOverride(false);
+    setDateEdit(null);
+  }
 
-  useEffect(() => {
-    if (showDateOverride && !dateValue && current?.event_date) {
-      setDateValue(current.event_date.slice(0, 10));
-    }
-  }, [showDateOverride, current?.event_date]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The override field starts at the date the model proposed. Deriving that
+  // rather than copying it into state on open is what keeps the toggle a pure
+  // setState, so the keyboard handler needs no fresh closure over the patient.
+  const dateValue =
+    dateEdit ?? (current?.event_date ? current.event_date.slice(0, 10) : "");
 
   const judgeMutation = useMutation({
     mutationFn: ({
@@ -164,7 +161,7 @@ export default function EvalReviewPanel({
       ),
     onSuccess: () => {
       setShowDateOverride(false);
-      setDateValue("");
+      setDateEdit(null);
 
       queryClient.invalidateQueries({
         queryKey: ["eval-metrics", projectId, sessionId],
@@ -174,15 +171,16 @@ export default function EvalReviewPanel({
       });
       onRefresh();
 
-      if (current && current.total_unreviewed <= 1) {
-        setCompletionMessage(
-          `All ${current.total_results} patients reviewed.`
-        );
-        setTimeout(() => setCompletionMessage(null), 3000);
-      } else {
-        setAfterId(current!.id);
-        refetch();
-      }
+      // Always advance and always refetch, including on the last patient. The
+      // old code showed a three-second "all reviewed" message instead, and when
+      // it timed out the panel fell back to the cached patient it had just
+      // judged — reporting "1 remaining" against metrics that said none were
+      // left, with a re-judgeable patient on screen. The queue endpoint returns
+      // null when nothing is unreviewed, which is the completion state.
+      setAfterId(current!.id);
+      queryClient.invalidateQueries({
+        queryKey: ["eval-next-result", projectId, sessionId],
+      });
     },
   });
 
@@ -232,15 +230,6 @@ export default function EvalReviewPanel({
     return () => window.removeEventListener("keydown", handleKey);
   }, [handleJudge]);
 
-  if (completionMessage) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-lg border-2 border-emerald-300 bg-emerald-50/50 py-16 dark:border-emerald-700 dark:bg-emerald-950/20">
-        <Check className="mb-3 h-10 w-10 text-emerald-500" />
-        <p className="text-lg font-medium text-foreground">{completionMessage}</p>
-      </div>
-    );
-  }
-
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -269,13 +258,13 @@ export default function EvalReviewPanel({
   }
 
   const isPending = judgeMutation.isPending;
+  // The patient on screen is not judged yet, so it counts toward neither the
+  // bar nor the judged tally. Pairing a "5 of 5" position with "1 remaining"
+  // read as a contradiction.
+  const judged = current.total_results - current.total_unreviewed;
   const progressPct =
     current.total_results > 0
-      ? Math.round(
-          ((current.total_results - current.total_unreviewed) /
-            current.total_results) *
-            100
-        )
+      ? Math.round((judged / current.total_results) * 100)
       : 0;
 
   return (
@@ -288,8 +277,7 @@ export default function EvalReviewPanel({
         {/* Top bar */}
         <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
           <span className="text-sm font-medium tabular-nums text-foreground">
-            {current.total_results - current.total_unreviewed + 1} of{" "}
-            {current.total_results}
+            Patient {judged + 1} of {current.total_results}
           </span>
           <div className="mx-2 h-5 w-px bg-border" />
           <div className="flex-1">
@@ -301,7 +289,7 @@ export default function EvalReviewPanel({
             </div>
           </div>
           <span className="text-xs tabular-nums text-muted-foreground">
-            {current.total_unreviewed} remaining
+            {judged} of {current.total_results} judged
           </span>
           <div className="mx-1 h-5 w-px bg-border" />
           <Tooltip>
@@ -462,12 +450,12 @@ export default function EvalReviewPanel({
                     type="date"
                     className="text-sm"
                     value={dateValue}
-                    onChange={(e) => setDateValue(e.target.value)}
+                    onChange={(e) => setDateEdit(e.target.value)}
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === "Escape") {
                         setShowDateOverride(false);
-                        setDateValue("");
+                        setDateEdit(null);
                       }
                     }}
                   />
@@ -480,7 +468,7 @@ export default function EvalReviewPanel({
                     className="w-full"
                     onClick={() => {
                       setShowDateOverride(false);
-                      setDateValue("");
+                      setDateEdit(null);
                     }}
                   >
                     Cancel

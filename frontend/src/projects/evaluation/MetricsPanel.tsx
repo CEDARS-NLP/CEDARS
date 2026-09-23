@@ -34,13 +34,22 @@ export default function MetricsPanel({ projectId, sessionId }: MetricsPanelProps
 
   const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
 
+  // Precision and F1 divide by the number of patients the model flagged. When
+  // it flagged nobody they are undefined, and the backend's 0.0 placeholder read
+  // as "the model is wrong every time" rather than "there is nothing to judge
+  // it on yet".
+  const flaggedAny = metrics.tp + metrics.fp > 0;
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Metric label="Accuracy" value={pct(metrics.accuracy)} />
-        <Metric label="Precision" value={pct(metrics.precision)} />
+        <Metric
+          label="Precision"
+          value={flaggedAny ? pct(metrics.precision) : "—"}
+        />
         <Metric label="Recall" value={pct(metrics.recall)} />
-        <Metric label="F1" value={pct(metrics.f1)} />
+        <Metric label="F1" value={flaggedAny ? pct(metrics.f1) : "—"} />
       </div>
 
       <p className="text-sm text-muted-foreground">
@@ -50,6 +59,14 @@ export default function MetricsPanel({ projectId, sessionId }: MetricsPanelProps
         {metrics.tn} correctly passed over.
         {metrics.total_pending > 0 && ` ${metrics.total_pending} left to judge.`}
       </p>
+
+      {!flaggedAny && (
+        <p className="max-w-prose text-sm text-amber-700 dark:text-amber-400">
+          The model called no patient positive, so precision and F1 cannot be
+          measured yet. If it should have flagged some of these, sharpen what
+          counts as the event in step 1 and run the sample again.
+        </p>
+      )}
     </div>
   );
 }
