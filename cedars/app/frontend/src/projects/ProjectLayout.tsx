@@ -2,15 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
-
-export interface ProjectDetail {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  role: string;
-  created_at: string;
-}
+import type { ProjectDetail } from "./types";
 
 export default function ProjectLayout() {
   const { projectId } = useParams<{ projectId: string }>();

@@ -1,5 +1,5 @@
 import { useOutletContext } from "react-router-dom";
-import type { ProjectDetail } from "./ProjectLayout";
+import type { ProjectDetail } from "./types";
 
 /** Access the current project provided by ProjectLayout's outlet context. */
 export function useProject(): ProjectDetail {

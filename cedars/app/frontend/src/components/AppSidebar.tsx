@@ -17,15 +17,7 @@ import {
   Info,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-
-interface ProjectDetail {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  role: string;
-  created_at: string;
-}
+import type { ProjectDetail } from "@/projects/types";
 
 // Project workflow navigation (mirrors the original Flask menu, role-gated).
 const adminNav = [
