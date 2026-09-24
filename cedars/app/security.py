@@ -6,13 +6,19 @@ JWTs delivered as httpOnly cookies instead of Flask-Login server sessions.
 Password hashing continues to use ``werkzeug.security`` exactly as before.
 """
 from datetime import datetime, timezone
+from typing import Optional
 
-import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
+from jose import ExpiredSignatureError, JWTError, jwt
+from passlib.context import CryptContext
+from werkzeug.security import check_password_hash
 
 from .database import get_global_engine
 from .database.db_auth import get_user
 from .settings import settings
+
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class CurrentUser:  # pylint: disable=too-few-public-methods
@@ -35,6 +41,20 @@ def _create_token(username, is_admin, token_type, expires_delta):
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def hash_password(password: str) -> str:
+    """Hash a plaintext password using the V2 backend bcrypt strategy."""
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, password_hash: Optional[str]) -> bool:
+    """Verify bcrypt hashes, falling back to legacy Werkzeug hashes."""
+    if not password_hash:
+        return False
+    if password_hash.startswith("$2"):
+        return pwd_context.verify(plain_password, password_hash)
+    return check_password_hash(password_hash, plain_password)
+
+
 def create_access_token(username, is_admin):
     """Create a short-lived access token."""
     return _create_token(username, is_admin, "access", settings.ACCESS_TOKEN_TTL)
@@ -50,7 +70,10 @@ def decode_token(token, expected_type):
     try:
         payload = jwt.decode(token, settings.SECRET_KEY,
                              algorithms=[settings.JWT_ALGORITHM])
-    except jwt.PyJWTError as exc:
+    except ExpiredSignatureError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Token expired") from exc
+    except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Invalid or expired token") from exc
     if payload.get("type") != expected_type:

@@ -8,6 +8,7 @@ from __future__ import annotations
 from loguru import logger
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -58,6 +59,18 @@ class Users(GlobalBase):
     uses_orcid: Mapped[bool] = mapped_column(Boolean, 
                                              default=False,
                                              nullable=False)
+
+    auth_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    sso_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    sso_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    sso_email_verified: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+    sso_groups_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    last_login_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_projects: Mapped[list["Projects"]] = relationship(
         back_populates="investigator_user",

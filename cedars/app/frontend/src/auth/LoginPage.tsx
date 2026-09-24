@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "./AuthProvider";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, ssoConfig } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -24,6 +24,12 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  function handleSsoLogin() {
+    if (ssoConfig?.login_url) {
+      window.location.assign(ssoConfig.login_url);
     }
   }
 
@@ -105,6 +111,17 @@ export default function LoginPage() {
               {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+
+          {ssoConfig?.enabled && (
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4 w-full"
+              onClick={handleSsoLogin}
+            >
+              Sign in with {ssoConfig.provider_name}
+            </Button>
+          )}
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}

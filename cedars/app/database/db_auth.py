@@ -6,6 +6,8 @@ application database and per-project databases.
 '''
 
 from typing import Optional
+from datetime import datetime, timezone
+import json
 
 from loguru import logger
 
@@ -91,6 +93,97 @@ def get_user(engine, user_id):
         ).scalar_one_or_none()
 
     return user
+
+
+@log_function_call
+def get_user_by_sso_identity(engine, provider, subject):
+    '''
+    Retrieves a user by external SSO provider and subject.
+
+    Returns:
+        Users row, or None if no linked SSO identity exists.
+    '''
+    with session_scope(engine) as session:
+        return session.execute(
+            select(Users).where(
+                Users.auth_provider == provider,
+                Users.sso_subject == subject,
+            )
+        ).scalar_one_or_none()
+
+
+@log_function_call
+def get_user_by_sso_email(engine, email):
+    '''
+    Retrieves a user by normalized SSO email.
+
+    Returns:
+        Users row, or None if no matching SSO email exists.
+    '''
+    normalized_email = (email or "").strip().lower()
+    with session_scope(engine) as session:
+        return session.execute(
+            select(Users).where(Users.sso_email == normalized_email)
+        ).scalar_one_or_none()
+
+
+@log_function_call
+def add_sso_user(engine, user_id, provider, subject, email,
+                 email_verified=None, groups=None, is_admin=False):
+    '''
+    Adds an SSO-only user to the global application database.
+    '''
+    normalized_email = (email or user_id).strip().lower()
+    with session_scope(engine) as session:
+        session.execute(
+            insert(Users).values(
+                user_id=user_id,
+                password_hash=None,
+                uses_orcid=False,
+                is_admin=is_admin,
+                auth_provider=provider,
+                sso_subject=subject,
+                sso_email=normalized_email,
+                sso_email_verified=email_verified,
+                sso_groups_json=json.dumps(groups or []),
+                last_login_time=datetime.now(timezone.utc),
+            )
+        )
+
+
+@log_function_call
+def link_sso_identity(engine, user_id, provider, subject, email,
+                      email_verified=None, groups=None):
+    '''
+    Links an existing user row to an external SSO identity.
+    '''
+    normalized_email = (email or user_id).strip().lower()
+    with session_scope(engine) as session:
+        session.execute(
+            update(Users)
+            .where(Users.user_id == user_id)
+            .values(
+                auth_provider=provider,
+                sso_subject=subject,
+                sso_email=normalized_email,
+                sso_email_verified=email_verified,
+                sso_groups_json=json.dumps(groups or []),
+                last_login_time=datetime.now(timezone.utc),
+            )
+        )
+
+
+@log_function_call
+def touch_user_login(engine, user_id):
+    '''
+    Updates the user's last-login timestamp.
+    '''
+    with session_scope(engine) as session:
+        session.execute(
+            update(Users)
+            .where(Users.user_id == user_id)
+            .values(last_login_time=datetime.now(timezone.utc))
+        )
 
 
 @log_function_call

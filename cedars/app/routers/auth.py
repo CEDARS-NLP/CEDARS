@@ -3,21 +3,94 @@
 Ports the working parts of the original Flask ``auth`` blueprint (username +
 password, password policy) to FastAPI with JWT cookies.
 """
+import secrets
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from passvalidate import PasswordPolicy
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..database import get_global_engine
 from ..database.db_auth import add_user, get_user
 from ..schemas import (LoginRequest, LoginResponse, MessageResponse,
-                       RegisterRequest, UserOut)
+                       RegisterRequest, SsoConfigOut, UserOut)
 from ..security import (CurrentUser, clear_auth_cookies, decode_token,
-                        get_current_user, set_auth_cookies)
+                        get_current_user, hash_password, set_auth_cookies,
+                        verify_password)
 from ..settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_USERNAMES = {"cedars", "pines"}
+SSO_DOMAIN_MESSAGE = "Use Sign in with SSO for this email domain."
+SSO_STATE_COOKIE_NAME = "cedars_sso_state"
+SSO_NONCE_COOKIE_NAME = "cedars_sso_nonce"
+
+
+def _is_sso_domain_identifier(identifier: str) -> bool:
+    value = (identifier or "").strip().lower()
+    if "@" not in value:
+        return False
+    domain = value.rsplit("@", 1)[1]
+    return domain in settings.SSO_ALLOWED_EMAIL_DOMAINS
+
+
+def _sso_login_available() -> bool:
+    return all([
+        settings.SSO_ENABLED,
+        settings.SSO_AUTHORIZATION_ENDPOINT,
+        settings.SSO_CLIENT_ID,
+        settings.SSO_REDIRECT_URI,
+    ])
+
+
+def _set_sso_cookie(response: Response, name: str, value: str) -> None:
+    response.set_cookie(
+        name,
+        value,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+        path="/api/v1/auth/sso",
+        max_age=300,
+    )
+
+
+@router.get("/sso/config", response_model=SsoConfigOut)
+def sso_config():
+    """Return frontend-safe SSO configuration."""
+    return SsoConfigOut(
+        enabled=_sso_login_available(),
+        provider_name=settings.SSO_PROVIDER_NAME,
+        login_url="/api/v1/auth/sso/login",
+    )
+
+
+@router.get("/sso/login")
+def sso_login():
+    """Start the backend-owned OIDC authorization flow."""
+    if not _sso_login_available():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "SSO login is not configured.")
+
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    query = urlencode({
+        "response_type": "code",
+        "client_id": settings.SSO_CLIENT_ID,
+        "redirect_uri": settings.SSO_REDIRECT_URI,
+        "scope": settings.SSO_SCOPES,
+        "state": state,
+        "nonce": nonce,
+    })
+    response = RedirectResponse(
+        url=f"{settings.SSO_AUTHORIZATION_ENDPOINT}?{query}",
+        status_code=status.HTTP_302_FOUND,
+    )
+    _set_sso_cookie(response, SSO_STATE_COOKIE_NAME, state)
+    _set_sso_cookie(response, SSO_NONCE_COOKIE_NAME, nonce)
+    return response
 
 
 def _password_policy() -> PasswordPolicy:
@@ -47,6 +120,8 @@ def register(payload: RegisterRequest):
     if not username or not password.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Username and password are required.")
+    if _is_sso_domain_identifier(username):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, SSO_DOMAIN_MESSAGE)
     if existing_user or username.lower() in RESERVED_USERNAMES:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -55,7 +130,7 @@ def register(payload: RegisterRequest):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "\n".join(password_issues))
 
     add_user(global_engine, user_id=username,
-             password_hash=generate_password_hash(password),
+             password_hash=hash_password(password),
              is_admin=False)
     return UserOut(username=username, is_admin=False)
 
@@ -68,9 +143,11 @@ def login(payload: LoginRequest, response: Response):
     if not username or not password:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Username and password are required.")
+    if _is_sso_domain_identifier(username):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, SSO_DOMAIN_MESSAGE)
 
     user = get_user(get_global_engine(), username)
-    if user and check_password_hash(user.password_hash, password):
+    if user and verify_password(password, user.password_hash):
         is_admin = bool(user.is_admin)
         set_auth_cookies(response, username, is_admin)
         return LoginResponse(message="Login successful.",

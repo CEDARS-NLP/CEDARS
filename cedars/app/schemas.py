@@ -35,6 +35,12 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class SsoConfigOut(BaseModel):
+    enabled: bool
+    provider_name: str
+    login_url: str
+
+
 # --- projects -----------------------------------------------------------
 
 class ProjectCreate(BaseModel):

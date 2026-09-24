@@ -18,8 +18,15 @@ interface LoginResponse {
   user: User;
 }
 
+interface SsoConfig {
+  enabled: boolean;
+  provider_name: string;
+  login_url: string;
+}
+
 interface AuthContextValue {
   user: User | null;
+  ssoConfig: SsoConfig | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (
@@ -34,7 +41,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchSsoConfig = useCallback(async () => {
+    try {
+      const config = await api.get<SsoConfig>("/auth/sso/config");
+      setSsoConfig(config);
+    } catch {
+      setSsoConfig(null);
+    }
+  }, []);
 
   const fetchUser = useCallback(async () => {
     try {
@@ -46,8 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchUser().finally(() => setIsLoading(false));
-  }, [fetchUser]);
+    Promise.all([fetchUser(), fetchSsoConfig()]).finally(() => setIsLoading(false));
+  }, [fetchSsoConfig, fetchUser]);
 
   const login = useCallback(async (username: string, password: string) => {
     const resp = await api.post<LoginResponse>("/auth/login", {
@@ -83,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext value={{ user, isLoading, login, register, logout }}>
+    <AuthContext value={{ user, ssoConfig, isLoading, login, register, logout }}>
       {children}
     </AuthContext>
   );

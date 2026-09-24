@@ -30,6 +30,28 @@ class Settings:  # pylint: disable=too-few-public-methods
     ACCESS_COOKIE_NAME = "cedars_access"
     REFRESH_COOKIE_NAME = "cedars_refresh"
 
+    # --- SSO / OIDC ---
+    SSO_ENABLED = os.getenv("SSO_ENABLED", "false").lower() == "true"
+    SSO_PROVIDER_NAME = os.getenv("SSO_PROVIDER_NAME", "MSK SSO")
+    SSO_ISSUER = os.getenv("SSO_ISSUER", "")
+    SSO_AUTHORIZATION_ENDPOINT = os.getenv("SSO_AUTHORIZATION_ENDPOINT", "")
+    SSO_TOKEN_ENDPOINT = os.getenv("SSO_TOKEN_ENDPOINT", "")
+    SSO_USERINFO_ENDPOINT = os.getenv("SSO_USERINFO_ENDPOINT", "")
+    SSO_JWKS_URI = os.getenv("SSO_JWKS_URI", "")
+    SSO_CLIENT_ID = os.getenv("SSO_CLIENT_ID", "")
+    SSO_CLIENT_SECRET = os.getenv("SSO_CLIENT_SECRET", "")
+    SSO_REDIRECT_URI = os.getenv("SSO_REDIRECT_URI", "")
+    SSO_SCOPES = os.getenv("SSO_SCOPES", "openid email profile")
+    SSO_ALLOWED_EMAIL_DOMAINS = [
+        domain.lower()
+        for domain in _split_csv(os.getenv("SSO_ALLOWED_EMAIL_DOMAINS"), [])
+    ]
+    SSO_REQUIRED_CLAIMS = _split_csv(os.getenv("SSO_REQUIRED_CLAIMS"),
+                                     ["sub", "email"])
+    SSO_GROUPS_CLAIM = os.getenv("SSO_GROUPS_CLAIM", "groups")
+    SSO_LOGOUT_ENDPOINT = os.getenv("SSO_LOGOUT_ENDPOINT", "")
+    SSO_POST_LOGOUT_REDIRECT_URI = os.getenv("SSO_POST_LOGOUT_REDIRECT_URI", "")
+
     # --- CORS (dev: allow the Vite dev server by default) ---
     CORS_ORIGINS = _split_csv(os.getenv("CORS_ORIGINS"),
                               ["http://localhost:5173", "http://localhost"])
