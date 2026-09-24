@@ -5,7 +5,11 @@ x-cedars-common: &cedars-common
   image: cedars
 
 x-minio-common: &minio-common
-  image: quay.io/minio/minio:${MINIO_VERSION}
+  build:
+    context: ./minio
+    args:
+      MINIO_VERSION: ${MINIO_VERSION}
+  image: cedars-minio:${MINIO_VERSION}
   command: server --console-address ":9001" http://minio/data{1...2}
   expose:
     - ${MINIO_PORT}
@@ -14,7 +18,7 @@ x-minio-common: &minio-common
     MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
     MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
   healthcheck:
-    test: ["CMD", "mc", "ready", "local"]
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/minio/health/live"]
     interval: 5s
     timeout: 5s
     retries: 5
