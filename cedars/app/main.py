@@ -7,7 +7,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import setup_logging
-from .routers import (adjudicate, auth, data, download, internal, projects,
+from .routers import (adjudicate, auth, data, download, internal, jobs, projects,
                       query, rq_dashboard, stats)
 from .settings import settings
 
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     api.include_router(auth.router)
     api.include_router(projects.router)
     api.include_router(data.router)
+    api.include_router(jobs.router)
     api.include_router(query.router)
     api.include_router(adjudicate.router)
     api.include_router(stats.router)

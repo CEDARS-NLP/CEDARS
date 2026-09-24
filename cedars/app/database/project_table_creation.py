@@ -12,6 +12,7 @@ from loguru import logger
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
+from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Double,
+    JSON,
     String,
     Text,
     Index,
@@ -36,6 +38,60 @@ SYSTEM_REVIEWERS = ("CEDARS", "PINES")
 
 class ProjectBase(DeclarativeBase):
     """Shared declarative base for all ORM models."""
+
+
+class DataSources(ProjectBase):
+    """A project-local data ingestion source and its latest sync state."""
+
+    __tablename__ = "DataSources"
+
+    source_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    object_key: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_data_sources_active", "deleted_at", "created_at"),
+    )
+
+
+class BackgroundJobs(ProjectBase):
+    """Durable project-local lifecycle state for work executed by ARQ."""
+
+    __tablename__ = "BackgroundJobs"
+
+    job_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    arq_job_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, nullable=True)
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    result_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_background_jobs_recent", "created_at"),
+        Index("idx_background_jobs_status", "status", "created_at"),
+    )
+
 
 class Patients(ProjectBase):
     """
@@ -74,6 +130,13 @@ class Patients(ProjectBase):
     )
     pines_status: Mapped[str] = mapped_column(String(20), nullable=True)
     pines_error: Mapped[str] = mapped_column(String(500), nullable=True)
+
+    data_source_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("DataSources.source_id"), nullable=True
+    )
+    workflow_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     updated: Mapped[bool] = mapped_column(Boolean,
                                              default=False,
@@ -148,6 +211,10 @@ class Notes(ProjectBase):
                                                  default=False,
                                                  nullable=False)
 
+    data_source_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("DataSources.source_id"), nullable=True
+    )
+
     patient: Mapped["Patients"] = relationship(back_populates="notes")
 
     annotations: Mapped[list["Annotations"]] = relationship(
@@ -170,6 +237,7 @@ class Notes(ProjectBase):
     __table_args__ = (
         Index("idx_notes_patient_date", "patient_id", "text_date"),
         Index("idx_notes_patient", "patient_id"),
+        Index("idx_notes_data_source", "data_source_id"),
     )
 
     def __repr__(self) -> str:  # for debugging and logging only

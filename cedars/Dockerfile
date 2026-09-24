@@ -1,22 +1,16 @@
-#FROM python:3.9-buster as builder
-FROM python:3.9-slim as builder
+FROM ghcr.io/astral-sh/uv:0.12.18-python3.12-bookworm-slim AS uv
+FROM python:3.12-slim AS builder
 
-RUN pip install poetry==1.7.1 --no-cache-dir
+COPY --from=uv /uv /uvx /bin/
 
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_INSTALLER_PARALLEL=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache \
-    PIP_DEFAULT_TIMEOUT=300 \
-    PIP_RETRIES=10
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/.venv
 
-WORKDIR /
+WORKDIR /app
 
-COPY pyproject.toml ./
-RUN touch README.md
-
-RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 
 FROM redis:7.2-alpine
 
@@ -24,13 +18,14 @@ COPY redis.conf /usr/local/etc/redis/redis.conf
 
 CMD ["redis-server", "/usr/local/etc/redis/redis.conf", "--loglevel", "warning"]
 
-FROM python:3.9-slim as runtime
+FROM python:3.12-slim AS runtime
 
 ENV VIRTUAL_ENV=/.venv \
     PATH="/.venv/bin:$PATH"
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
+WORKDIR /app
 COPY . .
 RUN mkdir -p /tmp/prometheus-multiproc
 EXPOSE 8000

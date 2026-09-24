@@ -9,7 +9,8 @@ CEDARS is setup with [pytest](https://docs.pytest.org/en/stable/) to test the ba
 
 ```shell
 $ cd cedars
-$ poetry run python -m pytest
+$ uv sync --extra dev
+$ uv run python -m pytest
 ```
 
 ## 2. Code Linting
@@ -18,7 +19,7 @@ CEDARS includes [flake8](https://flake8.pycqa.org/en/latest/) as a code linting 
 
 ```shell
 $ cd cedars
-$ poetry run python -m flake8 --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
+$ uv run python -m flake8 --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
 ```
 
 

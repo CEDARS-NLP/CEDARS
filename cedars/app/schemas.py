@@ -2,6 +2,7 @@
 
 Models are grouped by workflow area and expanded as each phase is ported.
 """
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -97,6 +98,50 @@ class IngestResponse(BaseModel):
     total_rows: int
     total_chunks: int
     total_patients: int
+
+
+class DataSourceOut(BaseModel):
+    id: str
+    name: str
+    connector_type: str
+    object_key: Optional[str] = None
+    status: str
+    row_count: Optional[int] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    last_synced_at: Optional[datetime] = None
+
+
+class BackgroundJobOut(BaseModel):
+    id: str
+    arq_job_id: Optional[str] = None
+    job_type: str
+    status: str
+    progress: int
+    created_by: Optional[str] = None
+    result_summary: Optional[dict] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class PatientListItemOut(BaseModel):
+    id: str
+    patient_id_ext: str
+    status: str
+    note_count: int
+    annotation_count: int
+    reviewed_count: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PatientListOut(BaseModel):
+    items: list[PatientListItemOut]
+    total: int
+    limit: int
+    offset: int
 
 
 # --- query / NLP --------------------------------------------------------

@@ -7,13 +7,58 @@ Ingestion runs synchronously, matching the original behavior.
 from typing import Optional
 from loguru import logger
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
-from ..dependencies import require_project_admin
-from ..schemas import DataFileOut, IngestResponse
+from ..database import get_current_project_engine
+from ..database.db_overview import list_data_sources
+from ..database.db_patients import WORKFLOW_STATUSES, list_patients
+from ..dependencies import ProjectContext, require_project, require_project_admin
+from ..schemas import (DataFileOut, DataSourceOut, IngestResponse, PatientListItemOut,
+                       PatientListOut)
 from ..services import data_service
 
 router = APIRouter(prefix="/projects/{project_id}/data", tags=["data"])
+
+
+@router.get("/sources", response_model=list[DataSourceOut])
+def list_sources(_ctx: ProjectContext = Depends(require_project)):
+    """List active ingestion sources from this project's own database."""
+    return [
+        DataSourceOut(
+            id=source.source_id,
+            name=source.name,
+            connector_type=source.connector_type,
+            object_key=source.object_key,
+            status=source.status,
+            row_count=source.row_count,
+            error_message=source.error_message,
+            created_at=source.created_at,
+            last_synced_at=source.last_synced_at,
+        )
+        for source in list_data_sources(get_current_project_engine())
+    ]
+
+
+@router.get("/patients", response_model=PatientListOut)
+def list_project_patients(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    search: Optional[str] = Query(default=None, max_length=100),
+    patient_status: Optional[str] = Query(default=None, alias="status"),
+    _ctx: ProjectContext = Depends(require_project),
+):
+    """Browse patients in the bound project with search, workflow state, and counts."""
+    if patient_status and patient_status not in WORKFLOW_STATUSES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown patient status.")
+    items, total = list_patients(
+        get_current_project_engine(), limit, offset, search, patient_status
+    )
+    return PatientListOut(
+        items=[PatientListItemOut(**item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/files", response_model=list[DataFileOut])

@@ -4,7 +4,6 @@ __pycache__/
 *.pyc
 .idea/
 .DS_Store
-poetry.lock
 **/.ipynb_checkpoints/*
 data
 .venv/
