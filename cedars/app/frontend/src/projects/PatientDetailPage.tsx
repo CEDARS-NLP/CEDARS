@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, ChevronRight, RotateCcw, CalendarDays } from "lucide-react";
 import { api } from "@/api/client";
@@ -82,6 +82,7 @@ function groupAnnotationsByNote(
 /** Notes and annotation decisions for a single patient (ports the V2 patient detail view). */
 export default function PatientDetailPage() {
   const { projectId, patientId } = useParams<{ projectId: string; patientId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAdminLevel } = useProjectPermissions();
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
@@ -118,6 +119,9 @@ export default function PatientDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["patient-info", projectId, patientId] });
       queryClient.invalidateQueries({ queryKey: ["patient-stats", projectId, patientId] });
       queryClient.invalidateQueries({ queryKey: ["patients", projectId] });
+      // Mirrors a manual patient-ID search: the patient is now loaded into this
+      // admin's adjudicate session, so take them straight there.
+      navigate(`/projects/${projectId}/adjudicate`);
     },
   });
 

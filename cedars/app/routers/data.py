@@ -20,7 +20,7 @@ from ..dependencies import ProjectContext, require_project, require_project_admi
 from ..schemas import (DataFileOut, DataSourceOut, IngestResponse, MessageResponse,
                        NoteOut, PatientAnnotationOut, PatientListItemOut,
                        PatientListOut, PatientReviewStatsOut)
-from ..services import data_service
+from ..services import adjudication_service, data_service
 
 _REVIEW_STATUS_LABELS = {
     Annotations.STATUS_UNREVIEWED: "unreviewed",
@@ -136,10 +136,12 @@ def get_patient_stats_endpoint(
 @router.post("/patients/{patient_id}/reopen", response_model=MessageResponse)
 def reopen_patient_endpoint(
     patient_id: str,
-    _ctx: ProjectContext = Depends(require_project_admin),
+    ctx: ProjectContext = Depends(require_project_admin),
 ):
-    """Re-enter a reviewed patient into the annotation queue, preserving decisions."""
+    """Unlock a reviewed patient and load them into the caller's adjudicate session,
+    the same way searching for their ID in the Adjudicate page would."""
     reopen_patient(get_current_project_engine(), patient_id)
+    adjudication_service.search_patient(ctx.user.username, ctx.project_id, patient_id)
     return MessageResponse(message=f"Patient {patient_id} re-opened for review.")
 
 
