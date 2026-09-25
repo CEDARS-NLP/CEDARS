@@ -2,7 +2,7 @@
 
 Models are grouped by workflow area and expanded as each phase is ported.
 """
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
@@ -142,6 +142,35 @@ class PatientListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class NoteOut(BaseModel):
+    id: str
+    patient_id: str
+    text_id: str
+    note_date: date
+    text: str
+
+
+class PatientAnnotationOut(BaseModel):
+    id: int
+    note_id: str
+    sentence_text: str
+    matched_tokens: str
+    is_negated: bool
+    review_status: str
+    event_date: Optional[date] = None
+    note_date: date
+    sentence_number: int
+
+
+class PatientReviewStatsOut(BaseModel):
+    total: int
+    unreviewed: int
+    reviewed: int
+    skipped: int
+    current_event_date: Optional[date] = None
+    event_annotation_id: Optional[int] = None
 
 
 # --- query / NLP --------------------------------------------------------

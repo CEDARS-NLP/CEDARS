@@ -15,6 +15,8 @@ import DataPage from "@/projects/DataPage";
 import QueryPage from "@/projects/QueryPage";
 import AdjudicatePage from "@/projects/AdjudicatePage";
 import StatsPage from "@/projects/StatsPage";
+import PatientsPage from "@/projects/PatientsPage";
+import PatientDetailPage from "@/projects/PatientDetailPage";
 import ExportPage from "@/projects/ExportPage";
 import InternalProcessesPage from "@/projects/InternalProcessesPage";
 import ProjectDetailsPage from "@/projects/ProjectDetailsPage";
@@ -123,6 +125,8 @@ export default function App() {
                 <Route path="query" element={<QueryPage />} />
                 <Route path="adjudicate" element={<AdjudicatePage />} />
                 <Route path="stats" element={<StatsPage />} />
+                <Route path="patients" element={<PatientsPage />} />
+                <Route path="patients/:patientId" element={<PatientDetailPage />} />
                 <Route path="export" element={<ExportPage />} />
                 <Route path="internal" element={<InternalProcessesPage />} />
                 <Route path="details" element={<ProjectDetailsPage />} />

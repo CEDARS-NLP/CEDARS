@@ -354,6 +354,18 @@ def remove_all_locked(project_engine) -> None:
         session.execute(update(Patients).values(locked=False))
 
 
+@log_function_call
+def reopen_patient(project_engine, patient_id: str) -> None:
+    '''
+    Re-enters a reviewed patient into the annotation queue: unlocks them, clears
+    the reviewed flag, and reverts any SKIPPED annotations back to UNREVIEWED.
+    Annotations already marked REVIEWED are left untouched.
+    '''
+    revert_patient_reviewed(project_engine, patient_id, "")
+    set_patient_lock_status(project_engine, patient_id, False)
+    revert_skipped_annotations(project_engine, patient_id)
+
+
 # ---------------------------------------------------------------------------
 # Event date/annotation tracking (Events: one row per patient)
 # ---------------------------------------------------------------------------

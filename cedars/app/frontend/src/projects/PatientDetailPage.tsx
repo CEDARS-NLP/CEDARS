@@ -1,0 +1,276 @@
+import { useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ChevronDown, ChevronRight, RotateCcw, CalendarDays } from "lucide-react";
+import { api } from "@/api/client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useProjectPermissions } from "./usePermissions";
+
+interface NoteResponse {
+  id: string;
+  patient_id: string;
+  text_id: string;
+  note_date: string;
+  text: string;
+}
+
+interface PatientAnnotation {
+  id: number;
+  note_id: string;
+  sentence_text: string;
+  matched_tokens: string;
+  is_negated: boolean;
+  review_status: string;
+  event_date: string | null;
+  note_date: string;
+  sentence_number: number;
+}
+
+interface PatientReviewStats {
+  total: number;
+  unreviewed: number;
+  reviewed: number;
+  skipped: number;
+  current_event_date: string | null;
+  event_annotation_id: number | null;
+}
+
+interface PatientListItem {
+  id: string;
+  patient_id_ext: string;
+  status: string;
+  note_count: number;
+}
+
+interface PatientListResponse {
+  items: PatientListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+function statusLabel(s: string): string {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function reviewBadgeVariant(
+  s: string,
+): "default" | "secondary" | "destructive" | "outline" {
+  switch (s) {
+    case "reviewed":
+      return "default";
+    case "skipped":
+      return "secondary";
+    default:
+      return "outline";
+  }
+}
+
+function groupAnnotationsByNote(
+  annotations: PatientAnnotation[],
+): Map<string, PatientAnnotation[]> {
+  const map = new Map<string, PatientAnnotation[]>();
+  for (const a of annotations) {
+    const list = map.get(a.note_id) || [];
+    list.push(a);
+    map.set(a.note_id, list);
+  }
+  return map;
+}
+
+/** Notes and annotation decisions for a single patient (ports the V2 patient detail view). */
+export default function PatientDetailPage() {
+  const { projectId, patientId } = useParams<{ projectId: string; patientId: string }>();
+  const queryClient = useQueryClient();
+  const { isAdminLevel } = useProjectPermissions();
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+
+  // The list endpoint carries the patient's workflow status; the detail endpoints don't.
+  const { data: patientData } = useQuery<PatientListResponse>({
+    queryKey: ["patient-info", projectId, patientId],
+    queryFn: () => api.get(`/projects/${projectId}/data/patients?limit=50&offset=0`),
+    enabled: !!projectId && !!patientId,
+  });
+  const patient = patientData?.items.find((p) => p.id === patientId);
+
+  const { data: notes, isLoading: notesLoading } = useQuery<NoteResponse[]>({
+    queryKey: ["patient-notes", projectId, patientId],
+    queryFn: () => api.get(`/projects/${projectId}/data/patients/${patientId}/notes`),
+    enabled: !!projectId && !!patientId,
+  });
+
+  const { data: annotations } = useQuery<PatientAnnotation[]>({
+    queryKey: ["patient-annotations", projectId, patientId],
+    queryFn: () => api.get(`/projects/${projectId}/data/patients/${patientId}/annotations`),
+    enabled: !!projectId && !!patientId,
+  });
+
+  const { data: stats } = useQuery<PatientReviewStats>({
+    queryKey: ["patient-stats", projectId, patientId],
+    queryFn: () => api.get(`/projects/${projectId}/data/patients/${patientId}/stats`),
+    enabled: !!projectId && !!patientId,
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/data/patients/${patientId}/reopen`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["patient-info", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["patient-stats", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["patients", projectId] });
+    },
+  });
+
+  const annotationsByNote = annotations
+    ? groupAnnotationsByNote(annotations)
+    : new Map<string, PatientAnnotation[]>();
+
+  const toggleNote = (noteId: string) => {
+    setExpandedNotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(noteId)) {
+        next.delete(noteId);
+      } else {
+        next.add(noteId);
+      }
+      return next;
+    });
+  };
+
+  const handleReopen = () => {
+    if (
+      window.confirm(
+        "Re-open this patient for review? They will re-enter the annotation queue. Existing decisions are preserved.",
+      )
+    ) {
+      reopenMutation.mutate();
+    }
+  };
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <Link
+        to={`/projects/${projectId}/patients`}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to patients
+      </Link>
+
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">{patient?.patient_id_ext ?? patientId}</h1>
+          <div className="flex items-center gap-3">
+            {patient && <Badge variant="outline">{statusLabel(patient.status)}</Badge>}
+            {stats && stats.total > 0 && (
+              <span className="text-sm text-muted-foreground">
+                {stats.reviewed} reviewed, {stats.skipped} skipped, {stats.unreviewed} unreviewed of{" "}
+                {stats.total} annotations
+              </span>
+            )}
+            {stats?.current_event_date && (
+              <span className="inline-flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
+                <CalendarDays className="h-3.5 w-3.5" />
+                Event: {new Date(stats.current_event_date).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {isAdminLevel && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReopen}
+            disabled={reopenMutation.isPending}
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            {reopenMutation.isPending ? "Re-opening..." : "Re-open for review"}
+          </Button>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-medium">
+          Clinical notes{" "}
+          {notes && <span className="text-muted-foreground font-normal">({notes.length})</span>}
+        </h2>
+
+        {notesLoading ? (
+          <p className="text-sm text-muted-foreground">Loading notes...</p>
+        ) : !notes?.length ? (
+          <p className="text-sm text-muted-foreground">No notes found for this patient.</p>
+        ) : (
+          notes.map((note) => {
+            const noteAnnotations = annotationsByNote.get(note.text_id) || [];
+            const isExpanded = expandedNotes.has(note.text_id);
+
+            return (
+              <div key={note.id} className="rounded-md border">
+                <button
+                  onClick={() => toggleNote(note.text_id)}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/50"
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="font-medium text-sm">{note.text_id}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {new Date(note.note_date).toLocaleDateString()}
+                  </span>
+                  {noteAnnotations.length > 0 && (
+                    <Badge variant="secondary" className="ml-auto">
+                      {noteAnnotations.length} annotation{noteAnnotations.length !== 1 ? "s" : ""}
+                    </Badge>
+                  )}
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t px-4 py-4 space-y-4">
+                    <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90 font-sans">
+                      {note.text}
+                    </pre>
+
+                    {noteAnnotations.length > 0 && (
+                      <div className="space-y-2 border-t pt-3">
+                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                          Annotations
+                        </h4>
+                        {noteAnnotations.map((ann) => (
+                          <div
+                            key={ann.id}
+                            className="rounded border bg-muted/30 px-3 py-2 text-sm space-y-1"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium text-foreground/90 italic">
+                                &ldquo;{ann.sentence_text}&rdquo;
+                              </p>
+                              <Badge variant={reviewBadgeVariant(ann.review_status)} className="shrink-0">
+                                {statusLabel(ann.review_status)}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                              <span className="font-mono">{ann.matched_tokens}</span>
+                              {ann.is_negated && <span>Negated</span>}
+                              {ann.event_date && (
+                                <span className="text-amber-600 dark:text-amber-400">
+                                  Event: {new Date(ann.event_date).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}

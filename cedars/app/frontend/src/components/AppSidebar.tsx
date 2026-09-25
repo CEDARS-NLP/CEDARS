@@ -12,6 +12,7 @@ import {
   Search,
   ClipboardCheck,
   PieChart,
+  Users,
   Wrench,
   Settings,
   Info,
@@ -23,6 +24,7 @@ import type { ProjectDetail } from "@/projects/types";
 const adminNav = [
   { label: "Statistics", suffix: "/stats", icon: PieChart },
   { label: "Data", suffix: "/data", icon: Database },
+  { label: "Patients", suffix: "/patients", icon: Users },
   { label: "Query", suffix: "/query", icon: Search },
   { label: "Adjudicate", suffix: "/adjudicate", icon: ClipboardCheck },
   { label: "Export", suffix: "/export", icon: Download },
