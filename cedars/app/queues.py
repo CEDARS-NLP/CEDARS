@@ -17,7 +17,7 @@ from rq import Queue
 TASK_QUEUE_PREFIX = "task"
 OPS_QUEUE_PREFIX = "ops"
 JOB_TIMEOUT = 3600
-OPERATION_TIMEOUT = 86400
+OPERATION_TIMEOUT = 86400 # 24 hours
 
 _PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
