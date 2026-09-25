@@ -5,6 +5,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import {
   Database,
   Download,
+  FlaskConical,
   LogOut,
   FolderOpen,
   Moon,
@@ -28,6 +29,7 @@ const adminNav = [
   { label: "Query", suffix: "/query", icon: Search },
   { label: "Adjudicate", suffix: "/adjudicate", icon: ClipboardCheck },
   { label: "Export", suffix: "/export", icon: Download },
+  { label: "Evaluation", suffix: "/evaluation", icon: FlaskConical },
   { label: "Internal", suffix: "/internal", icon: Wrench },
   { label: "Project details", suffix: "/details", icon: Settings },
 ];

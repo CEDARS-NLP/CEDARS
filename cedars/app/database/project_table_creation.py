@@ -664,3 +664,63 @@ class ProjectSettings(ProjectBase):
     def __repr__(self) -> str:  # for debugging and logging only
         return f"ProjectSettings(settings_id={self.settings_id!r})"
 
+
+class EvaluationSessions(ProjectBase):
+    """Project-local configuration and lifecycle for an isolated evaluation."""
+
+    __tablename__ = "EvaluationSessions"
+
+    eval_session_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    event_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    include_criteria: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    exclude_criteria: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    search_queries: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    sample_patient_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc), nullable=False,
+    )
+
+    __table_args__ = (Index("idx_evaluation_sessions_status", "status", "created_at"),)
+
+
+class LLMEvaluationResults(ProjectBase):
+    """PINES outputs and review state, isolated from CEDARS workflow tables."""
+
+    __tablename__ = "LLMEvaluationResults"
+
+    evaluation_result_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    eval_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("EvaluationSessions.eval_session_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    patient_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    note_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    predicted_score: Mapped[float] = mapped_column(Double, nullable=False)
+    predicted_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    classification_threshold: Mapped[float] = mapped_column(Double, nullable=False)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    review_judgment: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_llm_eval_session", "eval_session_id", "evaluated_at"),
+        Index("idx_llm_eval_patient", "patient_id", "evaluated_at"),
+    )
+

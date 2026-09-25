@@ -18,6 +18,7 @@ import StatsPage from "@/projects/StatsPage";
 import PatientsPage from "@/projects/PatientsPage";
 import PatientDetailPage from "@/projects/PatientDetailPage";
 import ExportPage from "@/projects/ExportPage";
+import EvaluationPage from "@/projects/EvaluationPage";
 import InternalProcessesPage from "@/projects/InternalProcessesPage";
 import ProjectDetailsPage from "@/projects/ProjectDetailsPage";
 import AboutPage from "@/projects/AboutPage";
@@ -128,6 +129,7 @@ export default function App() {
                 <Route path="patients" element={<PatientsPage />} />
                 <Route path="patients/:patientId" element={<PatientDetailPage />} />
                 <Route path="export" element={<ExportPage />} />
+                <Route path="evaluation" element={<EvaluationPage />} />
                 <Route path="internal" element={<InternalProcessesPage />} />
                 <Route path="details" element={<ProjectDetailsPage />} />
               </Route>

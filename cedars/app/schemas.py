@@ -6,7 +6,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- auth ---------------------------------------------------------------
@@ -303,3 +303,74 @@ class PinesStatusOut(BaseModel):
 class PinesRetryResponse(BaseModel):
     dispatched: int
     message: str
+
+
+# --- isolated LLM evaluation -------------------------------------------
+
+class EvaluationPatientOut(BaseModel):
+    patient_id: str
+    note_count: int
+
+
+class EvaluationNoteOut(BaseModel):
+    note_id: str
+    patient_id: str
+    note_date: date
+    text: str
+
+
+class EvaluationSessionCreate(BaseModel):
+    event_name: str
+    event_description: str = ""
+    include_criteria: str = ""
+    exclude_criteria: str = ""
+    search_queries: list[dict] = Field(default_factory=list)
+    sample_patient_ids: list[str]
+
+
+class EvaluationSessionOut(BaseModel):
+    eval_session_id: str
+    event_name: str
+    event_description: str
+    include_criteria: str
+    exclude_criteria: str
+    search_queries: list[dict]
+    sample_patient_ids: list[str]
+    metrics: dict = Field(default_factory=dict)
+    status: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class EvaluationRunRequest(BaseModel):
+    note_ids: list[str]
+
+
+class LLMEvaluationResultOut(BaseModel):
+    evaluation_result_id: str
+    eval_session_id: str
+    patient_id: str
+    note_id: str
+    model_name: str
+    predicted_score: float
+    predicted_label: str
+    classification_threshold: float
+    result_json: dict
+    review_judgment: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    evaluated_at: datetime
+
+
+class EvaluationJudgmentRequest(BaseModel):
+    judgment: str
+
+
+class EvaluationMetricsOut(BaseModel):
+    total_results: int
+    reviewed: int
+    correct: int
+    incorrect: int
+    skipped: int
+    accuracy: Optional[float] = None
