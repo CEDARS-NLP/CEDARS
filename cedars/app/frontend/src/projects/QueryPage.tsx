@@ -13,6 +13,7 @@ interface QueryData {
   hide_duplicates: boolean;
   skip_after_event: boolean;
   exclude_negated: boolean;
+  pines_model: string | null;
 }
 
 interface SaveResponse {
@@ -27,20 +28,34 @@ interface PinesStatus {
   classification_threshold?: number | null;
 }
 
+interface PinesModel {
+  id: string;
+  name: string;
+  classification_threshold?: number | null;
+  search_query: string;
+}
+
 /** Define the CEDARS search query and dispatch NLP processing. */
 export default function QueryPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [nlpApply, setNlpApply] = useState(false);
+  const [pinesModel, setPinesModel] = useState("");
   const [hideDuplicates, setHideDuplicates] = useState(true);
   const [skipAfterEvent, setSkipAfterEvent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const nlpApply = Boolean(pinesModel);
 
   const { data } = useQuery<QueryData>({
     queryKey: ["query", projectId],
     queryFn: () => api.get<QueryData>(`/projects/${projectId}/query`),
+    enabled: !!projectId,
+  });
+
+  const { data: pinesModels } = useQuery<PinesModel[]>({
+    queryKey: ["pines-models", projectId],
+    queryFn: () => api.get<PinesModel[]>(`/projects/${projectId}/internal/pines/models`),
     enabled: !!projectId,
   });
 
@@ -54,11 +69,21 @@ export default function QueryPage() {
   useEffect(() => {
     if (data) {
       setQuery(data.query ?? "");
-      setNlpApply(data.nlp_apply);
+      setPinesModel(data.pines_model ?? "");
       setHideDuplicates(data.hide_duplicates);
       setSkipAfterEvent(data.skip_after_event);
     }
   }, [data]);
+
+  function handleModelChange(modelId: string) {
+    setPinesModel(modelId);
+    const searchQuery = pinesModels?.find((m) => m.id === modelId)?.search_query;
+    if (!searchQuery || searchQuery === query) return;
+    if (query.trim() && !window.confirm("Replace the current query with this model's search query?")) {
+      return;
+    }
+    setQuery(searchQuery);
+  }
 
   async function handleSave() {
     setError("");
@@ -69,6 +94,7 @@ export default function QueryPage() {
         nlp_apply: nlpApply,
         hide_duplicates: hideDuplicates,
         skip_after_event: skipAfterEvent,
+        pines_model: pinesModel || null,
       });
       navigate(`/projects/${projectId}/stats`);
     } catch (err) {
@@ -134,14 +160,25 @@ export default function QueryPage() {
               />
               Skip annotations after a recorded event date
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={nlpApply}
-                onChange={(e) => setNlpApply(e.target.checked)}
-              />
-              Apply PINES model (NLP classification)
-            </label>
+            <div className="space-y-1">
+              <Label htmlFor="pines-model">PINES model (NLP classification)</Label>
+              <select
+                id="pines-model"
+                value={pinesModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">No PINES model</option>
+                {(pinesModels ?? []).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Selecting a model fills in its search query, which you can still edit.
+              </p>
+            </div>
             {nlpApply && pinesStatus && !pinesStatus.available && (
               <p className="text-sm text-destructive">
                 PINES is unavailable. Start the model server before saving this query.

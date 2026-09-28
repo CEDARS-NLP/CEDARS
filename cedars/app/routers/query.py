@@ -39,6 +39,7 @@ def get_query(_ctx: ProjectContext = Depends(require_project_admin)):
         hide_duplicates=bool(details.get("hide_duplicates", True)) if details else True,
         skip_after_event=bool(details.get("skip_after_event", False)) if details else False,
         exclude_negated=bool(details.get("exclude_negated", False)) if details else False,
+        pines_model=details.get("pines_model") if details else None,
     )
 
 
@@ -47,7 +48,9 @@ def save_query(payload: QueryUpdate,
                ctx: ProjectContext = Depends(require_project_admin)):
     """Save the query and dispatch NLP (matches the Flask upload_query action)."""
     search_query = payload.query or ""
-    if payload.nlp_apply and not check_is_pines_available():
+    # nlp_apply is still honored so existing API clients keep working.
+    apply_pines = bool(payload.pines_model) or bool(payload.nlp_apply)
+    if apply_pines and not check_is_pines_available():
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "PINES is enabled but its model server is unavailable or unhealthy.",
@@ -63,8 +66,8 @@ def save_query(payload: QueryUpdate,
     new_query_added = save_search_query(
         get_current_project_engine(), search_query, use_negation,
         bool(payload.hide_duplicates), bool(payload.skip_after_event),
-        tag_query_exact=False, apply_pines=bool(payload.nlp_apply),
-        apply_llm=False)
+        tag_query_exact=False, apply_pines=apply_pines,
+        apply_llm=False, pines_model=payload.pines_model)
     if new_query_added:
         project_engine = get_current_project_engine()
         empty_annotations(project_engine)

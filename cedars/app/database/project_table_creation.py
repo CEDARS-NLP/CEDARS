@@ -631,7 +631,10 @@ class Query(ProjectBase):
     tag_query_exact: Mapped[bool] = mapped_column(Boolean, nullable=False)
     apply_pines: Mapped[bool] = mapped_column(Boolean, nullable=False)
     apply_llm: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    
+
+    # NULL means no PINES model was selected for this query.
+    pines_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
     date_min: Mapped[date] = mapped_column(Date, nullable=True)
     date_max: Mapped[date] = mapped_column(Date, nullable=True)
     current: Mapped[bool] = mapped_column(Boolean,

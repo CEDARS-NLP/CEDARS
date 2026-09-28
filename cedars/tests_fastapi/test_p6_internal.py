@@ -51,6 +51,34 @@ def test_pines_status_mocked(admin_project, monkeypatch):
     assert resp.json()["model"] == "test-model"
 
 
+def test_pines_models_mocked(admin_project, monkeypatch):
+    client, pid = admin_project
+    monkeypatch.setattr(internal_router, "get_pines_models", lambda: [{
+        "id": "BERT-TINY",
+        "name": "bert-tiny",
+        "classification_threshold": 0.5,
+        "search_query": "dvt OR bleed",
+    }])
+    resp = client.get(f"/api/v1/projects/{pid}/internal/pines/models")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == "BERT-TINY"
+    assert body[0]["search_query"] == "dvt OR bleed"
+
+
+def test_pines_models_handles_unreachable(admin_project, monkeypatch):
+    client, pid = admin_project
+
+    def _boom(*a, **k):
+        raise RuntimeError("unreachable")
+
+    monkeypatch.setattr(internal_router, "get_pines_models", _boom)
+    resp = client.get(f"/api/v1/projects/{pid}/internal/pines/models")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 def test_pines_status_handles_unreachable(admin_project, monkeypatch):
     client, pid = admin_project
 

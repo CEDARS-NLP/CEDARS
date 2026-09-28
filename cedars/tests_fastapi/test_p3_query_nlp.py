@@ -60,6 +60,49 @@ def test_get_query_returns_saved(admin_project, monkeypatch):
     assert got["skip_after_event"] is True
 
 
+def test_selected_pines_model_is_saved_and_enables_pines(admin_project, monkeypatch):
+    client, pid = admin_project
+    _seed_patients(pid, 1)
+    monkeypatch.setattr(query_router, "check_is_pines_available", lambda: True)
+
+    resp = client.put(f"/api/v1/projects/{pid}/query", json={
+        "query": "dvt OR bleed", "hide_duplicates": True,
+        "skip_after_event": False, "pines_model": "VTE-LF-4K"})
+    assert resp.status_code == 200, resp.text
+
+    saved = sql.get_current_query(pid)
+    assert saved.pines_model == "VTE-LF-4K"
+    assert saved.apply_pines is True
+    assert client.get(f"/api/v1/projects/{pid}/query").json()["pines_model"] == "VTE-LF-4K"
+
+
+def test_no_pines_model_leaves_pines_disabled(admin_project):
+    client, pid = admin_project
+    _seed_patients(pid, 1)
+
+    resp = client.put(f"/api/v1/projects/{pid}/query", json={
+        "query": "cancer", "hide_duplicates": True, "skip_after_event": False})
+    assert resp.status_code == 200, resp.text
+
+    saved = sql.get_current_query(pid)
+    assert saved.pines_model is None
+    assert saved.apply_pines is False
+    assert client.get(f"/api/v1/projects/{pid}/query").json()["pines_model"] is None
+
+
+def test_unavailable_pines_rejects_model_selection(admin_project, monkeypatch):
+    client, pid = admin_project
+    _seed_patients(pid, 1)
+    monkeypatch.setattr(query_router, "check_is_pines_available", lambda: False)
+
+    resp = client.put(f"/api/v1/projects/{pid}/query", json={
+        "query": "sepsis", "hide_duplicates": True,
+        "skip_after_event": False, "pines_model": "BERT-TINY"})
+
+    assert resp.status_code == 503
+    assert sql.get_current_query(pid) is None
+
+
 def test_unavailable_pines_rejects_query_without_mutation(admin_project, monkeypatch):
     client, pid = admin_project
     _seed_patients(pid, 1)

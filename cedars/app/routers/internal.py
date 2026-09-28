@@ -8,12 +8,12 @@ from fastapi import APIRouter, Depends
 from rq.registry import FailedJobRegistry, FinishedJobRegistry
 
 from .. import ops_tasks, queues
-from ..api import check_is_pines_available, get_pines_health
+from ..api import check_is_pines_available, get_pines_health, get_pines_models
 from ..database import get_current_project_engine
 from ..database.db_search import get_patient_ids_by_pines_status
 from ..dependencies import ProjectContext, require_project_admin
-from ..schemas import (InternalStatusOut, PinesRetryResponse, PinesStatusOut,
-                       SimpleJobResponse)
+from ..schemas import (InternalStatusOut, PinesModelOut, PinesRetryResponse,
+                       PinesStatusOut, SimpleJobResponse)
 from ..services import nlp_service
 
 router = APIRouter(prefix="/projects/{project_id}/internal", tags=["internal"])
@@ -60,6 +60,15 @@ def pines_status(_ctx: ProjectContext = Depends(require_project_admin)):
         model=health["model"],
         classification_threshold=health["classification_threshold"],
     )
+
+
+@router.get("/pines/models", response_model=list[PinesModelOut])
+def pines_models(_ctx: ProjectContext = Depends(require_project_admin)):
+    """List selectable PINES models; empty when the server is unreachable."""
+    try:
+        return [PinesModelOut(**model) for model in get_pines_models()]
+    except Exception:  # noqa: BLE001 - unavailable/unreachable PINES is a normal state
+        return []
 
 
 @router.post("/pines/retry", response_model=PinesRetryResponse)

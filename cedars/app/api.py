@@ -46,6 +46,35 @@ def load_pines_url(project_id: Optional[str] = None):
     del project_id
     return get_pines_health()["url"], False
 
+
+@log_function_call
+def get_pines_models() -> list[dict]:
+    '''Return the models the PINES server offers, with their search queries.'''
+    url = _configured_pines_url()
+    response = requests.get(f"{url}/models", timeout=PINES_HEALTH_TIMEOUT)
+    response.raise_for_status()
+    entries = response.json().get("models")
+    if not isinstance(entries, list):
+        raise ValueError("PINES models response is missing models")
+
+    models = []
+    for entry in entries:
+        model_id = entry.get("id") if isinstance(entry, dict) else None
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ValueError("PINES models response has an entry without an id")
+        search_query = entry.get("search_query", "")
+        if not isinstance(search_query, str):
+            raise ValueError(f"PINES model {model_id} has an invalid search_query")
+        threshold = entry.get("classification_threshold")
+        models.append({
+            "id": model_id,
+            "name": entry.get("name") or model_id,
+            "classification_threshold": (float(threshold)
+                                         if isinstance(threshold, (int, float)) else None),
+            "search_query": search_query,
+        })
+    return models
+
 @log_function_call
 def init_pines_connection() -> bool:
     '''Validate and persist the self-hosted PINES connection.'''

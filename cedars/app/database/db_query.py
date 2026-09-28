@@ -29,6 +29,7 @@ class QueryDetails(TypedDict, total=False):
     tag_query_exact: bool
     apply_pines: bool
     apply_llm: bool
+    pines_model: Optional[str]
     date_min: Optional[date]
     date_max: Optional[date]
 
@@ -37,7 +38,7 @@ class QueryDetails(TypedDict, total=False):
 def save_query(project_engine, query, exclude_negated, hide_duplicates,  # pylint: disable=R0913
                skip_after_event, tag_query_exact,
                apply_pines, apply_llm,
-               date_min=None, date_max=None) -> bool:
+               date_min=None, date_max=None, pines_model=None) -> bool:
     '''
     Saves a new search query to a project's database, marking any previously
     current query as no longer current. If the new query is identical to the
@@ -62,6 +63,7 @@ def save_query(project_engine, query, exclude_negated, hide_duplicates,  # pylin
             and current.tag_query_exact == tag_query_exact
             and current.apply_pines == apply_pines
             and current.apply_llm == apply_llm
+            and current.pines_model == pines_model
             and current.date_min == date_min
             and current.date_max == date_max):
             logger.info(f"Query already saved: {query}.")
@@ -79,6 +81,7 @@ def save_query(project_engine, query, exclude_negated, hide_duplicates,  # pylin
                 tag_query_exact=tag_query_exact,
                 apply_pines=apply_pines,
                 apply_llm=apply_llm,
+                pines_model=pines_model,
                 date_min=date_min,
                 date_max=date_max,
                 current=True
@@ -134,6 +137,7 @@ def get_search_query_details(project_engine) -> QueryDetails:
         "tag_query_exact": current.tag_query_exact,
         "apply_pines": current.apply_pines,
         "apply_llm": current.apply_llm,
+        "pines_model": current.pines_model,
         "date_min": current.date_min,
         "date_max": current.date_max,
     }

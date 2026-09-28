@@ -180,6 +180,7 @@ class QueryUpdate(BaseModel):
     nlp_apply: bool = False
     hide_duplicates: bool = True
     skip_after_event: bool = False
+    pines_model: Optional[str] = None
 
 
 class QueryOut(BaseModel):
@@ -188,6 +189,7 @@ class QueryOut(BaseModel):
     hide_duplicates: bool = True
     skip_after_event: bool = False
     exclude_negated: bool = False
+    pines_model: Optional[str] = None
 
 
 class SaveQueryResponse(BaseModel):
@@ -298,6 +300,13 @@ class PinesStatusOut(BaseModel):
     available: bool
     model: Optional[str] = None
     classification_threshold: Optional[float] = None
+
+
+class PinesModelOut(BaseModel):
+    id: str
+    name: str
+    classification_threshold: Optional[float] = None
+    search_query: str = ""
 
 
 class PinesRetryResponse(BaseModel):
