@@ -6,6 +6,7 @@ from spacy.matcher import Matcher
 from loguru import logger
 from . import db
 from .cedars_enums import ReviewStatus
+from .sqs_pines_handler import SQS_Task_Handler
 
 logger.enable(__name__)
 
@@ -142,7 +143,9 @@ class NlpProcessor:
                 raise FileNotFoundError(f"Spacy model {model_name} failed to load.") from exc
         return cls.instance
 
-    def process_notes(self, patient_id: str, processes=1, batch_size=20):
+    def process_notes(self, patient_id: str, processes=1,
+                      batch_size=20, pines_inf_mode=None,
+                      sqs_conn_details = {}):
         """
         ##### Process Query Matching
 
@@ -151,6 +154,15 @@ class NlpProcessor:
         """
         # nlp_model = spacy.load(model_name)
         assert len(self.matcher) == 0
+
+        sqs_handler = None
+        if db.get_search_query("tag_query")["nlp_apply"] is True:
+            if pines_inf_mode is not None and pines_inf_mode == 'SQS_Inference':
+                sqs_handler = SQS_Task_Handler(inference_queue_url=sqs_conn_details['inference_queue_url'],
+                                               response_queue_url=sqs_conn_details['response_queue_url'],
+                                               aws_region=sqs_conn_details['aws_region'])
+                sqs_handler.send_warmup()
+
         # load previosly processed documents
         # document_processed = load_progress()
         spacy_patterns = query_to_patterns(self.query)
@@ -236,9 +248,10 @@ class NlpProcessor:
         # check if nlp processing is enabled
         if docs_with_annotations > 0 and db.get_search_query("tag_query")["nlp_apply"] is True:
             logger.info(f"Processing {docs_with_annotations} documents with PINES")
-            self.process_patient_pines(patient_id)
+            self.process_patient_pines(patient_id, sqs_handler=sqs_handler)
 
-    def process_patient_pines(self, patient_id: str, threshold: float = 0.95) -> None:
+    def process_patient_pines(self, patient_id: str, threshold: float = 0.95,
+                              sqs_handler=None) -> None:
         """
         For each patient who are unreviewed,
 
@@ -258,7 +271,7 @@ class NlpProcessor:
             logger.debug(f"Marked patient {patient_id} as reviewed")
             return
 
-        db.predict_and_save(notes)
+        db.predict_and_save(notes, sqs_handler=sqs_handler)
         scores = []
         for note_id in notes:
             score = db.get_note_prediction_from_db(note_id)
@@ -305,7 +318,9 @@ class NlpProcessor:
                     db.add_task(task)
                 db.set_patient_lock_status(patient_id, True)
                 try:
-                    self.process_notes(patient_id)
+                    self.process_notes(patient_id,
+                                       pines_inf_mode=kwargs.get("pines_inf_mode", None),
+                                       sqs_conn_details=kwargs.get("sqs_conn_details", {}))
                 except Exception as exc:
                     logger.error(f"Error processing notes for patient {patient_id}: {exc}")
                 finally:
