@@ -59,14 +59,14 @@ const stepConfig = [
     icon: Database,
   },
   {
-    label: "Evaluation",
-    description: "Configure search, LLM, and evaluate",
+    label: "Search",
+    description: "Match notes by keyword, optionally filter with an LLM",
     path: "evaluation",
     icon: BarChart3,
   },
   {
     label: "Annotations",
-    description: "Review predictions",
+    description: "Review matched sentences",
     path: "annotations",
     icon: MessageSquareText,
   },
@@ -466,12 +466,12 @@ export default function ProjectOverview() {
     switch (stepIndex) {
       case 0: // Data
         return hasData ? "done" : "current";
-      case 1: // Evaluation
+      case 1: // Search / evaluation
         if (!hasData) return "locked";
-        return hasCommitted ? "done" : "current";
+        return hasCommitted || hasAnnotations ? "done" : "current";
       case 2: // Annotations
-        if (!hasCommitted) return "locked";
-        return hasAnnotations && (annotationStats?.is_complete ?? false) ? "done" : "current";
+        if (!hasAnnotations) return "locked";
+        return annotationStats?.is_complete ?? false ? "done" : "current";
       case 3: // Export
         if (!hasAnnotations) return "locked";
         return "current";
@@ -489,9 +489,10 @@ export default function ProjectOverview() {
         if (state === "locked") return "Waiting for data upload";
         if (hasCommitted && committedSession?.metrics?.f1 !== undefined)
           return `Committed, F1: ${(committedSession.metrics.f1 * 100).toFixed(1)}%`;
-        return "Configure search queries and evaluate LLM";
+        if (hasAnnotations) return `${totalAnnotations} matched sentences found`;
+        return "Run a search query, or test an LLM filter first";
       case 2:
-        if (state === "locked") return "Waiting for evaluation";
+        if (state === "locked") return "Waiting for a search run";
         if (hasAnnotations)
           return `${reviewedCount + (annotationStats?.skipped ?? 0)}/${totalAnnotations} reviewed`;
         return "No annotations yet";

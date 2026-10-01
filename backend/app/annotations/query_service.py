@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.annotations.filters import reviewable_filter
 from app.annotations.models import Annotation, ReviewStatus
 from app.annotations.schemas import AnnotationStatsResponse
 from app.connectors.models import Note, Patient
@@ -71,12 +72,12 @@ async def get_annotation_stats(
 ) -> AnnotationStatsResponse:
     """Get annotation review statistics for the project.
 
-    Only counts annotations with predicted_label='1' (positive predictions)
-    to match the review queue, which only surfaces positive predictions.
+    Scoped to the same set the review queue surfaces: annotations not ruled out
+    by an optional predictor.
     """
     base = select(func.count()).select_from(Annotation).where(
         Annotation.project_id == project_id,
-        Annotation.predicted_label == 1,
+        reviewable_filter(),
     )
 
     total = (await session.execute(base)).scalar() or 0

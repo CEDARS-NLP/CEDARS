@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import JSON, Column, DateTime, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -41,7 +41,21 @@ class Annotation(SQLModel, table=True):
     matched_tokens: str = Field(default="")  # comma-separated
     is_negated: bool = Field(default=False)
 
-    # Prediction result (from LLM/PINES)
+    # Match detail, mirroring the v1 nlpprocessor annotation record.
+    # Nullable because pipeline/LLM-created annotations are sentence-level only.
+    token: str | None = Field(default=None)
+    note_start_index: int | None = Field(default=None)
+    note_end_index: int | None = Field(default=None)
+    sentence_number: int | None = Field(default=None)
+    sentence_start: int | None = Field(default=None)
+    sentence_end: int | None = Field(default=None)
+    text_date: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+    # Legacy inline prediction result — still written by the LLM pipeline path.
+    # New predictions are stored in AnnotationPrediction.
     predicted_score: float | None = Field(default=None)
     predicted_label: int | None = Field(default=None)  # 0 or 1
     predictor_model: str = Field(default="")
@@ -70,6 +84,39 @@ class Annotation(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+    created_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class AnnotationPrediction(SQLModel, table=True):
+    """An optional predictor (LLM/PINES) verdict layered on top of an annotation.
+
+    Keyword/spaCy matching alone produces annotations; running a predictor adds
+    one of these rows per annotation without mutating the annotation itself.
+    """
+
+    __tablename__ = "annotation_predictions"
+    __table_args__ = (
+        UniqueConstraint(
+            "annotation_id", "predictor_config_id", name="uq_annotation_prediction"
+        ),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    annotation_id: str = Field(foreign_key="annotations.id", index=True)
+    project_id: str = Field(foreign_key="projects.id", index=True)
+    predictor_config_id: str | None = Field(
+        default=None, foreign_key="predictor_configs.id", index=True
+    )
+
+    predictor_model: str = Field(default="")
+    predicted_score: float | None = Field(default=None)
+    predicted_label: int | None = Field(default=None)  # 0 or 1
+    reasoning: str = Field(sa_column=Column(Text, nullable=False, server_default=""))
+    token_usage: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
     created_at: datetime = Field(
         default_factory=now_utc,

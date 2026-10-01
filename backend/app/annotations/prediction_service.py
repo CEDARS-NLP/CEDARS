@@ -6,11 +6,9 @@ import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation
+from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
-from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus, JobType
-from app.nlp.models import Sentence
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.llm import SYSTEM_PROMPT
@@ -23,13 +21,13 @@ async def run_bulk_predictions(
     session: AsyncSession,
     project_id: str,
 ) -> dict:
-    """Run the active predictor on all target sentences without annotations.
+    """Run the active predictor over existing annotations as an optional filter.
 
     Flow:
     1. Get the active predictor config for the project
-    2. Find target sentences that don't yet have annotations
-    3. Run predictor on each sentence
-    4. Create annotation records with prediction results
+    2. Find annotations it has not scored yet
+    3. Run predictor on each annotation's sentence
+    4. Record the verdict as an AnnotationPrediction (annotations are not mutated)
     """
     # Get active predictor
     stmt = select(PredictorConfig).where(
@@ -45,84 +43,91 @@ async def run_bulk_predictions(
 
     predictor = create_predictor(predictor_config)
 
-    # Find target sentences without annotations
-    existing_annotations = (
-        select(Annotation.sentence_id)
-        .where(Annotation.project_id == project_id)
-        .scalar_subquery()
-    )
-
-    stmt = (
-        select(Sentence, Note.patient_id)
-        .join(Note, Sentence.note_id == Note.id)
-        .where(
-            Sentence.project_id == project_id,
-            Sentence.is_target == True,  # noqa: E712
-            Note.deleted_at.is_(None),
-            Sentence.id.notin_(existing_annotations),
-        )
-    )
-    result = await session.execute(stmt)
-    rows = result.all()
+    result = await session.execute(_unscored_annotations_stmt(project_id, predictor_config.id))
+    annotations = list(result.scalars().all())
 
     stats: dict = {
-        "total_sentences": len(rows),
+        "total_sentences": len(annotations),
         "predictions_made": 0,
         "annotations_created": 0,
         "errors": 0,
         "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
 
-    for sentence, patient_id in rows:
+    for annotation in annotations:
         prediction: PredictionResult | None = None
         try:
-            prediction = await predictor.predict(sentence.text)
+            prediction = await predictor.predict(annotation.sentence_text)
             stats["predictions_made"] += 1
             if prediction.token_usage:
                 stats["token_usage"]["prompt_tokens"] += prediction.token_usage.prompt_tokens
                 stats["token_usage"]["completion_tokens"] += prediction.token_usage.completion_tokens
                 stats["token_usage"]["total_tokens"] += prediction.token_usage.total_tokens
         except PredictorError as e:
-            logger.warning("Prediction failed for sentence %s: %s", sentence.id, e)
+            logger.warning("Prediction failed for annotation %s: %s", annotation.id, e)
             stats["errors"] += 1
+            continue
 
-        annotation = Annotation(
-            project_id=project_id,
-            patient_id=patient_id,
-            note_id=sentence.note_id,
-            sentence_id=sentence.id,
-            sentence_text=sentence.text,
-            matched_tokens=",".join(sentence.matched_tokens) if sentence.matched_tokens else "",
-            is_negated=sentence.is_negated,
-            predicted_score=prediction.score if prediction else None,
-            predicted_label=prediction.label if prediction else None,
-            predictor_model=prediction.model if prediction else "",
-            reasoning=prediction.reasoning if prediction else "",
+        session.add(
+            AnnotationPrediction(
+                annotation_id=annotation.id,
+                project_id=project_id,
+                predictor_config_id=predictor_config.id,
+                predictor_model=prediction.model,
+                predicted_score=prediction.score,
+                predicted_label=prediction.label,
+                reasoning=prediction.reasoning or "",
+                token_usage=(
+                    prediction.token_usage.model_dump() if prediction.token_usage else None
+                ),
+            )
         )
-        session.add(annotation)
         stats["annotations_created"] += 1
 
     await session.commit()
     return stats
 
 
+def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
+    """Annotations in a project that the given predictor has not scored yet."""
+    already_scored = (
+        select(AnnotationPrediction.id)
+        .where(
+            AnnotationPrediction.annotation_id == Annotation.id,
+            AnnotationPrediction.predictor_config_id == predictor_config_id,
+        )
+        .exists()
+    )
+    return select(Annotation).where(
+        Annotation.project_id == project_id,
+        ~already_scored,
+    )
+
+
 async def estimate_bulk_predictions(
     session: AsyncSession,
     project_id: str,
 ) -> dict:
-    """Estimate token usage for bulk predictions on unannotated target sentences."""
-    existing_annotations = (
-        select(Annotation.sentence_id)
-        .where(Annotation.project_id == project_id)
-        .scalar_subquery()
+    """Estimate token usage for running the active predictor over unscored annotations."""
+    stmt = select(PredictorConfig).where(
+        PredictorConfig.project_id == project_id,
+        PredictorConfig.is_active == True,  # noqa: E712
+        PredictorConfig.deleted_at.is_(None),
     )
+    predictor_config = (await session.execute(stmt)).scalar_one_or_none()
+    if not predictor_config:
+        return {
+            "sentence_count": 0,
+            "estimated_prompt_tokens": 0,
+            "estimated_completion_tokens": 0,
+            "estimated_total_tokens": 0,
+        }
 
-    stmt = select(Sentence.text).where(
-        Sentence.project_id == project_id,
-        Sentence.is_target == True,  # noqa: E712
-        Sentence.id.notin_(existing_annotations),
+    result = await session.execute(
+        _unscored_annotations_stmt(project_id, predictor_config.id).with_only_columns(
+            Annotation.sentence_text
+        )
     )
-    result = await session.execute(stmt)
     texts = [r[0] for r in result.all()]
 
     sentence_count = len(texts)

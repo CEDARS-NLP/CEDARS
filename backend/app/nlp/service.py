@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.annotations.models import Annotation, ReviewStatus
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
@@ -220,7 +221,10 @@ async def _process_notes_into_sentences(
 ) -> dict:
     """Core NLP pipeline: fetch queries, find unprocessed notes, create sentences.
 
-    Returns {"total_notes": int, "processed_notes": int}.
+    Every matched token also becomes an Annotation row, mirroring the v1
+    nlpprocessor record, so review can proceed without any predictor.
+
+    Returns a stats dict with note, annotation and patient counts.
     """
     # Get active search queries
     queries = await list_search_queries(session, project_id)
@@ -247,10 +251,20 @@ async def _process_notes_into_sentences(
 
     total = len(notes)
     if not notes:
-        return {"total_notes": 0, "processed_notes": 0}
+        return {
+            "total_notes": 0,
+            "processed_notes": 0,
+            "annotations_created": 0,
+            "patients_with_matches": 0,
+            "patients_auto_completed": 0,
+        }
+
+    annotations_created = 0
+    match_counts: dict[str, int] = {}
 
     for i, note in enumerate(notes):
         sentences = process_note(note.text, all_query_groups)
+        match_counts.setdefault(note.patient_id, 0)
 
         for sent_data in sentences:
             sentence = Sentence(
@@ -266,13 +280,60 @@ async def _process_notes_into_sentences(
             )
             session.add(sentence)
 
+            for match in sent_data.get("matches", []):
+                session.add(
+                    Annotation(
+                        project_id=project_id,
+                        patient_id=note.patient_id,
+                        note_id=note.id,
+                        sentence_id=sentence.id,
+                        sentence_text=sent_data["text"],
+                        matched_tokens=",".join(sent_data["matched_tokens"]),
+                        is_negated=sent_data["is_negated"],
+                        token=match["token"],
+                        note_start_index=match["note_start_index"],
+                        note_end_index=match["note_end_index"],
+                        sentence_number=sent_data["sentence_number"],
+                        sentence_start=sent_data["start_pos"],
+                        sentence_end=sent_data["end_pos"],
+                        text_date=note.note_date,
+                        review_status=ReviewStatus.UNREVIEWED,
+                    )
+                )
+                annotations_created += 1
+                match_counts[note.patient_id] += 1
+
         await session.flush()
 
         if (i + 1) % 50 == 0 or i == total - 1:
             if progress_callback:
                 await progress_callback(i + 1, total)
 
-    return {"total_notes": total, "processed_notes": total}
+    matched_patients = [pid for pid, count in match_counts.items() if count > 0]
+    unmatched_patients = [pid for pid, count in match_counts.items() if count == 0]
+
+    if matched_patients:
+        await session.execute(
+            update(Patient)
+            .where(Patient.id.in_(matched_patients))
+            .values(status=PatientStatus.NLP_COMPLETE, updated_at=now_utc())
+        )
+    if unmatched_patients:
+        # v1 parity: a patient with no keyword hits needs no human review.
+        await session.execute(
+            update(Patient)
+            .where(Patient.id.in_(unmatched_patients), Patient.status != PatientStatus.REVIEWED)
+            .values(status=PatientStatus.REVIEWED, updated_at=now_utc())
+        )
+    await session.commit()
+
+    return {
+        "total_notes": total,
+        "processed_notes": total,
+        "annotations_created": annotations_created,
+        "patients_with_matches": len(matched_patients),
+        "patients_auto_completed": len(unmatched_patients),
+    }
 
 
 async def run_nlp_pipeline(
@@ -399,7 +460,12 @@ async def list_target_sentences(
 
 async def clear_sentences(session: AsyncSession, project_id: str) -> int:
     """Delete all sentences (and their annotations) for a project to allow re-processing."""
-    # Delete annotations first (FK dependency on sentences)
+    # Delete predictions first (FK dependency on annotations)
+    await session.execute(
+        text("DELETE FROM annotation_predictions WHERE project_id = :pid"),
+        {"pid": project_id},
+    )
+    # Delete annotations next (FK dependency on sentences)
     await session.execute(
         text("DELETE FROM annotations WHERE project_id = :pid"),
         {"pid": project_id},

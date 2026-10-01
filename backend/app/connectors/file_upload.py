@@ -8,8 +8,14 @@ import sys
 from app.common.s3 import download_file
 from app.connectors.base import ConnectorBase, FetchResult, PreviewResult
 
-# Clinical notes can be very large — raise the default 128KB field size limit
-csv.field_size_limit(sys.maxsize)
+# Clinical notes can be very large — raise the default 128KB field size limit.
+# sys.maxsize overflows C long on Windows, so step down until one is accepted.
+for _limit in (sys.maxsize, 2**31 - 1):
+    try:
+        csv.field_size_limit(_limit)
+        break
+    except OverflowError:
+        continue
 
 
 class FileUploadConnector(ConnectorBase):

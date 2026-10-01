@@ -6,12 +6,11 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.annotations.models import Annotation
+from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus
-from app.nlp.models import Sentence
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.models import PredictorConfig
@@ -30,10 +29,10 @@ async def execute_prediction_job(
     job_db_id: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> dict:
-    """Run bulk predictions with per-patient batching.
+    """Score existing annotations with the active predictor, batched per patient.
 
-    - Groups target sentences by patient
-    - Commits after each patient (annotations immediately available)
+    - Groups unscored annotations by patient
+    - Commits after each patient (verdicts immediately available)
     - Checks cancellation flag between patients
     - Updates BackgroundJob progress after each patient
     """
@@ -75,36 +74,38 @@ async def execute_prediction_job(
 
             predictor = create_predictor(predictor_config)
 
-            # Find target sentences without annotations, grouped by patient
-            existing_annotations = (
-                select(Annotation.sentence_id)
-                .where(Annotation.project_id == project_id)
-                .scalar_subquery()
+            # Find annotations this predictor has not scored yet, grouped by patient
+            already_scored = (
+                select(AnnotationPrediction.id)
+                .where(
+                    AnnotationPrediction.annotation_id == Annotation.id,
+                    AnnotationPrediction.predictor_config_id == predictor_config.id,
+                )
+                .exists()
             )
             stmt = (
-                select(Sentence, Note.patient_id)
-                .join(Note, Sentence.note_id == Note.id)
+                select(Annotation)
+                .join(Note, Annotation.note_id == Note.id)
                 .where(
-                    Sentence.project_id == project_id,
-                    Sentence.is_target == True,  # noqa: E712
+                    Annotation.project_id == project_id,
                     Note.deleted_at.is_(None),
-                    Sentence.id.notin_(existing_annotations),
+                    ~already_scored,
                 )
-                .order_by(Note.patient_id, Note.note_date, Sentence.sentence_number)
+                .order_by(Annotation.patient_id, Note.note_date, Annotation.sentence_number)
             )
             result = await session.execute(stmt)
-            rows = result.all()
+            rows = list(result.scalars().all())
 
             # Group by patient
-            patient_batches: dict[str, list[tuple]] = defaultdict(list)
-            for sentence, patient_id in rows:
-                patient_batches[patient_id].append((sentence, patient_id))
+            patient_batches: dict[str, list[Annotation]] = defaultdict(list)
+            for annotation in rows:
+                patient_batches[annotation.patient_id].append(annotation)
 
             stats["total_sentences"] = len(rows)
             stats["total_patients"] = len(patient_batches)
 
             # Process per-patient
-            for patient_idx, (patient_id, sentences) in enumerate(patient_batches.items()):
+            for patient_idx, (patient_id, annotations) in enumerate(patient_batches.items()):
                 # Check cancellation
                 await session.refresh(bg_job)
                 if bg_job.is_cancelled:
@@ -115,33 +116,36 @@ async def execute_prediction_job(
                     await session.commit()
                     return stats
 
-                for sentence, pid in sentences:
+                for annotation in annotations:
                     prediction: PredictionResult | None = None
                     try:
-                        prediction = await predictor.predict(sentence.text)
+                        prediction = await predictor.predict(annotation.sentence_text)
                         stats["predictions_made"] += 1
                         if prediction.token_usage:
                             stats["token_usage"]["prompt_tokens"] += prediction.token_usage.prompt_tokens
                             stats["token_usage"]["completion_tokens"] += prediction.token_usage.completion_tokens
                             stats["token_usage"]["total_tokens"] += prediction.token_usage.total_tokens
                     except PredictorError as e:
-                        logger.warning("Prediction failed for sentence %s: %s", sentence.id, e)
+                        logger.warning("Prediction failed for annotation %s: %s", annotation.id, e)
                         stats["errors"] += 1
+                        continue
 
-                    annotation = Annotation(
-                        project_id=project_id,
-                        patient_id=pid,
-                        note_id=sentence.note_id,
-                        sentence_id=sentence.id,
-                        sentence_text=sentence.text,
-                        matched_tokens=",".join(sentence.matched_tokens) if sentence.matched_tokens else "",
-                        is_negated=sentence.is_negated,
-                        predicted_score=prediction.score if prediction else None,
-                        predicted_label=prediction.label if prediction else None,
-                        predictor_model=prediction.model if prediction else "",
-                        reasoning=prediction.reasoning if prediction else "",
+                    session.add(
+                        AnnotationPrediction(
+                            annotation_id=annotation.id,
+                            project_id=project_id,
+                            predictor_config_id=predictor_config.id,
+                            predictor_model=prediction.model,
+                            predicted_score=prediction.score,
+                            predicted_label=prediction.label,
+                            reasoning=prediction.reasoning or "",
+                            token_usage=(
+                                prediction.token_usage.model_dump()
+                                if prediction.token_usage
+                                else None
+                            ),
+                        )
                     )
-                    session.add(annotation)
                     stats["annotations_created"] += 1
 
                 # Commit after each patient

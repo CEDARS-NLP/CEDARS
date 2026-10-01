@@ -6,7 +6,8 @@ from datetime import datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.filters import reviewable_filter as _reviewable_filter
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.annotations.schemas import NextPatientResponse, PatientReviewStats
 from app.audit.models import AuditAction
 from app.audit.service import log_action
@@ -206,7 +207,7 @@ async def get_next_patient_for_review(
         .where(
             Annotation.project_id == project_id,
             Annotation.review_status == ReviewStatus.UNREVIEWED,
-            Annotation.predicted_label == 1,
+            _reviewable_filter(),
         )
         .distinct()
         .scalar_subquery()
@@ -232,7 +233,7 @@ async def get_next_patient_for_review(
                 .where(
                     Annotation.project_id == project_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
-                    Annotation.predicted_label == 1,
+                    _reviewable_filter(),
                 )
             )
         ).scalar() or 0
@@ -306,7 +307,7 @@ async def get_patient_annotations(
         .where(
             Annotation.project_id == project_id,
             Annotation.patient_id == patient_id,
-            Annotation.predicted_label == 1,
+            _reviewable_filter(),
         )
         .order_by(
             Note.note_date.asc().nullslast(),
@@ -315,6 +316,18 @@ async def get_patient_annotations(
         )
     )
     rows = (await session.execute(stmt)).all()
+
+    predictions = {
+        p.annotation_id: p
+        for p in (
+            await session.execute(
+                select(AnnotationPrediction).where(
+                    AnnotationPrediction.project_id == project_id,
+                    AnnotationPrediction.annotation_id.in_([r[0].id for r in rows]),
+                )
+            )
+        ).scalars()
+    } if rows else {}
 
     results = []
     for annotation, note_date, text_id, sentence_number, note_text in rows:
@@ -330,6 +343,8 @@ async def get_patient_annotations(
         ):
             sentence_text = note_text[:1000]
 
+        prediction = predictions.get(annotation.id)
+
         results.append({
             "id": annotation.id,
             "project_id": annotation.project_id,
@@ -339,10 +354,22 @@ async def get_patient_annotations(
             "sentence_text": sentence_text,
             "matched_tokens": annotation.matched_tokens,
             "is_negated": annotation.is_negated,
-            "predicted_score": annotation.predicted_score,
-            "predicted_label": annotation.predicted_label,
-            "predictor_model": annotation.predictor_model,
-            "reasoning": annotation.reasoning,
+            "token": annotation.token,
+            "note_start_index": annotation.note_start_index,
+            "note_end_index": annotation.note_end_index,
+            "sentence_start": annotation.sentence_start,
+            "sentence_end": annotation.sentence_end,
+            "text_date": annotation.text_date,
+            "predicted_score": (
+                prediction.predicted_score if prediction else annotation.predicted_score
+            ),
+            "predicted_label": (
+                prediction.predicted_label if prediction else annotation.predicted_label
+            ),
+            "predictor_model": (
+                prediction.predictor_model if prediction else annotation.predictor_model
+            ),
+            "reasoning": prediction.reasoning if prediction else annotation.reasoning,
             "review_status": annotation.review_status,
             "reviewed_by": annotation.reviewed_by,
             "reviewed_at": annotation.reviewed_at,
@@ -350,7 +377,10 @@ async def get_patient_annotations(
             "created_at": annotation.created_at,
             "note_date": note_date,
             "note_text_id": text_id,
-            "sentence_number": sentence_number,
+            "sentence_number": (
+                annotation.sentence_number if annotation.sentence_number is not None
+                else sentence_number
+            ),
         })
     return results
 

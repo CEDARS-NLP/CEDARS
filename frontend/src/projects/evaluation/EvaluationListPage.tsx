@@ -1,19 +1,24 @@
 // frontend/src/projects/evaluation/EvaluationListPage.tsx
-import { useParams, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { UnifiedSessionListItem } from "@/projects/types";
-import { Plus, Copy, Trash2 } from "lucide-react";
+import { Plus, Copy, Trash2, Search, Sparkles, ArrowRight } from "lucide-react";
 
+import NlpQueriesSection from "./NlpQueriesSection";
 import { STATUS_STYLES, statusLabel } from "./sessionStatus";
+
+type Mode = "search" | "llm";
 
 export default function EvaluationListPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [mode, setMode] = useState<Mode>("search");
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ["eval-sessions", projectId],
@@ -21,6 +26,12 @@ export default function EvaluationListPage() {
       api.get<UnifiedSessionListItem[]>(
         `/projects/${projectId}/evaluation/sessions`
       ),
+  });
+
+  const { data: annotationStats } = useQuery({
+    queryKey: ["annotation-stats", projectId],
+    queryFn: () =>
+      api.get<{ total: number }>(`/projects/${projectId}/annotations/stats`),
   });
 
   const createMutation = useMutation({
@@ -57,43 +68,85 @@ export default function EvaluationListPage() {
     ["draft", "reviewing"].includes(s.status)
   );
   const hasCommitted = sessions.some((s) => s.status === "committed");
+  const annotationCount = annotationStats?.total ?? 0;
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Evaluation sessions</h1>
-          <p className="text-sm text-muted-foreground">
-            Define an event, check the model against your own judgment on a small
-            sample, then run the version you trust across every patient.
-          </p>
-        </div>
-        <Button
-          onClick={() => createMutation.mutate()}
-          disabled={hasActive || hasCommitted || createMutation.isPending}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New session
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold">Find notes to review</h1>
+        <p className="text-sm text-muted-foreground">
+          Search every note with keyword queries, or test an LLM filter on a
+          sample first and commit the version you trust.
+        </p>
       </div>
 
-      {hasCommitted && (
-        <div className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          A committed session is running on the full project. Cancel or finish it
-          before starting another.
-        </div>
-      )}
+      <div className="grid gap-4 md:grid-cols-2">
+        <ModeCard
+          icon={<Search className="h-5 w-5" />}
+          title="Run a search query"
+          description="Match keywords across all notes with spaCy and send every hit straight to annotation. No model needed."
+          selected={mode === "search"}
+          onSelect={() => setMode("search")}
+        />
+        <ModeCard
+          icon={<Sparkles className="h-5 w-5" />}
+          title="Test an LLM filter first"
+          description="Define an event, check the model against your own judgment on a small sample, then apply it across every patient."
+          selected={mode === "llm"}
+          onSelect={() => setMode("llm")}
+        />
+      </div>
 
-      {isLoading ? (
-        <p className="text-muted-foreground">Loading sessions...</p>
-      ) : sessions.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            No sessions yet. Start one to define an event and try it on a sample.
-          </CardContent>
-        </Card>
+      {mode === "search" ? (
+        <div className="space-y-4">
+          <NlpQueriesSection projectId={projectId!} />
+          {annotationCount > 0 && (
+            <Card>
+              <CardContent className="flex items-center justify-between py-4">
+                <p className="text-sm text-muted-foreground">
+                  {annotationCount} matched sentence
+                  {annotationCount === 1 ? "" : "s"} ready for review.
+                </p>
+                <Button asChild>
+                  <Link to={`/projects/${projectId}/annotations`}>
+                    Review annotations
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       ) : (
-        <div className="space-y-3">
+        <>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Evaluation sessions</h2>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={hasActive || hasCommitted || createMutation.isPending}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              New session
+            </Button>
+          </div>
+
+          {hasCommitted && (
+            <div className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+              A committed session is running on the full project. Cancel or finish it
+              before starting another.
+            </div>
+          )}
+
+          {isLoading ? (
+            <p className="text-muted-foreground">Loading sessions...</p>
+          ) : sessions.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                No sessions yet. Start one to define an event and try it on a sample.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
           {sessions.map((s) => (
             <Card
               key={s.id}
@@ -156,8 +209,43 @@ export default function EvaluationListPage() {
               </CardContent>
             </Card>
           ))}
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+function ModeCard({
+  icon,
+  title,
+  description,
+  selected,
+  onSelect,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`rounded-lg border p-4 text-left transition-colors ${
+        selected
+          ? "border-primary bg-primary/5"
+          : "border-border hover:bg-muted/50"
+      }`}
+    >
+      <div className="flex items-center gap-2 font-medium">
+        {icon}
+        {title}
+      </div>
+      <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
+    </button>
   );
 }

@@ -24,7 +24,7 @@ from app.projects.models import Project, ProjectMember  # noqa: E402, F401
 from app.connectors.models import DataSource, Patient, Note  # noqa: E402, F401
 from app.predictors.models import PredictorConfig  # noqa: E402, F401
 from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
-from app.annotations.models import Annotation  # noqa: E402, F401
+from app.annotations.models import Annotation, AnnotationPrediction  # noqa: E402, F401
 from app.evaluation.models import (  # noqa: E402, F401
     EvaluationSession, SearchMatch, PatientResult
 )

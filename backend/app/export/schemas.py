@@ -8,8 +8,16 @@ from pydantic import BaseModel
 class ExportAnnotationRow(BaseModel):
     patient_id: str
     note_id: str
-    sentence_id: str
+    sentence_id: str | None = None
     sentence_text: str
+    token: str | None = None
+    is_negated: bool = False
+    note_start_index: int | None = None
+    note_end_index: int | None = None
+    sentence_number: int | None = None
+    sentence_start: int | None = None
+    sentence_end: int | None = None
+    text_date: datetime | None = None
     predicted_label: int | None
     predicted_score: float | None
     predictor_model: str
