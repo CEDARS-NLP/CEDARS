@@ -27,22 +27,35 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    command:
+      - mini
+      - -dir=/data
+      - -ip=seaweedfs
+      - -ip.bind=0.0.0.0
+      - -s3.port=8333
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
+      - -webdav=false
+      - -admin.ui=false
+      - -master.telemetry=false
     environment:
-      MINIO_ROOT_USER: rootuser
-      MINIO_ROOT_PASSWORD: rootpassword
+      AWS_ACCESS_KEY_ID: ${CEDARS_S3_ACCESS_KEY:-rootuser}
+      AWS_SECRET_ACCESS_KEY: ${CEDARS_S3_SECRET_KEY:-rootpassword}
+      S3_BUCKET: ${CEDARS_S3_BUCKET:-cedars}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:8333:8333"
     volumes:
-      - minio_data:/data
+      - seaweedfs_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test:
+        - CMD-SHELL
+        - wget -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'
       interval: 5s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 12
+      start_period: 30s
 
   backend:
     build: ./backend
@@ -56,15 +69,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
     environment:
       CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
       CEDARS_REDIS_URL: redis://redis:6379
-      CEDARS_S3_ENDPOINT: http://minio:9000
-      CEDARS_S3_BUCKET: cedars
-      CEDARS_S3_ACCESS_KEY: rootuser
-      CEDARS_S3_SECRET_KEY: rootpassword
+      CEDARS_S3_ENDPOINT: http://seaweedfs:8333
+      CEDARS_S3_BUCKET: ${CEDARS_S3_BUCKET:-cedars}
+      CEDARS_S3_ACCESS_KEY: ${CEDARS_S3_ACCESS_KEY:-rootuser}
+      CEDARS_S3_SECRET_KEY: ${CEDARS_S3_SECRET_KEY:-rootpassword}
+      CEDARS_S3_REGION: us-east-1
       CEDARS_SECRET_KEY: dev-secret-key
 
   worker:
@@ -79,15 +93,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
     environment:
       CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
       CEDARS_REDIS_URL: redis://redis:6379
-      CEDARS_S3_ENDPOINT: http://minio:9000
-      CEDARS_S3_BUCKET: cedars
-      CEDARS_S3_ACCESS_KEY: rootuser
-      CEDARS_S3_SECRET_KEY: rootpassword
+      CEDARS_S3_ENDPOINT: http://seaweedfs:8333
+      CEDARS_S3_BUCKET: ${CEDARS_S3_BUCKET:-cedars}
+      CEDARS_S3_ACCESS_KEY: ${CEDARS_S3_ACCESS_KEY:-rootuser}
+      CEDARS_S3_SECRET_KEY: ${CEDARS_S3_SECRET_KEY:-rootpassword}
+      CEDARS_S3_REGION: us-east-1
       CEDARS_SECRET_KEY: dev-secret-key
 
   frontend:
@@ -106,4 +121,4 @@ services:
 
 volumes:
   pgdata:
-  minio_data:
+  seaweedfs_data:

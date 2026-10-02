@@ -105,11 +105,11 @@ async def upload_and_create_data_source(
 
     # A bucket is always required. An empty endpoint is valid — it means native
     # AWS S3 (credentials from the environment / task role), as opposed to a
-    # MinIO/S3-compatible endpoint URL.
+    # custom S3-compatible endpoint URL.
     if not settings.s3_bucket:
         raise EnvironmentError(
             "Object storage is not configured. Set CEDARS_S3_BUCKET "
-            "(and CEDARS_S3_ENDPOINT only for MinIO/S3-compatible storage)."
+            "(and CEDARS_S3_ENDPOINT only for custom S3-compatible storage)."
         )
 
     if not filename:

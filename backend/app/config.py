@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     cookie_secure: bool = False
 
-    # S3 / MinIO object storage
-    s3_endpoint: str = "http://localhost:9000"
+    # S3-compatible object storage
+    s3_endpoint: str = "http://localhost:8333"
     s3_bucket: str = "cedars"
     s3_access_key: str = "rootuser"
     s3_secret_key: str = "rootpassword"

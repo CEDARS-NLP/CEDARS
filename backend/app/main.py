@@ -19,7 +19,7 @@ from app.projects.router import router as projects_router
 
 
 def _ensure_s3_bucket():
-    """Create the S3 bucket if it doesn't exist (for local MinIO dev only).
+    """Create the configured S3 bucket when using a local S3-compatible endpoint.
 
     Skipped when no endpoint is set (native AWS S3): those buckets are
     provisioned out-of-band (e.g. Terraform), not created at app startup.
