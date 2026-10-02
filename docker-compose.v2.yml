@@ -17,6 +17,16 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build: ./backend
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@db:5432/cedars
+
   redis:
     image: redis:7-alpine
     ports:
@@ -65,6 +75,8 @@ services:
       # VPN-only LLM hosts, unresolvable from inside the container's DNS.
       - "ppliapppytorc01:10.254.160.26"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -89,6 +101,8 @@ services:
       # VPN-only LLM hosts, unresolvable from inside the container's DNS.
       - "ppliapppytorc01:10.254.160.26"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
