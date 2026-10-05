@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -18,7 +18,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { SearchQuery, NlpStats, NlpJob } from "@/projects/types";
+import type {
+  BackgroundJobStatus,
+  SearchQuery,
+  NlpStats,
+  NlpJob,
+} from "@/projects/types";
 
 export default function NlpQueriesSection({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
@@ -40,6 +45,30 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
     queryFn: () => api.get<NlpJob | null>(`/projects/${projectId}/nlp/job`),
   });
 
+  const { data: latestBackgroundJob } = useQuery<BackgroundJobStatus | null>({
+    queryKey: ["nlp-background-job", projectId],
+    queryFn: () =>
+      api.get<BackgroundJobStatus | null>(`/projects/${projectId}/nlp/job/status`),
+    refetchInterval: (query) =>
+      ["pending", "running"].includes(query.state.data?.status ?? "")
+        ? 2000
+        : false,
+  });
+
+  const backgroundJobId = latestBackgroundJob?.job_id;
+  const backgroundJobStatus = latestBackgroundJob?.status;
+
+  useEffect(() => {
+    if (!backgroundJobId || !backgroundJobStatus ||
+      ["pending", "running"].includes(backgroundJobStatus)) {
+      return;
+    }
+
+    void queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
+  }, [backgroundJobId, backgroundJobStatus, projectId, queryClient]);
+
   const createQuery = useMutation({
     mutationFn: (body: { query: string; name?: string }) =>
       api.post(`/projects/${projectId}/nlp/queries`, body),
@@ -58,10 +87,12 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   });
 
   const runNlp = useMutation({
-    mutationFn: () => api.post(`/projects/${projectId}/nlp/run`, {}),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.post<BackgroundJobStatus>(`/projects/${projectId}/nlp/run`, {}),
+    onSuccess: (job) => {
+      queryClient.setQueryData(["nlp-background-job", projectId], job);
+      queryClient.invalidateQueries({ queryKey: ["nlp-background-job", projectId] });
       queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["nlp-job", projectId] });
     },
   });
 
@@ -70,10 +101,16 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
       queryClient.invalidateQueries({ queryKey: ["nlp-job", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
     },
   });
 
-  const isRunning = runNlp.isPending || reprocessNlp.isPending;
+  const backgroundJobIsRunning = ["pending", "running"].includes(
+    latestBackgroundJob?.status ?? "",
+  );
+  const isRunning =
+    runNlp.isPending || reprocessNlp.isPending || backgroundJobIsRunning;
 
   return (
     <div className="space-y-4">
@@ -179,7 +216,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           <CardContent className="space-y-3">
             <div className="flex gap-2">
               <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
-                {runNlp.isPending ? "Processing..." : "Run NLP"}
+                {runNlp.isPending || backgroundJobIsRunning ? "Processing..." : "Run NLP"}
               </Button>
               <Button
                 variant="outline"
@@ -195,9 +232,33 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 {((runNlp.error || reprocessNlp.error) as Error)?.message || "Pipeline failed"}
               </p>
             )}
+            {latestBackgroundJob && (
+              <div className="text-sm text-muted-foreground">
+                Search run: {" "}
+                <span
+                  className={
+                    latestBackgroundJob.status === "completed"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : latestBackgroundJob.status === "failed"
+                        ? "text-destructive"
+                        : ""
+                  }
+                >
+                  {latestBackgroundJob.status}
+                </span>
+                {latestBackgroundJob.status === "running" && (
+                  <> ({latestBackgroundJob.progress}%)</>
+                )}
+                {latestBackgroundJob.error_message && (
+                  <p className="mt-1 text-destructive">
+                    {latestBackgroundJob.error_message}
+                  </p>
+                )}
+              </div>
+            )}
             {latestJob && (
               <div className="text-sm text-muted-foreground">
-                Last run:{" "}
+                Last full reprocess: {" "}
                 <span
                   className={
                     latestJob.status === "completed"

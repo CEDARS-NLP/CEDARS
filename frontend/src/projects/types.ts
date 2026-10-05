@@ -74,6 +74,7 @@ export interface BackgroundJobStatus {
   status: string;
   progress: number;
   result_summary: Record<string, unknown> | null;
+  error_message?: string | null;
 }
 
 // ── Agentic Pipeline Types ─────────────────────────────────────

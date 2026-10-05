@@ -104,7 +104,7 @@ export default function EvaluationListPage() {
             <Card>
               <CardContent className="flex items-center justify-between py-4">
                 <p className="text-sm text-muted-foreground">
-                  {annotationCount} matched sentence
+                  {annotationCount} matched annotation
                   {annotationCount === 1 ? "" : "s"} ready for review.
                 </p>
                 <Button asChild>

@@ -182,6 +182,7 @@ async def get_nlp_job_status(
         "status": bg_job.status.value,
         "progress": bg_job.progress,
         "result_summary": bg_job.result_summary,
+        "error_message": bg_job.error_message,
     }
 
 
@@ -265,6 +266,7 @@ async def _process_notes_into_sentences(
     for i, note in enumerate(notes):
         sentences = process_note(note.text, all_query_groups)
         match_counts.setdefault(note.patient_id, 0)
+        sentence_rows = []
 
         for sent_data in sentences:
             sentence = Sentence(
@@ -279,7 +281,11 @@ async def _process_notes_into_sentences(
                 matched_tokens=sent_data["matched_tokens"],
             )
             session.add(sentence)
+            sentence_rows.append((sentence, sent_data))
 
+        await session.flush()
+
+        for sentence, sent_data in sentence_rows:
             for match in sent_data.get("matches", []):
                 session.add(
                     Annotation(
@@ -311,18 +317,41 @@ async def _process_notes_into_sentences(
 
     matched_patients = [pid for pid, count in match_counts.items() if count > 0]
     unmatched_patients = [pid for pid, count in match_counts.items() if count == 0]
+    patients_with_unreviewed = set()
+
+    if unmatched_patients:
+        pending_result = await session.execute(
+            select(Annotation.patient_id)
+            .where(
+                Annotation.project_id == project_id,
+                Annotation.patient_id.in_(unmatched_patients),
+                Annotation.review_status == ReviewStatus.UNREVIEWED,
+            )
+            .distinct()
+        )
+        patients_with_unreviewed = set(pending_result.scalars().all())
+
+    auto_completed_patients = [
+        pid for pid in unmatched_patients if pid not in patients_with_unreviewed
+    ]
 
     if matched_patients:
         await session.execute(
             update(Patient)
-            .where(Patient.id.in_(matched_patients))
+            .where(
+                Patient.id.in_(matched_patients),
+                Patient.status != PatientStatus.REVIEWING,
+            )
             .values(status=PatientStatus.NLP_COMPLETE, updated_at=now_utc())
         )
-    if unmatched_patients:
+    if auto_completed_patients:
         # v1 parity: a patient with no keyword hits needs no human review.
         await session.execute(
             update(Patient)
-            .where(Patient.id.in_(unmatched_patients), Patient.status != PatientStatus.REVIEWED)
+            .where(
+                Patient.id.in_(auto_completed_patients),
+                Patient.status != PatientStatus.REVIEWED,
+            )
             .values(status=PatientStatus.REVIEWED, updated_at=now_utc())
         )
     await session.commit()
@@ -332,7 +361,7 @@ async def _process_notes_into_sentences(
         "processed_notes": total,
         "annotations_created": annotations_created,
         "patients_with_matches": len(matched_patients),
-        "patients_auto_completed": len(unmatched_patients),
+        "patients_auto_completed": len(auto_completed_patients),
     }
 
 
@@ -348,6 +377,7 @@ async def run_nlp_pipeline(
     session.add(job)
     await session.commit()
     await session.refresh(job)
+    job_id = job.id
 
     try:
         job.status = NlpJobStatus.RUNNING
@@ -368,10 +398,15 @@ async def run_nlp_pipeline(
         job.processed_notes = stats["processed_notes"]
         job.completed_at = now_utc()
 
-    except Exception as exc:
+    except Exception:
         logger.exception("NLP pipeline failed for project %s", project_id)
+        await session.rollback()
+        job = await session.get(NlpJob, job_id)
+        if job is None:
+            raise
         job.status = NlpJobStatus.FAILED
-        job.error_message = str(exc)
+        job.error_message = "NLP processing failed. Check server logs for details."
+        job.completed_at = now_utc()
 
     session.add(job)
     await session.commit()

@@ -10,3 +10,4 @@ class BackgroundJobResponse(BaseModel):
     status: str
     progress: int = 0
     result_summary: dict | None = None
+    error_message: str | None = None
