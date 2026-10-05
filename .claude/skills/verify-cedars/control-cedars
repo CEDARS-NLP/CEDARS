@@ -1,0 +1,2070 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["httpx>=0.27,<1", "websockets>=13,<16", "playwright==1.58.0"]
+# ///
+"""control-cedars: drive a local copy of the CEDARS v2 AWS deployment, plus every check used to verify it.
+
+The stack mirrors infra/cedars-v2. Each piece below stands in for its AWS
+counterpart:
+
+  ECS services           backend x2, worker x1, frontend x2, with Fargate CPU and memory limits
+  Migrate task           one-off migrate task
+  Image build            linux/amd64, as in the deploy runbook
+  ALB                    ALB-style nginx: path rules, idle timeout 300, AWSALB stickiness
+  Aurora                 Postgres 16.11, schema built by Alembic only
+  ElastiCache            Redis 7.0 (OSS stand-in for 7.1)
+  S3                     an empty CEDARS_S3_ENDPOINT plus the default credential chain,
+                         pointed at a MinIO bucket that is created up front, as Terraform does
+  Bedrock                a fake OpenAI-compatible LLM, so runs cost nothing
+
+Every command is non-interactive and prints what it runs (lines starting with "+").
+Each one exits 0 on success, 1 when a check fails, and 2 on a usage or precondition error.
+Run `control-cedars <command> --help` for examples.
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import contextlib
+import hashlib
+import http.cookiejar
+import json
+import os
+import platform as pyplatform
+import re
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import zlib
+from datetime import datetime, timezone
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent
+STACK_DIR = SKILL_DIR / "stack"
+COMPOSE_FILE = STACK_DIR / "compose.parity.yml"
+STATE_ROOT = Path(os.environ.get("CEDARS_VERIFY_STATE_ROOT", "/tmp/cedars-verify"))
+BUCKET = "user-cedars-v2-verify-storage"  # mirrors s3.tf "user-${local.prefix}-storage"
+ROLES = ("admin", "annotator", "viewer")
+LLM_MODES = ("normal", "fail", "empty", "garbage", "slow")
+SAMPLE_CSV = "frontend/public/sample-data/simulated_patients.csv"
+SAMPLE_MAPPING = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "text_date"}
+SAMPLE_PATIENTS, SAMPLE_NOTES = 5, 103
+CI_POSTGRES_IMAGE = "postgres:16-alpine"  # .github/workflows/backend-v2.yml service image
+PLAYWRIGHT_CHROMIUM = "1208"  # browser revision for playwright==1.58.0
+DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+AWS_PREFIX = "cedars-v2-dev"  # local.prefix for the dev environment
+
+
+class CliError(Exception):
+    """Precondition or usage problem; message must say how to fix it."""
+
+
+class CheckFailed(Exception):
+    """A verification check ran and failed."""
+
+
+# --------------------------------------------------------------------------- utils
+
+
+def log(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
+def run(cmd, *, check=True, capture=False, env=None, cwd=None, timeout=None, quiet=False, input=None):
+    """Run a command and echo it so the transcript shows exactly what ran."""
+    if not quiet:
+        log("+ " + " ".join(str(c) for c in cmd))
+    full_env = {**os.environ, **(env or {})}
+    try:
+        proc = subprocess.run(
+            [str(c) for c in cmd],
+            cwd=cwd,
+            env=full_env,
+            text=True,
+            capture_output=capture,
+            timeout=timeout,
+            input=input,
+        )
+    except FileNotFoundError:
+        raise CliError(f"{cmd[0]} is not installed or not on PATH. Run `control-cedars doctor`.")
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[-2000:] if capture else ""
+        raise CheckFailed(f"command failed ({proc.returncode}): {' '.join(map(str, cmd))}\n{detail}")
+    return proc
+
+
+def run_logged(cmd, log_path: Path, *, cwd=None, env=None, timeout=None) -> int:
+    """Run a command streaming to a log file; return exit code and print the tail on failure."""
+    log("+ " + " ".join(str(c) for c in cmd) + f"   (log: {log_path})")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w") as fh:
+        proc = subprocess.run(
+            [str(c) for c in cmd], cwd=cwd, env={**os.environ, **(env or {})},
+            stdout=fh, stderr=subprocess.STDOUT, text=True, timeout=timeout,
+        )
+    return proc.returncode
+
+
+def tail(path: Path, n: int = 25) -> str:
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-n:])
+    except OSError:
+        return ""
+
+
+def emit(args, data, human: str | None = None) -> None:
+    """Machine output on stdout: JSON with --json, else the human text (or JSON if none)."""
+    if getattr(args, "json", False) or human is None:
+        print(json.dumps(data, indent=2, default=str))
+    else:
+        print(human)
+
+
+def slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "default"
+
+
+def port_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+# --------------------------------------------------------------------------- repo + state
+
+
+def repo_root(args) -> Path:
+    if args.repo:
+        root = Path(args.repo).resolve()
+    else:
+        proc = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+        root = Path(proc.stdout.strip()) if proc.returncode == 0 else SKILL_DIR.parents[2]
+    if not (root / "backend" / "app" / "main.py").exists() or not (root / "infra" / "cedars-v2").exists():
+        raise CliError(f"{root} is not a CEDARS v2 checkout (no backend/app/main.py or infra/cedars-v2). Pass --repo PATH.")
+    return root
+
+
+def git(root: Path, *a, check=True) -> str:
+    proc = subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise CliError(f"git {' '.join(a)} failed: {proc.stderr.strip()}")
+    return proc.stdout.strip()
+
+
+class State:
+    """Per-instance state under /tmp/cedars-verify/<instance>; evidence survives cleanup."""
+
+    def __init__(self, args):
+        self.args = args
+        self.root_repo = repo_root(args)
+        self.instance = slugify(args.instance or os.environ.get("CEDARS_VERIFY_INSTANCE") or self.root_repo.name)
+        self.project = f"cedars-verify-{self.instance}"
+        self.dir = STATE_ROOT / self.instance
+        self.file = self.dir / "state.json"
+        self.evidence = self.dir / "evidence"
+        self.control = self.dir / "control"
+        self.cookies = self.dir / "cookies"
+        self.logs = self.dir / "logs"
+        self.src = self.dir / "src"
+        self.data = json.loads(self.file.read_text()) if self.file.exists() else {}
+
+    @property
+    def exists(self) -> bool:
+        return bool(self.data)
+
+    def init(self) -> None:
+        for d in (self.evidence, self.control, self.cookies, self.logs, self.src):
+            d.mkdir(parents=True, exist_ok=True)
+        if not self.data:
+            self.data = {
+                "instance": self.instance,
+                "project": self.project,
+                "repo": str(self.root_repo),
+                "created_at": now_iso(),
+                "secrets": {
+                    "db_password": secrets.token_hex(16),  # rds.tf: 32 chars, special=false
+                    "secret_key": secrets.token_hex(32),  # secrets.tf: 64 chars, special=false
+                    "s3_user": "verify" + secrets.token_hex(4),
+                    "s3_password": secrets.token_hex(16),
+                    "user_password": "Verify-" + secrets.token_urlsafe(12),
+                },
+            }
+        mode = self.control / "mode"
+        if not mode.exists():
+            mode.write_text("normal\n")
+        self.save()
+
+    def save(self) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.file.write_text(json.dumps(self.data, indent=2))
+
+    def require_stack(self) -> None:
+        if not self.data.get("images"):
+            raise CliError(f"no stack for instance '{self.instance}'. Run `control-cedars stack up` first.")
+
+    @property
+    def port(self) -> int:
+        return int(self.data["port"])
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def compose_env(self, images: dict | None = None) -> dict:
+        s = self.data["secrets"]
+        imgs = images or self.data.get("images", {})
+        return {
+            "CV_PROJECT": self.project,
+            "CV_PORT": str(self.data.get("port", 0)),
+            "CV_BUCKET": BUCKET,
+            "CV_DB_PASSWORD": s["db_password"],
+            "CV_SECRET_KEY": s["secret_key"],
+            "CV_S3_USER": s["s3_user"],
+            "CV_S3_PASSWORD": s["s3_password"],
+            "CV_BACKEND_IMAGE": imgs.get("backend", "cedars-verify/backend:unset"),
+            "CV_FRONTEND_IMAGE": imgs.get("frontend", "cedars-verify/frontend:unset"),
+            "CV_PLATFORM": imgs.get("platform", "linux/amd64"),
+            "CV_STACK_DIR": str(STACK_DIR),
+            "CV_CONTROL_DIR": str(self.control),
+            "CV_EVIDENCE_DIR": str(self.evidence),
+            "CV_NO_EGRESS": "true" if self.data.get("no_egress") else "false",
+        }
+
+    def compose(self, *a, images=None, **kw):
+        cmd = ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *a]
+        return run(cmd, env=self.compose_env(images), **kw)
+
+
+def derive_port(instance: str) -> int:
+    base = 18000 + zlib.crc32(instance.encode()) % 900
+    for p in range(base, base + 100):
+        if port_free(p):
+            return p
+    raise CliError("no free port in 18000-19000; pass --port N")
+
+
+def resolve_platform(name: str) -> str:
+    if name == "amd64":
+        return "linux/amd64"
+    if name == "native":
+        machine = pyplatform.machine().lower()
+        return "linux/arm64" if machine in ("arm64", "aarch64") else "linux/amd64"
+    raise CliError("--platform must be amd64 or native")
+
+
+# --------------------------------------------------------------------------- images
+
+
+def source_tree(st: State, ref: str | None) -> tuple[Path, str, str]:
+    """Return (path, sha, label) for the working tree or a detached worktree at ref."""
+    root = st.root_repo
+    if not ref or ref == "worktree":
+        sha = git(root, "rev-parse", "HEAD")
+        dirty = git(root, "status", "--porcelain", "--", "backend", "frontend")
+        label = f"wt-{sha[:12]}"
+        if dirty:
+            # Hash the uncommitted changes so sessions with different edits never share (and retag) one image.
+            h = hashlib.sha256(git(root, "diff", "HEAD", "--binary", "--", "backend", "frontend").encode())
+            for f in git(root, "ls-files", "--others", "--exclude-standard", "--", "backend", "frontend").splitlines():
+                h.update(f.encode() + (root / f).read_bytes())
+            label += f"-dirty{h.hexdigest()[:8]}"
+        return root, sha, label
+    sha = git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    path = st.src / sha[:12]
+    if not (path / "backend").exists():
+        st.src.mkdir(parents=True, exist_ok=True)
+        run(["git", "-C", str(root), "worktree", "add", "--detach", str(path), sha])
+    return path, sha, sha[:12]
+
+
+def image_exists(name: str) -> bool:
+    return subprocess.run(["docker", "image", "inspect", name], capture_output=True).returncode == 0
+
+
+def build_images(st: State, ref: str | None, platform_name: str, force: bool) -> dict:
+    """docker build --platform linux/amd64 for backend + frontend, as the deploy runbook does."""
+    src, sha, label = source_tree(st, ref)
+    plat = resolve_platform(platform_name)
+    suffix = "amd64" if plat == "linux/amd64" else "native"
+    images = {
+        "backend": f"cedars-verify/backend:{label}-{suffix}",
+        "frontend": f"cedars-verify/frontend:{label}-{suffix}",
+        "platform": plat,
+        "sha": sha,
+        "label": label,
+        "src": str(src),
+        "ref": ref or "worktree",
+    }
+    worktree_build = label.startswith("wt-")
+    jobs = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        for part in ("backend", "frontend"):
+            if not force and not worktree_build and image_exists(images[part]):
+                log(f"= {images[part]} already built")
+                continue
+            logf = st.logs / f"build-{part}-{label}-{suffix}.log"
+            # The label lets cleanup find builds whose tag a later rebuild moved (dangling, but still ours).
+            cmd = ["docker", "build", "--platform", plat, "--label", "cedars-verify=1", "-t", images[part], str(src / part)]
+            jobs[part] = (pool.submit(run_logged, cmd, logf, timeout=3600), logf)
+        started = time.time()
+        for part, (fut, logf) in jobs.items():
+            if fut.result() != 0:
+                raise CheckFailed(f"{part} image build failed. Tail of {logf}:\n{tail(logf)}")
+        if jobs:
+            log(f"= built {', '.join(jobs)} in {time.time() - started:.0f}s ({plat})")
+    images["built"] = sorted(set(st.data.get("built_images", [])) | {images["backend"], images["frontend"]})
+    st.data["built_images"] = images.pop("built")
+    return images
+
+
+# --------------------------------------------------------------------------- stack
+
+
+def compose_ps(st: State) -> list[dict]:
+    proc = st.compose("ps", "-a", "--format", "json", capture=True, quiet=True, check=False)
+    out = proc.stdout.strip()
+    if not out:
+        return []
+    if out.startswith("["):
+        return json.loads(out)
+    return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+
+def http_status(url: str, timeout: float = 5.0) -> int:
+    import httpx
+
+    try:
+        return httpx.get(url, timeout=timeout).status_code
+    except httpx.HTTPError:
+        return 0
+
+
+def worker_heartbeat(st: State) -> bool:
+    proc = st.compose("exec", "-T", "redis", "redis-cli", "EXISTS", "arq:queue:health-check",
+                      capture=True, quiet=True, check=False)
+    return proc.stdout.strip() == "1"
+
+
+def wait_healthy(st: State, timeout: int) -> dict:
+    """Wait like the deploy runbook: migrate exits 0, then ALB target health (2 consecutive 200s)."""
+    deadline = time.time() + timeout
+    t0 = time.time()
+    result = {"migrate": None, "alb_api": None, "alb_frontend": None, "worker_heartbeat": None}
+    while time.time() < deadline:
+        ps = {c["Service"]: c for c in compose_ps(st) if c.get("Service") in ("migrate", "s3-init")}
+        bad = [s for s, c in ps.items() if c.get("State") == "exited" and c.get("ExitCode") not in (0, None)]
+        if bad:
+            for s in bad:
+                st.compose("logs", "--no-color", "--tail", "60", s, check=False)
+            raise CheckFailed(f"one-off task(s) failed: {', '.join(bad)} (logs above)")
+        if ps.get("migrate", {}).get("State") == "exited":
+            result["migrate"] = "exit 0"
+            break
+        time.sleep(2)
+    else:
+        raise CheckFailed(f"migrate did not finish in {timeout}s; see `control-cedars stack logs migrate`")
+    consecutive = 0
+    while time.time() < deadline:
+        code = http_status(f"{st.url}/api/v1/health")
+        consecutive = consecutive + 1 if code == 200 else 0
+        if consecutive >= 2:  # alb.tf healthy_threshold = 2
+            result["alb_api"] = 200
+            break
+        time.sleep(3)
+    else:
+        raise CheckFailed(f"ALB /api/v1/health not healthy in {timeout}s; see `control-cedars stack logs backend`")
+    result["alb_frontend"] = http_status(f"{st.url}/")
+    if result["alb_frontend"] != 200:
+        # A crash-looping frontend task (e.g. nginx `host not found in upstream`) shows up as a 502 here.
+        proc = st.compose("logs", "--no-color", "--tail", "40", "frontend", capture=True, quiet=True, check=False)
+        emerg = sorted({ln.split("|", 1)[-1].strip() for ln in proc.stdout.splitlines() if "[emerg]" in ln})
+        cause = f": frontend crashed with {emerg[-1]}" if emerg else ""
+        raise CheckFailed(f"ALB / returned {result['alb_frontend']}{cause}; see `control-cedars stack logs frontend`")
+    while time.time() < deadline:
+        if worker_heartbeat(st):
+            result["worker_heartbeat"] = True
+            break
+        time.sleep(3)
+    else:
+        raise CheckFailed("worker never wrote arq:queue:health-check; see `control-cedars stack logs worker`")
+    result["seconds"] = round(time.time() - t0)
+    return result
+
+
+def cmd_stack_up(args) -> int:
+    st = State(args)
+    st.init()
+    running = any(c.get("State") == "running" for c in compose_ps(st))
+    if args.port:
+        st.data["port"] = args.port
+    elif not st.data.get("port") or (not running and not port_free(st.data["port"])):
+        st.data["port"] = derive_port(st.instance)
+    if not running and not port_free(st.port):
+        raise CliError(f"port {st.port} is in use by something else; pass --port N")
+    st.data["no_egress"] = bool(args.no_egress)
+    if args.no_build:
+        images = st.data.get("images")
+        if not images or not all(image_exists(images[p]) for p in ("backend", "frontend")):
+            raise CliError("--no-build given but no images are recorded/present; drop --no-build")
+    else:
+        images = build_images(st, args.ref, args.platform, args.rebuild)
+    st.data["images"] = images
+    st.save()
+    t_up = time.time()
+    st.compose("up", "-d", "--remove-orphans")
+    health = wait_healthy(st, args.timeout)
+    health["seconds"] = round(time.time() - t_up)
+    st.data["up_at"] = now_iso()
+    st.save()
+    data = {"url": st.url, "instance": st.instance, "images": images, "health": health,
+            "evidence": str(st.evidence), "no_egress": st.data["no_egress"]}
+    note = "" if images["platform"] == "linux/amd64" else "\nWARNING: native platform; Fargate runs linux/amd64. Say so in the report."
+    emit(args, data, f"stack up: {st.url}\n  source  {images['ref']} @ {images['sha'][:12]} ({images['label']})\n"
+         f"  images  {images['backend']}  {images['frontend']}\n  health  migrate {health['migrate']}, "
+         f"ALB /api/v1/health 200 x2, / 200, worker heartbeat ok ({health['seconds']}s)\n"
+         f"  evidence {st.evidence}{note}\nnext: control-cedars seed")
+    return 0
+
+
+def cmd_stack_status(args) -> int:
+    st = State(args)
+    st.require_stack()
+    ps = compose_ps(st)
+    services: dict[str, list] = {}
+    for c in ps:
+        services.setdefault(c["Service"], []).append(
+            {"name": c.get("Name"), "state": c.get("State"), "health": c.get("Health") or "", "exit": c.get("ExitCode")}
+        )
+    up = any(c.get("State") == "running" for c in ps)
+    data = {
+        "instance": st.instance,
+        "url": st.url,
+        "up": up,
+        "images": st.data.get("images"),
+        "services": services,
+        "alb_api_health": http_status(f"{st.url}/api/v1/health") if up else None,
+        "alb_frontend": http_status(f"{st.url}/") if up else None,
+        "worker_heartbeat": worker_heartbeat(st) if up else None,
+        "llm_mode": (st.control / "mode").read_text().strip() if (st.control / "mode").exists() else None,
+        "last_seed": st.data.get("last_seed"),
+    }
+    lines = [f"{st.project}: {'UP' if up else 'DOWN'}  {st.url}",
+             f"  source {data['images'].get('ref')} @ {data['images'].get('sha', '')[:12]}  platform {data['images'].get('platform')}"]
+    for svc in sorted(services):
+        reps = services[svc]
+        states = ", ".join(f"{r['state']}{'/' + r['health'] if r['health'] else ''}{'' if r['exit'] in (0, None) or r['state'] == 'running' else ' exit ' + str(r['exit'])}" for r in reps)
+        lines.append(f"  {svc:<9} x{len(reps)}  {states}")
+    if up:
+        lines.append(f"  ALB /api/v1/health {data['alb_api_health']}  / {data['alb_frontend']}  worker heartbeat {data['worker_heartbeat']}  llm mode {data['llm_mode']}")
+    emit(args, data, "\n".join(lines))
+    return 0 if up else 1
+
+
+def cmd_stack_logs(args) -> int:
+    st = State(args)
+    st.require_stack()
+    cmd = ["logs", "--no-color", "--timestamps", "--tail", str(args.tail)]
+    if args.since:
+        cmd += ["--since", args.since]
+    proc = st.compose(*cmd, *args.service, capture=bool(args.grep), check=False)
+    if args.grep:
+        pat = re.compile(args.grep, re.I)
+        hits = [ln for ln in (proc.stdout + proc.stderr).splitlines() if pat.search(ln)]
+        print("\n".join(hits))
+        return 0 if hits else 1
+    return proc.returncode
+
+
+def cmd_stack_restart(args) -> int:
+    st = State(args)
+    st.require_stack()
+    st.compose("restart", *args.service)
+    if "backend" in args.service or "alb" in args.service:
+        consecutive, deadline = 0, time.time() + args.timeout
+        while time.time() < deadline and consecutive < 2:
+            consecutive = consecutive + 1 if http_status(f"{st.url}/api/v1/health") == 200 else 0
+            time.sleep(3)
+        if consecutive < 2:
+            raise CheckFailed("backend not healthy behind the ALB after restart")
+    emit(args, {"restarted": args.service}, f"restarted {' '.join(args.service)}")
+    return 0
+
+
+def cmd_stack_down(args) -> int:
+    st = State(args)
+    if not st.exists:
+        emit(args, {"down": True, "note": "no state"}, f"nothing to stop for instance '{st.instance}'")
+        return 0
+    down = ["down", "--remove-orphans"] + ([] if args.keep_volumes else ["-v"])
+    st.compose(*down, check=False)
+    if not args.keep_volumes and st.data.pop("last_seed", None):
+        st.save()  # the seeded project died with the volume; {project} must not expand to it
+    emit(args, {"down": True, "volumes_removed": not args.keep_volumes, "evidence": str(st.evidence)},
+         f"stack down ({'volumes kept' if args.keep_volumes else 'volumes removed'}); evidence kept at {st.evidence}")
+    return 0
+
+
+# --------------------------------------------------------------------------- db + migrations
+
+
+def psql_ro(st: State, sql: str, *flags, quiet=False):
+    """psql in the stack's postgres with default_transaction_read_only=on."""
+    return run(
+        ["docker", "compose", "-p", st.project, "-f", str(COMPOSE_FILE), "exec", "-T",
+         "-e", "PGOPTIONS=-c default_transaction_read_only=on", "postgres",
+         "psql", "-U", "cedars", "-d", "cedars", "-v", "ON_ERROR_STOP=1", "-P", "pager=off", *flags, "-c", sql],
+        env=st.compose_env(), check=False, capture=True, quiet=quiet,
+    )
+
+
+def cmd_db_query(args) -> int:
+    st = State(args)
+    st.require_stack()
+    sql = expand_path_ui(st, sys.stdin.read() if args.sql == "-" else args.sql)  # {project}/{source} are seeded UUIDs, safe to inline
+    proc = psql_ro(st, sql, *(["--csv"] if args.csv else []))
+    sys.stdout.write(proc.stdout)
+    if proc.returncode != 0:
+        log(proc.stderr.strip())
+        if "read-only transaction" in proc.stderr:
+            log("db query is read-only by design (CLAUDE.md: no ad-hoc data fixes). Change data through the UI or API.")
+    return 0 if proc.returncode == 0 else 1
+
+
+def alembic(st: State, *a, db_url: str | None = None, check=True, images=None):
+    env_flags = ["-e", f"CEDARS_DATABASE_URL={db_url}"] if db_url else []
+    return st.compose("run", "--rm", "--no-deps", "-T", *env_flags, "migrate", "uv", "run", "alembic", *a,
+                      capture=True, check=check, images=images)
+
+
+def cmd_migrate_status(args) -> int:
+    st = State(args)
+    st.require_stack()
+    current = alembic(st, "current").stdout.strip().splitlines()
+    heads = alembic(st, "heads").stdout.strip().splitlines()
+    cur = [ln.split()[0] for ln in current if re.match(r"^[0-9a-f]{6,}", ln)]
+    hd = [ln.split()[0] for ln in heads if re.match(r"^[0-9a-f]{6,}", ln)]
+    ok = len(hd) == 1 and cur == hd
+    emit(args, {"current": cur, "heads": hd, "at_head": ok},
+         f"alembic current {cur or 'none'}  heads {hd}  -> {'at head' if ok else 'NOT at single head'}")
+    return 0 if ok else 1
+
+
+def cmd_migrate_check(args) -> int:
+    """Fresh DB: upgrade head, single head, downgrade -1, re-upgrade, alembic check (models == migrations)."""
+    st = State(args)
+    st.require_stack()
+    scratch = "cedars_migrate_check"
+    url = f"postgresql+asyncpg://cedars:{st.data['secrets']['db_password']}@postgres:5432/{scratch}"
+    psql = ["exec", "-T", "postgres", "psql", "-U", "cedars", "-d", "postgres", "-v", "ON_ERROR_STOP=1"]
+    st.compose(*psql, "-c", f"DROP DATABASE IF EXISTS {scratch}", "-c", f"CREATE DATABASE {scratch}", capture=True)
+    steps = []
+    try:
+        for label, a in [("upgrade head", ("upgrade", "head")), ("heads", ("heads",)),
+                         ("downgrade -1", ("downgrade", "-1")), ("re-upgrade head", ("upgrade", "head")),
+                         ("check (models vs migrations)", ("check",))]:
+            proc = alembic(st, *a, db_url=url, check=False)
+            out = (proc.stdout + proc.stderr).strip()
+            ok = proc.returncode == 0
+            if label == "heads":
+                n = len([ln for ln in proc.stdout.splitlines() if re.match(r"^[0-9a-f]{6,}", ln)])
+                ok = ok and n == 1
+                out = f"{n} head(s): {proc.stdout.strip()}"
+            steps.append({"step": label, "ok": ok, "detail": out.splitlines()[-1] if out else ""})
+            if not ok and label != "check (models vs migrations)":
+                break
+    finally:
+        st.compose(*psql, "-c", f"DROP DATABASE IF EXISTS {scratch}", capture=True, check=False)
+    ok = all(s["ok"] for s in steps) and len(steps) == 5
+    emit(args, {"ok": ok, "steps": steps},
+         "\n".join(f"  {'PASS' if s['ok'] else 'FAIL'}  {s['step']}: {s['detail']}" for s in steps)
+         + f"\nmigrate check: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- CI parity tests
+
+
+PYTEST_SUMMARY = re.compile(r"\b\d+ (passed|failed|errors?)\b.* in [\d.]+s")
+
+
+def run_ci_steps(steps: list, cwd: Path, logf: Path, env: dict | None = None) -> list:
+    """Run every step, even after a failure. CI stops at the first failure, so later steps are
+    marked ci_skipped: their result is still useful, but real CI never saw it."""
+    results, failed = [], False
+    with open(logf, "w") as fh:
+        for step in steps:
+            log("+ " + " ".join(step) + f"   (cwd {cwd}, log {logf})")
+            fh.write(f"\n$ {' '.join(step)}\n")
+            fh.flush()
+            rc = subprocess.run(step, cwd=cwd, env={**os.environ, **(env or {})},
+                                stdout=fh, stderr=subprocess.STDOUT).returncode
+            results.append({"step": " ".join(step), "exit": rc, "ci_skipped": failed})
+            failed = failed or rc != 0
+    return results
+
+
+def step_lines(results: list) -> str:
+    return "\n".join(f"  {'PASS' if r['exit'] == 0 else 'FAIL'}  {r['step']}"
+                     + ("   (CI never runs this: an earlier step failed)" if r["ci_skipped"] else "")
+                     for r in results)
+
+
+def cmd_test_backend(args) -> int:
+    st = State(args)
+    st.init()
+    src, sha, label = source_tree(st, args.ref)
+    cwd = src / "backend"
+    mode = "postgres" if args.postgres else "sqlite"
+    logf = st.evidence / f"test-backend-{mode}-{label}-{stamp()}.log"
+    env, container = {"UV_PYTHON": "3.12"}, None  # CI runs `uv python install 3.12` first
+    # .github/workflows/backend-v2.yml, job by job.
+    steps = [["uv", "sync", "--extra", "dev"]]
+    if args.postgres:
+        container = f"{st.project}-ci-pg"
+        run(["docker", "rm", "-f", container], check=False, capture=True, quiet=True)
+        run(["docker", "run", "-d", "--name", container, "-e", "POSTGRES_DB=cedars", "-e", "POSTGRES_USER=cedars",
+             "-e", "POSTGRES_PASSWORD=cedars", "-p", "127.0.0.1::5432", CI_POSTGRES_IMAGE], capture=True)
+        port = run(["docker", "port", container, "5432/tcp"], capture=True).stdout.strip().splitlines()[0].rsplit(":", 1)[1]
+        for _ in range(60):
+            if run(["docker", "exec", container, "pg_isready", "-U", "cedars"], check=False, capture=True, quiet=True).returncode == 0:
+                break
+            time.sleep(1)
+        env |= {"CEDARS_TEST_POSTGRES": "1",
+                "CEDARS_TEST_POSTGRES_URL": f"postgresql+asyncpg://cedars:cedars@127.0.0.1:{port}/cedars"}
+        steps.append(["uv", "run", "pytest", "tests/", "-q", *args.pytest_args])
+    else:
+        steps.append(["uv", "run", "ruff", "check", "app"])
+        steps.append(["uv", "run", "pytest", "tests/", "--cov=app", "--cov-report=term-missing", *args.pytest_args])
+    try:
+        results = run_ci_steps(steps, cwd, logf, env)
+    finally:
+        if container:
+            run(["docker", "rm", "-f", container], check=False, capture=True)
+    log_text = tail(logf, 400).splitlines()
+    summary = [ln.strip("= ") for ln in log_text if PYTEST_SUMMARY.search(ln)]
+    failures = [ln for ln in log_text if ln.startswith(("FAILED ", "ERROR "))]
+    ok = all(r["exit"] == 0 for r in results)
+    emit(args, {"ok": ok, "mode": mode, "source": label, "steps": results, "summary": summary[-1:],
+                "failures": failures, "log": str(logf)},
+         step_lines(results) + (f"\n  pytest: {summary[-1]}" if summary else "")
+         + "".join(f"\n  {f}" for f in failures)
+         + f"\ntest backend ({mode}): {'PASS' if ok else 'FAIL'}  log {logf}")
+    if not ok:
+        log(tail(logf, 40))
+    return 0 if ok else 1
+
+
+def cmd_test_frontend(args) -> int:
+    st = State(args)
+    st.init()
+    src, sha, label = source_tree(st, args.ref)
+    cwd = src / "frontend"
+    logf = st.evidence / f"test-frontend-{label}-{stamp()}.log"
+    # There is no frontend CI workflow; these are the CLAUDE.md commands.
+    steps = []
+    if args.ci or not (cwd / "node_modules").exists():
+        steps.append(["npm", "ci"])
+    steps += [["npx", "tsc", "--noEmit"], ["npx", "eslint", "src/"], ["npm", "run", "build"]]
+    results = run_ci_steps(steps, cwd, logf)
+    ok = all(r["exit"] == 0 for r in results)
+    emit(args, {"ok": ok, "source": label, "steps": results, "log": str(logf)},
+         step_lines(results) + f"\ntest frontend: {'PASS' if ok else 'FAIL'}  log {logf}")
+    if not ok:
+        log(tail(logf, 40))
+    return 0 if ok else 1
+
+
+def cmd_test_all(args) -> int:
+    rc = 0
+    for fn, extra in ((cmd_test_backend, {"postgres": False}), (cmd_test_backend, {"postgres": True}),
+                      (cmd_test_frontend, {"ci": False})):
+        ns = argparse.Namespace(**{**vars(args), **extra})
+        rc |= fn(ns)
+    return rc
+
+
+def gh_json(root: Path, *a, timeout=60):
+    proc = run(["gh", *a], capture=True, check=False, cwd=root, timeout=timeout)
+    if proc.returncode != 0:
+        raise CliError(f"gh {' '.join(a[:2])} failed. Check `gh auth status` (read access to the repo is enough).\n"
+                       f"{proc.stderr.strip()[-400:]}")
+    return json.loads(proc.stdout or "null")
+
+
+def cmd_ci_status(args) -> int:
+    """Real GitHub Actions results for a workflow on a branch (read-only gh calls)."""
+    st = State(args)
+    root = st.root_repo
+    branch = args.branch or git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    head = git(root, "rev-parse", "HEAD")
+    runs = gh_json(root, "run", "list", "--workflow", args.workflow, "--branch", branch, "--limit", str(args.limit),
+                   "--json", "databaseId,headSha,status,conclusion,createdAt,displayTitle")
+    failed_tests: dict[str, int] = {}
+    for r in runs:
+        # A force-pushed branch keeps CI runs for commits that are no longer in its history.
+        r["in_history"] = run(["git", "merge-base", "--is-ancestor", r["headSha"], head], cwd=root,
+                              check=False, quiet=True).returncode == 0
+        jobs = gh_json(root, "run", "view", str(r["databaseId"]), "--json", "jobs")["jobs"]
+        r["jobs"] = [{"name": j["name"], "conclusion": j.get("conclusion"),
+                      "failed_steps": [x["name"] for x in j.get("steps", []) if x.get("conclusion") == "failure"]}
+                     for j in jobs]
+        r["failed_tests"] = []
+        if r.get("conclusion") == "failure":
+            logp = run(["gh", "run", "view", str(r["databaseId"]), "--log-failed"], capture=True, check=False,
+                       cwd=root, timeout=180)
+            r["failed_tests"] = sorted({m.group(1) for m in re.finditer(r"FAILED (tests/\S+)", logp.stdout)})
+            for t in r["failed_tests"] if r["in_history"] else []:
+                failed_tests[t] = failed_tests.get(t, 0) + 1
+    done = [r for r in runs if r.get("status") == "completed"]
+    latest = done[0] if done else None
+    head_run = next((r for r in runs if r["headSha"] == head), None)
+    ok = bool(latest and latest.get("conclusion") == "success")
+    data = {"workflow": args.workflow, "branch": branch, "head": head[:12], "runs": runs,
+            "head_has_run": bool(head_run), "latest_completed_ok": ok, "failed_test_counts": failed_tests}
+    lines = [f"{args.workflow} on {branch} (gh, read-only), local HEAD {head[:12]}"]
+    for r in runs:
+        lines.append(f"  {r['createdAt'][:10]} {r['headSha'][:8]} {r.get('conclusion') or r['status']:<9} {r['displayTitle'][:60]}"
+                     + ("" if r["in_history"] else "  [NOT in local history: rewritten branch, ignored in counts]"))
+        for j in r["jobs"]:
+            if j["conclusion"] != "success":
+                lines.append(f"      {j['name']}: {j['conclusion']}" + (f" at {', '.join(j['failed_steps'])}" if j["failed_steps"] else ""))
+        lines += [f"        FAILED {t}" for t in r["failed_tests"][:10]]
+    n_hist = sum(r["in_history"] for r in runs)
+    if failed_tests:
+        lines.append(f"  failing tests across {n_hist} run(s) in local history: "
+                     + "; ".join(f"{t} ({n}/{n_hist})" for t, n in sorted(failed_tests.items(), key=lambda x: -x[1])))
+    lines.append(f"  HEAD {'has a CI run' if head_run else 'has NO CI run (not pushed, or no backend/** change)'}; "
+                 f"latest completed run: {latest.get('conclusion') if latest else 'none'}")
+    emit(args, data, "\n".join(lines))
+    return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- parity (static)
+
+
+def tf_variables(infra: Path) -> dict:
+    text = (infra / "variables.tf").read_text()
+    out = {}
+    for m in re.finditer(r'variable\s+"(\w+)"\s*\{(.*?)\n\}', text, re.S):
+        d = re.search(r"^\s*default\s*=\s*(.+?)\s*$", m.group(2), re.M)
+        if d:
+            out[m.group(1)] = d.group(1).strip().strip('"')
+    return out
+
+
+def tf_block(text: str, kind: str, name: str) -> str:
+    m = re.search(rf'resource\s+"{kind}"\s+"{name}"\s*\{{(.*?)\n\}}', text, re.S)
+    return m.group(1) if m else ""
+
+
+def compose_config(st: State) -> dict:
+    env = st.compose_env() if st.exists else {
+        **{k: "placeholder" for k in ("CV_DB_PASSWORD", "CV_SECRET_KEY", "CV_S3_USER", "CV_S3_PASSWORD")},
+        "CV_BUCKET": BUCKET,
+        "CV_PROJECT": st.project, "CV_PORT": "18000", "CV_BACKEND_IMAGE": "b", "CV_FRONTEND_IMAGE": "f",
+        "CV_PLATFORM": "linux/amd64", "CV_STACK_DIR": str(STACK_DIR), "CV_CONTROL_DIR": "/tmp", "CV_EVIDENCE_DIR": "/tmp",
+    }
+    proc = run(["docker", "compose", "-p", st.project, "-f", str(COMPOSE_FILE), "config", "--format", "json"],
+               env=env, capture=True, quiet=True)
+    return json.loads(proc.stdout)
+
+
+def settings_fields(repo: Path) -> dict:
+    text = (repo / "backend/app/config.py").read_text()
+    fields = {}
+    for m in re.finditer(r"^    (\w+): [^=\n]+= (.+)$", text, re.M):
+        fields[m.group(1)] = m.group(2).strip()
+    return fields
+
+
+def settings_usage(repo: Path, field: str) -> int:
+    count = 0
+    for py in (repo / "backend/app").rglob("*.py"):
+        if py.name == "config.py" and py.parent.name == "app":
+            continue
+        count += len(re.findall(rf"settings\.{field}\b", py.read_text(errors="replace")))
+    return count
+
+
+def cmd_parity_check(args) -> int:
+    st = State(args)
+    repo = st.root_repo
+    infra = repo / "infra/cedars-v2"
+    ecs = (infra / "ecs.tf").read_text()
+    alb = (infra / "alb.tf").read_text()
+    main_tf = (infra / "main.tf").read_text()
+    var = tf_variables(infra)
+    cfg = compose_config(st)
+    svc = cfg["services"]
+    nginx = (STACK_DIR / "alb.nginx.conf").read_text()
+    checks, findings = [], []
+
+    def check(area, name, expected, actual, ok=None, note=""):
+        ok = (str(expected) == str(actual)) if ok is None else ok
+        checks.append({"area": area, "check": name, "aws": expected, "stack": actual, "ok": bool(ok), "note": note})
+
+    # env: names and literal values from ecs.tf local.app_environment/app_secrets
+    tf_env = dict(re.findall(r'\{\s*name\s*=\s*"(CEDARS_\w+)",\s*value\s*=\s*(.+?)\s*\}', ecs))
+    tf_secrets = re.findall(r'\{\s*name\s*=\s*"(CEDARS_\w+)",\s*valueFrom', ecs)
+
+    def tf_value(expr: str):
+        expr = expr.strip()
+        if expr.startswith('"'):
+            return expr.strip('"')
+        if expr == "var.region":
+            return var.get("region")
+        if expr == "local.cookie_secure" and 'cookie_secure = var.enable_https ? "true" : "false"' in main_tf:
+            return "true" if var.get("enable_https") == "true" else "false"
+        if expr == "local.cors_origins" and '"http://localhost:5173"' in main_tf and var.get("app_hostname", "") == "":
+            return "http://localhost:5173"
+        return None  # resolved by a dedicated check below
+
+    for name in ("backend", "worker", "migrate"):
+        env = svc[name].get("environment", {})
+        names = {k for k in env if k.startswith("CEDARS_")}
+        check("env", f"{name}: CEDARS_* names == ecs.tf app_environment + app_secrets",
+              sorted(set(tf_env) | set(tf_secrets)), sorted(names))
+    benv = svc["backend"]["environment"]
+    for k, expr in tf_env.items():
+        expected = tf_value(expr)
+        if expected is not None:
+            check("env", f"{k} value", repr(expected), repr(benv.get(k)))
+    check("env", "CEDARS_REDIS_URL shape", "redis://<host>:6379 (no TLS)", benv.get("CEDARS_REDIS_URL"),
+          ok=re.fullmatch(r"redis://[\w.-]+:6379", benv.get("CEDARS_REDIS_URL", "")) is not None)
+    check("env", "CEDARS_S3_BUCKET shape", "user-<prefix>-storage", benv.get("CEDARS_S3_BUCKET"),
+          ok='bucket = "user-${local.prefix}-storage"' in (infra / "s3.tf").read_text()
+          and re.fullmatch(r"user-[\w-]+-storage", benv.get("CEDARS_S3_BUCKET", "")) is not None)
+    check("env", "CEDARS_DATABASE_URL shape", "postgresql+asyncpg://cedars:<pw>@<host>:5432/cedars",
+          re.sub(r":[^:@/]+@", ":<pw>@", benv.get("CEDARS_DATABASE_URL", "")),
+          ok=re.fullmatch(r"postgresql\+asyncpg://cedars:[^@]+@[\w.-]+:5432/cedars", benv.get("CEDARS_DATABASE_URL", "")) is not None)
+
+    # settings wiring
+    fields = settings_fields(repo)
+    for k in sorted(set(tf_env) | set(tf_secrets)):
+        f = k.removeprefix("CEDARS_").lower()
+        check("settings", f"{k} maps to a Settings field", f, f if f in fields else "(missing)")
+    for f, default in fields.items():
+        if f == "model_config":
+            continue
+        uses = settings_usage(repo, f)
+        if uses == 0:
+            findings.append({"severity": "should-fix", "finding": f"Settings.{f} is declared but never read"
+                             + (f" (ecs.tf sets CEDARS_{f.upper()}, which does nothing)" if f"CEDARS_{f.upper()}" in tf_env else "")})
+    for f, risky in (("s3_endpoint", "MinIO URL"), ("s3_access_key", "MinIO key"), ("secret_key", "placeholder")):
+        if f in fields and fields[f] not in ('""', "''"):
+            findings.append({"severity": "nit", "finding": f"Settings.{f} defaults to a {risky} ({fields[f]}); if the env var is ever dropped the app starts anyway instead of failing"})
+
+    # resources + counts (variables.tf defaults; migrate literals in ecs.tf)
+    def limits(name):
+        lim = svc[name].get("deploy", {}).get("resources", {}).get("limits", {})
+        return float(lim.get("cpus", 0)), int(lim.get("memory", 0)) // (1024 * 1024)
+    for name in ("backend", "worker", "frontend"):
+        cpus, mem = limits(name)
+        check("resources", f"{name} cpu units", var.get(f"{name}_cpu"), int(cpus * 1024))
+        check("resources", f"{name} memory MiB", var.get(f"{name}_memory"), mem)
+        check("resources", f"{name} desired count", var.get(f"{name}_desired_count"), svc[name].get("deploy", {}).get("replicas", 1))
+    mig = tf_block(ecs, "aws_ecs_task_definition", "migrate")
+    mcpu = re.search(r"cpu\s*=\s*(\d+)", mig)
+    mmem = re.search(r"memory\s*=\s*(\d+)", mig)
+    cpus, mem = limits("migrate")
+    check("resources", "migrate cpu units", mcpu.group(1) if mcpu else "?", int(cpus * 1024))
+    check("resources", "migrate memory MiB", mmem.group(1) if mmem else "?", mem)
+
+    # commands
+    def tf_command(block):
+        m = re.search(r"command\s*=\s*(\[[^\]]*\])", block)
+        return json.loads(m.group(1)) if m else None
+    check("commands", "worker command", tf_command(tf_block(ecs, "aws_ecs_task_definition", "worker")), svc["worker"].get("command"))
+    check("commands", "migrate command", tf_command(mig), svc["migrate"].get("command"))
+    check("commands", "backend uses image CMD (no override)", None, svc["backend"].get("command"))
+    check("commands", "frontend uses image CMD (no override)", None, svc["frontend"].get("command"))
+    check("platform", "task runtime platform", "X86_64 (no runtime_platform in ecs.tf)" if "runtime_platform" not in ecs else "set in ecs.tf",
+          svc["backend"].get("platform"), ok=("runtime_platform" in ecs) or svc["backend"].get("platform") == "linux/amd64",
+          note="native builds are allowed with --platform native but must be reported")
+
+    # ALB
+    idle = re.search(r"idle_timeout\s*=\s*(\d+)", alb)
+    check("alb", "idle_timeout -> proxy_read_timeout", idle.group(1) if idle else "?",
+          (re.search(r"proxy_read_timeout (\d+)s", nginx) or [None, "?"])[1])
+    patterns = re.findall(r'values\s*=\s*\[([^\]]*)\]', tf_block(alb, "aws_lb_listener_rule", "backend"))
+    tf_paths = sorted(p.strip().strip('"') for p in ",".join(patterns).split(",") if p.strip())
+    ng_paths = sorted(f"{loc}*" for loc in re.findall(r"location (/\w+/) ", nginx))
+    check("alb", "backend path patterns", tf_paths, ng_paths)
+    hc = re.findall(r'path\s*=\s*"([^"]+)"', alb)
+    check("alb", "backend health path served by app", hc[0] if hc else "?",
+          "/api/v1/health" if '"/api/v1/health"' in (repo / "backend/app/main.py").read_text() else "(missing)")
+    dur = re.search(r"cookie_duration\s*=\s*(\d+)", alb)
+    check("alb", "backend stickiness lb_cookie duration", dur.group(1) if dur else "none",
+          (re.search(r"Max-Age=(\d+)", nginx) or [None, "none"])[1])
+    check("alb", "frontend target group stickiness", "none" if alb.count("stickiness") == 1 else "set",
+          "none" if "hash" not in nginx.split("upstream frontend_tg")[1].split("}")[0] else "set")
+
+    # managed-service versions
+    pg_image = svc["postgres"]["image"]
+    check("versions", "Aurora PostgreSQL engine", var.get("db_engine_version"), pg_image.split(":")[1].split("-")[0])
+    redis_image = svc["redis"]["image"]
+    check("versions", "ElastiCache Redis engine", var.get("redis_engine_version"), redis_image.split(":")[1].split("-")[0],
+          ok=True, note="known gap: no OSS 7.1 image; 7.0.15 is the protocol-compatible stand-in")
+
+    # images: Dockerfiles are shared with the deploy by construction; flag unpinned bases
+    for part in ("backend", "frontend"):
+        df = (repo / part / "Dockerfile").read_text()
+        stages = set(re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", df, re.M | re.I))
+        for img in re.findall(r"(?:FROM|--from=)\s*(\S+)", df):
+            if img in stages:
+                continue
+            if img.endswith(":latest") or ":" not in img.split("/")[-1] or re.search(r":(alpine|slim)$", img):
+                findings.append({"severity": "nit", "finding": f"{part}/Dockerfile uses floating base {img}; the deploy and this stack can differ build to build"})
+    if "uv run" in json.dumps(svc["worker"].get("command")) or "uv\", \"run" in (repo / "backend/Dockerfile").read_text():
+        findings.append({"severity": "nit", "finding": "containers start through `uv run`, which re-checks the environment at startup; `.venv/bin/...` would be deterministic"})
+
+    failed = [c for c in checks if not c["ok"]]
+    if args.json:
+        print(json.dumps({"ok": not failed, "checks": checks, "findings": findings}, indent=2))
+    else:
+        for c in checks:
+            print(f"  {'PASS' if c['ok'] else 'FAIL'}  [{c['area']}] {c['check']}: aws={c['aws']} stack={c['stack']}"
+                  + (f"  ({c['note']})" if c["note"] else ""))
+        for f in findings:
+            print(f"  NOTE  [{f['severity']}] {f['finding']}")
+        print(f"parity check: {len(checks) - len(failed)}/{len(checks)} match" + ("" if not failed else f", {len(failed)} DRIFT"))
+    return 1 if failed else 0
+
+
+def cmd_infra_validate(args) -> int:
+    st = State(args)
+    st.init()
+    infra = st.root_repo / "infra/cedars-v2"
+    scratch = st.dir / "tf-validate"
+    if scratch.exists():
+        shutil.rmtree(scratch)
+    shutil.copytree(infra, scratch, ignore=shutil.ignore_patterns(".terraform", "*.tfstate*", ".terraform.lock.hcl.bak"))
+    results = []
+    for label, cmd, cwd in [
+        ("fmt -check", ["terraform", "fmt", "-check", "-recursive", "-diff", "-no-color"], infra),
+        ("init -backend=false", ["terraform", "init", "-backend=false", "-input=false", "-no-color"], scratch),
+        ("validate", ["terraform", "validate", "-no-color"], scratch),
+    ]:
+        proc = run(cmd, cwd=cwd, check=False, capture=True, timeout=600)
+        out = (proc.stdout + proc.stderr).strip()
+        results.append({"step": label, "ok": proc.returncode == 0, "detail": out.splitlines()[-1] if out else ""})
+        if proc.returncode != 0:
+            log(out[-3000:])
+            break
+    ok = all(r["ok"] for r in results) and len(results) == 3
+    emit(args, {"ok": ok, "steps": results},
+         "\n".join(f"  {'PASS' if r['ok'] else 'FAIL'}  terraform {r['step']}: {r['detail']}" for r in results)
+         + f"\ninfra validate: {'PASS' if ok else 'FAIL'} (no plan/apply; never touches the TFC workspace)")
+    return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- HTTP client
+
+
+def user_email(role: str) -> str:
+    return f"verify-{role}@example.com"  # EmailStr rejects .local/.test
+
+
+def jar_for(st: State, role: str) -> http.cookiejar.MozillaCookieJar:
+    jar = http.cookiejar.MozillaCookieJar(str(st.cookies / f"{role}.txt"))
+    if Path(jar.filename).exists():
+        jar.load(ignore_discard=True, ignore_expires=True)
+    return jar
+
+
+def client_for(st: State, role: str | None):
+    import httpx
+
+    jar = jar_for(st, role) if role else http.cookiejar.CookieJar()
+    return httpx.Client(base_url=st.url, cookies=jar, timeout=60.0), jar
+
+
+def save_jar(jar) -> None:
+    """Write the jar atomically so parallel callers never read a half-written file."""
+    if isinstance(jar, http.cookiejar.MozillaCookieJar):
+        tmp = f"{jar.filename}.{os.getpid()}.tmp"
+        jar.save(tmp, ignore_discard=True, ignore_expires=True)
+        os.replace(tmp, jar.filename)
+
+
+def login(st: State, role: str) -> dict:
+    """Register (idempotent) and log in a synthetic user; cookies land in the role's jar."""
+    client, jar = client_for(st, role)
+    pw = st.data["secrets"]["user_password"]
+    with client:
+        r = client.post("/api/v1/auth/register", json={"email": user_email(role), "name": f"Verify {role.title()}", "password": pw})
+        if r.status_code not in (201, 400):
+            raise CheckFailed(f"register {role} -> {r.status_code} {r.text[:300]}")
+        r = client.post("/api/v1/auth/login", json={"email": user_email(role), "password": pw})
+        if r.status_code != 200:
+            raise CheckFailed(f"login {role} -> {r.status_code} {r.text[:300]}")
+        save_jar(jar)
+        return r.json()["user"]
+
+
+def expand_path(st: State, path: str) -> str:
+    seed = st.data.get("last_seed") or {}
+    for key, val in (("{project}", seed.get("project_id")), ("{source}", seed.get("data_source_id"))):
+        if key in path:
+            if not val:
+                raise CliError(f"{key} needs a seeded project; run `control-cedars seed` first")
+            path = path.replace(key, val)
+    if not path.startswith("/"):
+        raise CliError("path must start with / (e.g. /projects or /api/v1/health)")
+    return path if path.startswith(("/api/", "/ws/")) or path == "/" else "/api/v1" + path
+
+
+def api_call(st: State, role: str | None, method: str, path: str, *, json_body=None, data=None, files=None, retry_auth=True,
+             quiet=False):
+    client, jar = client_for(st, role)
+    url = expand_path(st, path)
+    with client:
+        t0 = time.time()
+        r = client.request(method.upper(), url, json=json_body, data=data, files=files)
+        if r.status_code == 401 and role and retry_auth and "/auth/" not in url:
+            save_jar(jar)
+            login(st, role)
+            return api_call(st, role, method, path, json_body=json_body, data=data, files=files, retry_auth=False,
+                            quiet=quiet)
+        save_jar(jar)
+        if not quiet:
+            log(f"HTTP {r.status_code} {method.upper()} {url} as {role or 'anon'} ({(time.time() - t0) * 1000:.0f} ms)")
+        return r
+
+
+def json_path(obj, path: str) -> list:
+    """Values at a dot path (`metrics.llm_status`, `results.0.id`); `[*]` fans out over a list."""
+    vals = [obj]
+    for part in re.findall(r"\[\*\]|[^.\[\]]+", path):
+        nxt = []
+        for v in vals:
+            if part == "[*]":
+                nxt.extend(v if isinstance(v, list) else [])
+            elif isinstance(v, list) and part.isdigit() and int(part) < len(v):
+                nxt.append(v[int(part)])
+            elif isinstance(v, dict) and part in v:
+                nxt.append(v[part])
+        vals = nxt
+    return vals
+
+
+def as_text(v) -> str:
+    return v if isinstance(v, str) else json.dumps(v)
+
+
+def until_holds(body, expr: str) -> bool:
+    """`PATH=VALUE` / `PATH!=VALUE`; every value at PATH must compare, and there must be at least one."""
+    m = re.fullmatch(r"(.+?)(!=|=)(.*)", expr)
+    if not m:
+        raise CliError(f"--until {expr!r}: use PATH=VALUE or PATH!=VALUE (e.g. metrics.llm_status=completed)")
+    path, op, want = m.groups()
+    vals = json_path(body, path)
+    return bool(vals) and all((as_text(v) == want) == (op == "=") for v in vals)
+
+
+def cmd_api(args) -> int:
+    st = State(args)
+    st.require_stack()
+    body, data, files = None, None, None
+    if args.json_body is not None:
+        raw = sys.stdin.read() if args.json_body == "-" else (Path(args.json_body[1:]).read_text() if args.json_body.startswith("@") else args.json_body)
+        body = json.loads(raw)
+    if args.form:
+        data = dict(kv.split("=", 1) for kv in args.form)
+    if args.file:
+        files = {}
+        for spec in args.file:
+            field, p = spec.split("=", 1)
+            path = Path(p).expanduser()
+            files[field] = (path.name, path.read_bytes())
+    role = None if args.as_user == "anon" else args.as_user
+    if role and not (st.cookies / f"{role}.txt").exists():
+        login(st, role)
+    if args.until and args.method.upper() != "GET":
+        raise CliError("--until re-sends the request until it holds; use it with GET only")
+    for e in args.until or []:
+        until_holds({}, e)  # syntax check before the first request
+    r = api_call(st, role, args.method, args.path, json_body=body, data=data, files=files)
+    ctype = r.headers.get("content-type", "")
+    parsed = r.json() if "json" in ctype and r.content else r.text
+    timed_out, started, polls = False, time.time(), 1
+    while args.until:
+        pending = [e for e in args.until if not until_holds(parsed, e)]
+        if not pending:
+            log(f"= until {' and '.join(args.until)}: held after {time.time() - started:.0f}s ({polls} request(s))")
+            break
+        if time.time() - started >= args.timeout:
+            timed_out = True
+            log(f"FAIL: still not {' and '.join(pending)} after {args.timeout}s ({polls} request(s)); last response below")
+            break
+        if polls % 10 == 0:
+            log(f"  waiting for {' and '.join(pending)} ({time.time() - started:.0f}s)")
+        time.sleep(args.interval)
+        r = api_call(st, role, args.method, args.path, quiet=True)
+        ctype = r.headers.get("content-type", "")
+        parsed = r.json() if "json" in ctype and r.content else r.text
+        polls += 1
+    if args.field:
+        vals = json_path(parsed, args.field)
+        if not vals:
+            log(f"no value at {args.field!r} in HTTP {r.status_code} response: {as_text(parsed)[:300]}")
+            return 1
+        print("\n".join(as_text(v) for v in vals))
+    else:
+        print(json.dumps(parsed, indent=2) if not isinstance(parsed, str) else parsed)
+    if args.save:
+        (st.evidence / f"{args.save}.json").write_text(json.dumps(
+            {"request": {"method": args.method.upper(), "path": expand_path(st, args.path), "as": args.as_user},
+             "status": r.status_code, "body": parsed}, indent=2))
+        log(f"saved {st.evidence / (args.save + '.json')}")
+    if timed_out:
+        return 1
+    if args.expect:
+        return 0 if r.status_code == args.expect else 1
+    return 0 if r.is_success else 1
+
+
+def cmd_ws(args) -> int:
+    """Open a WebSocket through the ALB the way a browser would (only cookies whose path matches /ws)."""
+    from urllib.request import Request
+
+    from websockets.sync.client import connect
+
+    st = State(args)
+    st.require_stack()
+    path = expand_path(st, args.path)
+    url = st.url.replace("http://", "ws://") + path
+    headers = {}
+    if args.as_user != "anon":
+        if not (st.cookies / f"{args.as_user}.txt").exists():
+            login(st, args.as_user)
+        jar = jar_for(st, args.as_user)
+        req = Request(st.url + path)
+        jar.add_cookie_header(req)
+        if req.get_header("Cookie"):
+            headers["Cookie"] = req.get_header("Cookie")
+    log(f"+ websocket {url} as {args.as_user} (cookies sent: {'yes' if headers else 'none'})")
+    messages, closed = [], None
+    deadline = time.time() + args.seconds
+    try:
+        with connect(url, additional_headers=headers, open_timeout=10) as ws:
+            while time.time() < deadline and len(messages) < args.max_messages:
+                try:
+                    msg = ws.recv(timeout=max(0.1, deadline - time.time()))
+                except TimeoutError:
+                    break
+                print(msg, flush=True)
+                messages.append(msg)
+    except Exception as e:  # noqa: BLE001 - report any handshake/close reason
+        closed = f"{type(e).__name__}: {e}"
+        log(f"websocket closed: {closed}")
+    log(f"received {len(messages)} message(s)")
+    if args.save:  # saved on failure too: a socket that closes silently is the evidence
+        out = st.evidence / f"{args.save}.json"
+        out.write_text(json.dumps({"url": path, "as": args.as_user, "cookies_sent": bool(headers),
+                                   "closed": closed, "messages": messages}, indent=2))
+        log(f"saved {out}")
+    return 0 if messages else 1
+
+
+# --------------------------------------------------------------------------- seed
+
+
+def cmd_seed(args) -> int:
+    st = State(args)
+    st.require_stack()
+    src = Path(st.data["images"]["src"])
+    for role in ROLES:
+        login(st, role)
+    name = args.project_name or f"verify-{stamp()}"
+    r = api_call(st, "admin", "POST", "/projects", json_body={
+        "name": name, "description": "control-cedars seed (synthetic data only)",
+        "llm_provider": "vllm", "llm_model": "fake-clinical", "llm_api_base": "http://fake-llm:8080"})
+    if r.status_code != 201:
+        raise CheckFailed(f"create project -> {r.status_code} {r.text[:300]}")
+    pid = r.json()["id"]
+    for role in ("annotator", "viewer"):
+        r = api_call(st, "admin", "POST", f"/projects/{pid}/members", json_body={"email": user_email(role), "role": role})
+        if r.status_code != 201:
+            raise CheckFailed(f"add {role} member -> {r.status_code} {r.text[:300]}")
+    seed = {"project_id": pid, "project_name": name, "users": {k: user_email(k) for k in ROLES},
+            "password_hint": "state.json secrets.user_password", "llm": "vllm/fake-clinical @ http://fake-llm:8080"}
+    if not args.no_upload:
+        csv = src / SAMPLE_CSV
+        if not csv.exists():  # refs before a2ae6891 (2026-09-22) predate the bundled sample; the data is the same
+            csv = repo_root(args) / SAMPLE_CSV
+            log(f"= {SAMPLE_CSV} not in the stack's ref; uploading the working tree's copy")
+        r = api_call(st, "admin", "POST", f"/projects/{pid}/data/upload",
+                     data={"column_mapping": json.dumps(SAMPLE_MAPPING)},
+                     files={"file": (csv.name, csv.read_bytes(), "text/csv")})
+        if r.status_code != 201:
+            raise CheckFailed(f"upload sample -> {r.status_code} {r.text[:300]}")
+        sid = r.json()["id"]
+        seed["data_source_id"] = sid
+        seed["s3_key"] = r.json()["config"].get("s3_key")
+        if not args.no_ingest:
+            r = api_call(st, "admin", "POST", f"/projects/{pid}/data/sources/{sid}/ingest")
+            if r.status_code not in (200, 201, 202):
+                raise CheckFailed(f"start ingestion -> {r.status_code} {r.text[:300]}")
+            deadline = time.time() + args.timeout
+            src_status = None
+            while time.time() < deadline:
+                src_status = api_call(st, "admin", "GET", f"/projects/{pid}/data/sources/{sid}").json()
+                if src_status["status"] in ("completed", "failed"):
+                    break
+                time.sleep(2)
+            if not src_status or src_status["status"] != "completed":
+                raise CheckFailed(f"ingestion did not complete: {src_status}")
+            # Count from the DB so a broken patient-list API (old releases) does not hide whether ingestion worked.
+            proc = psql_ro(st, f"select count(*) from patients where project_id = '{pid}' and deleted_at is null", "-tA")
+            total = int(proc.stdout.strip()) if proc.returncode == 0 else None
+            seed.update({"row_count": src_status["row_count"], "patients": total})
+            if (total, src_status["row_count"]) != (SAMPLE_PATIENTS, SAMPLE_NOTES):
+                raise CheckFailed(f"expected {SAMPLE_PATIENTS} patients / {SAMPLE_NOTES} notes, got {total} / {src_status['row_count']}")
+            r = api_call(st, "admin", "GET", f"/projects/{pid}/data/patients?limit=50")
+            seed["patients_api"] = r.status_code
+            if r.status_code != 200 or r.json().get("total") != total:
+                msg = f"GET /data/patients -> {r.status_code} {r.text[:200]} (DB has {total} patients)"
+                if not getattr(args, "tolerate_api_errors", False):
+                    raise CheckFailed(msg + "; see `control-cedars stack logs backend --grep Traceback`")
+                log(f"  WARN  {msg}")
+    st.data["last_seed"] = seed
+    st.save()
+    emit(args, seed, f"seeded project {name} ({pid})\n  users {', '.join(seed['users'].values())}\n"
+         + (f"  data source {seed.get('data_source_id')}: {seed.get('row_count', 'not ingested')} notes, {seed.get('patients', '-')} patients\n" if not args.no_upload else "")
+         + "  {project} and {source} now expand in `api`, `ws` and `browser` paths")
+    return 0
+
+
+# --------------------------------------------------------------------------- browser
+
+
+def locator(page, spec):
+    """Locator from a string (Playwright selector) or a dict {role,name,exact|text|label|placeholder|css|testid, nth, within}."""
+    if isinstance(spec, str):
+        loc = page.locator(spec)
+    else:
+        root = locator(page, spec["within"]) if "within" in spec else page
+        exact = spec.get("exact", False)
+        if "role" in spec:
+            loc = root.get_by_role(spec["role"], name=spec.get("name"), exact=exact) if "name" in spec else root.get_by_role(spec["role"])
+        elif "text" in spec:
+            loc = root.get_by_text(spec["text"], exact=exact)
+        elif "label" in spec:
+            loc = root.get_by_label(spec["label"], exact=exact)
+        elif "placeholder" in spec:
+            loc = root.get_by_placeholder(spec["placeholder"], exact=exact)
+        elif "testid" in spec:
+            loc = root.get_by_test_id(spec["testid"])
+        elif "css" in spec:
+            loc = root.locator(spec["css"])
+        else:
+            raise CliError(f"locator needs role/text/label/placeholder/testid/css: {spec}")
+    if isinstance(spec, dict) and "nth" in spec:
+        loc = loc.nth(spec["nth"])
+    return loc
+
+
+def browser_session(st: State, role: str | None, headed=False, slow_mo=0):
+    from playwright.sync_api import sync_playwright
+
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=not headed, slow_mo=slow_mo)
+    context = browser.new_context(base_url=st.url, viewport={"width": 1440, "height": 900})
+    if role:
+        login(st, role)
+        cookies = [{"name": c.name, "value": c.value, "domain": "127.0.0.1", "path": c.path,
+                    "httpOnly": True, "sameSite": "Lax"} for c in jar_for(st, role)]
+        context.add_cookies(cookies)
+    page = context.new_page()
+    events = {"console_errors": [], "page_errors": [], "api_errors": [], "failed_requests": []}
+    page.on("console", lambda m: m.type == "error" and events["console_errors"].append(m.text[:300]))
+    page.on("pageerror", lambda e: events["page_errors"].append(str(e)[:300]))
+    page.on("response", lambda r: r.status >= 400 and "/api/" in r.url and events["api_errors"].append(f"{r.status} {r.request.method} {r.url.split(str(st.port), 1)[-1]}"))
+    page.on("requestfailed", lambda r: events["failed_requests"].append(f"{r.method} {r.url.split(str(st.port), 1)[-1]} {r.failure}"))
+    return pw, browser, page, events
+
+
+def save_shot(st: State, page, name: str, full_page=False) -> str:
+    path = st.evidence / f"{name}.png"
+    page.screenshot(path=str(path), full_page=full_page)
+    log(f"screenshot {path}")
+    return str(path)
+
+
+def run_steps(st: State, page, steps: list, prefix: str, default_timeout: float) -> list:
+    shots = []
+    for i, step in enumerate(steps, 1):
+        timeout = float(step.get("timeout", default_timeout)) * 1000
+        action = next((k for k in ("goto", "click", "fill", "select", "press", "check", "upload", "expect_text",
+                                   "expect_no_text", "expect", "expect_url", "wait", "screenshot", "snapshot") if k in step), None)
+        if not action:
+            raise CliError(f"step {i} has no known action: {step}")
+        log(f"  step {i}: {action} {json.dumps(step[action])[:120]}")
+        try:
+            if action == "goto":
+                page.goto(step["goto"], timeout=timeout)
+                page.wait_for_load_state("networkidle", timeout=timeout)
+            elif action == "click":
+                locator(page, step["click"]).click(timeout=timeout)
+            elif action == "fill":
+                locator(page, step["fill"]).fill(str(step["value"]), timeout=timeout)
+            elif action == "select":
+                loc = locator(page, step["select"])
+                try:
+                    loc.select_option(label=str(step["value"]), timeout=timeout)
+                except Exception:  # noqa: BLE001 - fall back to option value
+                    loc.select_option(value=str(step["value"]), timeout=timeout)
+            elif action == "press":
+                if "on" in step:
+                    locator(page, step["on"]).press(step["press"], timeout=timeout)
+                else:
+                    page.keyboard.press(step["press"])
+            elif action == "check":
+                locator(page, step["check"]).check(timeout=timeout)
+            elif action == "upload":
+                f = Path(step["file"])
+                f = f if f.is_absolute() else Path(st.data["images"]["src"]) / f
+                locator(page, step["upload"]).set_input_files(str(f), timeout=timeout)
+            elif action == "expect_text":
+                page.get_by_text(step["expect_text"], exact=step.get("exact", False)).first.wait_for(state="visible", timeout=timeout)
+            elif action == "expect_no_text":
+                page.get_by_text(step["expect_no_text"], exact=step.get("exact", False)).first.wait_for(state="hidden", timeout=timeout)
+            elif action == "expect":
+                state = step.get("state", "visible")
+                loc = locator(page, step["expect"]).first
+                if state in ("visible", "hidden", "attached", "detached"):
+                    loc.wait_for(state=state, timeout=timeout)
+                else:
+                    deadline = time.time() + timeout / 1000
+                    while (loc.is_enabled() if state == "enabled" else loc.is_disabled()) is False:
+                        if time.time() > deadline:
+                            raise TimeoutError(f"not {state}")
+                        time.sleep(0.25)
+            elif action == "expect_url":
+                page.wait_for_url(re.compile(step["expect_url"]), timeout=timeout)
+            elif action == "wait":
+                time.sleep(float(step["wait"]))
+            elif action == "screenshot":
+                shots.append(save_shot(st, page, f"{prefix}-{step['screenshot']}", step.get("full_page", False)))
+            elif action == "snapshot":
+                snap = page.locator("body").aria_snapshot()
+                p = st.evidence / f"{prefix}-{step['snapshot']}.aria.yml"
+                p.write_text(snap)
+                log(f"aria snapshot {p}")
+        except Exception as e:  # noqa: BLE001 - every failure gets evidence
+            shots.append(save_shot(st, page, f"{prefix}-FAIL-step{i}", True))
+            (st.evidence / f"{prefix}-FAIL-step{i}.aria.yml").write_text(page.locator("body").aria_snapshot())
+            raise CheckFailed(f"step {i} ({action}) failed: {type(e).__name__}: {str(e).splitlines()[0][:300]}\n"
+                              f"  url {page.url}\n  evidence {st.evidence}/{prefix}-FAIL-step{i}.png and .aria.yml")
+    return shots
+
+
+def cmd_browser(args) -> int:
+    st = State(args)
+    st.require_stack()
+    role = None if args.as_user == "anon" else args.as_user
+    pw, browser, page, events = browser_session(st, role, getattr(args, "headed", False), getattr(args, "slow_mo", 0))
+    result = {"as": args.as_user}
+    try:
+        if args.browser_cmd in ("snapshot", "screenshot"):
+            page.goto(expand_path_ui(st, args.path), timeout=args.timeout * 1000)
+            page.wait_for_load_state("networkidle", timeout=args.timeout * 1000)
+            if args.wait_text:
+                page.get_by_text(args.wait_text).first.wait_for(state="visible", timeout=args.timeout * 1000)
+            name = args.save or f"{args.browser_cmd}-{stamp()}"
+            result["url"] = page.url
+            result["screenshot"] = save_shot(st, page, name, getattr(args, "full_page", False))
+            if args.browser_cmd == "snapshot":
+                snap = page.locator("body").aria_snapshot()
+                (st.evidence / f"{name}.aria.yml").write_text(snap)
+                print(snap)
+        else:
+            raw = sys.stdin.read() if args.steps in (None, "-") else Path(args.steps).read_text()
+            steps = json.loads(raw)
+            for s in steps:
+                if isinstance(s.get("goto"), str):
+                    s["goto"] = expand_path_ui(st, s["goto"])
+            prefix = args.save or f"run-{stamp()}"
+            result["screenshots"] = run_steps(st, page, steps, prefix, args.timeout)
+            result["steps"] = len(steps)
+            result["final_url"] = page.url
+    finally:
+        result.update(events)
+        browser.close()
+        pw.stop()
+    for k in ("page_errors", "api_errors", "failed_requests", "console_errors"):
+        if result[k]:
+            log(f"WARNING {k}: {result[k][:10]}")
+    if args.browser_cmd == "run":
+        print(json.dumps(result, indent=2))
+    noisy = result["page_errors"] or (args.strict and (result["api_errors"] or result["console_errors"]))
+    return 1 if noisy else 0
+
+
+def expand_path_ui(st: State, path: str) -> str:
+    seed = st.data.get("last_seed") or {}
+    for key, val in (("{project}", seed.get("project_id")), ("{source}", seed.get("data_source_id"))):
+        if key in path:
+            if not val:
+                raise CliError(f"{key} needs a seeded project; run `control-cedars seed` first")
+            path = path.replace(key, val)
+    return path
+
+
+# --------------------------------------------------------------------------- fake LLM
+
+
+def cmd_llm_mode(args) -> int:
+    st = State(args)
+    st.init()
+    f = st.control / "mode"
+    if args.mode:
+        f.write_text(args.mode + "\n")
+    mode = f.read_text().strip()
+    emit(args, {"mode": mode}, f"fake-llm mode: {mode}")
+    return 0
+
+
+def cmd_llm_calls(args) -> int:
+    st = State(args)
+    f = st.evidence / "fake-llm-calls.jsonl"
+    calls = [json.loads(ln) for ln in f.read_text().splitlines()] if f.exists() else []
+    if args.since:
+        calls = [c for c in calls if c["at"] >= args.since]
+    by = {}
+    for c in calls:
+        key = f"{c['kind']}/{c['mode']}"
+        by[key] = by.get(key, 0) + 1
+    emit(args, {"total": len(calls), "by_kind_mode": by, "last": calls[-args.tail:]},
+         f"fake-llm calls: {len(calls)} total  " + "  ".join(f"{k}={v}" for k, v in sorted(by.items())))
+    return 0
+
+
+# --------------------------------------------------------------------------- AWS (read-only)
+
+
+def redact(text: str) -> str:
+    """The repo is public: keep account IDs and internal hostnames out of the transcript."""
+    text = re.sub(r"(?<![0-9a-fA-F])\d{12}(?![0-9a-fA-F])", "<account>", text)
+    return re.sub(r"\b[\w.-]+\.elb\.amazonaws\.com\b", "<alb-dns>", text)
+
+
+def aws(args, *a, missing_ok: str | None = None) -> dict:
+    cmd = ["aws", *a, "--profile", args.profile, "--region", args.region, "--output", "json"]
+    log(redact("+ " + " ".join(cmd)))
+    proc = run(cmd, capture=True, check=False, timeout=60, quiet=True)
+    if proc.returncode != 0:
+        err = redact(proc.stderr.strip())
+        if missing_ok and missing_ok in err:
+            return {}
+        if re.search(r"expired|Token|credentials|SSO|ExpiredToken|InvalidClientTokenId", err, re.I):
+            raise CliError(f"AWS credentials for profile '{args.profile}' are missing or expired. "
+                           f"Ask the user to refresh them (e.g. `! aws sso login --profile {args.profile}` or their SAML login), then retry.\n{err[-400:]}")
+        raise CheckFailed(f"aws {' '.join(a[:2])} failed: {err[-600:]}")
+    return json.loads(proc.stdout or "{}")
+
+
+def deployed_shas(args) -> dict:
+    """Map service -> image tags/digest actually running (read-only describe/list calls)."""
+    cluster = args.cluster
+    names = [f"{AWS_PREFIX}-{s}" for s in ("backend", "worker", "frontend")]
+    svcs = aws(args, "ecs", "describe-services", "--cluster", cluster, "--services", *names)["services"]
+    out = {}
+    for s in svcs:
+        short = s["serviceName"].removeprefix(f"{AWS_PREFIX}-")
+        tasks = aws(args, "ecs", "list-tasks", "--cluster", cluster, "--service-name", s["serviceName"], "--desired-status", "RUNNING")["taskArns"]
+        digests, sidecars = set(), set()
+        if tasks:
+            for t in aws(args, "ecs", "describe-tasks", "--cluster", cluster, "--tasks", *tasks[:10])["tasks"]:
+                for c in t.get("containers", []):
+                    # Only the app container. AWS injects sidecars (aws-guardduty-agent-*) with no image name.
+                    if c.get("imageDigest") and ".dkr.ecr." in (c.get("image") or ""):
+                        digests.add(c["imageDigest"])
+                    elif c.get("name"):
+                        sidecars.add(re.sub(r"-[A-Za-z0-9]{4,8}$", "-*", c["name"]))
+        repo = f"{AWS_PREFIX}-{'frontend' if short == 'frontend' else 'backend'}"
+        tags, gone = set(), []
+        for d in digests:
+            imgs = aws(args, "ecr", "describe-images", "--repository-name", repo, "--image-ids", f"imageDigest={d}",
+                       missing_ok="ImageNotFoundException").get("imageDetails")
+            if imgs is None:
+                gone.append(d[:19])  # task still runs an image ECR no longer has (overwritten tag + lifecycle expiry)
+            for img in imgs or []:
+                tags.update(img.get("imageTags", []))
+        deploy = next((d for d in s.get("deployments", []) if d.get("status") == "PRIMARY"), {})
+        out[short] = {
+            "desired": s.get("desiredCount"), "running": s.get("runningCount"), "pending": s.get("pendingCount"),
+            "rollout": deploy.get("rolloutState"), "task_def_revision": s.get("taskDefinition", "").rsplit(":", 1)[-1],
+            "image_tags": sorted(tags), "digests": sorted(d[:19] for d in digests), "digests_not_in_ecr": gone, "sidecars": sorted(sidecars),
+            "sha": next((t for t in sorted(tags) if re.fullmatch(r"[0-9a-f]{7,40}", t)), None),
+        }
+    return out
+
+
+def cmd_aws_status(args) -> int:
+    st = State(args)
+    ident = aws(args, "sts", "get-caller-identity")
+    services = deployed_shas(args)
+    lb = aws(args, "elbv2", "describe-load-balancers", "--names", f"{AWS_PREFIX}-alb")["LoadBalancers"][0]
+    tgs = aws(args, "elbv2", "describe-target-groups", "--load-balancer-arn", lb["LoadBalancerArn"])["TargetGroups"]
+    health = {}
+    for tg in tgs:
+        states = [d["TargetHealth"]["State"] for d in aws(args, "elbv2", "describe-target-health", "--target-group-arn", tg["TargetGroupArn"])["TargetHealthDescriptions"]]
+        health[tg["TargetGroupName"].removeprefix(f"{AWS_PREFIX}-")] = {s: states.count(s) for s in set(states)}
+    head = git(st.root_repo, "rev-parse", "HEAD")
+    for name, s in services.items():
+        sha = s.get("sha")
+        if not sha:
+            continue
+        paths = ["frontend"] if name == "frontend" else ["backend"]
+        known = subprocess.run(["git", "-C", str(st.root_repo), "cat-file", "-e", f"{sha}^{{commit}}"]).returncode == 0
+        s["in_local_history"] = known
+        if known:
+            s["is_ancestor_of_head"] = subprocess.run(["git", "-C", str(st.root_repo), "merge-base", "--is-ancestor", sha, head]).returncode == 0
+            s["undeployed_commits"] = git(st.root_repo, "log", "--oneline", f"{sha}..{head}", "--", *paths).splitlines()[:20]
+            if name == "backend":
+                s["undeployed_migrations"] = git(st.root_repo, "diff", "--name-only", f"{sha}..{head}", "--", "backend/migrations/versions").splitlines()
+    data = {"profile": args.profile, "arn_role": ident.get("Arn", "").split("/")[1] if "/" in ident.get("Arn", "") else "?",
+            "cluster": args.cluster, "head": head[:12], "services": services, "target_health": health,
+            "alb_scheme": lb.get("Scheme")}
+    lines = [f"AWS {args.cluster} (profile {args.profile}, read-only), local HEAD {head[:12]}"]
+    for name, s in services.items():
+        lines.append(f"  {name:<8} {s['running']}/{s['desired']} running, rollout {s['rollout']}, taskdef rev {s['task_def_revision']}, "
+                     f"image {s.get('sha') or s['image_tags']}, {len(s['digests'])} digest(s)"
+                     + (f", sidecars {', '.join(s['sidecars'])}" if s["sidecars"] else ""))
+        if s["digests_not_in_ecr"]:
+            lines.append(f"           WARNING: {len(s['digests_not_in_ecr'])} running task(s) use an image no longer in ECR "
+                         f"({', '.join(s['digests_not_in_ecr'])}); tasks are on mixed builds, and a replacement task will pull something else")
+        if s.get("undeployed_commits") is not None:
+            lines.append(f"           {len(s['undeployed_commits'])} commit(s) on HEAD touching {name if name == 'frontend' else 'backend'}/ not deployed"
+                         + (f", {len(s.get('undeployed_migrations', []))} new migration file(s)" if name == "backend" else ""))
+            lines += [f"             {c}" for c in s["undeployed_commits"][:8]]
+    lines.append("  target health: " + "  ".join(f"{k} {v}" for k, v in health.items()))
+    emit(args, data, "\n".join(lines))
+    return 0
+
+
+def cmd_bedrock_probe(args) -> int:
+    """Classify two synthetic excerpts with real Bedrock inside the deployed-arch backend image. Costs money."""
+    if not args.yes_cost:
+        raise CliError("bedrock probe makes 2 paid Bedrock calls with real AWS credentials. Ask the user first, "
+                       "then rerun with --yes-cost.")
+    st = State(args)
+    image = args.image or (st.data.get("images") or {}).get("backend")
+    if not image or not image_exists(image):
+        raise CliError("no backend image; run `control-cedars stack up` first, or pass --image")
+    script = r'''
+import asyncio, json, sys
+from types import SimpleNamespace
+from app.pipeline.classifier import classify_patient
+cfg = SimpleNamespace(name="Deep vein thrombosis", description="Objectively confirmed DVT",
+    include_criteria="Duplex ultrasound showing thrombus", exclude_criteria="Rule-out studies, family history",
+    llm_provider="bedrock", llm_model=sys.argv[1], llm_api_base=None, llm_api_key=None)
+cases = {
+  "positive": [{"note_id": "n1", "note_date": "2020-03-04", "text": "Duplex ultrasound shows occlusive thrombus in the left femoral vein, consistent with acute DVT. Started apixaban."}],
+  "negative": [{"note_id": "n2", "note_date": "2020-05-06", "text": "Bilateral lower extremity duplex: no evidence of deep vein thrombosis. DVT ruled out."}],
+}
+out = {}
+for name, ex in cases.items():
+    try:
+        r = asyncio.run(classify_patient(ex, cfg))
+        out[name] = {"label": r.label, "confidence": r.confidence, "score": r.score, "event_date": r.event_date,
+                     "reasoning_present": bool(r.reasoning), "token_usage": r.token_usage}
+    except Exception as e:
+        out[name] = {"error": f"{type(e).__name__}: {e}"[:400]}
+print(json.dumps(out))
+'''
+    plat = (st.data.get("images") or {}).get("platform", "linux/amd64")
+    cmd = ["docker", "run", "--rm", "--platform", plat, "-v", f"{Path.home() / '.aws'}:/root/.aws:ro",
+           "-e", f"AWS_PROFILE={args.profile}", "-e", f"AWS_REGION={args.region}", "-e", f"AWS_DEFAULT_REGION={args.region}",
+           image, "uv", "run", "python", "-c", script, args.model]
+    proc = run(cmd, capture=True, check=False, timeout=600)
+    line = next((ln for ln in reversed(proc.stdout.splitlines()) if ln.startswith("{")), None)
+    if not line:
+        raise CheckFailed(f"probe produced no result (exit {proc.returncode}):\n{proc.stderr[-1500:]}")
+    res = json.loads(line)
+    ok = res.get("positive", {}).get("label") == "positive" and res.get("negative", {}).get("label") == "negative"
+    (st.evidence / f"bedrock-probe-{stamp()}.json").write_text(json.dumps({"model": args.model, "image": image, "result": res}, indent=2))
+    emit(args, {"ok": ok, "model": args.model, "image": image, "result": res},
+         f"bedrock probe ({args.model}) in {image}:\n" + "\n".join(f"  {k}: {v}" for k, v in res.items())
+         + f"\nbedrock probe: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- deploy rehearsal
+
+
+def cmd_deploy_rehearse(args) -> int:
+    """Replay the deploy runbook locally: old images serving + data, migrate with new image, old must survive, then roll."""
+    st = State(args)
+    st.init()
+    from_ref = args.from_ref
+    if from_ref == "aws":
+        from_ref = deployed_shas(args)["backend"].get("sha")
+        if not from_ref:
+            raise CliError("could not read the deployed backend SHA tag from ECR; pass --from <ref>")
+        log(f"= deployed backend is {from_ref}")
+    if any(c.get("State") == "running" for c in compose_ps(st)):
+        raise CliError(f"instance '{st.instance}' already has a running stack and rehearsal needs a fresh DB. "
+                       f"Use another instance (CEDARS_VERIFY_INSTANCE={st.instance}-2). Run `stack down` only if "
+                       "you started that stack yourself")
+    report = {"from": from_ref, "to": args.to_ref or "worktree", "steps": []}
+    try:
+        return _rehearse(args, st, from_ref, report)
+    except Exception as e:
+        if not report["steps"] or report["steps"][-1]["ok"]:  # failed inside a step's action, not its check
+            report["steps"].append({"step": "(next step)", "ok": False, "detail": f"{type(e).__name__}: {e}"})
+        report["ok"] = False
+        out = st.evidence / f"deploy-rehearsal-{stamp()}.json"
+        out.write_text(json.dumps(report, indent=2))
+        log(f"saved {out}")
+        raise
+
+
+def _rehearse(args, st: "State", from_ref: str, report: dict) -> int:
+    def step(name, ok, detail=""):
+        report["steps"].append({"step": name, "ok": ok, "detail": detail})
+        log(f"  {'PASS' if ok else 'FAIL'}  {name} {detail}")
+        if not ok:
+            raise CheckFailed(f"deploy rehearsal failed at: {name} {detail}")
+
+    up = argparse.Namespace(**{**vars(args), "ref": from_ref, "no_build": False, "rebuild": False, "port": args.port,
+                               "no_egress": False, "timeout": args.timeout, "json": True})
+    try:
+        cmd_stack_up(up)
+    except CheckFailed as e:
+        step("old release up", False, f"{from_ref}: {e}")
+    step("old release up", True, f"{from_ref}")
+    # The old release may have its own bugs; the API check is the baseline below, not part of seeding.
+    seed_ns = argparse.Namespace(**{**vars(args), "project_name": "rehearsal", "no_upload": False, "no_ingest": False,
+                                    "json": True, "tolerate_api_errors": True})
+    cmd_seed(seed_ns)
+    st = State(args)
+    pid = st.data["last_seed"]["project_id"]
+    step("seed data on old release", True, f"{pid} patients={st.data['last_seed']['patients']}")
+    paths = ("/projects", f"/projects/{pid}", f"/projects/{pid}/data/patients?limit=5",
+             f"/projects/{pid}/data/sources", f"/projects/{pid}/evaluation/sessions")
+    report["baseline_old_release"] = {p: api_call(st, "admin", "GET", p).status_code for p in paths}
+    broken = {p: c for p, c in report["baseline_old_release"].items() if c != 200}
+    if broken:  # an old-release defect, not a deploy problem; recorded so the regression check can skip it
+        log(f"  NOTE  old release already fails before the migration: {broken}")
+    new_images = build_images(st, args.to_ref, args.platform, False)
+    st.save()
+    step("build new images", True, new_images["label"])
+    proc = st.compose("run", "--rm", "--no-deps", "-T", "migrate", images=new_images, capture=True, check=False)
+    step("migrate task with NEW image while OLD tasks serve", proc.returncode == 0, (proc.stdout + proc.stderr).strip().splitlines()[-1:] or "")
+    # Invariant: whatever the old tasks served before the migration, they still serve after it.
+    for path in paths:
+        before, now = report["baseline_old_release"][path], api_call(st, "admin", "GET", path).status_code
+        step(f"OLD backend on NEW schema: GET {path}", now == 200 or before != 200,
+             str(now) if before == 200 else f"{now} (was {before} before the migration: an old-release defect)")
+    st.data["images"] = new_images
+    st.save()
+    st.compose("up", "-d", "--remove-orphans")
+    wait_healthy(st, args.timeout)
+    step("roll services to new images", True, new_images["backend"])
+    for path in paths:
+        code = api_call(st, "admin", "GET", path).status_code
+        step(f"NEW backend: GET {path}", code == 200, str(code))
+    total = api_call(st, "admin", "GET", f"/projects/{pid}/data/patients?limit=5").json().get("total")
+    step("data survives the roll", total == SAMPLE_PATIENTS, f"patients={total}")
+    report["ok"] = True
+    (st.evidence / f"deploy-rehearsal-{stamp()}.json").write_text(json.dumps(report, indent=2))
+    emit(args, report, f"deploy rehearsal {from_ref[:12]} -> {new_images['label']}: PASS ({len(report['steps'])} steps)")
+    return 0
+
+
+# --------------------------------------------------------------------------- doctor / evidence / cleanup
+
+
+def cmd_doctor(args) -> int:
+    rows = []
+
+    def row(name, ok, detail, required=True):
+        rows.append({"check": name, "ok": bool(ok), "detail": detail, "required": required})
+
+    def ver(cmd):
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            return p.returncode == 0, (p.stdout or p.stderr).strip().splitlines()[0] if (p.stdout or p.stderr).strip() else ""
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            return False, str(e)
+
+    ok, d = ver(["docker", "info", "--format", "{{.ServerVersion}} {{.Architecture}}"])
+    row("docker daemon", ok, d or "start Docker Desktop")
+    ok, d = ver(["docker", "compose", "version", "--short"])
+    row("docker compose v2", ok, d)
+    ok, d = ver(["docker", "buildx", "ls"])
+    amd = ok and "linux/amd64" in subprocess.run(["docker", "buildx", "ls"], capture_output=True, text=True).stdout
+    row("buildx can build linux/amd64 (Fargate arch)", amd, "QEMU/Rosetta emulation available" if amd else "enable amd64 emulation in Docker Desktop")
+    for tool, cmd, req, hint in [("uv", ["uv", "--version"], True, "https://docs.astral.sh/uv/"),
+                                 ("git", ["git", "--version"], True, ""),
+                                 ("node", ["node", "--version"], False, "needed for `test frontend`"),
+                                 ("npm", ["npm", "--version"], False, "needed for `test frontend`"),
+                                 ("terraform", ["terraform", "version"], False, "needed for `infra validate`"),
+                                 ("aws cli", ["aws", "--version"], False, "needed for `aws status` / `bedrock probe`")]:
+        ok, d = ver(cmd)
+        row(tool, ok, d if ok else hint, req)
+    cache = Path.home() / ("Library/Caches/ms-playwright" if sys.platform == "darwin" else ".cache/ms-playwright")
+    has_browser = (cache / f"chromium_headless_shell-{PLAYWRIGHT_CHROMIUM}").exists() or (cache / f"chromium-{PLAYWRIGHT_CHROMIUM}").exists()
+    row("playwright chromium", has_browser, str(cache) if has_browser else
+        "run: uv run --no-project --with playwright==1.58.0 playwright install chromium", False)
+    try:
+        st = State(args)
+        root = st.root_repo
+        dirty = git(root, "status", "--porcelain")
+        row("repo", True, f"{root} @ {git(root, 'rev-parse', '--abbrev-ref', 'HEAD')} {git(root, 'rev-parse', '--short=12', 'HEAD')}"
+            + (f" ({len(dirty.splitlines())} uncommitted path(s))" if dirty else " (clean)"))
+        ps = compose_ps(st) if st.exists else []
+        up = any(c.get("State") == "running" for c in ps)
+        port = st.data.get("port")
+        row("instance", True, f"{st.instance} ({st.project}) "
+            + (f"UP at {st.url} since {st.data.get('up_at', '?')}; if you did not start it, another session in this "
+               "checkout did: use --instance NAME" if up else "not running")
+            + (f", port {port} {'free' if port_free(port) else 'busy'}" if port and not up else ""))
+    except CliError as e:
+        row("repo", False, str(e))
+        st = None
+    others = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True).stdout.split()
+    foreign = [n for n in others if not (st and n.startswith(st.project))]
+    if foreign:
+        row("other containers (not ours: leave alone)", True,
+            ", ".join(foreign[:12]) + (f" … and {len(foreign) - 12} more" if len(foreign) > 12 else ""), False)
+    failed = [r for r in rows if r["required"] and not r["ok"]]
+    if args.json:
+        print(json.dumps({"ok": not failed, "checks": rows}, indent=2))
+    else:
+        for r in rows:
+            print(f"  {'OK  ' if r['ok'] else ('FAIL' if r['required'] else 'WARN')}  {r['check']}: {r['detail']}")
+        print(f"doctor: {'ready' if not failed else 'NOT ready'}")
+    return 1 if failed else 0
+
+
+def cmd_evidence(args) -> int:
+    st = State(args)
+    st.evidence.mkdir(parents=True, exist_ok=True)
+    if args.evidence_cmd == "dir":
+        print(st.evidence)
+        return 0
+    files = sorted(st.evidence.iterdir(), key=lambda p: p.stat().st_mtime)
+    emit(args, [{"file": str(p), "bytes": p.stat().st_size} for p in files],
+         "\n".join(f"{p.stat().st_size:>9}  {p}" for p in files) or f"(empty) {st.evidence}")
+    return 0
+
+
+def cmd_cleanup(args) -> int:
+    st = State(args)
+    removed = []
+    if st.exists:
+        st.compose("down", "-v", "--remove-orphans", check=False, capture=True)
+        removed.append(f"compose project {st.project} (containers, networks, volumes)")
+    for c in (f"{st.project}-ci-pg",):
+        if run(["docker", "rm", "-f", c], check=False, capture=True, quiet=True).returncode == 0:
+            removed.append(f"container {c}")
+    if st.src.exists():
+        for wt in st.src.iterdir():
+            run(["git", "-C", str(st.root_repo), "worktree", "remove", "--force", str(wt)], check=False, capture=True)
+            removed.append(f"worktree {wt}")
+        run(["git", "-C", str(st.root_repo), "worktree", "prune"], check=False, capture=True, quiet=True)
+    if st.cookies.exists():
+        shutil.rmtree(st.cookies)
+        removed.append("cookie jars")
+    kept_images = []
+    if args.images:
+        # `docker image rm` only refuses an image's last tag, so check what other instances still record first.
+        elsewhere = set()
+        for f in STATE_ROOT.glob("*/state.json"):
+            if f.parent.name != st.instance:
+                with contextlib.suppress(ValueError, OSError):
+                    elsewhere |= set((json.loads(f.read_text()).get("images") or {}).get(k) for k in ("backend", "frontend"))
+        for img in st.data.get("built_images", []):
+            if img in elsewhere:
+                kept_images.append(img)  # keep it recorded so a later cleanup removes it
+            elif run(["docker", "image", "rm", img], check=False, capture=True, quiet=True).returncode == 0:
+                removed.append(f"image {img}")
+            elif run(["docker", "image", "inspect", img], check=False, capture=True, quiet=True).returncode == 0:
+                kept_images.append(img)  # a container outside any instance state still uses it
+        st.data["built_images"] = kept_images
+        # Untagged leftovers of rebuilt tags; prune skips any image a container still uses.
+        pruned = run(["docker", "image", "prune", "-f", "--filter", "label=cedars-verify=1"],
+                     check=False, capture=True, quiet=True).stdout
+        n = sum(1 for ln in pruned.splitlines() if ln.startswith("deleted:"))
+        if n:
+            removed.append(f"{n} untagged cedars-verify image layer(s)")
+    leftovers = subprocess.run(["docker", "ps", "-a", "-q", "--filter", f"label=com.docker.compose.project={st.project}"],
+                               capture_output=True, text=True).stdout.split()
+    vols = subprocess.run(["docker", "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={st.project}"],
+                          capture_output=True, text=True).stdout.split()
+    if st.exists:
+        st.data.pop("images", None) if not args.keep_state else None
+        st.data.pop("last_seed", None) if not args.keep_state else None
+        st.save()
+    evidence = sorted(p.name for p in st.evidence.iterdir()) if st.evidence.exists() else []
+    ok = not leftovers and not vols
+    emit(args, {"ok": ok, "removed": removed, "leftover_containers": leftovers, "leftover_volumes": vols,
+                "images_in_use": kept_images, "evidence_dir": str(st.evidence), "evidence_files": len(evidence)},
+         "\n".join(f"  removed {r}" for r in removed)
+         + "".join(f"\n  kept image {i} (another instance still uses it; re-run cleanup --images after that one)" for i in kept_images)
+         + f"\n  leftovers: containers={len(leftovers)} volumes={len(vols)}"
+         + f"\n  evidence kept: {st.evidence} ({len(evidence)} files)\ncleanup: {'clean' if ok else 'LEFTOVERS'}")
+    return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------- argparse
+
+EXAMPLES = {
+    "doctor": "control-cedars doctor\ncontrol-cedars doctor --json",
+    "stack up": "control-cedars stack up                     # build working tree for linux/amd64, start, wait for ALB health\n"
+                "control-cedars stack up --ref c7cf4c74      # an older release (`aws status` shows what DEV runs)\n"
+                "control-cedars stack up --platform native   # faster on Apple silicon; report says so\n"
+                "control-cedars stack up --no-egress         # surface hidden internet dependencies",
+    "stack status": "control-cedars stack status\ncontrol-cedars stack status --json",
+    "stack logs": "control-cedars stack logs backend worker --since 10m\ncontrol-cedars stack logs worker --grep 'orphan|Traceback'",
+    "stack restart": "control-cedars stack restart worker          # test orphan recovery\ncontrol-cedars stack restart backend",
+    "stack down": "control-cedars stack down\ncontrol-cedars stack down --keep-volumes",
+    "db query": "control-cedars db query 'select status, count(*) from patients group by 1'\ncontrol-cedars db query \"select count(*) from annotations where project_id='{project}'\"\necho 'select 1' | control-cedars db query - --csv",
+    "migrate status": "control-cedars migrate status",
+    "migrate check": "control-cedars migrate check     # scratch DB: upgrade, single head, downgrade -1, re-upgrade, alembic check",
+    "test backend": "control-cedars test backend                # SQLite job: uv sync --extra dev, ruff, pytest --cov\n"
+                    "control-cedars test backend --postgres     # Postgres job: postgres:16-alpine, CEDARS_TEST_POSTGRES=1\n"
+                    "control-cedars test backend -- -k ingest   # extra pytest args after --",
+    "test frontend": "control-cedars test frontend               # tsc --noEmit, eslint src/, npm run build\ncontrol-cedars test frontend --ci          # force npm ci first",
+    "test all": "control-cedars test all",
+    "ci status": "control-cedars ci status                   # backend-v2.yml on the current branch: jobs, failed steps, failed tests\n"
+                 "control-cedars ci status --limit 10 --json  # spot flaky tests: failed in some runs, not others",
+    "parity check": "control-cedars parity check\ncontrol-cedars parity check --json",
+    "infra validate": "control-cedars infra validate     # terraform fmt -check, init -backend=false, validate (scratch copy)",
+    "seed": "control-cedars seed                        # users, project (fake LLM), sample CSV, ingestion, 5/103 assert\n"
+            "control-cedars seed --no-ingest            # stop after upload (data source Pending)\n"
+            "control-cedars seed --no-upload            # users + empty project",
+    "api": "control-cedars api GET /auth/me --as viewer\n"
+           "SID=$(control-cedars api POST /projects/{project}/evaluation/sessions --body '{\"search_queries\":[]}' --field id)\n"
+           "control-cedars api GET /projects/{project}/evaluation/sessions/$SID --until metrics.llm_status=completed\n"
+           "control-cedars api GET \"/projects/{project}/evaluation/sessions/$SID/results?page_size=100\" --field 'results[*].status'\n"
+           "control-cedars api DELETE /projects/{project} --as viewer --expect 403\n"
+           "control-cedars api POST /projects/{project}/data/upload --file file=notes.csv --form 'column_mapping={...}'",
+    "ws": "control-cedars ws /ws/projects/{project}/jobs/<job_id> --seconds 5 --as admin",
+    "browser snapshot": "control-cedars browser snapshot /projects/{project}/data --as admin --wait-text 'Data sources'",
+    "browser screenshot": "control-cedars browser screenshot /projects --as viewer --save viewer-projects",
+    "browser run": "control-cedars browser run steps.json --as admin --save ingest-ui\n"
+                   "echo '[{\"goto\":\"/projects/{project}/data\"},{\"expect_text\":\"Ingested\"},{\"screenshot\":\"done\"}]' | control-cedars browser run - --as admin\n"
+                   "steps: goto | click | fill(+value) | select(+value) | press(+on) | check | upload(+file) | expect_text |\n"
+                   "       expect_no_text | expect(+state) | expect_url | wait | screenshot | snapshot; optional timeout (s)\n"
+                   "locator: Playwright selector string, or {role,name,exact} {text} {label} {placeholder} {css} {testid} + nth/within",
+    "llm mode": "control-cedars llm mode            # show\ncontrol-cedars llm mode empty      # replies '{}' (the Bedrock regression fixed in cef61132)\ncontrol-cedars llm mode normal",
+    "llm calls": "control-cedars llm calls\ncontrol-cedars llm calls --json --tail 5",
+    "aws status": "control-cedars aws status                  # read-only: ECS services, deployed image SHA, target health, undeployed commits\n"
+                  "control-cedars aws status --profile saml --json",
+    "bedrock probe": "control-cedars bedrock probe --yes-cost    # ONLY after the user agrees: 2 paid Haiku calls in the amd64 image",
+    "deploy rehearse": "control-cedars deploy rehearse --from c7cf4c74      # old release + data, migrate with new image, old must survive, roll\n"
+                       "control-cedars deploy rehearse --from aws           # read the deployed SHA first (read-only AWS)",
+    "evidence": "control-cedars evidence dir\ncontrol-cedars evidence list",
+    "cleanup": "control-cedars cleanup            # stack, CI postgres, ref worktrees, cookies; evidence kept\ncontrol-cedars cleanup --images",
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    def global_flags(suppress: bool) -> argparse.ArgumentParser:
+        # Accepted before or after the subcommand. Subparser copies default to SUPPRESS so they
+        # never overwrite a value given before the subcommand (argparse applies sub defaults last).
+        d = {"default": argparse.SUPPRESS} if suppress else {}
+        g = argparse.ArgumentParser(add_help=False)
+        g.add_argument("--instance", help="stack instance name (default: repo folder name; env CEDARS_VERIFY_INSTANCE)", **d)
+        g.add_argument("--repo", help="CEDARS checkout to verify (default: git toplevel of cwd)", **d)
+        g.add_argument("--json", action="store_true", help="machine-readable output on stdout", **d)
+        return g
+
+    common = global_flags(suppress=True)
+    p = argparse.ArgumentParser(prog="control-cedars", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                parents=[global_flags(suppress=False)])
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
+
+    def add(parent_sub, name, fn, help_text, key=None):
+        sp = parent_sub.add_parser(name.split()[-1], help=help_text, description=help_text, parents=[common],
+                                   epilog="examples:\n  " + EXAMPLES.get(key or name, "").replace("\n", "\n  "),
+                                   formatter_class=argparse.RawDescriptionHelpFormatter)
+        sp.set_defaults(fn=fn)
+        return sp
+
+    add(sub, "doctor", cmd_doctor, "check tools, emulation, ports, repo and instance state")
+
+    stack = sub.add_parser("stack", help="launch / inspect / stop the AWS-parity stack").add_subparsers(dest="stack_cmd", required=True, metavar="<verb>")
+    sp = add(stack, "stack up", cmd_stack_up, "build images like the deploy runbook, start the stack, wait for ALB-style health")
+    sp.add_argument("--ref", help="git ref to build instead of the working tree (built in a detached worktree)")
+    sp.add_argument("--platform", choices=("amd64", "native"), default="amd64", help="image arch (default amd64 = Fargate)")
+    sp.add_argument("--no-build", action="store_true", help="reuse recorded images")
+    sp.add_argument("--rebuild", action="store_true", help="rebuild ref images even if present")
+    sp.add_argument("--port", type=int, help="host port for the ALB (default derived from instance)")
+    sp.add_argument("--no-egress", action="store_true", help="no internet from app containers")
+    sp.add_argument("--timeout", type=int, default=900, help="seconds to wait for health (default 900)")
+    add(stack, "stack status", cmd_stack_status, "services, replicas, health, ALB and worker heartbeat")
+    sp = add(stack, "stack logs", cmd_stack_logs, "service logs (alb backend worker frontend migrate postgres redis s3 fake-llm)")
+    sp.add_argument("service", nargs="*", help="services (default all)")
+    sp.add_argument("--tail", type=int, default=200)
+    sp.add_argument("--since", help="e.g. 10m, 2026-10-04T12:00:00")
+    sp.add_argument("--grep", help="regex filter; exit 1 when nothing matches")
+    sp = add(stack, "stack restart", cmd_stack_restart, "restart services (e.g. worker for orphan recovery)")
+    sp.add_argument("service", nargs="+")
+    sp.add_argument("--timeout", type=int, default=300)
+    sp = add(stack, "stack down", cmd_stack_down, "stop the stack (volumes removed unless --keep-volumes); evidence kept")
+    sp.add_argument("--keep-volumes", action="store_true")
+
+    db = sub.add_parser("db", help="read-only database access").add_subparsers(dest="db_cmd", required=True, metavar="<verb>")
+    sp = add(db, "db query", cmd_db_query, "run read-only SQL (default_transaction_read_only=on); {project} and {source} expand to the last seed")
+    sp.add_argument("sql", help="SQL text, or - for stdin")
+    sp.add_argument("--csv", action="store_true")
+
+    mig = sub.add_parser("migrate", help="Alembic checks").add_subparsers(dest="migrate_cmd", required=True, metavar="<verb>")
+    add(mig, "migrate status", cmd_migrate_status, "alembic current vs heads on the stack DB")
+    add(mig, "migrate check", cmd_migrate_check, "migration round-trip + model drift on a scratch DB")
+
+    test = sub.add_parser("test", help="CI-parity test suites").add_subparsers(dest="test_cmd", required=True, metavar="<suite>")
+    for name, fn, h in (("test backend", cmd_test_backend, "backend-v2.yml jobs (SQLite default, --postgres for the Postgres job)"),
+                        ("test frontend", cmd_test_frontend, "tsc, eslint, vite build (no frontend CI exists)"),
+                        ("test all", cmd_test_all, "backend sqlite + backend postgres + frontend")):
+        sp = add(test, name, fn, h)
+        sp.add_argument("--ref", help="test a git ref in a detached worktree instead of the working tree")
+        if name == "test backend":
+            sp.add_argument("--postgres", action="store_true")
+        if name in ("test frontend",):
+            sp.add_argument("--ci", action="store_true", help="run npm ci first")
+        if name != "test frontend":
+            sp.add_argument("pytest_args", nargs=argparse.REMAINDER, help="after --: extra pytest args")
+
+    ci = sub.add_parser("ci", help="real GitHub Actions results (read-only gh)").add_subparsers(dest="ci_cmd", required=True, metavar="<verb>")
+    sp = add(ci, "ci status", cmd_ci_status, "latest workflow runs on a branch: job and step failures, failed tests; exit 0 only if the latest completed run passed")
+    sp.add_argument("--workflow", default="backend-v2.yml")
+    sp.add_argument("--branch", help="default: current branch")
+    sp.add_argument("--limit", type=int, default=5)
+
+    par = sub.add_parser("parity", help="static stack <-> Terraform <-> Settings comparison").add_subparsers(dest="parity_cmd", required=True, metavar="<verb>")
+    add(par, "parity check", cmd_parity_check, "diff env, resources, commands, ALB rules, versions; list wiring findings")
+
+    infra = sub.add_parser("infra", help="Terraform checks (never plan/apply)").add_subparsers(dest="infra_cmd", required=True, metavar="<verb>")
+    add(infra, "infra validate", cmd_infra_validate, "terraform fmt -check, init -backend=false, validate")
+
+    sp = add(sub, "seed", cmd_seed, "synthetic users (admin/annotator/viewer), project on the fake LLM, sample data, ingestion")
+    sp.add_argument("--project-name")
+    sp.add_argument("--no-upload", action="store_true")
+    sp.add_argument("--no-ingest", action="store_true")
+    sp.add_argument("--timeout", type=int, default=300)
+
+    sp = add(sub, "api", cmd_api, "HTTP request through the ALB as a seeded user ({project}/{source} expand)")
+    sp.add_argument("method")
+    sp.add_argument("path", help="/projects/... (prefixed with /api/v1) or a full /api/... path")
+    sp.add_argument("--as", dest="as_user", choices=(*ROLES, "anon"), default="admin")
+    sp.add_argument("--body", dest="json_body", metavar="JSON", help="JSON request body, @file, or - for stdin")
+    sp.add_argument("--form", action="append", metavar="K=V")
+    sp.add_argument("--file", action="append", metavar="FIELD=PATH")
+    sp.add_argument("--expect", type=int, help="exit 0 only if the status matches (e.g. 403)")
+    sp.add_argument("--save", metavar="NAME", help="write request+response to evidence/NAME.json")
+    sp.add_argument("--field", metavar="PATH", help="print only this value (dot path, [*] for every list item), e.g. id")
+    sp.add_argument("--until", action="append", metavar="PATH=VALUE",
+                    help="GET only: repeat every --interval s until it holds (also PATH!=VALUE; repeat to AND); "
+                         "exit 1 on --timeout")
+    sp.add_argument("--interval", type=float, default=3)
+    sp.add_argument("--timeout", type=int, default=300)
+
+    sp = add(sub, "ws", cmd_ws, "open a WebSocket through the ALB like a browser and print messages")
+    sp.add_argument("path")
+    sp.add_argument("--as", dest="as_user", choices=(*ROLES, "anon"), default="admin")
+    sp.add_argument("--seconds", type=float, default=5)
+    sp.add_argument("--max-messages", type=int, default=50)
+    sp.add_argument("--save", metavar="NAME", help="write the messages to evidence/NAME.json")
+
+    br = sub.add_parser("browser", help="headless Chromium against the ALB (Playwright)").add_subparsers(dest="browser_cmd", required=True, metavar="<verb>")
+    for name, h in (("browser snapshot", "print the ARIA snapshot (roles/names to drive) + screenshot"),
+                    ("browser screenshot", "screenshot a page into evidence"),
+                    ("browser run", "run a JSON list of steps; failure saves screenshot + ARIA snapshot")):
+        sp = add(br, name, cmd_browser, h)
+        sp.add_argument("--as", dest="as_user", choices=(*ROLES, "anon"), default="admin")
+        sp.add_argument("--save", metavar="NAME", help="evidence file prefix")
+        sp.add_argument("--timeout", type=float, default=20, help="seconds per step / page load (default 20)")
+        sp.add_argument("--strict", action="store_true", help="exit 1 on any API 4xx/5xx or console error")
+        if name == "browser run":
+            sp.add_argument("steps", nargs="?", help="steps JSON file or - (stdin)")
+            sp.add_argument("--headed", action="store_true")
+            sp.add_argument("--slow-mo", type=int, default=0)
+        else:
+            sp.add_argument("path")
+            sp.add_argument("--wait-text")
+            sp.add_argument("--full-page", action="store_true")
+
+    llm = sub.add_parser("llm", help="fake LLM controls").add_subparsers(dest="llm_cmd", required=True, metavar="<verb>")
+    sp = add(llm, "llm mode", cmd_llm_mode, "show or set the fake LLM failure mode (live, no restart)")
+    sp.add_argument("mode", nargs="?", choices=LLM_MODES)
+    sp = add(llm, "llm calls", cmd_llm_calls, "count fake LLM calls (proxy for Bedrock spend)")
+    sp.add_argument("--tail", type=int, default=3)
+    sp.add_argument("--since", help="ISO timestamp")
+
+    def aws_args(sp):
+        sp.add_argument("--profile", default="saml", help="AWS profile (default: %(default)s)")
+        sp.add_argument("--region", default="us-east-1", help="default: %(default)s")
+        sp.add_argument("--cluster", default=AWS_PREFIX, help="ECS cluster (default: %(default)s)")
+
+    awsp = sub.add_parser("aws", help="read-only AWS inspection").add_subparsers(dest="aws_cmd", required=True, metavar="<verb>")
+    aws_args(add(awsp, "aws status", cmd_aws_status, "what DEV runs vs local git (describe/list calls only)"))
+
+    bed = sub.add_parser("bedrock", help="real Bedrock check (costs money)").add_subparsers(dest="bedrock_cmd", required=True, metavar="<verb>")
+    sp = add(bed, "bedrock probe", cmd_bedrock_probe, "classify one positive + one negative synthetic excerpt via Bedrock")
+    aws_args(sp)
+    sp.add_argument("--model", default=DEFAULT_BEDROCK_MODEL, help="Bedrock model the 2 paid calls use (default: %(default)s)")
+    sp.add_argument("--image", help="backend image (default: stack image)")
+    sp.add_argument("--yes-cost", action="store_true", help="confirm the user approved the paid calls")
+
+    dep = sub.add_parser("deploy", help="local replay of the ECS deploy runbook").add_subparsers(dest="deploy_cmd", required=True, metavar="<verb>")
+    sp = add(dep, "deploy rehearse", cmd_deploy_rehearse, "old release + data -> migrate with new image -> old survives -> roll")
+    sp.add_argument("--from", dest="from_ref", required=True, help="git ref of the current release, or 'aws'")
+    sp.add_argument("--to", dest="to_ref", help="git ref of the new release (default: working tree)")
+    sp.add_argument("--platform", choices=("amd64", "native"), default="amd64")
+    sp.add_argument("--port", type=int)
+    sp.add_argument("--timeout", type=int, default=900)
+    aws_args(sp)
+
+    ev = sub.add_parser("evidence", help="evidence directory (survives cleanup)").add_subparsers(dest="evidence_cmd", required=True, metavar="<verb>")
+    add(ev, "evidence dir", cmd_evidence, "print the evidence directory", key="evidence")
+    add(ev, "evidence list", cmd_evidence, "list evidence files", key="evidence")
+
+    sp = add(sub, "cleanup", cmd_cleanup, "remove everything this instance started; keep evidence")
+    sp.add_argument("--images", action="store_true", help="also remove images this instance built")
+    sp.add_argument("--keep-state", action="store_true", help="keep this instance's recorded images and seed in state.json (default: forget them, so the last instance cleaned with --images can remove shared images)")
+    return p
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if getattr(args, "pytest_args", None) and args.pytest_args[:1] == ["--"]:
+        args.pytest_args = args.pytest_args[1:]
+    try:
+        return args.fn(args)
+    except CliError as e:
+        log(f"error: {e}")
+        return 2
+    except CheckFailed as e:
+        log(f"FAIL: {e}")
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,185 @@
+# Local stand-in for the ECS Fargate deployment in infra/cedars-v2.
+#
+# Start it only with `control-cedars stack up`, which sets every ${CV_*} value,
+# builds the images the way the deploy runbook does (docker build --platform
+# linux/amd64), and waits for ALB-style health. Each service names the AWS resource
+# it stands in for. `control-cedars parity check` diffs this file against the
+# Terraform, so change both together.
+#
+# Networks mirror who can reach whom on AWS:
+#   edge: alb, frontend. The frontend cannot resolve "backend", as on ECS, so the
+#         /api proxy blocks in frontend/nginx.conf fail exactly as they would there.
+#   app:  alb, backend (the ALB -> backend target group).
+#   data: backend, worker, migrate and the managed-service stand-ins.
+
+name: ${CV_PROJECT:?run through control-cedars}
+
+x-app-env: &app-env
+  # ecs.tf local.app_environment: same names, and the same values where they are literals.
+  CEDARS_REDIS_URL: redis://redis:6379
+  CEDARS_S3_ENDPOINT: ""      # empty => native AWS S3 code path
+  CEDARS_S3_ACCESS_KEY: ""    # empty => default credential chain (the task role on ECS)
+  CEDARS_S3_SECRET_KEY: ""
+  CEDARS_S3_REGION: us-east-1
+  CEDARS_S3_BUCKET: ${CV_BUCKET}
+  CEDARS_COOKIE_SECURE: "false"
+  CEDARS_CORS_ORIGINS: http://localhost:5173
+  CEDARS_ALLOW_CLOUD_LLM: "true"
+  # ecs.tf local.app_secrets. Same DSN shape as rds.tf aws_secretsmanager_secret_version.db_url.
+  CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:${CV_DB_PASSWORD}@postgres:5432/cedars
+  CEDARS_SECRET_KEY: ${CV_SECRET_KEY}
+  # Stand-ins for what Fargate and the task role supply implicitly. The app never
+  # sees these through Settings. They feed boto3's default chain, just as the task
+  # role does.
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ENDPOINT_URL_S3: http://s3:9000
+  AWS_ACCESS_KEY_ID: ${CV_S3_USER}
+  AWS_SECRET_ACCESS_KEY: ${CV_S3_PASSWORD}
+
+x-app-depends: &app-depends
+  postgres: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  s3-init: { condition: service_completed_successfully }
+  migrate: { condition: service_completed_successfully }
+
+services:
+  alb:  # aws_lb.main + listener rules + target groups (alb.tf)
+    image: nginx:1.27-alpine
+    ports: ["127.0.0.1:${CV_PORT}:80"]
+    volumes: ["${CV_STACK_DIR}/alb.nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    networks: [edge, app]
+    depends_on:
+      backend: { condition: service_healthy }
+      frontend: { condition: service_started }
+
+  frontend:  # aws_ecs_service.frontend: 2 tasks, 256 CPU / 512 MiB, image CMD
+    image: ${CV_FRONTEND_IMAGE}
+    platform: ${CV_PLATFORM}
+    deploy:
+      replicas: 2
+      resources: { limits: { cpus: "0.25", memory: 512M } }
+    networks: [edge]
+
+  backend:  # aws_ecs_service.backend: 2 tasks, 1024 CPU / 2048 MiB, image CMD (no command override)
+    image: ${CV_BACKEND_IMAGE}
+    platform: ${CV_PLATFORM}
+    environment: *app-env
+    depends_on: *app-depends
+    deploy:
+      replicas: 2
+      resources: { limits: { cpus: "1", memory: 2048M } }
+    # The target group checks /api/v1/health every 30s, healthy after 2. This polls
+    # faster so startup is quick. stack up still requires two consecutive 200s through the ALB.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).status != 200)"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    networks: [app, data]
+
+  worker:  # aws_ecs_service.worker: 1 task, 2048 CPU / 4096 MiB, same image as backend
+    image: ${CV_BACKEND_IMAGE}
+    platform: ${CV_PLATFORM}
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    environment: *app-env
+    depends_on: *app-depends
+    deploy:
+      replicas: 1
+      resources: { limits: { cpus: "2", memory: 4096M } }
+    networks: [data]
+
+  migrate:  # aws_ecs_task_definition.migrate: one-off task, 512 CPU / 1024 MiB
+    image: ${CV_BACKEND_IMAGE}
+    platform: ${CV_PLATFORM}
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 1024M } }
+    networks: [data]
+
+  postgres:  # aws_rds_cluster.aurora: aurora-postgresql 16.11 (var.db_engine_version), database "cedars"
+    image: postgres:16.11-alpine
+    environment:
+      POSTGRES_DB: cedars
+      POSTGRES_USER: cedars
+      POSTGRES_PASSWORD: ${CV_DB_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cedars -d cedars"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [data]
+
+  redis:  # aws_elasticache_replication_group.redis: 7.1, TLS off, no persistence.
+    # There is no OSS 7.1 image. ElastiCache 7.1 is compatible with OSS 7.0.
+    image: redis:7.0.15-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [data]
+
+  s3:  # aws_s3_bucket.storage (s3.tf). Upstream minio/minio images can no longer be pulled.
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    environment:
+      MINIO_ROOT_USER: ${CV_S3_USER}
+      MINIO_ROOT_PASSWORD: ${CV_S3_PASSWORD}
+    volumes: [s3data:/bitnami/minio/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [data]
+
+  s3-init:  # Terraform creates the bucket, with versioning, before any task runs.
+    # The app's own _ensure_s3_bucket only runs when CEDARS_S3_ENDPOINT is set, so it never runs here or on ECS.
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    entrypoint: ["/bin/sh", "-c"]
+    # bitnami minio restarts once after first-boot setup, so the healthcheck can pass just before a refused connection: retry for up to 30 s
+    command:
+      - >-
+        for i in $$(seq 30); do mc alias set aws http://s3:9000 "$$CV_S3_USER" "$$CV_S3_PASSWORD" && break; sleep 1; done;
+        mc mb --ignore-existing "aws/$$CV_BUCKET" &&
+        mc version enable "aws/$$CV_BUCKET"
+    environment:
+      CV_S3_USER: ${CV_S3_USER}
+      CV_S3_PASSWORD: ${CV_S3_PASSWORD}
+      CV_BUCKET: ${CV_BUCKET}
+    depends_on:
+      s3: { condition: service_healthy }
+    restart: "no"
+    networks: [data]
+
+  fake-llm:  # Stands in for Bedrock (no AWS analogue in the stack). Project config: provider vllm, api_base http://fake-llm:8080
+    image: python:3.12-alpine
+    command: ["python", "/stack/fake_llm.py"]
+    volumes:
+      - ${CV_STACK_DIR}/fake_llm.py:/stack/fake_llm.py:ro
+      - ${CV_CONTROL_DIR}:/control:ro
+      - ${CV_EVIDENCE_DIR}:/evidence
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [data]
+
+networks:
+  edge: {}
+  app:
+    internal: ${CV_NO_EGRESS:-false}
+  data:
+    internal: ${CV_NO_EGRESS:-false}
+
+volumes:
+  pgdata: {}
+  s3data: {}
