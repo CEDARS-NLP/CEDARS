@@ -1122,7 +1122,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                 {current.predicted_label === null &&
                 current.predicted_score === null &&
                 !current.predictor_model ? (
-                  <p className="text-sm text-muted-foreground">No AI Model Used</p>
+                  <p className="text-sm text-muted-foreground">SpaCy Match Found</p>
                 ) : (
                   <div className="flex items-center gap-2">
                     {current.predicted_label !== null && (
