@@ -102,6 +102,7 @@ interface NoteContext {
     end_pos: number;
     is_target: boolean;
     is_negated: boolean;
+    review_excluded: boolean;
     matched_tokens: string[];
   }[];
 }
@@ -328,7 +329,7 @@ function NoteViewer({
     >
       {context.sentences.map((sent) => {
         const isTarget = sent.id === targetSentenceId;
-        const isOtherTarget = sent.is_target && !isTarget;
+        const isOtherTarget = sent.is_target && !sent.review_excluded && !isTarget;
 
         return (
           <span
@@ -1118,25 +1119,30 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               </div>
 
               <div className="space-y-3">
-                {/* Label + confidence */}
-                <div className="flex items-center gap-2">
-                  {current.predicted_label !== null && (
-                    <Badge
-                      className={
-                        current.predicted_label === 1
-                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                          : "bg-zinc-500 text-white hover:bg-zinc-600"
-                      }
-                    >
-                      {current.predicted_label === 1
-                        ? "Event Detected"
-                        : "No Event"}
-                    </Badge>
-                  )}
-                  <span className="text-sm tabular-nums text-muted-foreground">
-                    {formatScore(current.predicted_score)} likely
-                  </span>
-                </div>
+                {current.predicted_label === null &&
+                current.predicted_score === null &&
+                !current.predictor_model ? (
+                  <p className="text-sm text-muted-foreground">No AI Model Used</p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {current.predicted_label !== null && (
+                      <Badge
+                        className={
+                          current.predicted_label === 1
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-zinc-500 text-white hover:bg-zinc-600"
+                        }
+                      >
+                        {current.predicted_label === 1
+                          ? "Event Detected"
+                          : "No Event"}
+                      </Badge>
+                    )}
+                    <span className="text-sm tabular-nums text-muted-foreground">
+                      {formatScore(current.predicted_score)} likely
+                    </span>
+                  </div>
+                )}
 
                 {current.is_negated && (
                   <Badge

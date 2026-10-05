@@ -58,6 +58,7 @@ async def get_next_unreviewed(
     stmt = select(Annotation).where(
         Annotation.project_id == project_id,
         Annotation.review_status == ReviewStatus.UNREVIEWED,
+        Annotation.review_excluded.is_(False),
     )
     if patient_id:
         stmt = stmt.where(Annotation.patient_id == patient_id)
@@ -132,6 +133,17 @@ async def get_note_context(
             .order_by(Sentence.sentence_number)
         )
     ).scalars().all()
+    excluded_sentence_ids = set(
+        (
+            await session.execute(
+                select(Annotation.sentence_id).where(
+                    Annotation.note_id == note_id,
+                    Annotation.review_excluded.is_(True),
+                    Annotation.sentence_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
 
     return {
         "note_id": note.id,
@@ -149,6 +161,7 @@ async def get_note_context(
                 "end_pos": s.end_pos,
                 "is_target": s.is_target,
                 "is_negated": s.is_negated,
+                "review_excluded": s.id in excluded_sentence_ids,
                 "matched_tokens": s.matched_tokens,
             }
             for s in sentences

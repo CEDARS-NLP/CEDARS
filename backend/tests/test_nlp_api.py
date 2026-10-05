@@ -40,6 +40,18 @@ class TestSearchQueryCRUD:
         data = resp.json()
         assert data["query"] == "troponin OR myocardial AND !suspected"
         assert data["is_active"] is True
+        assert data["exclude_negated"] is True
+
+    async def test_create_query_can_include_negated_mentions(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT", "exclude_negated": False},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["exclude_negated"] is False
 
     async def test_list_queries(self, client):
         await register_and_login(client)
@@ -182,6 +194,44 @@ class TestNlpProcessing:
         stats_resp = await client.get(f"/api/v1/projects/{pid}/nlp/stats")
         stats = stats_resp.json()
         assert stats["target_sentences"] == 0
+
+    async def test_negated_matches_are_auto_reviewed_without_a_predictor(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+        await self._setup_project_with_notes(client, pid)
+
+        query_resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )
+        assert query_resp.status_code == 201
+        assert query_resp.json()["exclude_negated"] is True
+
+        resp = await client.post(f"/api/v1/projects/{pid}/nlp/reprocess")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+
+        annotations_resp = await client.get(f"/api/v1/projects/{pid}/annotations")
+        assert annotations_resp.status_code == 200
+        negated = [row for row in annotations_resp.json() if row["is_negated"]]
+        assert negated
+        assert all(row["review_status"] == "reviewed" for row in negated)
+        assert all(row["review_excluded"] is True for row in negated)
+        assert all(row["predicted_label"] is None for row in negated)
+
+        context_resp = await client.get(
+            f"/api/v1/projects/{pid}/annotations/{negated[0]['id']}/context"
+        )
+        assert context_resp.status_code == 200
+        assert any(sentence["review_excluded"] for sentence in context_resp.json()["sentences"])
+
+        stats_resp = await client.get(f"/api/v1/projects/{pid}/annotations/stats")
+        assert stats_resp.status_code == 200
+        assert stats_resp.json()["reviewed"] == len(negated)
+
+        next_patient = await client.get(f"/api/v1/projects/{pid}/annotations/patient/next")
+        assert next_patient.status_code == 200
+        assert next_patient.json()["patient_id"] is None
 
     async def test_list_target_sentences(self, client):
         await register_and_login(client)

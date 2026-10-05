@@ -29,6 +29,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   const queryClient = useQueryClient();
   const [newQuery, setNewQuery] = useState("");
   const [newQueryName, setNewQueryName] = useState("");
+  const [excludeNegated, setExcludeNegated] = useState(true);
 
   const { data: queries } = useQuery<SearchQuery[]>({
     queryKey: ["nlp-queries", projectId],
@@ -70,12 +71,13 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   }, [backgroundJobId, backgroundJobStatus, projectId, queryClient]);
 
   const createQuery = useMutation({
-    mutationFn: (body: { query: string; name?: string }) =>
+    mutationFn: (body: { query: string; name?: string; exclude_negated: boolean }) =>
       api.post(`/projects/${projectId}/nlp/queries`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] });
       setNewQuery("");
       setNewQueryName("");
+      setExcludeNegated(true);
     },
   });
 
@@ -136,6 +138,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                     createQuery.mutate({
                       query: newQuery.trim(),
                       name: newQueryName.trim() || undefined,
+                      exclude_negated: excludeNegated,
                     });
                   }
                 }}
@@ -154,6 +157,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 createQuery.mutate({
                   query: newQuery.trim(),
                   name: newQueryName.trim() || undefined,
+                  exclude_negated: excludeNegated,
                 })
               }
               disabled={!newQuery.trim() || createQuery.isPending}
@@ -162,6 +166,15 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
               Add
             </Button>
           </div>
+          <label className="mt-3 flex w-fit items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={excludeNegated}
+              onChange={(event) => setExcludeNegated(event.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            Hide negated mentions from manual review
+          </label>
           <p className="mt-2 text-xs text-muted-foreground">
             Syntax: terms joined by <code className="rounded bg-muted px-1">OR</code> (any match)
             or <code className="rounded bg-muted px-1">AND</code> (all must match).
@@ -184,6 +197,11 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 <code className="text-sm font-medium">{q.query}</code>
                 {q.name && (
                   <span className="text-xs text-muted-foreground">({q.name})</span>
+                )}
+                {q.exclude_negated && (
+                  <span className="text-xs text-muted-foreground">
+                    Negated mentions hidden
+                  </span>
                 )}
                 {!q.is_active && (
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">

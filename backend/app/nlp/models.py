@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -54,6 +54,10 @@ class SearchQuery(SQLModel, table=True):
     nlp_apply: bool = Field(default=True)  # apply predictor after NLP
     hide_duplicates: bool = Field(default=True)  # filter duplicate sentences
     skip_after_event: bool = Field(default=True)  # skip sentences after event date
+    exclude_negated: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False, server_default="false"),
+    )
     created_by: str | None = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(
         default_factory=now_utc,

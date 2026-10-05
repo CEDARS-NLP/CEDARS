@@ -13,6 +13,7 @@ class CreateSearchQueryRequest(BaseModel):
     nlp_apply: bool = True
     hide_duplicates: bool = True
     skip_after_event: bool = True
+    exclude_negated: bool = True
 
 
 class UpdateSearchQueryRequest(BaseModel):
@@ -22,6 +23,7 @@ class UpdateSearchQueryRequest(BaseModel):
     nlp_apply: bool | None = None
     hide_duplicates: bool | None = None
     skip_after_event: bool | None = None
+    exclude_negated: bool | None = None
 
 
 class SearchQueryResponse(BaseModel):
@@ -33,6 +35,7 @@ class SearchQueryResponse(BaseModel):
     nlp_apply: bool
     hide_duplicates: bool
     skip_after_event: bool
+    exclude_negated: bool
     created_at: datetime
 
 

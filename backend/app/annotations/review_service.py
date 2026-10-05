@@ -33,6 +33,7 @@ async def _check_patient_completion(
                 Annotation.project_id == project_id,
                 Annotation.patient_id == patient_id,
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
+                Annotation.review_excluded.is_(False),
             )
         )
     ).scalar() or 0
@@ -115,6 +116,7 @@ async def review_annotation(
                     Annotation.project_id == project_id,
                     Annotation.patient_id == annotation.patient_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
+                    Annotation.review_excluded.is_(False),
                     Annotation.id != annotation_id,
                     Annotation.note_id.in_(notes_on_or_after_subq),
                 )
@@ -133,6 +135,7 @@ async def review_annotation(
                     Annotation.project_id == project_id,
                     Annotation.patient_id == annotation.patient_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
+                    Annotation.review_excluded.is_(False),
                     Annotation.id != annotation_id,
                     Note.note_date < event_date,
                 )
@@ -207,6 +210,7 @@ async def get_next_patient_for_review(
         .where(
             Annotation.project_id == project_id,
             Annotation.review_status == ReviewStatus.UNREVIEWED,
+            Annotation.review_excluded.is_(False),
             _reviewable_filter(),
         )
         .distinct()
@@ -233,6 +237,7 @@ async def get_next_patient_for_review(
                 .where(
                     Annotation.project_id == project_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
+                    Annotation.review_excluded.is_(False),
                     _reviewable_filter(),
                 )
             )
@@ -307,6 +312,7 @@ async def get_patient_annotations(
         .where(
             Annotation.project_id == project_id,
             Annotation.patient_id == patient_id,
+            Annotation.review_excluded.is_(False),
             _reviewable_filter(),
         )
         .order_by(
@@ -538,18 +544,31 @@ async def reopen_patient(
     if not patient or patient.status != PatientStatus.REVIEWED:
         return False
 
-    patient.status = PatientStatus.REVIEWING
-    session.add(patient)
-
     stmt = select(Annotation).where(
         Annotation.project_id == project_id,
         Annotation.patient_id == patient_id,
     )
     for ann in (await session.execute(stmt)).scalars().all():
-        ann.review_status = ReviewStatus.UNREVIEWED
-        ann.reviewed_by = None
-        ann.reviewed_at = None
-        ann.event_date = None
+        if not ann.review_excluded:
+            ann.review_status = ReviewStatus.UNREVIEWED
+            ann.reviewed_by = None
+            ann.reviewed_at = None
+            ann.event_date = None
+
+    outstanding = (
+        await session.execute(
+            select(func.count())
+            .select_from(Annotation)
+            .where(
+                Annotation.project_id == project_id,
+                Annotation.patient_id == patient_id,
+                Annotation.review_status == ReviewStatus.UNREVIEWED,
+                Annotation.review_excluded.is_(False),
+            )
+        )
+    ).scalar() or 0
+    patient.status = PatientStatus.REVIEWING if outstanding else PatientStatus.REVIEWED
+    session.add(patient)
 
     await session.commit()
 

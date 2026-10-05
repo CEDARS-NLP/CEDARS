@@ -59,6 +59,7 @@ async def create_query_endpoint(
         nlp_apply=body.nlp_apply,
         hide_duplicates=body.hide_duplicates,
         skip_after_event=body.skip_after_event,
+        exclude_negated=body.exclude_negated,
     )
     return sq
 

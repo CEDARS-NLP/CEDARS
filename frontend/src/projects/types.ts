@@ -20,6 +20,7 @@ export interface SearchQuery {
   nlp_apply: boolean;
   hide_duplicates: boolean;
   skip_after_event: boolean;
+  exclude_negated: boolean;
   created_at: string;
 }
 

@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -40,6 +40,12 @@ class Annotation(SQLModel, table=True):
     sentence_text: str = Field(sa_column=Column(Text, nullable=False))
     matched_tokens: str = Field(default="")  # comma-separated
     is_negated: bool = Field(default=False)
+    review_excluded: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean, nullable=False, default=False, server_default="false", index=True
+        ),
+    )
 
     # Match detail, mirroring the v1 nlpprocessor annotation record.
     # Nullable because pipeline/LLM-created annotations are sentence-level only.

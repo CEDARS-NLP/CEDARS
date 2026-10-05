@@ -29,6 +29,7 @@ async def create_search_query(
     nlp_apply: bool = True,
     hide_duplicates: bool = True,
     skip_after_event: bool = True,
+    exclude_negated: bool = True,
 ) -> SearchQuery:
     sq = SearchQuery(
         project_id=project_id,
@@ -38,6 +39,7 @@ async def create_search_query(
         nlp_apply=nlp_apply,
         hide_duplicates=hide_duplicates,
         skip_after_event=skip_after_event,
+        exclude_negated=exclude_negated,
     )
     session.add(sq)
     await session.commit()
@@ -57,7 +59,10 @@ async def get_search_query(
     return await get_scoped(session, SearchQuery, project_id, query_id)
 
 
-_QUERY_UPDATE_FIELDS = {"query", "name", "is_active", "nlp_apply", "hide_duplicates", "skip_after_event"}
+_QUERY_UPDATE_FIELDS = {
+    "query", "name", "is_active", "nlp_apply", "hide_duplicates",
+    "skip_after_event", "exclude_negated",
+}
 
 
 async def update_search_query(
@@ -235,6 +240,7 @@ async def _process_notes_into_sentences(
     for q in active_queries:
         groups = parse_query(q.query)
         all_query_groups.extend(groups)
+    exclude_negated = len(active_queries) == 1 and active_queries[0].exclude_negated
 
     # Get notes that haven't been processed yet (no sentences exist)
     notes_stmt = (
@@ -287,6 +293,7 @@ async def _process_notes_into_sentences(
 
         for sentence, sent_data in sentence_rows:
             for match in sent_data.get("matches", []):
+                auto_excluded = exclude_negated and sent_data["is_negated"]
                 session.add(
                     Annotation(
                         project_id=project_id,
@@ -303,7 +310,11 @@ async def _process_notes_into_sentences(
                         sentence_start=sent_data["start_pos"],
                         sentence_end=sent_data["end_pos"],
                         text_date=note.note_date,
-                        review_status=ReviewStatus.UNREVIEWED,
+                        review_status=(
+                            ReviewStatus.REVIEWED if auto_excluded else ReviewStatus.UNREVIEWED
+                        ),
+                        reviewed_at=now_utc() if auto_excluded else None,
+                        review_excluded=auto_excluded,
                     )
                 )
                 annotations_created += 1
@@ -316,30 +327,29 @@ async def _process_notes_into_sentences(
                 await progress_callback(i + 1, total)
 
     matched_patients = [pid for pid, count in match_counts.items() if count > 0]
-    unmatched_patients = [pid for pid, count in match_counts.items() if count == 0]
     patients_with_unreviewed = set()
 
-    if unmatched_patients:
+    touched_patient_ids = list(match_counts)
+    if touched_patient_ids:
         pending_result = await session.execute(
             select(Annotation.patient_id)
             .where(
                 Annotation.project_id == project_id,
-                Annotation.patient_id.in_(unmatched_patients),
+                Annotation.patient_id.in_(touched_patient_ids),
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
             )
             .distinct()
         )
         patients_with_unreviewed = set(pending_result.scalars().all())
 
-    auto_completed_patients = [
-        pid for pid in unmatched_patients if pid not in patients_with_unreviewed
-    ]
+    auto_completed_patients = [pid for pid in touched_patient_ids if pid not in patients_with_unreviewed]
+    patients_requiring_review = [pid for pid in matched_patients if pid in patients_with_unreviewed]
 
-    if matched_patients:
+    if patients_requiring_review:
         await session.execute(
             update(Patient)
             .where(
-                Patient.id.in_(matched_patients),
+                Patient.id.in_(patients_requiring_review),
                 Patient.status != PatientStatus.REVIEWING,
             )
             .values(status=PatientStatus.NLP_COMPLETE, updated_at=now_utc())

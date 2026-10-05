@@ -14,6 +14,7 @@ class AnnotationResponse(BaseModel):
     sentence_text: str
     matched_tokens: str | None = None
     is_negated: bool = False
+    review_excluded: bool = False
     token: str | None = None
     note_start_index: int | None = None
     note_end_index: int | None = None
