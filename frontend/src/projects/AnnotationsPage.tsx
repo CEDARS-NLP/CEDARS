@@ -18,6 +18,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { api } from "@/api/client";
+import type { ReviewMetadata } from "./ReviewProvenance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +33,7 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────
 
-interface Annotation {
+interface Annotation extends ReviewMetadata {
   id: string;
   project_id: string;
   patient_id: string;
@@ -46,8 +47,6 @@ interface Annotation {
   predictor_model: string;
   reasoning: string;
   review_status: string;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   event_date: string | null;
   created_at: string;
 }
@@ -58,7 +57,7 @@ interface PatientAnnotation extends Annotation {
   sentence_number: number;
 }
 
-interface PatientInfo {
+interface PatientInfo extends ReviewMetadata {
   patient_id: string | null;
   patient_id_ext: string | null;
   total_annotations: number;

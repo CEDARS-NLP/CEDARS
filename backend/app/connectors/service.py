@@ -745,6 +745,10 @@ async def list_patients(
     items = [
         {
             "patient": row[0],
+            "review_source": row[0].review_source,
+            "review_reason": row[0].review_reason,
+            "reviewed_by": row[0].reviewed_by,
+            "reviewed_at": row[0].reviewed_at,
             "note_count": row[1],
             "annotation_count": row[2],
             "reviewed_count": row[3],

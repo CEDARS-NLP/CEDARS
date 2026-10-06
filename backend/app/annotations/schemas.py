@@ -15,6 +15,7 @@ class AnnotationResponse(BaseModel):
     matched_tokens: str | None = None
     is_negated: bool = False
     review_excluded: bool = False
+    manual_review_override: bool = False
     token: str | None = None
     note_start_index: int | None = None
     note_end_index: int | None = None

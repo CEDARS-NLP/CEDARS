@@ -1,6 +1,6 @@
 """API routes for NLP pipeline: search queries, processing, sentences."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -13,6 +13,8 @@ from app.nlp.schemas import (
     CreateSearchQueryRequest,
     NlpJobResponse,
     NlpStatsResponse,
+    ReprocessImpact,
+    ReprocessRequest,
     SearchQueryResponse,
     SentenceResponse,
     UpdateSearchQueryRequest,
@@ -26,9 +28,11 @@ from app.nlp.service import (
     get_latest_job,
     get_nlp_job_status,
     get_nlp_stats,
+    get_reprocess_impact,
     get_search_query,
     list_search_queries,
     list_target_sentences,
+    reprocess_is_busy,
     run_nlp_pipeline,
     update_search_query,
 )
@@ -149,13 +153,39 @@ async def cancel_nlp_endpoint(
     return result
 
 
-@router.post("/reprocess", response_model=NlpJobResponse)
-async def reprocess_nlp_endpoint(
+@router.get("/reprocess-impact", response_model=ReprocessImpact)
+async def reprocess_impact_endpoint(
     project_id: str,
     session: AsyncSession = Depends(get_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
+    return await get_reprocess_impact(session, project_id)
+
+
+@router.post("/reprocess", response_model=NlpJobResponse)
+async def reprocess_nlp_endpoint(
+    project_id: str,
+    body: ReprocessRequest,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
     """Clear all sentences and re-run the NLP pipeline from scratch."""
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Confirm deletion before reprocessing.")
+    if await reprocess_is_busy(session, project_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Finish active processing and release patient review locks before reprocessing.",
+        )
+    impact = await get_reprocess_impact(session, project_id)
+    expected = {
+        "annotations": body.expected_annotations, "predictions": body.expected_predictions,
+        "sentences": body.expected_sentences,
+    }
+    if impact != expected:
+        raise HTTPException(
+            status_code=409, detail="Deletion counts changed. Review the updated counts and confirm again.",
+        )
     await clear_sentences(session, project_id)
     job = await run_nlp_pipeline(session, project_id)
     return job

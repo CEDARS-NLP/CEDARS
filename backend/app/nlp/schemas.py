@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.nlp.models import NlpJobStatus
 
@@ -70,3 +70,16 @@ class NlpStatsResponse(BaseModel):
     total_sentences: int
     target_sentences: int
     negated_sentences: int
+
+
+class ReprocessImpact(BaseModel):
+    annotations: int
+    predictions: int
+    sentences: int
+
+
+class ReprocessRequest(BaseModel):
+    confirmed: bool
+    expected_annotations: int = Field(ge=0)
+    expected_predictions: int = Field(ge=0)
+    expected_sentences: int = Field(ge=0)

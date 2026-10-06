@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -8,7 +8,10 @@ import {
   RefreshCw,
   BarChart3,
 } from "lucide-react";
-import { api } from "@/api/client";
+import { api, ApiError } from "@/api/client";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,11 +28,22 @@ import type {
   NlpJob,
 } from "@/projects/types";
 
+interface ReprocessImpact {
+  annotations: number;
+  predictions: number;
+  sentences: number;
+}
+
 export default function NlpQueriesSection({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [newQuery, setNewQuery] = useState("");
   const [newQueryName, setNewQueryName] = useState("");
   const [excludeNegated, setExcludeNegated] = useState(true);
+  const [reprocessOpen, setReprocessOpen] = useState(false);
+  const reprocessSubmitting = useRef(false);
+  const impactPreview = useMutation({
+    mutationFn: () => api.get<ReprocessImpact>(`/projects/${projectId}/nlp/reprocess-impact`),
+  });
 
   const { data: queries } = useQuery<SearchQuery[]>({
     queryKey: ["nlp-queries", projectId],
@@ -44,6 +58,10 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   const { data: latestJob } = useQuery<NlpJob | null>({
     queryKey: ["nlp-job", projectId],
     queryFn: () => api.get<NlpJob | null>(`/projects/${projectId}/nlp/job`),
+    refetchInterval: (query) =>
+      ["pending", "queued", "running"].includes(query.state.data?.status ?? "")
+        ? 2000
+        : false,
   });
 
   const { data: latestBackgroundJob } = useQuery<BackgroundJobStatus | null>({
@@ -99,20 +117,40 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   });
 
   const reprocessNlp = useMutation({
-    mutationFn: () => api.post(`/projects/${projectId}/nlp/reprocess`, {}),
+    mutationFn: (impact: ReprocessImpact) => api.post(`/projects/${projectId}/nlp/reprocess`, {
+      confirmed: true,
+      expected_annotations: impact.annotations,
+      expected_predictions: impact.predictions,
+      expected_sentences: impact.sentences,
+    }),
     onSuccess: () => {
+      setReprocessOpen(false);
       queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
       queryClient.invalidateQueries({ queryKey: ["nlp-job", projectId] });
       queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        impactPreview.reset();
+        impactPreview.mutate();
+      }
+    },
+    onSettled: () => { reprocessSubmitting.current = false; },
   });
 
   const backgroundJobIsRunning = ["pending", "running"].includes(
     latestBackgroundJob?.status ?? "",
   );
   const isRunning =
-    runNlp.isPending || reprocessNlp.isPending || backgroundJobIsRunning;
+    runNlp.isPending || reprocessNlp.isPending || backgroundJobIsRunning ||
+    ["pending", "queued", "running"].includes(latestJob?.status ?? "");
+  const confirmReprocess = () => {
+    if (!impactPreview.data || impactPreview.isPending || impactPreview.isError ||
+      isRunning || reprocessSubmitting.current) return;
+    reprocessSubmitting.current = true;
+    reprocessNlp.mutate(impactPreview.data);
+  };
 
   return (
     <div className="space-y-4">
@@ -238,11 +276,16 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
               </Button>
               <Button
                 variant="outline"
-                onClick={() => reprocessNlp.mutate()}
+                onClick={() => {
+                  reprocessNlp.reset();
+                  impactPreview.reset();
+                  setReprocessOpen(true);
+                  impactPreview.mutate();
+                }}
                 disabled={isRunning}
               >
                 <RefreshCw className="mr-1.5 h-4 w-4" />
-                {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess All"}
+                {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess all"}
               </Button>
             </div>
             {(runNlp.isError || reprocessNlp.isError) && (
@@ -330,6 +373,48 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </CardContent>
         </Card>
       </div>
+      <Dialog open={reprocessOpen} onOpenChange={(open) => {
+        if (!reprocessSubmitting.current) setReprocessOpen(open);
+      }}>
+        <DialogContent showCloseButton={!reprocessNlp.isPending}>
+          <DialogHeader>
+            <DialogTitle>Reprocess all notes?</DialogTitle>
+            <DialogDescription>
+              This deletes existing annotations, predictions, and sentences, including manual review decisions.
+              Source notes remain. The pipeline will regenerate the NLP results.
+            </DialogDescription>
+          </DialogHeader>
+          {impactPreview.isPending && <p role="status">Loading deletion counts...</p>}
+          {impactPreview.data && !impactPreview.isPending && !impactPreview.isError && (
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt>Annotations to delete</dt><dd>{impactPreview.data.annotations}</dd>
+              <dt>Predictions to delete</dt><dd>{impactPreview.data.predictions}</dd>
+              <dt>Sentences to delete</dt><dd>{impactPreview.data.sentences}</dd>
+            </dl>
+          )}
+          {impactPreview.isError && (
+            <p role="alert" className="text-sm text-destructive">{impactPreview.error.message}</p>
+          )}
+          {reprocessNlp.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {reprocessNlp.error.message}
+              {reprocessNlp.error instanceof ApiError && reprocessNlp.error.status === 409 &&
+                " Review the refreshed counts and confirm again to proceed."}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={reprocessNlp.isPending}
+              onClick={() => setReprocessOpen(false)}>Cancel</Button>
+            {impactPreview.isError && (
+              <Button variant="outline" onClick={() => impactPreview.mutate()}>Retry counts</Button>
+            )}
+            <Button variant="destructive" onClick={confirmReprocess}
+              disabled={!impactPreview.data || impactPreview.isPending || impactPreview.isError || isRunning}>
+              {reprocessNlp.isPending ? "Reprocessing..." : "Confirm reprocess"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

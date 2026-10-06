@@ -112,6 +112,7 @@ async def app(_postgres_url):
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     application = create_app()
+    application.state.test_session_factory = test_session
 
     async def override_get_session():
         async with test_session() as session:
@@ -137,6 +138,12 @@ async def app(_postgres_url):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture
+def session_factory(app):
+    """Reuse the app fixture's migration-backed session factory."""
+    return app.state.test_session_factory
 
 
 @pytest.fixture

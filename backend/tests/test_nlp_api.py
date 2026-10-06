@@ -27,6 +27,21 @@ async def create_project(client: AsyncClient) -> str:
     return resp.json()["id"]
 
 
+async def reprocess_with_current_impact(client: AsyncClient, project_id: str):
+    impact = await client.get(f"/api/v1/projects/{project_id}/nlp/reprocess-impact")
+    assert impact.status_code == 200
+    counts = impact.json()
+    return await client.post(
+        f"/api/v1/projects/{project_id}/nlp/reprocess",
+        json={
+            "confirmed": True,
+            "expected_annotations": counts["annotations"],
+            "expected_predictions": counts["predictions"],
+            "expected_sentences": counts["sentences"],
+        },
+    )
+
+
 class TestSearchQueryCRUD:
     async def test_create_query(self, client):
         await register_and_login(client)
@@ -207,7 +222,7 @@ class TestNlpProcessing:
         assert query_resp.status_code == 201
         assert query_resp.json()["exclude_negated"] is True
 
-        resp = await client.post(f"/api/v1/projects/{pid}/nlp/reprocess")
+        resp = await reprocess_with_current_impact(client, pid)
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
 
@@ -268,7 +283,7 @@ class TestNlpProcessing:
         await asyncio.sleep(0.5)
 
         # Reprocess
-        resp = await client.post(f"/api/v1/projects/{pid}/nlp/reprocess")
+        resp = await reprocess_with_current_impact(client, pid)
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
 

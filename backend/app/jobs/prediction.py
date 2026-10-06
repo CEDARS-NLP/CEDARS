@@ -2,10 +2,12 @@
 
 import logging
 from collections import defaultdict
+from dataclasses import asdict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
 from app.config import settings
@@ -140,7 +142,7 @@ async def execute_prediction_job(
                             predicted_label=prediction.label,
                             reasoning=prediction.reasoning or "",
                             token_usage=(
-                                prediction.token_usage.model_dump()
+                                asdict(prediction.token_usage)
                                 if prediction.token_usage
                                 else None
                             ),
@@ -149,6 +151,9 @@ async def execute_prediction_job(
                     stats["annotations_created"] += 1
 
                 # Commit after each patient
+                await complete_negative_llm_patients(
+                    session, project_id, [patient_id], predictor_config,
+                )
                 await session.commit()
                 stats["patients_processed"] += 1
 
@@ -163,10 +168,15 @@ async def execute_prediction_job(
             bg_job.completed_at = now_utc()
             bg_job.result_summary = stats
 
-        except Exception as exc:
+        except Exception:
             logger.exception("Prediction job failed for project %s", project_id)
+            await session.rollback()
+            bg_job = await session.get(BackgroundJob, job_db_id)
+            if bg_job is None:
+                return stats
             bg_job.status = JobStatus.FAILED
-            bg_job.error_message = str(exc)
+            bg_job.error_message = "Prediction processing failed. Check server logs for details."
+            bg_job.completed_at = now_utc()
 
         session.add(bg_job)
         await session.commit()

@@ -78,6 +78,12 @@ class Patient(SQLModel, table=True):
     project_id: str = Field(foreign_key="projects.id", index=True)
     patient_id_ext: str = Field(index=True)
     status: PatientStatus = Field(default=PatientStatus.NEW)
+    review_source: str | None = Field(default=None, max_length=20)
+    review_reason: str | None = Field(default=None, max_length=80)
+    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     locked_by: str | None = Field(default=None, foreign_key="users.id")
     locked_at: datetime | None = Field(
         default=None,

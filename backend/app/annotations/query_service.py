@@ -59,6 +59,7 @@ async def get_next_unreviewed(
         Annotation.project_id == project_id,
         Annotation.review_status == ReviewStatus.UNREVIEWED,
         Annotation.review_excluded.is_(False),
+        reviewable_filter(),
     )
     if patient_id:
         stmt = stmt.where(Annotation.patient_id == patient_id)

@@ -12,6 +12,8 @@ class ExportAnnotationRow(BaseModel):
     sentence_text: str
     token: str | None = None
     is_negated: bool = False
+    review_excluded: bool = False
+    manual_review_override: bool = False
     note_start_index: int | None = None
     note_end_index: int | None = None
     sentence_number: int | None = None
@@ -26,6 +28,10 @@ class ExportAnnotationRow(BaseModel):
     reviewed_by: str | None
     reviewed_at: datetime | None
     event_date: datetime | None
+    patient_review_source: str | None = None
+    patient_review_reason: str | None = None
+    patient_reviewed_by: str | None = None
+    patient_reviewed_at: datetime | None = None
 
 
 class ExportStatsResponse(BaseModel):

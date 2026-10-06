@@ -1,5 +1,15 @@
 const API_BASE = "/api/v1";
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -28,7 +38,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
   };
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  let res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
     credentials: "include",
@@ -37,15 +47,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (res.status === 401 && !path.includes("/auth/")) {
     const refreshed = await tryRefresh();
     if (refreshed) {
-      const retry = await fetch(`${API_BASE}${path}`, {
+      res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers,
         credentials: "include",
       });
-      if (retry.ok) return retry.json() as Promise<T>;
     }
-    window.location.href = "/login";
-    throw new Error("Session expired");
+    if (!refreshed || res.status === 401) {
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
   }
 
   if (!res.ok) {
@@ -56,7 +67,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       : Array.isArray(detail)
         ? detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join("; ")
         : `HTTP ${res.status}`;
-    throw new Error(message);
+    throw new ApiError(message, res.status);
   }
 
   return res.json() as Promise<T>;

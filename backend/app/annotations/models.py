@@ -46,6 +46,10 @@ class Annotation(SQLModel, table=True):
             Boolean, nullable=False, default=False, server_default="false", index=True
         ),
     )
+    manual_review_override: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False, server_default="false"),
+    )
 
     # Match detail, mirroring the v1 nlpprocessor annotation record.
     # Nullable because pipeline/LLM-created annotations are sentence-level only.

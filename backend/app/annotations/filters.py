@@ -19,7 +19,10 @@ def reviewable_filter():
         )
         .exists()
     )
-    return and_(
-        or_(Annotation.predicted_label.is_(None), Annotation.predicted_label != 0),
-        ~ruled_out_by_predictor,
+    return or_(
+        Annotation.manual_review_override.is_(True),
+        and_(
+            or_(Annotation.predicted_label.is_(None), Annotation.predicted_label != 0),
+            ~ruled_out_by_predictor,
+        ),
     )

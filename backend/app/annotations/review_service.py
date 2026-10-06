@@ -19,10 +19,15 @@ from app.projects.models import Project
 logger = logging.getLogger(__name__)
 
 
+class ReopenConflictError(ValueError):
+    pass
+
+
 async def _check_patient_completion(
     session: AsyncSession,
     project_id: str,
     patient_id: str,
+    user_id: str,
 ) -> None:
     """Mark patient as REVIEWED if all their annotations are reviewed/skipped."""
     unreviewed_count = (
@@ -34,6 +39,7 @@ async def _check_patient_completion(
                 Annotation.patient_id == patient_id,
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
                 Annotation.review_excluded.is_(False),
+                _reviewable_filter(),
             )
         )
     ).scalar() or 0
@@ -44,8 +50,12 @@ async def _check_patient_completion(
                 select(Patient).where(Patient.id == patient_id)
             )
         ).scalar_one_or_none()
-        if patient and patient.status != PatientStatus.REVIEWED:
+        if patient:
             patient.status = PatientStatus.REVIEWED
+            patient.review_source = "human"
+            patient.review_reason = "manual_review"
+            patient.reviewed_by = user_id
+            patient.reviewed_at = now_utc()
             session.add(patient)
             await session.commit()
 
@@ -145,7 +155,7 @@ async def review_annotation(
     session.add(annotation)
     await session.commit()
     await session.refresh(annotation)
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
 
     await log_action(
         session, project_id, AuditAction.ANNOTATION_REVIEWED,
@@ -185,7 +195,7 @@ async def skip_annotation(
     session.add(annotation)
     await session.commit()
     await session.refresh(annotation)
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
 
     await log_action(
         session, project_id, AuditAction.ANNOTATION_SKIPPED,
@@ -360,6 +370,8 @@ async def get_patient_annotations(
             "sentence_text": sentence_text,
             "matched_tokens": annotation.matched_tokens,
             "is_negated": annotation.is_negated,
+            "review_excluded": annotation.review_excluded,
+            "manual_review_override": annotation.manual_review_override,
             "token": annotation.token,
             "note_start_index": annotation.note_start_index,
             "note_end_index": annotation.note_end_index,
@@ -455,12 +467,16 @@ async def delete_event_date(
     await session.commit()
     await session.refresh(annotation)
 
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
     patient = (
         await session.execute(select(Patient).where(Patient.id == annotation.patient_id))
     ).scalar_one_or_none()
     if patient and patient.status == PatientStatus.REVIEWED:
         patient.status = PatientStatus.REVIEWING
+        patient.review_source = None
+        patient.review_reason = None
+        patient.reviewed_by = None
+        patient.reviewed_at = None
         session.add(patient)
         await session.commit()
 
@@ -531,7 +547,7 @@ async def reopen_patient(
     patient_id: str,
     user_id: str,
 ) -> bool:
-    """Reopen a REVIEWED patient: revert all annotations to UNREVIEWED."""
+    """Restore all stored annotations for explicit human review."""
     patient = (
         await session.execute(
             select(Patient).where(
@@ -548,26 +564,25 @@ async def reopen_patient(
         Annotation.project_id == project_id,
         Annotation.patient_id == patient_id,
     )
-    for ann in (await session.execute(stmt)).scalars().all():
-        if not ann.review_excluded:
-            ann.review_status = ReviewStatus.UNREVIEWED
-            ann.reviewed_by = None
-            ann.reviewed_at = None
-            ann.event_date = None
-
-    outstanding = (
-        await session.execute(
-            select(func.count())
-            .select_from(Annotation)
-            .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id == patient_id,
-                Annotation.review_status == ReviewStatus.UNREVIEWED,
-                Annotation.review_excluded.is_(False),
-            )
+    annotations = list((await session.execute(stmt)).scalars().all())
+    if not annotations:
+        raise ReopenConflictError(
+            "No stored annotations are available to reopen. Run a new search first."
         )
-    ).scalar() or 0
-    patient.status = PatientStatus.REVIEWING if outstanding else PatientStatus.REVIEWED
+    for ann in annotations:
+        ann.review_excluded = False
+        ann.manual_review_override = True
+        ann.review_status = ReviewStatus.UNREVIEWED
+        ann.reviewed_by = None
+        ann.reviewed_at = None
+        ann.event_date = None
+
+    patient.status = PatientStatus.REVIEWING
+    patient.review_source = None
+    patient.review_reason = None
+    patient.reviewed_by = None
+    patient.reviewed_at = None
+    patient.updated_at = now_utc()
     session.add(patient)
 
     await session.commit()

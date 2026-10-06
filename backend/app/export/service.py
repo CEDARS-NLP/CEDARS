@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from app.connectors.models import Patient
 from app.evaluation.models import EvaluationSession
 
 
@@ -55,10 +56,11 @@ async def export_annotations(
     Predictor verdicts, when present, are merged in from annotation_predictions.
     """
     stmt = (
-        select(Annotation, AnnotationPrediction)
+        select(Annotation, AnnotationPrediction, Patient)
         .outerjoin(
             AnnotationPrediction, AnnotationPrediction.annotation_id == Annotation.id
         )
+        .join(Patient, Patient.id == Annotation.patient_id)
         .where(Annotation.project_id == project_id)
     )
 
@@ -78,6 +80,8 @@ async def export_annotations(
             "sentence_text": ann.sentence_text,
             "token": ann.token,
             "is_negated": ann.is_negated,
+            "review_excluded": ann.review_excluded,
+            "manual_review_override": ann.manual_review_override,
             "note_start_index": ann.note_start_index,
             "note_end_index": ann.note_end_index,
             "sentence_number": ann.sentence_number,
@@ -92,8 +96,12 @@ async def export_annotations(
             "reviewed_by": ann.reviewed_by,
             "reviewed_at": ann.reviewed_at,
             "event_date": ann.event_date,
+            "patient_review_source": patient.review_source,
+            "patient_review_reason": patient.review_reason,
+            "patient_reviewed_by": patient.reviewed_by,
+            "patient_reviewed_at": patient.reviewed_at,
         }
-        for ann, pred in rows
+        for ann, pred, patient in rows
     ]
 
 
@@ -104,6 +112,8 @@ _CSV_HEADERS = [
     "sentence_text",
     "token",
     "is_negated",
+    "review_excluded",
+    "manual_review_override",
     "note_start_index",
     "note_end_index",
     "sentence_number",
@@ -118,9 +128,13 @@ _CSV_HEADERS = [
     "reviewed_by",
     "reviewed_at",
     "event_date",
+    "patient_review_source",
+    "patient_review_reason",
+    "patient_reviewed_by",
+    "patient_reviewed_at",
 ]
 
-_CSV_DATE_FIELDS = ("text_date", "reviewed_at", "event_date")
+_CSV_DATE_FIELDS = ("text_date", "reviewed_at", "event_date", "patient_reviewed_at")
 
 
 def format_csv(annotations: list[dict]) -> str:

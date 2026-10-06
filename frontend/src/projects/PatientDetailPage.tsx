@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,6 +12,10 @@ import { api } from "@/api/client";
 import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import ReviewProvenance, { type ReviewMetadata } from "./ReviewProvenance";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -25,7 +29,7 @@ interface NoteResponse {
   created_at: string;
 }
 
-interface PatientAnnotation {
+interface PatientAnnotation extends ReviewMetadata {
   id: string;
   note_id: string;
   sentence_text: string;
@@ -36,8 +40,6 @@ interface PatientAnnotation {
   predictor_model: string;
   reasoning: string;
   review_status: string;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   event_date: string | null;
   note_date: string | null;
   note_text_id: string;
@@ -53,7 +55,7 @@ interface PatientReviewStats {
   event_annotation_id: string | null;
 }
 
-interface PatientListItem {
+interface PatientListItem extends ReviewMetadata {
   id: string;
   patient_id_ext: string;
   status: string;
@@ -108,6 +110,8 @@ export default function PatientDetailPage() {
   }>();
   const queryClient = useQueryClient();
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const reopenSubmitting = useRef(false);
 
   // Fetch patient info from list endpoint (filter by ID to get status)
   const { data: patientData } = useQuery<PatientListResponse>({
@@ -154,6 +158,7 @@ export default function PatientDetailPage() {
         {},
       ),
     onSuccess: () => {
+      setReopenOpen(false);
       queryClient.invalidateQueries({
         queryKey: ["patient-info", projectId, patientId],
       });
@@ -161,7 +166,14 @@ export default function PatientDetailPage() {
         queryKey: ["patient-stats", projectId, patientId],
       });
       queryClient.invalidateQueries({ queryKey: ["patients", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["patient-annotations", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-context"] });
+      queryClient.invalidateQueries({ queryKey: ["patient-matched-notes", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["patient-next", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
     },
+    onSettled: () => { reopenSubmitting.current = false; },
   });
 
   const annotationsByNote = annotations
@@ -181,13 +193,9 @@ export default function PatientDetailPage() {
   };
 
   const handleReopen = () => {
-    if (
-      window.confirm(
-        "Re-open this patient for review? They will re-enter the annotation queue. Existing decisions are preserved.",
-      )
-    ) {
-      reopenMutation.mutate();
-    }
+    if (reopenSubmitting.current) return;
+    reopenMutation.reset();
+    setReopenOpen(true);
   };
 
   return (
@@ -227,6 +235,7 @@ export default function PatientDetailPage() {
               </span>
             )}
           </div>
+          {patient && <ReviewProvenance {...patient} />}
         </div>
 
         {/* Reopen button — admin only (backend enforces, UI always shows for now) */}
@@ -237,9 +246,39 @@ export default function PatientDetailPage() {
           disabled={reopenMutation.isPending}
         >
           <RotateCcw className="mr-1.5 h-4 w-4" />
-          {reopenMutation.isPending ? "Re-opening..." : "Re-open for review"}
+          {reopenMutation.isPending ? "Reopening..." : "Reopen for review"}
         </Button>
       </div>
+      {reopenMutation.isError && !reopenOpen && (
+        <p role="alert" className="text-sm text-destructive">{reopenMutation.error.message}</p>
+      )}
+      <Dialog open={reopenOpen} onOpenChange={(open) => {
+        if (!reopenSubmitting.current) setReopenOpen(open);
+      }}>
+        <DialogContent showCloseButton={!reopenMutation.isPending}>
+          <DialogHeader>
+            <DialogTitle>Reopen this patient for review?</DialogTitle>
+            <DialogDescription>
+              This returns the patient to the annotation queue and resets review decisions.
+              Automated exclusions will be restored for human review. Predictions are preserved.
+            </DialogDescription>
+          </DialogHeader>
+          {reopenMutation.isError && (
+            <p role="alert" className="text-sm text-destructive">{reopenMutation.error.message}</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={reopenMutation.isPending}
+              onClick={() => setReopenOpen(false)}>Cancel</Button>
+            <Button disabled={reopenMutation.isPending || !projectId || !patientId} onClick={() => {
+              if (reopenSubmitting.current || !projectId || !patientId) return;
+              reopenSubmitting.current = true;
+              reopenMutation.mutate();
+            }}>
+              {reopenMutation.isPending ? "Reopening..." : "Reopen for review"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Notes list */}
       <div className="space-y-3">
@@ -317,6 +356,7 @@ export default function PatientDetailPage() {
                                 {statusLabel(ann.review_status)}
                               </Badge>
                             </div>
+                            <ReviewProvenance {...ann} />
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                               {ann.predicted_label !== null && (
                                 <span>

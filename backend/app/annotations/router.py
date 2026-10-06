@@ -259,7 +259,12 @@ async def reopen_patient_endpoint(
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Re-queue a reviewed patient. Admin only. Preserves annotation decisions."""
-    success = await reopen_patient(session, project_id, patient_id, current_user.id)
+    from app.annotations.review_service import ReopenConflictError
+
+    try:
+        success = await reopen_patient(session, project_id, patient_id, current_user.id)
+    except ReopenConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not success:
         raise_not_found("Patient not found or not in reviewed state")
     return {"ok": True}

@@ -5,7 +5,8 @@ import logging
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.filters import reviewable_filter
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
@@ -337,6 +338,8 @@ async def _process_notes_into_sentences(
                 Annotation.project_id == project_id,
                 Annotation.patient_id.in_(touched_patient_ids),
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
+                Annotation.review_excluded.is_(False),
+                reviewable_filter(),
             )
             .distinct()
         )
@@ -352,18 +355,40 @@ async def _process_notes_into_sentences(
                 Patient.id.in_(patients_requiring_review),
                 Patient.status != PatientStatus.REVIEWING,
             )
-            .values(status=PatientStatus.NLP_COMPLETE, updated_at=now_utc())
+            .values(
+                status=PatientStatus.NLP_COMPLETE, updated_at=now_utc(),
+                review_source=None, review_reason=None, reviewed_by=None, reviewed_at=None,
+            )
         )
     if auto_completed_patients:
-        # v1 parity: a patient with no keyword hits needs no human review.
-        await session.execute(
-            update(Patient)
-            .where(
-                Patient.id.in_(auto_completed_patients),
-                Patient.status != PatientStatus.REVIEWED,
+        annotations_result = await session.execute(
+            select(Annotation).where(
+                Annotation.project_id == project_id,
+                Annotation.patient_id.in_(auto_completed_patients),
             )
-            .values(status=PatientStatus.REVIEWED, updated_at=now_utc())
         )
+        annotations_by_patient: dict[str, list[Annotation]] = {}
+        for annotation in annotations_result.scalars():
+            annotations_by_patient.setdefault(annotation.patient_id, []).append(annotation)
+        for patient_id in auto_completed_patients:
+            patient = await session.get(Patient, patient_id)
+            if patient is None or patient.review_source in ("human", "llm"):
+                continue
+            existing = annotations_by_patient.get(patient_id, [])
+            if existing and not all(
+                annotation.review_excluded and annotation.reviewed_by is None
+                and not annotation.manual_review_override for annotation in existing
+            ):
+                continue
+            patient.status = PatientStatus.REVIEWED
+            patient.review_source = "cedars"
+            patient.review_reason = (
+                "negated_matches_only" if existing else "no_keyword_matches"
+            )
+            patient.reviewed_by = None
+            patient.reviewed_at = now_utc()
+            patient.updated_at = now_utc()
+            session.add(patient)
     await session.commit()
 
     return {
@@ -503,6 +528,47 @@ async def list_target_sentences(
     return list(result.scalars().all())
 
 
+async def get_reprocess_impact(session: AsyncSession, project_id: str) -> dict:
+    counts = {}
+    for name, model in (
+        ("annotations", Annotation), ("predictions", AnnotationPrediction),
+        ("sentences", Sentence),
+    ):
+        counts[name] = (
+            await session.execute(
+                select(func.count()).select_from(model).where(model.project_id == project_id)
+            )
+        ).scalar_one()
+    return counts
+
+
+async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
+    from app.pipeline.models import PipelineRun, PipelineRunStatus
+
+    checks = (
+        select(BackgroundJob.id).where(
+            BackgroundJob.project_id == project_id,
+            BackgroundJob.job_type.in_([JobType.NLP, JobType.PREDICTION]),
+            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+        ),
+        select(NlpJob.id).where(
+            NlpJob.project_id == project_id,
+            NlpJob.status.in_([NlpJobStatus.PENDING, NlpJobStatus.RUNNING]),
+        ),
+        select(PipelineRun.id).where(
+            PipelineRun.project_id == project_id,
+            PipelineRun.status.in_([PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING]),
+        ),
+        select(Patient.id).where(
+            Patient.project_id == project_id, Patient.locked_by.is_not(None),
+        ),
+    )
+    for statement in checks:
+        if (await session.execute(statement.limit(1))).first() is not None:
+            return True
+    return False
+
+
 async def clear_sentences(session: AsyncSession, project_id: str) -> int:
     """Delete all sentences (and their annotations) for a project to allow re-processing."""
     # Delete predictions first (FK dependency on annotations)
@@ -515,11 +581,13 @@ async def clear_sentences(session: AsyncSession, project_id: str) -> int:
         text("DELETE FROM annotations WHERE project_id = :pid"),
         {"pid": project_id},
     )
-    # Reset patients that were marked reviewed back to nlp_complete
     await session.execute(
         update(Patient)
-        .where(Patient.project_id == project_id, Patient.status == PatientStatus.REVIEWED)
-        .values(status=PatientStatus.NLP_COMPLETE)
+        .where(Patient.project_id == project_id)
+        .values(
+            status=PatientStatus.NLP_COMPLETE, review_source=None, review_reason=None,
+            reviewed_by=None, reviewed_at=None, updated_at=now_utc(),
+        )
     )
     result = await session.execute(
         text("DELETE FROM sentences WHERE project_id = :pid"),

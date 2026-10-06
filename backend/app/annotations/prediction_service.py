@@ -1,11 +1,13 @@
 """Prediction service: bulk prediction runs and token estimation."""
 
 import logging
+from dataclasses import asdict
 
 import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
 from app.jobs.models import BackgroundJob, JobStatus, JobType
@@ -78,12 +80,16 @@ async def run_bulk_predictions(
                 predicted_label=prediction.label,
                 reasoning=prediction.reasoning or "",
                 token_usage=(
-                    prediction.token_usage.model_dump() if prediction.token_usage else None
+                    asdict(prediction.token_usage) if prediction.token_usage else None
                 ),
             )
         )
         stats["annotations_created"] += 1
 
+    await complete_negative_llm_patients(
+        session, project_id, list({annotation.patient_id for annotation in annotations}),
+        predictor_config,
+    )
     await session.commit()
     return stats
 
