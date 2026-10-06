@@ -16,7 +16,7 @@ from tests.conftest import seed_project_and_user
 async def _session(app):
     agen = app.dependency_overrides[get_session]()
     session = await anext(agen)
-    yield session
+    yield session.state.sessionmaker()
     await agen.aclose()
 
 
