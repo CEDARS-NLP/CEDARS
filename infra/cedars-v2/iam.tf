@@ -15,6 +15,15 @@
 locals {
   execution_role_arn = var.create_execution_role ? aws_iam_role.execution[0].arn : var.execution_role_arn
   task_role_arn      = var.create_task_role ? aws_iam_role.task[0].arn : var.task_role_arn
+
+  # Account-scoped ARNs are built from the caller identity so no account ID is
+  # hardcoded. A non-null variable value is used as given.
+  account_id = data.aws_caller_identity.current.account_id
+  iam_policy = "arn:aws:iam::${local.account_id}:policy"
+
+  execution_permissions_boundary_arn = var.execution_permissions_boundary_arn != null ? var.execution_permissions_boundary_arn : "${local.iam_policy}/AutomationOrUserServiceRolePermissions"
+  task_permissions_boundary_arn      = var.task_permissions_boundary_arn != null ? var.task_permissions_boundary_arn : "${local.iam_policy}/hccp-automation-bedrock-permission-boundary"
+  bedrock_inference_profile_arns     = var.bedrock_inference_profile_arns != null ? var.bedrock_inference_profile_arns : ["arn:aws:bedrock:${var.region}:${local.account_id}:inference-profile/*"]
 }
 
 data "aws_iam_policy_document" "ecs_assume" {
@@ -35,7 +44,7 @@ resource "aws_iam_role" "execution" {
   count                = var.create_execution_role ? 1 : 0
   name                 = "${var.execution_role_name_prefix}${local.prefix}-ecs-execution"
   assume_role_policy   = data.aws_iam_policy_document.ecs_assume.json
-  permissions_boundary = var.execution_permissions_boundary_arn
+  permissions_boundary = local.execution_permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy_attachment" "execution_managed" {
@@ -74,7 +83,7 @@ resource "aws_iam_role" "task" {
   count                = var.create_task_role ? 1 : 0
   name                 = "${var.task_role_name_prefix}${local.prefix}-task"
   assume_role_policy   = data.aws_iam_policy_document.ecs_assume.json
-  permissions_boundary = var.task_permissions_boundary_arn
+  permissions_boundary = local.task_permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "task" {
@@ -113,7 +122,7 @@ data "aws_iam_policy_document" "task" {
       "bedrock:InvokeModelWithResponseStream",
     ]
     resources = concat(
-      var.bedrock_inference_profile_arns,
+      local.bedrock_inference_profile_arns,
       var.bedrock_foundation_model_arns,
     )
   }

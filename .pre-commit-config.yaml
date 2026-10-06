@@ -1,0 +1,8 @@
+# Install once per clone:  uv tool install pre-commit && pre-commit install
+# The gitleaks hook scans staged changes against .gitleaks.toml before each
+# commit; CI (.github/workflows/secret-scan.yml) runs the same rules.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

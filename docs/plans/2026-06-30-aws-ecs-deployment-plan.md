@@ -12,7 +12,7 @@
 | Question | Decision |
 |----------|----------|
 | Platform | **AWS ECS Fargate** (not Databricks Apps — wrong tool for multi-tenant + SSO + isolation) |
-| Account | **`180294205688`** (AWS profile `saml`), `us-east-1` |
+| Account | The research AWS account (AWS profile `saml`), `us-east-1`. The ID is a workspace variable, not in this repo. |
 | Relationship to `clinical-trials-research` | **Separate, self-contained stack.** CEDARS is a distinct product. Shares only account-level primitives (VPC, Bedrock, ECR registry). No DB/data commingling. |
 | Tenant isolation | **Single shared platform, logical (row-level) separation** — already implemented in v2 (membership-filtered projects, per-project roles). |
 | LLM provider | **AWS Bedrock** (confirmed working in this account — see recon) |
@@ -21,7 +21,7 @@
 
 ## Account Recon (verified 2026-06-30, profile `saml`)
 
-Identity: `arn:aws:sts::180294205688:assumed-role/mskEngineerUser/SinghR7@mskcc.org`, region `us-east-1`.
+Identity: the `mskEngineerUser` assumed role, region `us-east-1`.
 
 **What already exists and is reusable:**
 
@@ -238,4 +238,4 @@ First deployment can be manual (Terraform apply + `aws ecs update-service`) to v
 
 ## Bottom Line
 
-CEDARS v2 deploys cleanly as a **self-contained ECS Fargate stack in account `180294205688`**. Aurora PG16, ECS, ECR, and **working Bedrock** already exist in-account; the only net-new stateful piece is **ElastiCache Redis**. **App code changes are near-zero** — S3 and Bedrock are config-only. The real production blocker remains **SSO/ezGroups** (separate workstream), not this infrastructure.
+CEDARS v2 deploys cleanly as a **self-contained ECS Fargate stack in the research account**. Aurora PG16, ECS, ECR, and **working Bedrock** already exist in-account; the only net-new stateful piece is **ElastiCache Redis**. **App code changes are near-zero** — S3 and Bedrock are config-only. The real production blocker remains **SSO/ezGroups** (separate workstream), not this infrastructure.

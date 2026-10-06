@@ -1,0 +1,120 @@
+title = "CEDARS gitleaks config"
+
+# Gitleaks' default secret rules, plus rules for deployment details that are
+# not credentials but must not land in this public repo: AWS account IDs,
+# internal hostnames and private IPs, and Terraform Cloud org/workspace names.
+# Real values belong in an untracked .env / *.tfvars or a private deploy repo.
+#
+# Run locally:  gitleaks git --redact --config .gitleaks.toml
+# The pre-commit hook and the CI job (.github/workflows/secret-scan.yml) use
+# this file.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Lock files and generated assets"
+paths = [
+  '''(?:^|/)(?:uv|poetry)\.lock$''',
+  '''(?:^|/)package-lock\.json$''',
+  '''(?:^|/)site/''',
+]
+
+[[allowlists]]
+description = "Obvious placeholders"
+regexes = [
+  '''(?i)^(?:<[^>]*>|your[-_].*|example[-_.]?.*|replace[-_]?me|changeme|my[-_]org|my[-_]workspace)$''',
+]
+
+# --- AWS account IDs ---------------------------------------------------------
+
+[[rules]]
+id = "aws-account-id"
+description = "AWS account ID (12 digits): bare, in an ARN, or in an ECR registry host"
+# Twelve digits that are not part of a longer token, a UUID segment or a
+# decimal. Catches `arn:aws:iam::<id>:`, `<id>.dkr.ecr.`, `allowed_account_ids
+# = ["<id>"]` and prose like "account <id>".
+regex = '''(?:^|[^0-9A-Za-z_.+-])([0-9]{12})(?:[^0-9A-Za-z_-]|$)'''
+secretGroup = 1
+tags = ["aws", "infra"]
+
+  [[rules.allowlists]]
+  description = "Documentation placeholder account IDs"
+  regexes = [
+    '''^(?:123456789012|000000000000|111111111111|999999999999|012345678901)$''',
+  ]
+
+# --- Internal hosts ----------------------------------------------------------
+
+[[rules]]
+id = "private-ipv4-address"
+description = "RFC 1918 host address (not a CIDR block); usually an internal or VPN host"
+regex = '''(?:^|[^0-9.])((?:10\.[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3})(?:[^0-9./]|$)'''
+secretGroup = 1
+tags = ["network", "infra"]
+
+  [[rules.allowlists]]
+  description = "Docker bridge gateway and the examples in Redis's stock redis.conf"
+  regexes = ['''^(?:172\.17\.0\.1|192\.168\.1\.100|10\.0\.0\.1|10\.1\.1\.5)$''']
+
+  [[rules.allowlists]]
+  description = "Package version pins that look like addresses (pkg==10.3.2.106)"
+  regexTarget = "line"
+  regexes = ['''[=~<>!]=\s*(?:10|172|192)\.[0-9.]+''']
+
+[[rules]]
+id = "host-ip-mapping"
+description = "Hostname pinned to an IP (compose extra_hosts, --add-host, /etc/hosts); names an internal host"
+regex = '''\b([A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*:(?:[0-9]{1,3}\.){3}[0-9]{1,3})\b'''
+secretGroup = 1
+tags = ["network", "infra"]
+
+  [[rules.allowlists]]
+  description = "Loopback"
+  regexes = ['''^localhost:127\.0\.0\.1$''']
+
+[[rules]]
+id = "msk-internal-hostname"
+description = "Host under the institution's domain other than the public website"
+regex = '''(?i)\b((?:[a-z0-9-]+\.)+mskcc\.org)\b'''
+secretGroup = 1
+keywords = ["mskcc.org"]
+tags = ["network", "infra"]
+
+  [[rules.allowlists]]
+  description = "Public website"
+  regexes = ['''(?i)^www\.mskcc\.org$''']
+
+# --- Terraform Cloud ---------------------------------------------------------
+
+[[rules]]
+id = "terraform-cloud-organization"
+description = "Terraform Cloud organization hardcoded in a cloud/remote block"
+regex = '''(?s)\b(?:cloud|backend\s+"remote")\s*\{[^}]*?\borganization\s*=\s*"([^"$]+)"'''
+secretGroup = 1
+keywords = ["organization"]
+tags = ["terraform", "infra"]
+
+[[rules]]
+id = "terraform-cloud-workspace"
+description = "Terraform Cloud workspace hardcoded in a workspaces block"
+regex = '''(?s)\bworkspaces\s*\{[^}]*?\b(?:name|prefix)\s*=\s*"([^"$]+)"'''
+secretGroup = 1
+keywords = ["workspaces"]
+tags = ["terraform", "infra"]
+
+[[rules]]
+id = "terraform-cloud-env"
+description = "Terraform Cloud organization or workspace set via TF_CLOUD_ORGANIZATION / TF_WORKSPACE"
+regex = '''\bTF_(?:CLOUD_ORGANIZATION|WORKSPACE)\s*[=:]\s*["']?([A-Za-z0-9][A-Za-z0-9_.-]*)'''
+secretGroup = 1
+keywords = ["tf_cloud_organization", "tf_workspace"]
+tags = ["terraform", "infra"]
+
+[[rules]]
+id = "terraform-cloud-workspace-name"
+description = "Workspace name in the <app-id>-aws-<account>-<region>-<name> convention"
+regex = '''\b([A-Z]{3}[0-9]{7}-aws-[a-z0-9-]+)\b'''
+secretGroup = 1
+keywords = ["-aws-"]
+tags = ["terraform", "infra"]

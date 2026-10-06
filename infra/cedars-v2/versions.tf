@@ -1,16 +1,11 @@
 terraform {
   required_version = ">= 1.6"
 
-  # Terraform Cloud (MSK org standard). State lives in TFC; AWS auth is via
-  # the workspace's dynamic OIDC credentials — no static keys / AWS_PROFILE.
-  # The workspace name can be overridden at init with TF_WORKSPACE.
-  cloud {
-    organization = "mskcc"
-
-    workspaces {
-      name = "APM0004784-aws-research-us-east-1-ctdatahubpoc"
-    }
-  }
+  # Terraform Cloud. State lives in TFC; AWS auth is via the workspace's
+  # dynamic OIDC credentials — no static keys / AWS_PROFILE. The organization
+  # and workspace come from TF_CLOUD_ORGANIZATION and TF_WORKSPACE at init, so
+  # they stay out of this repo.
+  cloud {}
 
   required_providers {
     aws = {
