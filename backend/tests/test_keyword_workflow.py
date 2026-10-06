@@ -14,9 +14,10 @@ from tests.conftest import seed_project_and_user
 
 
 async def _session(app):
-    async for session in app.dependency_overrides[get_session]():
-        return session
-    raise AssertionError("no session")
+    agen = app.dependency_overrides[get_session]()
+    session = await anext(agen)
+    yield session
+    await agen.aclose()
 
 
 async def _seed_notes(app, project_id: str, notes: list[tuple[str, str]]) -> dict[str, str]:
