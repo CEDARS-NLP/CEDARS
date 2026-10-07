@@ -32,6 +32,17 @@ async def create_search_query(
     skip_after_event: bool = True,
     exclude_negated: bool = True,
 ) -> SearchQuery:
+    # Enforce one active query per project: deactivate the current active
+    # query (if any) before inserting the new active row.
+    await session.execute(
+        update(SearchQuery)
+        .where(
+            SearchQuery.project_id == project_id,
+            SearchQuery.deleted_at.is_(None),
+            SearchQuery.is_active.is_(True),
+        )
+        .values(is_active=False)
+    )
     sq = SearchQuery(
         project_id=project_id,
         name=name,
@@ -42,6 +53,35 @@ async def create_search_query(
         skip_after_event=skip_after_event,
         exclude_negated=exclude_negated,
     )
+    session.add(sq)
+    await session.commit()
+    await session.refresh(sq)
+    return sq
+
+
+async def activate_search_query(
+    session: AsyncSession, project_id: str, query_id: str
+) -> SearchQuery | None:
+    """Set a query as the active one for the project (deactivates others)."""
+    sq = await get_search_query(session, project_id, query_id)
+    if not sq:
+        return None
+
+    # Deactivate all others via an immediate UPDATE so it executes before
+    # the flush-time UPDATE below (the partial unique index is checked per
+    # statement; deactivating first avoids a spurious violation).
+    await session.execute(
+        update(SearchQuery)
+        .where(
+            SearchQuery.project_id == project_id,
+            SearchQuery.deleted_at.is_(None),
+            SearchQuery.is_active.is_(True),
+            SearchQuery.id != query_id,
+        )
+        .values(is_active=False)
+    )
+
+    sq.is_active = True
     session.add(sq)
     await session.commit()
     await session.refresh(sq)
@@ -61,7 +101,7 @@ async def get_search_query(
 
 
 _QUERY_UPDATE_FIELDS = {
-    "query", "name", "is_active", "nlp_apply", "hide_duplicates",
+    "query", "name", "nlp_apply", "hide_duplicates",
     "skip_after_event", "exclude_negated",
 }
 
@@ -241,7 +281,9 @@ async def _process_notes_into_sentences(
     for q in active_queries:
         groups = parse_query(q.query)
         all_query_groups.extend(groups)
-    exclude_negated = len(active_queries) == 1 and active_queries[0].exclude_negated
+    # Single active query per project is enforced at the DB level; negation
+    # exclusion follows that query's setting.
+    exclude_negated = bool(active_queries) and active_queries[0].exclude_negated
 
     # Get notes that haven't been processed yet (no sentences exist)
     notes_stmt = (

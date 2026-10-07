@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Text, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -45,6 +45,15 @@ class SearchQuery(SQLModel, table=True):
     """
 
     __tablename__ = "search_queries"
+    __table_args__ = (
+        Index(
+            "uq_search_queries_project_active",
+            "project_id",
+            unique=True,
+            postgresql_where=text("is_active AND deleted_at IS NULL"),
+            sqlite_where=text("is_active AND deleted_at IS NULL"),
+        ),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)

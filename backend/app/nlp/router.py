@@ -1,6 +1,7 @@
 """API routes for NLP pipeline: search queries, processing, sentences."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -20,6 +21,7 @@ from app.nlp.schemas import (
     UpdateSearchQueryRequest,
 )
 from app.nlp.service import (
+    activate_search_query,
     cancel_nlp_job,
     clear_sentences,
     create_search_query,
@@ -54,17 +56,26 @@ async def create_query_endpoint(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
-    sq = await create_search_query(
-        session,
-        project_id,
-        body.query,
-        name=body.name,
-        created_by=current_user.id,
-        nlp_apply=body.nlp_apply,
-        hide_duplicates=body.hide_duplicates,
-        skip_after_event=body.skip_after_event,
-        exclude_negated=body.exclude_negated,
-    )
+    try:
+        sq = await create_search_query(
+            session,
+            project_id,
+            body.query,
+            name=body.name,
+            created_by=current_user.id,
+            nlp_apply=body.nlp_apply,
+            hide_duplicates=body.hide_duplicates,
+            skip_after_event=body.skip_after_event,
+            exclude_negated=body.exclude_negated,
+        )
+    except IntegrityError:
+        # Race backstop: the partial unique index caught a concurrent
+        # create. Roll back so the session is reusable.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another query was created concurrently. Retry.",
+        ) from None
     return sq
 
 
@@ -115,6 +126,28 @@ async def delete_query_endpoint(
     deleted = await delete_search_query(session, project_id, query_id)
     if not deleted:
         raise_not_found("Search query not found")
+
+
+@router.post("/queries/{query_id}/activate", response_model=SearchQueryResponse)
+async def activate_query_endpoint(
+    project_id: str,
+    query_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    try:
+        sq = await activate_search_query(session, project_id, query_id)
+    except IntegrityError:
+        # Race backstop: the partial unique index caught a concurrent
+        # activation. Roll back so the session is reusable.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another query was activated concurrently. Retry.",
+        ) from None
+    if not sq:
+        raise_not_found("Search query not found")
+    return sq
 
 
 # ── NLP Processing ───────────────────────────────────────────────

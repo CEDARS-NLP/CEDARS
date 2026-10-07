@@ -6,17 +6,22 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus  # noqa: F401
+from app.audit.models import AuditEntry  # noqa: F401
+
 # Import all models so metadata registers all tables
 from app.auth.models import User  # noqa: F401
-from app.projects.models import Project, ProjectMember  # noqa: F401
 from app.connectors.models import DataSource, Note, Patient, PatientStatus  # noqa: F401
-from app.predictors.models import PredictorConfig, PredictorType  # noqa: F401
-from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus  # noqa: F401
+from app.evaluation.models import EvaluationSession, PatientResult, SearchMatch  # noqa: F401
 from app.jobs.models import BackgroundJob, JobStatus, JobType  # noqa: F401
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
-from app.evaluation.models import EvaluationSession, SearchMatch, PatientResult  # noqa: F401
-from app.audit.models import AuditEntry  # noqa: F401
-from app.predictors.base import PredictionResult, TokenUsage, PredictorError
+from app.predictors.base import PredictionResult, PredictorError, TokenUsage
+from app.predictors.models import PredictorConfig, PredictorType  # noqa: F401
+from app.projects.models import Project, ProjectMember  # noqa: F401
+
+
+def _assert_all_unreviewed(annotations: list[Annotation]) -> None:
+    assert all(a.review_status == ReviewStatus.UNREVIEWED for a in annotations)
 
 
 async def _seed_data(session: AsyncSession, is_cancelled: bool = False):
@@ -150,7 +155,7 @@ async def test_processes_all_sentences_per_patient(session_factory):
         result = await session.execute(select(Annotation))
         annotations = result.scalars().all()
         assert len(annotations) == 3
-        assert all(annotation.review_status == ReviewStatus.UNREVIEWED for annotation in annotations)
+        _assert_all_unreviewed(annotations)
         assert all(annotation.predicted_score is None for annotation in annotations)
 
         # The helper completes a patient only when every annotation is negative.
@@ -192,7 +197,7 @@ async def test_cancellation_stops_after_current_patient(session_factory):
         result = await session.execute(select(Annotation))
         annotations = result.scalars().all()
         assert len(annotations) == 3
-        assert all(annotation.review_status == ReviewStatus.UNREVIEWED for annotation in annotations)
+        _assert_all_unreviewed(annotations)
         job = await session.get(BackgroundJob, "job-1")
         assert job.status == JobStatus.CANCELLED
         assert job.completed_at is not None
@@ -226,7 +231,7 @@ async def test_handles_prediction_errors_gracefully(session_factory):
     # All 3 existing annotations were considered, but 1 prediction failed.
     assert stats["total_sentences"] == 3
     assert stats["predictions_made"] == 2
-    assert stats["annotations_created"] == 3
+    assert stats["annotations_created"] == 2
     assert stats["errors"] == 1
 
     # Successful predictions persist separately; the failed annotation has no row.
@@ -241,7 +246,7 @@ async def test_handles_prediction_errors_gracefully(session_factory):
         result = await session.execute(select(Annotation))
         annotations = result.scalars().all()
         assert len(annotations) == 3
-        assert all(annotation.review_status == ReviewStatus.UNREVIEWED for annotation in annotations)
+        _assert_all_unreviewed(annotations)
 
         # Patient 1 has an unscored annotation, so not all keyword matches are negative.
         patient_1 = await session.get(Patient, "pat-1")

@@ -13,6 +13,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -102,6 +103,13 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   const deleteQuery = useMutation({
     mutationFn: (id: string) =>
       api.delete(`/projects/${projectId}/nlp/queries/${id}`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] }),
+  });
+
+  const activateQuery = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/projects/${projectId}/nlp/queries/${id}/activate`, {}),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] }),
   });
@@ -225,6 +233,11 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
       {/* Query list */}
       {queries && queries.length > 0 && (
         <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Only one query can be active at a time. Adding or activating a query
+            deactivates the previous one. Use Reprocess all to apply a different
+            query to already-extracted annotations.
+          </p>
           {queries.map((q) => (
             <div
               key={q.id}
@@ -241,20 +254,36 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                     Negated mentions hidden
                   </span>
                 )}
-                {!q.is_active && (
+                {q.is_active ? (
+                  <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    Active
+                  </Badge>
+                ) : (
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                     inactive
                   </span>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                onClick={() => deleteQuery.mutate(q.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {!q.is_active && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={activateQuery.isPending}
+                    onClick={() => activateQuery.mutate(q.id)}
+                  >
+                    Activate
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={() => deleteQuery.mutate(q.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
           ))}
         </div>

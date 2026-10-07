@@ -4,6 +4,9 @@ from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
+
+from app.nlp.models import SearchQuery
 
 
 async def register_and_login(client: AsyncClient) -> None:
@@ -72,15 +75,79 @@ class TestSearchQueryCRUD:
         await register_and_login(client)
         pid = await create_project(client)
 
+        created_ids = []
         for q in ["DVT", "PE"]:
-            await client.post(
+            resp = await client.post(
                 f"/api/v1/projects/{pid}/nlp/queries",
                 json={"query": q},
             )
+            created_ids.append(resp.json()["id"])
 
         resp = await client.get(f"/api/v1/projects/{pid}/nlp/queries")
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        queries = resp.json()
+        assert len(queries) == 2
+        # Only one query may be active per project: the most recently created.
+        active = [q for q in queries if q["is_active"]]
+        assert len(active) == 1
+        assert active[0]["id"] == created_ids[-1]
+
+    async def test_create_query_deactivates_previous(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )
+        assert first.status_code == 201
+        assert first.json()["is_active"] is True
+
+        second = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "PE"},
+        )
+        assert second.status_code == 201
+        assert second.json()["is_active"] is True
+
+        resp = await client.get(f"/api/v1/projects/{pid}/nlp/queries")
+        queries = resp.json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first.json()["id"]]["is_active"] is False
+        assert by_id[second.json()["id"]]["is_active"] is True
+
+    async def test_activate_query_switches_exclusivity(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )).json()
+        second = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "PE"},
+        )).json()
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries/{first['id']}/activate"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+        queries = (await client.get(f"/api/v1/projects/{pid}/nlp/queries")).json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first["id"]]["is_active"] is True
+        assert by_id[second["id"]]["is_active"] is False
+
+    async def test_activate_unknown_query_returns_404(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries/nonexistent/activate"
+        )
+        assert resp.status_code == 404
 
     async def test_update_query(self, client):
         await register_and_login(client)
@@ -94,11 +161,54 @@ class TestSearchQueryCRUD:
 
         resp = await client.put(
             f"/api/v1/projects/{pid}/nlp/queries/{qid}",
-            json={"query": "new query", "is_active": False},
+            json={"query": "new query"},
         )
         assert resp.status_code == 200
         assert resp.json()["query"] == "new query"
-        assert resp.json()["is_active"] is False
+        assert resp.json()["is_active"] is True
+
+    async def test_update_query_ignores_is_active(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        create_resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "old query"},
+        )
+        qid = create_resp.json()["id"]
+
+        # is_active is no longer updatable via PUT; activation goes through
+        # the dedicated activate endpoint.
+        resp = await client.put(
+            f"/api/v1/projects/{pid}/nlp/queries/{qid}",
+            json={"query": "new query", "is_active": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+    async def test_second_active_query_insert_rejected_by_index(
+        self, client, session_factory
+    ):
+        """The partial unique index blocks a second active query per project."""
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )).json()
+
+        async with session_factory() as session:
+            session.add(
+                SearchQuery(project_id=pid, query="PE", is_active=True)
+            )
+            with pytest.raises(IntegrityError):
+                await session.commit()
+
+        # The original active query is untouched after the failed insert.
+        queries = (await client.get(f"/api/v1/projects/{pid}/nlp/queries")).json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first["id"]]["is_active"] is True
 
     async def test_delete_query(self, client):
         await register_and_login(client)

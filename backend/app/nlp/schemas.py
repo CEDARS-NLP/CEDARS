@@ -19,7 +19,6 @@ class CreateSearchQueryRequest(BaseModel):
 class UpdateSearchQueryRequest(BaseModel):
     name: str | None = None
     query: str | None = None
-    is_active: bool | None = None
     nlp_apply: bool | None = None
     hide_duplicates: bool | None = None
     skip_after_event: bool | None = None
