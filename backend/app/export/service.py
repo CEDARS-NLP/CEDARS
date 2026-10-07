@@ -75,6 +75,8 @@ async def export_annotations(
 
     return [
         {
+            "annotation_id": ann.id,
+            "predictor_config_id": pred.predictor_config_id if pred else None,
             "patient_id": ann.patient_id,
             "note_id": ann.note_id,
             "sentence_id": ann.sentence_id,
@@ -107,6 +109,8 @@ async def export_annotations(
 
 
 _CSV_HEADERS = [
+    "annotation_id",
+    "predictor_config_id",
     "patient_id",
     "note_id",
     "sentence_id",

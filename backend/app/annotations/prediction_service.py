@@ -107,6 +107,7 @@ def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
     )
     return select(Annotation).where(
         Annotation.project_id == project_id,
+        Annotation.review_excluded.is_(False),
         ~already_scored,
     )
 

@@ -598,3 +598,158 @@ async def test_reprocess_requires_matching_impact_and_deletes_confirmed_rows(
     after = await auth_client.get(f"/api/v1/projects/{project_id}/nlp/reprocess-impact")
     assert after.status_code == 200
     assert after.json() == {"annotations": 0, "predictions": 0, "sentences": 0}
+
+def _prediction(seeded, annotation, config_id, label):
+    return AnnotationPrediction(
+        annotation_id=annotation.id,
+        project_id=seeded["project_id"],
+        predictor_config_id=config_id,
+        predictor_model="mock-model",
+        predicted_label=label,
+        predicted_score=0.8,
+    )
+
+
+async def test_llm_completion_closes_patient_with_human_and_negative_annotations(session_factory):
+    async with session_factory() as session:
+        seeded = await _seed_project(session, annotation_count=2)
+        config = await session.get(PredictorConfig, seeded["config_id"])
+        reviewed, hidden = seeded["annotations"]
+        reviewed.review_status = ReviewStatus.REVIEWED
+        reviewed.reviewed_by = seeded["user_id"]
+        session.add(reviewed)
+        session.add(_prediction(seeded, hidden, config.id, 0))
+        await complete_negative_llm_patients(
+            session, seeded["project_id"], [seeded["patient_id"]], config
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        patient = await session.get(Patient, seeded["patient_id"])
+        assert patient.status == PatientStatus.REVIEWED
+        assert patient.review_source == "human"
+        assert patient.review_reason == "manual_review"
+        assert patient.reviewed_by == seeded["user_id"]
+
+
+async def test_unlock_closes_patient_whose_remaining_annotations_were_ruled_out(session_factory):
+    from app.annotations.review_service import unlock_patient
+
+    async with session_factory() as session:
+        seeded = await _seed_project(session, annotation_count=2)
+        config = await session.get(PredictorConfig, seeded["config_id"])
+        reviewed, hidden = seeded["annotations"]
+        reviewed.review_status = ReviewStatus.REVIEWED
+        reviewed.reviewed_by = seeded["user_id"]
+        session.add(reviewed)
+        session.add(_prediction(seeded, hidden, config.id, 0))
+        patient = await session.get(Patient, seeded["patient_id"])
+        patient.locked_by = seeded["user_id"]
+        patient.locked_at = datetime.now(UTC)
+        session.add(patient)
+        await session.commit()
+
+        await complete_negative_llm_patients(
+            session, seeded["project_id"], [seeded["patient_id"]], config
+        )
+        await session.commit()
+        await session.refresh(patient)
+        assert patient.status == PatientStatus.REVIEWING  # locked: skipped
+
+        await unlock_patient(session, seeded["project_id"], seeded["patient_id"], seeded["user_id"])
+
+    async with session_factory() as session:
+        patient = await session.get(Patient, seeded["patient_id"])
+        assert patient.status == PatientStatus.REVIEWED
+        assert patient.locked_by is None
+
+
+@pytest.mark.parametrize(
+    ("status", "age_hours", "busy"),
+    [
+        (PatientStatus.REVIEWING, 0, True),
+        (PatientStatus.REVIEWED, 0, False),
+        (PatientStatus.REVIEWING, 2, False),
+    ],
+)
+async def test_reprocess_busy_ignores_finished_and_stale_locks(
+    session_factory, status, age_hours, busy
+):
+    from datetime import timedelta
+
+    from app.nlp.service import reprocess_is_busy
+
+    async with session_factory() as session:
+        seeded = await _seed_project(session, patient_status=status)
+        patient = await session.get(Patient, seeded["patient_id"])
+        patient.locked_by = seeded["user_id"]
+        patient.locked_at = datetime.now(UTC) - timedelta(hours=age_hours)
+        session.add(patient)
+        job = await session.get(BackgroundJob, seeded["job_id"])
+        job.status = JobStatus.COMPLETED
+        session.add(job)
+        await session.commit()
+
+        assert await reprocess_is_busy(session, seeded["project_id"]) is busy
+
+
+async def test_export_identifies_annotation_and_predictor_per_row(session_factory):
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        other = PredictorConfig(
+            id=_id(), project_id=seeded["project_id"], predictor_type=PredictorType.LLM,
+            name="Second", config={}, is_active=False, created_by=seeded["user_id"],
+        )
+        session.add(other)
+        await session.flush()
+        session.add(_prediction(seeded, annotation, seeded["config_id"], 1))
+        session.add(_prediction(seeded, annotation, other.id, 0))
+        await session.commit()
+
+        rows = await export_annotations(session, seeded["project_id"])
+        assert len(rows) == 2
+        assert {r["annotation_id"] for r in rows} == {annotation.id}
+        assert {r["predictor_config_id"] for r in rows} == {seeded["config_id"], other.id}
+
+
+async def test_purge_data_source_removes_predictions(session_factory):
+    from app.connectors.models import DataSource
+    from app.connectors.service import purge_data_source
+
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        source = DataSource(
+            id=_id(), project_id=seeded["project_id"], name="src", connector_type="file_upload",
+        )
+        session.add(source)
+        await session.flush()
+        note = await session.get(Note, seeded["note_id"])
+        note.data_source_id = source.id
+        session.add(note)
+        session.add(_prediction(seeded, annotation, seeded["config_id"], 1))
+        await session.commit()
+
+        assert await purge_data_source(session, seeded["project_id"], source.id) == 1
+        await session.commit()
+        remaining = await session.execute(select(AnnotationPrediction))
+        assert remaining.scalars().all() == []
+
+
+async def test_bulk_prediction_skips_excluded_annotations(session_factory):
+    from app.annotations.prediction_service import _unscored_annotations_stmt
+
+    async with session_factory() as session:
+        seeded = await _seed_project(session, annotation_count=2)
+        excluded = seeded["annotations"][0]
+        excluded.review_excluded = True
+        session.add(excluded)
+        await session.commit()
+
+        rows = (
+            await session.execute(
+                _unscored_annotations_stmt(seeded["project_id"], seeded["config_id"])
+            )
+        ).scalars().all()
+        assert [a.id for a in rows] == [seeded["annotations"][1].id]

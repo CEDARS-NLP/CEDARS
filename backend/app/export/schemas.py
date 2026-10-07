@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 
 class ExportAnnotationRow(BaseModel):
+    annotation_id: str | None = None
+    predictor_config_id: str | None = None
     patient_id: str
     note_id: str
     sentence_id: str | None = None

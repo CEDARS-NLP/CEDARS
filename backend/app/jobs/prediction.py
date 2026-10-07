@@ -91,6 +91,7 @@ async def execute_prediction_job(
                 .where(
                     Annotation.project_id == project_id,
                     Note.deleted_at.is_(None),
+                    Annotation.review_excluded.is_(False),
                     ~already_scored,
                 )
                 .order_by(Annotation.patient_id, Note.note_date, Annotation.sentence_number)

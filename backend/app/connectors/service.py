@@ -504,7 +504,7 @@ async def purge_data_source(
     """
     from sqlalchemy import delete, exists
 
-    from app.annotations.models import Annotation
+    from app.annotations.models import Annotation, AnnotationPrediction
     from app.nlp.models import Sentence
 
     ds = await get_data_source(session, project_id, data_source_id)
@@ -521,6 +521,12 @@ async def purge_data_source(
         return 0
 
     async with session.begin_nested():
+        annotation_ids = select(Annotation.id).where(Annotation.note_id.in_(note_ids))
+        await session.execute(
+            delete(AnnotationPrediction).where(
+                AnnotationPrediction.annotation_id.in_(annotation_ids)
+            )
+        )
         await session.execute(
             delete(Annotation).where(Annotation.note_id.in_(note_ids))
         )

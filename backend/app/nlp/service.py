@@ -1,6 +1,7 @@
 """Business logic for NLP pipeline: search queries, sentence processing, jobs."""
 
 import logging
+from datetime import timedelta
 
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,6 +100,9 @@ async def get_search_query(
 ) -> SearchQuery | None:
     return await get_scoped(session, SearchQuery, project_id, query_id)
 
+
+# A review lock older than this belongs to an abandoned session and no longer blocks reprocessing.
+STALE_LOCK_AGE = timedelta(hours=1)
 
 _QUERY_UPDATE_FIELDS = {
     "query", "name", "nlp_apply", "hide_duplicates",
@@ -607,7 +611,10 @@ async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
             PipelineRun.status.in_([PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING]),
         ),
         select(Patient.id).where(
-            Patient.project_id == project_id, Patient.locked_by.is_not(None),
+            Patient.project_id == project_id,
+            Patient.locked_by.is_not(None),
+            Patient.status != PatientStatus.REVIEWED,
+            Patient.locked_at > now_utc() - STALE_LOCK_AGE,
         ),
     )
     for statement in checks:
