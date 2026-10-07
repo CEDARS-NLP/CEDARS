@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.annotations.query_service import get_annotation_stats
 from app.annotations.review_service import get_next_patient_for_review
-from app.common.database import get_session
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.engine import parse_query, process_note
 from app.nlp.models import SearchQuery
@@ -14,10 +13,7 @@ from tests.conftest import seed_project_and_user
 
 
 async def _session(app):
-    agen = app.dependency_overrides[get_session]()
-    session = await anext(agen)
-    yield session.state.sessionmaker()
-    await agen.aclose()
+    return app.state.test_session_factory()
 
 
 async def _seed_notes(app, project_id: str, notes: list[tuple[str, str]]) -> dict[str, str]:
@@ -63,30 +59,30 @@ class TestMatchSpans:
 
 class TestNlpProducesAnnotations:
     async def test_creates_annotation_per_match(self, app):
-        pid, _ = await anext(seed_project_and_user(app))
+        pid, _ = await seed_project_and_user(app)
         await _seed_notes(app, pid, [("P1", "Troponin elevated. Repeat troponin high.")])
 
-        session = await anext(_session(app))
+        session = await _session(app)
         session.add(SearchQuery(project_id=pid, query="troponin"))
         await session.commit()
 
-        stats = await anext(_process_notes_into_sentences(session, pid))
+        stats = await _process_notes_into_sentences(session, pid)
         assert stats["annotations_created"] == 2
         assert stats["patients_with_matches"] == 1
 
-        annotations = (await anext(session.execute(Annotation.__table__.select()))).all()
+        annotations = (await session.execute(Annotation.__table__.select())).all()
         assert len(annotations) == 2
 
     async def test_records_v1_fields(self, app):
-        pid, _ = await anext(seed_project_and_user(app))
+        pid, _ = await seed_project_and_user(app)
         await _seed_notes(app, pid, [("P1", "No findings. Troponin elevated.")])
 
-        session = await anext(_session(app))
+        session = await _session(app)
         session.add(SearchQuery(project_id=pid, query="troponin"))
         await session.commit()
         await _process_notes_into_sentences(session, pid)
 
-        ann = (await anext(session.execute(Annotation.__table__.select()))).one()
+        ann = (await session.execute(Annotation.__table__.select())).one()
         assert ann.token == "Troponin"
         assert ann.note_start_index == 13
         assert ann.note_end_index == 21
@@ -102,7 +98,7 @@ class TestNlpProducesAnnotations:
             app, pid, [("P1", "Troponin elevated."), ("P2", "Patient has a headache.")]
         )
 
-        session = await anext(_session(app))
+        session = await _session(app)
         session.add(SearchQuery(project_id=pid, query="troponin"))
         await session.commit()
         stats = await _process_notes_into_sentences(session, pid)
@@ -121,7 +117,7 @@ class TestReviewWithoutPredictor:
         pid, uid = await seed_project_and_user(app)
         await _seed_notes(app, pid, [("P1", "Troponin elevated.")])
 
-        session = await anext(_session(app))
+        session = await _session(app)
         session.add(SearchQuery(project_id=pid, query="troponin"))
         await session.commit()
         await _process_notes_into_sentences(session, pid)
@@ -134,7 +130,7 @@ class TestReviewWithoutPredictor:
         pid, uid = await seed_project_and_user(app)
         await _seed_notes(app, pid, [("P1", "Troponin elevated.")])
 
-        session = await anext(_session(app))
+        session = await _session(app)
         session.add(SearchQuery(project_id=pid, query="troponin"))
         await session.commit()
         await _process_notes_into_sentences(session, pid)
