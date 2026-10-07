@@ -46,6 +46,12 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
     mutationFn: () => api.get<ReprocessImpact>(`/projects/${projectId}/nlp/reprocess-impact`),
   });
 
+  const { data: project } = useQuery<{ role: string | null }>({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get(`/projects/${projectId}`),
+    enabled: !!projectId,
+  });
+
   const { data: queries } = useQuery<SearchQuery[]>({
     queryKey: ["nlp-queries", projectId],
     queryFn: () => api.get<SearchQuery[]>(`/projects/${projectId}/nlp/queries`),
@@ -303,19 +309,21 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
               <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
                 {runNlp.isPending || backgroundJobIsRunning ? "Processing..." : "Run NLP"}
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  reprocessNlp.reset();
-                  impactPreview.reset();
-                  setReprocessOpen(true);
-                  impactPreview.mutate();
-                }}
-                disabled={isRunning}
-              >
-                <RefreshCw className="mr-1.5 h-4 w-4" />
-                {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess all"}
-              </Button>
+              {project?.role === "admin" && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    reprocessNlp.reset();
+                    impactPreview.reset();
+                    setReprocessOpen(true);
+                    impactPreview.mutate();
+                  }}
+                  disabled={isRunning}
+                >
+                  <RefreshCw className="mr-1.5 h-4 w-4" />
+                  {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess all"}
+                </Button>
+              )}
             </div>
             {(runNlp.isError || reprocessNlp.isError) && (
               <p className="text-sm text-destructive">
