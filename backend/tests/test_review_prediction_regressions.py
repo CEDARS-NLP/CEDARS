@@ -714,6 +714,7 @@ async def test_export_identifies_annotation_and_predictor_per_row(session_factor
 
 
 async def test_purge_data_source_removes_predictions(session_factory):
+    from app.audit.models import AuditAction, AuditEntry
     from app.connectors.models import DataSource
     from app.connectors.service import purge_data_source
 
@@ -728,13 +729,25 @@ async def test_purge_data_source_removes_predictions(session_factory):
         note = await session.get(Note, seeded["note_id"])
         note.data_source_id = source.id
         session.add(note)
+        patient = await session.get(Patient, seeded["patient_id"])
+        patient.data_source_id = source.id
+        session.add(patient)
         session.add(_prediction(seeded, annotation, seeded["config_id"], 1))
+        session.add(
+            AuditEntry(
+                project_id=seeded["project_id"], patient_id=seeded["patient_id"],
+                user_id=seeded["user_id"], action=AuditAction.PATIENT_UNLOCKED,
+            )
+        )
         await session.commit()
 
         assert await purge_data_source(session, seeded["project_id"], source.id) == 1
         await session.commit()
         remaining = await session.execute(select(AnnotationPrediction))
         assert remaining.scalars().all() == []
+        audit = (await session.execute(select(AuditEntry))).scalars().all()
+        unlocks = [a for a in audit if a.action == AuditAction.PATIENT_UNLOCKED]
+        assert len(unlocks) == 1 and unlocks[0].patient_id is None
 
 
 async def test_bulk_prediction_skips_excluded_annotations(session_factory):

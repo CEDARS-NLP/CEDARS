@@ -502,9 +502,10 @@ async def purge_data_source(
     All deletes run inside a savepoint so a partial failure leaves the DB consistent.
     Returns count of deleted notes.
     """
-    from sqlalchemy import delete, exists
+    from sqlalchemy import delete, exists, update
 
     from app.annotations.models import Annotation, AnnotationPrediction
+    from app.audit.models import AuditEntry
     from app.nlp.models import Sentence
 
     ds = await get_data_source(session, project_id, data_source_id)
@@ -544,6 +545,12 @@ async def purge_data_source(
             Patient.data_source_id == data_source_id,
             ~exists(select(Note.id).where(Note.patient_id == Patient.id)),
         ).scalar_subquery()
+        # Keep the audit trail: detach its rows from the patients about to be deleted.
+        await session.execute(
+            update(AuditEntry)
+            .where(AuditEntry.patient_id.in_(patient_ids_subq))
+            .values(patient_id=None)
+        )
         await session.execute(
             delete(Patient).where(Patient.id.in_(patient_ids_subq))
         )
