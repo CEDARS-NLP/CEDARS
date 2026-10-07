@@ -58,6 +58,8 @@ CI_POSTGRES_IMAGE = "postgres:16-alpine"  # .github/workflows/ci.yml service ima
 PLAYWRIGHT_CHROMIUM = "1208"  # browser revision for playwright==1.58.0
 DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 AWS_PREFIX = "cedars-v2-dev"  # local.prefix for the dev environment
+GITLEAKS_CONFIG = ".gitleaks.toml"  # repo root; also read by .pre-commit-config.yaml and secret-scan.yml
+SCAN_BASE = "origin/feature/v2-platform"  # default PR base for `secrets scan`
 
 
 class CliError(Exception):
@@ -976,6 +978,68 @@ def cmd_infra_validate(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_secrets_scan(args) -> int:
+    """gitleaks with the repo's .gitleaks.toml, the rules the pre-commit hook and secret-scan.yml use.
+
+    Findings are always redacted: rule, file, line and commit, never the matched value.
+    """
+    st = State(args)
+    st.init()
+    root = st.root_repo
+    cfg = root / GITLEAKS_CONFIG
+    if not cfg.exists():
+        raise CliError(f"no {GITLEAKS_CONFIG} in {root}; check out a branch that has the secret-scan rules")
+    if args.tree and args.ref:
+        raise CliError("--tree scans the working tree; drop --ref, or drop --tree to scan the commits up to --ref")
+    out = st.dir / "secrets-scan"
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    report = out / "report.json"
+    tree = out / "tree"
+    if args.tree:
+        # What git would commit now: tracked plus untracked-not-ignored files, uncommitted edits included.
+        paths = [p for p in git(root, "ls-files", "-co", "--exclude-standard", "-z").split("\0") if p]
+        for p in paths:
+            src = root / p
+            if src.is_file() and not src.is_symlink():  # skips submodule gitlinks and symlinks
+                (tree / p).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, tree / p)
+        scope = f"the working tree ({len(paths)} paths)"
+        target = ["dir", tree]
+    else:
+        ref = args.ref or "HEAD"
+        sha = git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+        if args.all:
+            log_opts, scope = "--all", "the full history of every local ref"
+        else:
+            base = git(root, "rev-parse", "--verify", "-q", f"{args.base}^{{commit}}", check=False)
+            if not base:
+                raise CliError(f"--base {args.base} does not resolve; run `git fetch origin` or pass --base REF")
+            log_opts, scope = f"{base}..{sha}", f"commits on {ref} not on {args.base} (as CI scans a PR)"
+        target = ["git", f"--log-opts={log_opts}", root]
+    # cwd=root so a root .gitleaksignore applies, as in CI.
+    proc = run(["gitleaks", *target, "--config", cfg, "--redact", "--no-banner", "--report-format", "json",
+                "--report-path", report], check=False, capture=True, cwd=root, timeout=1800)
+    shutil.rmtree(tree, ignore_errors=True)
+    try:
+        raw = json.loads(report.read_text())
+    except (OSError, ValueError):
+        raise CheckFailed(f"gitleaks wrote no report (exit {proc.returncode}):\n{(proc.stderr or proc.stdout).strip()[-2000:]}")
+    prefix = f"{tree}/"
+    findings = [{"rule": f["RuleID"], "file": f["File"].removeprefix(prefix), "line": f["StartLine"],
+                 "commit": f.get("Commit", "")[:12], "date": (f.get("Date") or "")[:10],
+                 "fingerprint": f["Fingerprint"].removeprefix(prefix)} for f in raw]
+    if proc.returncode != 0 and not findings:
+        raise CheckFailed(f"gitleaks exited {proc.returncode} with no findings:\n{(proc.stderr or proc.stdout).strip()[-2000:]}")
+    lines = [f"  LEAK  {f['rule']}  {f['file']}:{f['line']}" + (f"  commit {f['commit']} ({f['date']})" if f["commit"] else "")
+             for f in findings]
+    emit(args, {"ok": not findings, "scope": scope, "findings": findings, "report": str(report)},
+         "\n".join([*lines, f"secrets scan: {'PASS, 0' if not findings else len(findings)} finding(s) in {scope}; "
+                            f"values redacted (report: {report})"]))
+    return 1 if findings else 0
+
+
 # --------------------------------------------------------------------------- HTTP client
 
 
@@ -1721,6 +1785,7 @@ def cmd_doctor(args) -> int:
                                  ("node", ["node", "--version"], False, "needed for `test frontend`"),
                                  ("npm", ["npm", "--version"], False, "needed for `test frontend`"),
                                  ("terraform", ["terraform", "version"], False, "needed for `infra validate`"),
+                                 ("gitleaks", ["gitleaks", "version"], False, "needed for `secrets scan` (brew install gitleaks)"),
                                  ("aws cli", ["aws", "--version"], False, "needed for `aws status` / `bedrock probe`")]:
         ok, d = ver(cmd)
         row(tool, ok, d if ok else hint, req)
@@ -1853,6 +1918,10 @@ EXAMPLES = {
                  "control-cedars ci status --limit 10 --json  # spot flaky tests: failed in some runs, not others",
     "parity check": "control-cedars parity check\ncontrol-cedars parity check --json",
     "infra validate": "control-cedars infra validate     # terraform fmt -check, init -backend=false, validate (scratch copy)",
+    "secrets scan": "control-cedars secrets scan                         # commits HEAD adds over origin/feature/v2-platform, like CI on a PR\n"
+                    "control-cedars secrets scan --ref <sha> --base origin/main\n"
+                    "control-cedars secrets scan --tree                  # the files git would commit now, uncommitted edits included\n"
+                    "control-cedars secrets scan --all --json            # every local ref's full history, like the manual CI run",
     "seed": "control-cedars seed                        # users, project (fake LLM), sample CSV, ingestion, 5/103 assert\n"
             "control-cedars seed --no-ingest            # stop after upload (data source Pending)\n"
             "control-cedars seed --no-upload            # users + empty project",
@@ -1961,6 +2030,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     infra = sub.add_parser("infra", help="Terraform checks (never plan/apply)").add_subparsers(dest="infra_cmd", required=True, metavar="<verb>")
     add(infra, "infra validate", cmd_infra_validate, "terraform fmt -check, init -backend=false, validate")
+
+    sec = sub.add_parser("secrets", help="gitleaks with the repo's rules (values always redacted)").add_subparsers(dest="secrets_cmd", required=True, metavar="<verb>")
+    sp = add(sec, "secrets scan", cmd_secrets_scan, "scan the commits a branch adds (default), the working tree, or all history; exit 1 on any finding")
+    scope = sp.add_mutually_exclusive_group()
+    scope.add_argument("--tree", action="store_true", help="scan the files git would commit now instead of commits")
+    scope.add_argument("--all", action="store_true", help="scan the full history of every local ref (fails until old findings are dealt with)")
+    sp.add_argument("--ref", help="last commit of the range (default HEAD)")
+    sp.add_argument("--base", default=SCAN_BASE, help="range starts after this ref (default: %(default)s; `git fetch` first)")
 
     sp = add(sub, "seed", cmd_seed, "synthetic users (admin/annotator/viewer), project on the fake LLM, sample data, ingestion")
     sp.add_argument("--project-name")
