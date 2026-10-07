@@ -62,7 +62,8 @@ def _validate_settings() -> None:
         if not is_local:
             raise RuntimeError(
                 "CEDARS_SECRET_KEY is using an unsafe default value. "
-                "Set a strong secret via the CEDARS_SECRET_KEY environment variable before deploying."
+                "Set a strong secret via the" \
+                "CEDARS_SECRET_KEY environment variable before deploying."
             )
         log.warning(
             "CEDARS_SECRET_KEY is using an unsafe default — acceptable only for local development."

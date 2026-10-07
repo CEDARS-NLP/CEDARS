@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["ClassificationResult", "classify_patient", "_build_connection_kwargs"]
 
-SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a patient's clinical notes contain evidence of a specific medical event. You will receive relevant excerpts from the patient's notes sorted chronologically. Respond ONLY with a JSON object.
+SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a patient's clinical notes
+contain evidence of a specific medical event. You will receive relevant excerpts from the patient's
+notes sorted chronologically. Respond ONLY with a JSON object.
 
 Classification rules:
 - Analyze ALL provided excerpts together for a unified patient-level decision
@@ -60,7 +62,8 @@ class ClassificationResult:
 def _build_user_prompt(excerpts: list[dict], event_config) -> str:
     """Build user prompt with all excerpts for a single patient."""
     excerpt_text = "\n\n".join(
-        f"--- Excerpt from note {e['note_id']} (date: {e.get('note_date', 'unknown')}) ---\n{e['text']}"
+        f"--- Excerpt from note {e['note_id']} (date: {e.get('note_date',
+                                                             'unknown')}) ---\n{e['text']}"
         for e in excerpts
     )
     return f"""Event to detect: {event_config.name}
@@ -72,7 +75,8 @@ Patient excerpts ({len(excerpts)} matched notes, chronological order):
 
 {excerpt_text}
 
-Based on ALL excerpts above, classify whether this patient has evidence of the event. Identify the EARLIEST confirmed occurrence date if positive. Respond with JSON only."""
+Based on ALL excerpts above, classify whether this patient has evidence of the event.
+Identify the EARLIEST confirmed occurrence date if positive. Respond with JSON only."""
 
 
 async def classify_patient(
@@ -93,7 +97,8 @@ async def classify_patient(
         ValueError: On LLM or parsing errors.
     """
     if not excerpts:
-        return ClassificationResult(label="negative", confidence=0.0, reasoning="No matched excerpts")
+        return ClassificationResult(label="negative", confidence=0.0,
+                                    reasoning="No matched excerpts")
 
     user_prompt = _build_user_prompt(excerpts, event_config)
     messages = [

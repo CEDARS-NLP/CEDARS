@@ -120,7 +120,10 @@ async def upload_and_create_data_source(
         raise ValueError("Only CSV and JSON files are supported")
 
     # Parse column mapping
-    mapping = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "note_date"}
+    mapping = {"patient_id": "patient_id",
+               "text_id": "text_id",
+               "text": "text",
+               "note_date": "note_date"}
     if column_mapping:
         try:
             user_mapping = json.loads(column_mapping)
@@ -143,7 +146,8 @@ async def upload_and_create_data_source(
         "column_mapping": mapping,
     }
 
-    return await create_data_source(session, project_id, filename, ConnectorType.FILE_UPLOAD, config)
+    return await create_data_source(session, project_id,
+                                    filename, ConnectorType.FILE_UPLOAD, config)
 
 
 # ── Ingestion ─────────────────────────────────────────────────────
@@ -716,7 +720,8 @@ async def list_patients(
             func.count(Annotation.id).label("annotation_count"),
             func.sum(
                 case(
-                    (Annotation.review_status.in_(["reviewed", "confirmed", "rejected", "skipped"]), 1),
+                    (Annotation.review_status.in_(["reviewed", "confirmed",
+                                                   "rejected", "skipped"]), 1),
                     else_=0,
                 )
             ).label("reviewed_count"),

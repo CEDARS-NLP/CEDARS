@@ -54,7 +54,8 @@ async def run_prediction_job(ctx: dict, project_id: str, job_db_id: str) -> dict
     return await execute_prediction_job(project_id, job_db_id)
 
 
-async def run_ingestion_job(ctx: dict, project_id: str, job_db_id: str, data_source_id: str) -> dict:
+async def run_ingestion_job(ctx: dict, project_id: str,
+                            job_db_id: str, data_source_id: str) -> dict:
     """ARQ task: run data ingestion for a data source."""
     from app.jobs.ingestion import execute_ingestion_job
 
@@ -67,7 +68,8 @@ async def run_export_job(ctx: dict, project_id: str, job_db_id: str) -> dict:
 
 
 async def run_pipeline_job(ctx: dict, pipeline_run_id: str) -> dict:
-    """ARQ task: orchestrate a pipeline run — enqueues per-patient jobs, monitors, circuit-breaks."""
+    """ARQ task: orchestrate a pipeline run — enqueues per-patient jobs,
+        monitors, circuit-breaks."""
     from app.jobs.pipeline import execute_pipeline_run
 
     return await execute_pipeline_run(pipeline_run_id)

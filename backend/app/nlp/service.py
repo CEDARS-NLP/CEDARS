@@ -387,8 +387,13 @@ async def _process_notes_into_sentences(
         )
         patients_with_unreviewed = set(pending_result.scalars().all())
 
-    auto_completed_patients = [pid for pid in touched_patient_ids if pid not in patients_with_unreviewed]
-    patients_requiring_review = [pid for pid in matched_patients if pid in patients_with_unreviewed]
+    auto_completed_patients = []
+    patients_requiring_review = []
+    for pid in touched_patient_ids:
+        if pid not in patients_with_unreviewed:
+            auto_completed_patients.append(pid)
+        else:
+            patients_requiring_review.append(pid)
 
     if patients_requiring_review:
         await session.execute(

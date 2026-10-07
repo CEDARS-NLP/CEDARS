@@ -52,7 +52,8 @@ async def register(body: RegisterRequest, session: AsyncSession = Depends(get_se
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, response: Response, session: AsyncSession = Depends(get_session)):
+async def login(body: LoginRequest, response: Response,
+                session: AsyncSession = Depends(get_session)):
     """Authenticate and set httpOnly auth cookies."""
     try:
         user = await authenticate_user(session, body.email, body.password)
@@ -75,7 +76,8 @@ async def login(body: LoginRequest, response: Response, session: AsyncSession = 
 
 
 @router.post("/refresh")
-async def refresh(request: Request, response: Response, session: AsyncSession = Depends(get_session)):
+async def refresh(request: Request, response: Response,
+                  session: AsyncSession = Depends(get_session)):
     """Refresh the access token using the refresh token cookie."""
     token = request.cookies.get("refresh_token")
     if not token:

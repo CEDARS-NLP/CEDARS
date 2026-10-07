@@ -43,7 +43,8 @@ async def get_export_stats(
             if tu and isinstance(tu, dict):
                 total_eval_tokens += tu.get("total_tokens", 0)
 
-    return {"total": total, "reviewed": reviewed, "events": events, "total_eval_tokens": total_eval_tokens}
+    return {"total": total, "reviewed": reviewed,
+            "events": events, "total_eval_tokens": total_eval_tokens}
 
 
 async def export_annotations(

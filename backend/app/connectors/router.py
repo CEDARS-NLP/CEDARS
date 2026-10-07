@@ -258,10 +258,16 @@ async def resync_data_source_endpoint(
 
     from app.connectors.service import resync_data_source
     result = await resync_data_source(session, project_id, data_source_id)
+
+    if result.row_count:
+        response = f"Re-synced {result.row_count or 0} rows"
+    else:
+        response = result.error_message or "No data"
+
     return IngestionResponse(
         data_source_id=result.id,
         status=result.status,
-        message=f"Re-synced {result.row_count or 0} rows" if result.row_count else result.error_message or "No data",
+        message=response,
     )
 
 

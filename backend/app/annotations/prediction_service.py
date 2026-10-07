@@ -61,10 +61,11 @@ async def run_bulk_predictions(
         try:
             prediction = await predictor.predict(annotation.sentence_text)
             stats["predictions_made"] += 1
-            if prediction.token_usage:
-                stats["token_usage"]["prompt_tokens"] += prediction.token_usage.prompt_tokens
-                stats["token_usage"]["completion_tokens"] += prediction.token_usage.completion_tokens
-                stats["token_usage"]["total_tokens"] += prediction.token_usage.total_tokens
+            pred_usage = prediction.token_usage
+            if pred_usage:
+                stats["token_usage"]["prompt_tokens"] += pred_usage.prompt_tokens
+                stats["token_usage"]["completion_tokens"] += pred_usage.completion_tokens
+                stats["token_usage"]["total_tokens"] += pred_usage.total_tokens
         except PredictorError as e:
             logger.warning("Prediction failed for annotation %s: %s", annotation.id, e)
             stats["errors"] += 1

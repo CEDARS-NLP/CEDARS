@@ -77,7 +77,11 @@ async def create_session_endpoint(
 ):
     """Create a new evaluation session with patient sampling."""
     try:
-        search_queries = [q.model_dump() for q in body.search_queries] if body.search_queries else []
+        if body.search_queries:
+            search_queries = [q.model_dump() for q in body.search_queries]
+        else:
+            search_queries = []
+
         session = await create_session(
             db,
             project_id,
@@ -184,7 +188,9 @@ async def suggest_queries_endpoint(
 
     project = await get_project(db, project_id)
     if not project or not project.llm_provider or not project.llm_model:
-        raise HTTPException(status_code=400, detail="Project LLM configuration is required. Set it in project settings.")
+        raise HTTPException(status_code=400,
+                            detail="""Project LLM configuration is required.
+                            \nYou may set it in project settings.""")
 
     try:
         suggestions = await suggest_queries(
@@ -215,7 +221,8 @@ async def execute_queries_endpoint(
     return FunnelResponse(**stats)
 
 
-@router.get("/sessions/{session_id}/queries/{query_index}/matches", response_model=QueryMatchesResponse)
+@router.get("/sessions/{session_id}/queries/{query_index}/matches",
+            response_model=QueryMatchesResponse)
 async def get_query_matches_endpoint(
     project_id: str,
     session_id: str,

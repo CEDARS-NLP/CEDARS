@@ -92,7 +92,8 @@ async def review_annotation(
 
         # Check project setting for skip_after_event_date
         project = await session.get(Project, project_id)
-        skip_enabled = (project.settings or {}).get("skip_after_event_date", False) if project else False
+        skip_enabled = (project.settings or {}).get("skip_after_event_date",
+                                                    False) if project else False
 
         # Fallback: also check per-query flag for backwards compatibility
         if not skip_enabled:

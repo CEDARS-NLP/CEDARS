@@ -189,7 +189,8 @@ async def _fetch_evaluation_rows(
             session_name,
             judgment.note_id,
             judgment.predicted_label,
-            judgment.judgment.value if hasattr(judgment.judgment, 'value') else str(judgment.judgment),
+            judgment.judgment.value if hasattr(judgment.judgment,
+                                               'value') else str(judgment.judgment),
             predictor_config_id or "",
         ))
     return rows

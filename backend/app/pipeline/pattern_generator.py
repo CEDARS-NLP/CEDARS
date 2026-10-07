@@ -7,12 +7,14 @@ from app.llm import complete_json
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clinical NLP expert. Given a clinical event description, generate search patterns to find relevant mentions in clinical notes.
+SYSTEM_PROMPT = """You are a clinical NLP expert. Given a clinical event description,
+generate search patterns to find relevant mentions in clinical notes.
 
 You must respond ONLY with a JSON object containing these fields:
 - "keywords": list of lowercase keywords/phrases to search for (exact match, case-insensitive)
 - "regex_patterns": list of Python-compatible regex patterns for flexible matching
-- "exclusion_patterns": list of regex patterns that indicate false positives (e.g., negations, family history)
+- "exclusion_patterns": list of regex patterns that indicate false positives (e.g., negations,
+                                                                                family history)
 
 Rules:
 - Keywords should be common terms clinicians use for this event

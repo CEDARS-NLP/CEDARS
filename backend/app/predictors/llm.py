@@ -20,7 +20,8 @@ SUSPICIOUS_PATTERNS = [
     r"<\|im_start\|>",
 ]
 
-SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a clinical note contains evidence of a specific medical event. You must respond ONLY with a JSON object.
+SYSTEM_PROMPT = """You are a clinical NLP system that classifies whether a clinical note contains
+evidence of a specific medical event. You must respond ONLY with a JSON object.
 
 Classification rules:
 - Analyze the clinical note within the XML tags
@@ -117,7 +118,8 @@ class LLMPredictor(BasePredictor):
                 f"Model '{self.model}' not found at {self.api_base or 'default endpoint'}. "
                 f"Check that the model name matches the server "
                 f"(try GET {self.api_base or ''}/models to list available models) "
-                f"and the API base URL is correct (should end with /v1 for OpenAI-compatible servers)."
+                f"and the API base URL is correct"
+                f"(should end with /v1 for OpenAI-compatible servers)."
             )
         except Exception as e:
             raise PredictorError(f"LLM prediction failed: {e}") from e

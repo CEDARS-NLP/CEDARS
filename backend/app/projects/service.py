@@ -72,7 +72,9 @@ async def get_project(
     return result.scalar_one_or_none()
 
 
-_PROJECT_UPDATE_FIELDS = {"name", "description", "settings", "llm_provider", "llm_model", "llm_api_base", "llm_api_key"}
+_PROJECT_UPDATE_FIELDS = {"name", "description", "settings",
+                          "llm_provider", "llm_model",
+                          "llm_api_base", "llm_api_key"}
 
 # LLM connection fields that may be explicitly cleared by sending "" (empty
 # string). The router drops None (exclude_none), so "" is the "unset it" signal,

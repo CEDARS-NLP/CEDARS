@@ -53,7 +53,8 @@ async def get_worker_info() -> list[dict]:
             workers.append({
                 "name": "arq-worker",
                 "queue": "arq:queue",
-                "current_job": health_val.decode() if isinstance(health_val, bytes) else str(health_val),
+                "current_job": health_val.decode() if isinstance(health_val,
+                                                                 bytes) else str(health_val),
             })
         await redis.aclose()
         return workers

@@ -217,7 +217,8 @@ async def reprocess_nlp_endpoint(
     }
     if impact != expected:
         raise HTTPException(
-            status_code=409, detail="Deletion counts changed. Review the updated counts and confirm again.",
+            status_code=409,
+            detail="Deletion counts changed. Review the updated counts and confirm again.",
         )
     await clear_sentences(session, project_id)
     job = await run_nlp_pipeline(session, project_id)
