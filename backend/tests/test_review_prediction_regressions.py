@@ -25,7 +25,9 @@ from app.nlp.models import SearchQuery, Sentence
 from app.predictors.base import PredictionResult, PredictorError, TokenUsage
 from app.predictors.models import PredictorConfig, PredictorType
 from app.projects.models import Project, ProjectMember, ProjectRole
-
+from app.annotations.filters import reviewable_filter
+from app.annotations.query_service import get_annotation_stats, get_next_unreviewed
+from app.predictors.service import activate_predictor
 
 def _id() -> str:
     return str(uuid4())
@@ -136,6 +138,26 @@ async def _seed_project(
         "config_id": config.id,
         "job_id": job.id,
     }
+
+
+async def _deactivate_active(session, project_id, config_id):
+    """Deactivate the project's active predictor (no active predictor remains)."""
+    config = await session.get(PredictorConfig, config_id)
+    assert config is not None
+    config.is_active = False
+    session.add(config)
+    await session.commit()
+
+def _make_inactive_predictor(seeded) -> PredictorConfig:
+    return PredictorConfig(
+        id=_id(),
+        project_id=seeded["project_id"],
+        predictor_type=PredictorType.LLM,
+        name="Inactive predictor",
+        config={},
+        is_active=False,
+        created_by=seeded["user_id"],
+    )
 
 
 @pytest.mark.parametrize("writer", ["bulk", "worker"])
@@ -708,9 +730,9 @@ async def test_export_identifies_annotation_and_predictor_per_row(session_factor
         await session.commit()
 
         rows = await export_annotations(session, seeded["project_id"])
-        assert len(rows) == 2
+        assert len(rows) == 1 # Each annotation is exported once, rows should now be 1
         assert {r["annotation_id"] for r in rows} == {annotation.id}
-        assert {r["predictor_config_id"] for r in rows} == {seeded["config_id"], other.id}
+        assert {r["predictor_config_id"] for r in rows} == {seeded["config_id"]}
 
 
 async def test_purge_data_source_removes_predictions(session_factory):
@@ -766,3 +788,97 @@ async def test_bulk_prediction_skips_excluded_annotations(session_factory):
             )
         ).scalars().all()
         assert [a.id for a in rows] == [seeded["annotations"][1].id]
+
+
+# ---------------------------------------------------------------------------
+# Active-predictor-only verdicts (Phase 1: review queue filter)
+# ---------------------------------------------------------------------------
+
+async def test_reviewable_filter_ignores_inactive_predictors(session_factory):
+    """A non-active predictor's label==0 must NOT rule out an annotation when a
+    different predictor is active."""
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        other = _make_inactive_predictor(seeded)
+        session.add_all([
+            _prediction(seeded, annotation, seeded["config_id"], 1),
+            _prediction(seeded, annotation, other.id, 0),
+        ])
+        await session.commit()
+
+        # Active-scoped filter -> NOT ruled out.
+        cond = reviewable_filter(active_predictor_id=seeded["config_id"])
+        rows = (
+            await session.execute(
+                select(Annotation).where(Annotation.id == annotation.id, cond)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+
+        # Inactive config id -> ruled out (its label==0 row is the one being scoped to).
+        cond = reviewable_filter(active_predictor_id=other.id)
+        rows = (
+            await session.execute(
+                select(Annotation).where(Annotation.id == annotation.id, cond)
+            )
+        ).scalars().all()
+        assert len(rows) == 0
+
+
+async def test_reviewable_filter_no_active_predictor_keeps_legacy_behavior(session_factory):
+    """With no active predictor, both inline predicted_label and any-prediction
+    rows rule out (current behavior)."""
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        # Inline field set, no AnnotationPrediction row.
+        annotation.predicted_label = 0
+        session.add(annotation)
+        await _deactivate_active(session, seeded["project_id"], seeded["config_id"])
+
+        cond = reviewable_filter(active_predictor_id=None)
+        rows = (
+            await session.execute(
+                select(Annotation).where(Annotation.id == annotation.id, cond)
+            )
+        ).scalars().all()
+        assert len(rows) == 0
+
+
+async def test_reviewable_filter_no_active_keeps_any_prediction_ruling_out(session_factory):
+    """With no active predictor, ANY AnnotationPrediction with label==0 rules out."""
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        other = _make_inactive_predictor(seeded)
+        session.add(_prediction(seeded, annotation, other.id, 0))
+        await _deactivate_active(session, seeded["project_id"], seeded["config_id"])
+
+        cond = reviewable_filter(active_predictor_id=None)
+        rows = (
+            await session.execute(
+                select(Annotation).where(Annotation.id == annotation.id, cond)
+            )
+        ).scalars().all()
+        assert len(rows) == 0
+
+
+async def test_reviewable_filter_manual_override_wins_regardless(session_factory):
+    """manual_review_override=True keeps the annotation reviewable even when the
+    active predictor returned label==0."""
+    async with session_factory() as session:
+        seeded = await _seed_project(session)
+        annotation = seeded["annotations"][0]
+        annotation.manual_review_override = True
+        session.add(annotation)
+        session.add(_prediction(seeded, annotation, seeded["config_id"], 0))
+        await session.commit()
+
+        cond = reviewable_filter(active_predictor_id=seeded["config_id"])
+        rows = (
+            await session.execute(
+                select(Annotation).where(Annotation.id == annotation.id, cond)
+            )
+        ).scalars().all()
+        assert len(rows) == 1

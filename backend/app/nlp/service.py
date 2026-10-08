@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.filters import reviewable_filter
+from app.annotations.filters import reviewable_filter as _reviewable_filter
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
