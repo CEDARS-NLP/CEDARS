@@ -113,6 +113,13 @@ export default function PatientDetailPage() {
   const [reopenOpen, setReopenOpen] = useState(false);
   const reopenSubmitting = useRef(false);
 
+  const { data: project } = useQuery<{ role: string | null }>({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get(`/projects/${projectId}`),
+    enabled: !!projectId,
+  });
+  const isAdmin = project?.role === "admin";
+
   // Fetch patient info from list endpoint (filter by ID to get status)
   const { data: patientData } = useQuery<PatientListResponse>({
     queryKey: ["patient-info", projectId, patientId],
@@ -238,16 +245,18 @@ export default function PatientDetailPage() {
           {patient && <ReviewProvenance {...patient} />}
         </div>
 
-        {/* Reopen button — admin only (backend enforces, UI always shows for now) */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleReopen}
-          disabled={reopenMutation.isPending}
-        >
-          <RotateCcw className="mr-1.5 h-4 w-4" />
-          {reopenMutation.isPending ? "Reopening..." : "Reopen for review"}
-        </Button>
+        {/* Reopen button — admin only (the backend enforces it too) */}
+        {isAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReopen}
+            disabled={reopenMutation.isPending}
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            {reopenMutation.isPending ? "Reopening..." : "Reopen for review"}
+          </Button>
+        )}
       </div>
       {reopenMutation.isError && !reopenOpen && (
         <p role="alert" className="text-sm text-destructive">{reopenMutation.error.message}</p>

@@ -58,6 +58,8 @@ async def _check_patient_completion(
             patient.review_reason = "manual_review"
             patient.reviewed_by = user_id
             patient.reviewed_at = now_utc()
+            patient.locked_by = None
+            patient.locked_at = None
             session.add(patient)
             await session.commit()
 
@@ -446,6 +448,11 @@ async def unlock_patient(
         session, project_id, AuditAction.PATIENT_UNLOCKED,
         user_id=user_id, patient_id=patient_id,
     )
+
+    # A predictor run can hide the last unreviewed annotations while a reviewer holds the lock
+    # (the completion pass skips locked patients), so close the patient once the lock is gone.
+    if patient.status == PatientStatus.REVIEWING:
+        await _check_patient_completion(session, project_id, patient_id, user_id)
 
 
 async def delete_event_date(

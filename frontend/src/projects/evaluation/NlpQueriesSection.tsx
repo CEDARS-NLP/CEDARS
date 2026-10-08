@@ -52,6 +52,8 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
     enabled: !!projectId,
   });
 
+  const isAdmin = project?.role === "admin";
+
   const { data: queries } = useQuery<SearchQuery[]>({
     queryKey: ["nlp-queries", projectId],
     queryFn: () => api.get<SearchQuery[]>(`/projects/${projectId}/nlp/queries`),
@@ -176,6 +178,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
       </div>
 
       {/* Add query form */}
+      {isAdmin && (
       <Card>
         <CardContent className="pt-4">
           <div className="flex items-end gap-3">
@@ -235,6 +238,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </p>
         </CardContent>
       </Card>
+      )}
 
       {/* Query list */}
       {queries && queries.length > 0 && (
@@ -271,7 +275,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {!q.is_active && (
+                {isAdmin && !q.is_active && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -281,14 +285,16 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                     Activate
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  onClick={() => deleteQuery.mutate(q.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => deleteQuery.mutate(q.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
           ))}
@@ -306,10 +312,12 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-2">
-              <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
-                {runNlp.isPending || backgroundJobIsRunning ? "Processing..." : "Run NLP"}
-              </Button>
-              {project?.role === "admin" && (
+              {isAdmin && (
+                <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
+                  {runNlp.isPending || backgroundJobIsRunning ? "Processing..." : "Run NLP"}
+                </Button>
+              )}
+              {isAdmin && (
                 <Button
                   variant="outline"
                   onClick={() => {

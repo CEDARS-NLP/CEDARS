@@ -208,7 +208,10 @@ async def reprocess_nlp_endpoint(
     if await reprocess_is_busy(session, project_id):
         raise HTTPException(
             status_code=409,
-            detail="Finish active processing and release patient review locks before reprocessing.",
+            detail=(
+                "Finish active processing and wait for open patient reviews "
+                "(locked in the last hour) before reprocessing."
+            ),
         )
     impact = await get_reprocess_impact(session, project_id)
     expected = {
