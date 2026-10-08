@@ -5,6 +5,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    // Baked in at build time (Dockerfile ARG GIT_SHA); "dev" for local runs.
+    __APP_COMMIT__: JSON.stringify((process.env.GIT_SHA ?? 'dev').slice(0, 8)),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

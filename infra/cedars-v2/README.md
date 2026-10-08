@@ -134,8 +134,8 @@ runs. Image tags below can be set as workspace vars instead of `-var`.)
 # 1. Build & push images to the new ECR repos (URLs come from `terraform output`)
 aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin 180294205688.dkr.ecr.us-east-1.amazonaws.com
-docker build -t <backend_repo_url>:<sha> ../../backend  && docker push <backend_repo_url>:<sha>
-docker build -t <frontend_repo_url>:<sha> ../../frontend && docker push <frontend_repo_url>:<sha>
+docker build --build-arg GIT_SHA=<sha> -t <backend_repo_url>:<sha> ../../backend  && docker push <backend_repo_url>:<sha>
+docker build --build-arg GIT_SHA=<sha> -t <frontend_repo_url>:<sha> ../../frontend && docker push <frontend_repo_url>:<sha>
 
 # 2. Set backend_image_tag / frontend_image_tag (workspace vars or -var) and re-apply
 terraform apply -var backend_image_tag=<sha> -var frontend_image_tag=<sha>
@@ -151,7 +151,8 @@ aws ecs run-task \
 # 4. Smoke test through the ALB (from inside the VPC)
 #    Spike (HTTP):  curl http://$(terraform output -raw alb_dns_name)/api/v1/health
 #    Production:    curl https://<app_hostname>/api/v1/health
-# Expect: {"status":"ok","version":"2.0.0"}
+# Expect: {"status":"ok","version":"2.0.0","commit":"<sha>"}  (commit shows which build is running;
+# the sidebar footer in the UI shows the frontend's)
 ```
 
 ## Notes & decisions
