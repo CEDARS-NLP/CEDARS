@@ -54,7 +54,7 @@ LLM_MODES = ("normal", "fail", "empty", "garbage", "slow")
 SAMPLE_CSV = "frontend/public/sample-data/simulated_patients.csv"
 SAMPLE_MAPPING = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "text_date"}
 SAMPLE_PATIENTS, SAMPLE_NOTES = 5, 103
-CI_POSTGRES_IMAGE = "postgres:16-alpine"  # .github/workflows/backend-v2.yml service image
+CI_POSTGRES_IMAGE = "postgres:16-alpine"  # .github/workflows/ci.yml service image
 PLAYWRIGHT_CHROMIUM = "1208"  # browser revision for playwright==1.58.0
 DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 AWS_PREFIX = "cedars-v2-dev"  # local.prefix for the dev environment
@@ -634,7 +634,7 @@ def cmd_test_backend(args) -> int:
     mode = "postgres" if args.postgres else "sqlite"
     logf = st.evidence / f"test-backend-{mode}-{label}-{stamp()}.log"
     env, container = {"UV_PYTHON": "3.12"}, None  # CI runs `uv python install 3.12` first
-    # .github/workflows/backend-v2.yml, job by job.
+    # .github/workflows/ci.yml, job by job: backend-sqlite (+ the static ruff and mypy-ratchet steps) and backend-postgres.
     steps = [["uv", "sync", "--extra", "dev"]]
     if args.postgres:
         container = f"{st.project}-ci-pg"
@@ -651,7 +651,8 @@ def cmd_test_backend(args) -> int:
         steps.append(["uv", "run", "pytest", "tests/", "-q", *args.pytest_args])
     else:
         steps.append(["uv", "run", "ruff", "check", "app"])
-        steps.append(["uv", "run", "pytest", "tests/", "--cov=app", "--cov-report=term-missing", *args.pytest_args])
+        steps.append(["python3", "../scripts/mypy_ratchet.py"])  # errors may not exceed backend/.mypy-baseline
+        steps.append(["uv", "run", "pytest", "tests/", "--cov=app", "--cov-report=term:skip-covered", *args.pytest_args])
     try:
         results = run_ci_steps(steps, cwd, logf, env)
     finally:
@@ -677,11 +678,11 @@ def cmd_test_frontend(args) -> int:
     src, sha, label = source_tree(st, args.ref)
     cwd = src / "frontend"
     logf = st.evidence / f"test-frontend-{label}-{stamp()}.log"
-    # There is no frontend CI workflow; these are the CLAUDE.md commands.
+    # The ci.yml static + frontend jobs: typecheck, lint (warning count is ratcheted), vitest, build.
     steps = []
     if args.ci or not (cwd / "node_modules").exists():
         steps.append(["npm", "ci"])
-    steps += [["npx", "tsc", "--noEmit"], ["npx", "eslint", "src/"], ["npm", "run", "build"]]
+    steps += [["npm", "run", "typecheck"], ["npm", "run", "lint"], ["npm", "test"], ["npm", "run", "build"]]
     results = run_ci_steps(steps, cwd, logf)
     ok = all(r["exit"] == 0 for r in results)
     emit(args, {"ok": ok, "source": label, "steps": results, "log": str(logf)},
@@ -1846,9 +1847,9 @@ EXAMPLES = {
     "test backend": "control-cedars test backend                # SQLite job: uv sync --extra dev, ruff, pytest --cov\n"
                     "control-cedars test backend --postgres     # Postgres job: postgres:16-alpine, CEDARS_TEST_POSTGRES=1\n"
                     "control-cedars test backend -- -k ingest   # extra pytest args after --",
-    "test frontend": "control-cedars test frontend               # tsc --noEmit, eslint src/, npm run build\ncontrol-cedars test frontend --ci          # force npm ci first",
+    "test frontend": "control-cedars test frontend               # typecheck, lint, vitest, build\ncontrol-cedars test frontend --ci          # force npm ci first",
     "test all": "control-cedars test all",
-    "ci status": "control-cedars ci status                   # backend-v2.yml on the current branch: jobs, failed steps, failed tests\n"
+    "ci status": "control-cedars ci status                   # ci.yml on the current branch: jobs, failed steps, failed tests\n"
                  "control-cedars ci status --limit 10 --json  # spot flaky tests: failed in some runs, not others",
     "parity check": "control-cedars parity check\ncontrol-cedars parity check --json",
     "infra validate": "control-cedars infra validate     # terraform fmt -check, init -backend=false, validate (scratch copy)",
@@ -1937,8 +1938,8 @@ def build_parser() -> argparse.ArgumentParser:
     add(mig, "migrate check", cmd_migrate_check, "migration round-trip + model drift on a scratch DB")
 
     test = sub.add_parser("test", help="CI-parity test suites").add_subparsers(dest="test_cmd", required=True, metavar="<suite>")
-    for name, fn, h in (("test backend", cmd_test_backend, "backend-v2.yml jobs (SQLite default, --postgres for the Postgres job)"),
-                        ("test frontend", cmd_test_frontend, "tsc, eslint, vite build (no frontend CI exists)"),
+    for name, fn, h in (("test backend", cmd_test_backend, "ci.yml backend jobs (SQLite default with ruff + mypy ratchet + coverage floor, --postgres for the Postgres job)"),
+                        ("test frontend", cmd_test_frontend, "typecheck, lint (warnings ratcheted), vitest, vite build (ci.yml frontend + static jobs)"),
                         ("test all", cmd_test_all, "backend sqlite + backend postgres + frontend")):
         sp = add(test, name, fn, h)
         sp.add_argument("--ref", help="test a git ref in a detached worktree instead of the working tree")
@@ -1951,7 +1952,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ci = sub.add_parser("ci", help="real GitHub Actions results (read-only gh)").add_subparsers(dest="ci_cmd", required=True, metavar="<verb>")
     sp = add(ci, "ci status", cmd_ci_status, "latest workflow runs on a branch: job and step failures, failed tests; exit 0 only if the latest completed run passed")
-    sp.add_argument("--workflow", default="backend-v2.yml")
+    sp.add_argument("--workflow", default="ci.yml")
     sp.add_argument("--branch", help="default: current branch")
     sp.add_argument("--limit", type=int, default=5)
 

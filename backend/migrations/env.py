@@ -29,6 +29,7 @@ from app.evaluation.models import (  # noqa: E402, F401
     EvaluationSession, SearchMatch, PatientResult
 )
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
+from app.pipeline.models import EventConfig, PipelineRun, PatientTask, Evidence  # noqa: E402, F401
 from app.audit.models import AuditEntry  # noqa: E402, F401
 
 target_metadata = SQLModel.metadata

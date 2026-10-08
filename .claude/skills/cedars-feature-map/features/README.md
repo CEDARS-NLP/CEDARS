@@ -2,7 +2,7 @@
 
 One file per product area. Each file says what exists, how mature it is, how a user reaches it, and how to drive it through `control-cedars` (the verify-cedars CLI, at `.claude/skills/verify-cedars/control-cedars`). Use the map to answer questions without re-reading the whole codebase. Use the source to settle anything the map does not cover or that may have changed.
 
-Scope: the v2 platform only (`backend/`, `frontend/`, `infra/cedars-v2/`). The v1 Flask app (`cedars/`) and PINES service (`PINES/`) appear only where v2 still calls them.
+Scope: the v2 platform only (`backend/`, `frontend/`, `infra/cedars-v2/`). The v1 Flask app (`cedars/`) was removed; the PINES service (`PINES/`) appears only where v2 still calls it.
 
 ## Maturity rubric
 
@@ -37,11 +37,7 @@ Snapshot (`aws status`, 2026-10-05):
 
 ## Test evidence
 
-"Tests pass" in this map means a local `control-cedars test backend` (SQLite) and `test backend --postgres` run at the file's `Last verified` commit. It does not mean CI is green. `backend-v2.yml` has failed on all 7 runs since it was added (2026-07-06). Two of those ran on commits a force-push later removed, which `ci status` marks `NOT in local history`. On the other 5:
-- The SQLite job stops at Lint, 44 × E501, so its pytest step never runs in CI.
-- The Postgres job failed once, on `test_annotations_api.py::TestPatientReview::test_delete_event_date` (cef61132). It passes locally, so it is likely flaky.
-
-There is no frontend CI. `control-cedars ci status` shows the current picture; `test frontend` runs tsc, eslint and the build locally.
+"Tests pass" in this map means a local `control-cedars test all` (backend SQLite and Postgres, frontend) run at the file's `Last verified` commit. It does not mean GitHub CI is green: the new `ci.yml` has not run on GitHub yet (branch `chore/watertight-ci`, unpushed). It runs on every PR behind one required-style `CI gate` job. Existing debt is held by ratchets that may only shrink: mypy errors (`backend/.mypy-baseline`), eslint warnings, model/migration drift (`backend/.alembic-drift-baseline`), known vulnerabilities (`scripts/audit-baseline.json`) and the coverage floor. `control-cedars ci status` shows the real GitHub picture; `scripts/check` runs the static lane locally.
 
 ## Baseline preconditions for driving
 

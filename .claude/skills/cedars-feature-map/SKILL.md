@@ -34,7 +34,7 @@ Evidence paths name the instance that produced them (`/tmp/cedars-verify/<instan
 
 `deferred` (out of scope by decision) < `stub` (code exists, doesn't do the job) < `api-only` (works, no UI reaches it) < `beta` (reachable, happy path works, a defect or coverage gap) < `stable` (reachable, tests pass on SQLite and Postgres, no known defect, driven live). Any known defect caps a sub-feature at `beta`. A source-only review writes `beta (stable pending live)`.
 
-**Tests passing ≠ CI green.** `backend-v2.yml` has never passed: all 7 runs since it was added on 2026-07-06 failed (check with `control-cedars ci status`; it ignores runs on commits a force-push removed). The SQLite job fails at Lint, so its pytest step never runs in CI. Grades rely on local `control-cedars test backend [--postgres]` runs at the `Last verified` commit. Say so when test evidence matters to the answer.
+**Tests passing ≠ CI green.** The old `backend-v2.yml` failed all 7 of its runs and is gone. Its replacement, `ci.yml` (lanes static, backend, migrations, frontend, full-stack, security behind one `CI gate`), has been run lane by lane locally but has no GitHub run yet until the `chore/watertight-ci` branch is pushed (check with `control-cedars ci status`). Grades rely on local `control-cedars test all` runs at the `Last verified` commit. Say so when test evidence matters to the answer.
 
 ## Maintain (pstack loop)
 
