@@ -802,6 +802,7 @@ async def test_reviewable_filter_ignores_inactive_predictors(session_factory):
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
         other = _make_inactive_predictor(seeded)
+        await session.flush()
         session.add_all([
             _prediction(seeded, annotation, seeded["config_id"], 1),
             _prediction(seeded, annotation, other.id, 0),
