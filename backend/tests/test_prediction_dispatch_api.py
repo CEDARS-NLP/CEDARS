@@ -1,8 +1,9 @@
 """API tests for prediction job dispatch, status, and cancellation."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import AsyncClient
-from unittest.mock import AsyncMock, patch
 
 from app.predictors.base import PredictionResult
 

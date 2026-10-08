@@ -14,7 +14,6 @@ from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.llm import SYSTEM_PROMPT
-from app.predictors.models import PredictorConfig
 from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)

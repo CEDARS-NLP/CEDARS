@@ -18,7 +18,6 @@ from app.connectors.models import (
 )
 from app.connectors.registry import get_connector, list_connector_types
 
-
 # ── Model tests ───────────────────────────────────────────────────
 
 

@@ -14,8 +14,8 @@ from app.audit.service import log_action
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
-from app.projects.models import Project
 from app.predictors.service import get_active_predictor_config
+from app.projects.models import Project
 
 logger = logging.getLogger(__name__)
 

@@ -40,10 +40,11 @@ async def test_project_stats_with_data(app, client):
     """Stats reflect uploaded data."""
     project_id = await _setup_project(client)
 
+    from datetime import UTC, datetime
+
     from app.common.database import get_session
-    from app.connectors.models import Patient, Note, PatientStatus
+    from app.connectors.models import Note, Patient, PatientStatus
     from app.nlp.models import Sentence
-    from datetime import datetime, UTC
 
     async for session in app.dependency_overrides[get_session]():
         p = Patient(

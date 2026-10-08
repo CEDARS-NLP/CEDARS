@@ -1,5 +1,6 @@
 """Tests for admin queue monitoring API."""
 import pytest
+
 from app.auth.models import UserRole
 
 
@@ -13,9 +14,10 @@ async def _make_admin(client, app):
         "/api/v1/auth/login",
         json={"email": "admin@test.com", "password": "testpass123"},
     )
-    from app.common.database import get_session
-    from app.auth.models import User
     from sqlalchemy import update
+
+    from app.auth.models import User
+    from app.common.database import get_session
 
     async for session in app.dependency_overrides[get_session]():
         await session.execute(

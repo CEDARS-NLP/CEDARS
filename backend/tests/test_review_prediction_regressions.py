@@ -10,7 +10,9 @@ from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.annotations.completion_service import complete_negative_llm_patients
+from app.annotations.filters import reviewable_filter
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from app.annotations.query_service import get_annotation_stats, get_next_unreviewed
 from app.annotations.review_service import (
     ReopenConflictError,
     get_patient_annotations,
@@ -24,10 +26,9 @@ from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.models import SearchQuery, Sentence
 from app.predictors.base import PredictionResult, PredictorError, TokenUsage
 from app.predictors.models import PredictorConfig, PredictorType
-from app.projects.models import Project, ProjectMember, ProjectRole
-from app.annotations.filters import reviewable_filter
-from app.annotations.query_service import get_annotation_stats, get_next_unreviewed
 from app.predictors.service import activate_predictor
+from app.projects.models import Project, ProjectMember, ProjectRole
+
 
 def _id() -> str:
     return str(uuid4())

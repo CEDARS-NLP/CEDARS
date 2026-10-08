@@ -1,8 +1,9 @@
 """API integration tests for annotations: bulk runs, review operations."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import AsyncClient
-from unittest.mock import AsyncMock, patch
 
 from app.predictors.base import PredictionResult
 

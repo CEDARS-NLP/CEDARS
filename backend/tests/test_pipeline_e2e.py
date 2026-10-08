@@ -12,7 +12,6 @@ import pytest
 from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_and_login
 from tests.test_pipeline_orchestration import _seed_patients
 
-
 MOCK_PATTERNS = {
     "keywords": ["troponin", "myocardial infarction", "chest pain"],
     "regex_patterns": [r"troponin\s+(?:level|elevation)"],

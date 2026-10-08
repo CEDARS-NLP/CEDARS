@@ -1,7 +1,7 @@
 """Tests for audit log models and service."""
 
 from app.audit.models import AuditAction, AuditEntry
-from app.audit.service import log_action, get_patient_activity, query_audit_log
+from app.audit.service import get_patient_activity, log_action, query_audit_log
 
 
 class TestAuditModels:

@@ -9,7 +9,6 @@ from app.projects.schemas import (
     UpdateProjectRequest,
 )
 
-
 # --- ProjectRole Enum Tests ---
 
 

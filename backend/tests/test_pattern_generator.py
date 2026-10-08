@@ -143,7 +143,7 @@ class TestPatternGenerator:
 class TestGeneratePatternsAPI:
     async def test_generate_patterns_endpoint(self, client):
         """POST /events/{eid}/generate-patterns updates the EventConfig."""
-        from tests.test_pipeline_api import register_and_login, create_project, EVENT_CONFIG_BODY
+        from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_and_login
 
         await register_and_login(client)
         pid = await create_project(client)
@@ -171,7 +171,7 @@ class TestGeneratePatternsAPI:
 
     async def test_generate_patterns_committed_config_rejected(self, client):
         """Cannot generate patterns for a committed config."""
-        from tests.test_pipeline_api import register_and_login, create_project, EVENT_CONFIG_BODY
+        from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_and_login
 
         await register_and_login(client)
         pid = await create_project(client)
