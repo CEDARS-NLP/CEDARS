@@ -1,107 +1,245 @@
 name: CI
 
+# Every check here has a local twin: scripts/check (static) and
+# .claude/skills/verify-cedars/control-cedars test|stack|migrate (the rest).
+# No path filters on purpose: the "CI gate" job must always run so it can be a required check.
+
 on:
   pull_request:
   push:
-    branches:
-      - "main"
-      - "github_workflows"
+    branches: [main, feature/v2-platform]
+  merge_group:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
-  test:
-    name: Run tests & display coverage
+  static:
+    name: Static checks
     runs-on: ubuntu-latest
-    permissions:
-      # Gives the action the necessary permissions for publishing new
-      # comments in pull requests.
-      pull-requests: write
-      # Gives the action the necessary permissions for pushing data to the
-      # python-coverage-comment-action branch, and for editing existing
-      # comments (to avoid publishing multiple comments in the same PR)
-      contents: write
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python 3.9
-        id: setup-python
-        uses: actions/setup-python@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
-          python-version: 3.9
-      
-      - name: install deps
-        run: |
-          cd cedars
-          export POETRY_NO_INTERACTION=1 \
-            POETRY_VIRTUALENVS_IN_PROJECT=1 \
-            POETRY_VIRTUALENVS_CREATE=1 \
-            POETRY_CACHE_DIR=/tmp/poetry_cache
-          python -m pip install --upgrade pip
-          python -m pip install poetry==1.7.1
-          python -m poetry install
-          export VIRTUAL_ENV=/.venv
-          export PATH="/.venv/bin:$PATH"
-          export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
-          mkdir -p /tmp/prometheus-multiproc
-
-      - name: Lint with flake8
-        run: |
-          cd cedars
-          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          poetry run flake8 ./ --count --exit-zero --max-complexity=20 --max-line-length=127 --statistics
-
-      - name: Install everything, run the tests, produce the .coverage file
-        run: |
-          cd cedars
-          touch .env
-          export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
-          mkdir -p /tmp/prometheus-multiproc
-          echo "PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc" >> .env
-          echo "PROJECT_NAME=demo" >> .env
-          echo "INVESTIGATOR_NAME=demo_user" >> .env
-          echo "SECRET_KEY=cedars" >> .env
-          echo "HOST=localhost" >> .env
-          echo "PORT=5000" >> .env
-          echo "DB_PARAMS=\"authSource=admin\"" >> .env
-          echo "DB_HOST=localhost" >> .env
-          echo "DB_NAME=cedars" >> .env
-          echo "DB_PORT=27017" >> .env
-          echo "DB_USER=admin" >> .env
-          echo "DB_PWD=password" >> .env
-          echo "MINIO_HOST=localhost" >> .env
-          echo "MINIO_PORT=9000" >> .env
-          echo "MINIO_ACCESS_KEY=ROOTUSER" >> .env
-          echo "MINIO_SECRET_KEY=CHANGEME123" >> .env
-          echo "ENV=dev" >> .env
-          echo "PINES_API_URL=http://localhost:8036" >> .env
-          echo "REDIS_URL=localhost" >> .env
-          echo "REDIS_PORT=6379" >> .env
-          echo "PROJECT_ID=660ff9188b4911e22c4197b2" >> .env
-          echo "ENV=dev" >> .env
-          echo "RQ_DASHBOARD_URL=/rq" >> .env
-          echo "PINES_API_URL=http://pines:8036" >> .env
-
-          poetry run python -m pytest --cov=app
-
-      # - name: Coverage comment
-      #   id: coverage_comment
-      #   uses: py-cov-action/python-coverage-comment-action@v3
-      #   with:
-      #     GITHUB_TOKEN: ${{ github.token }}
-
-      # - name: Store Pull Request comment to be posted
-      #   uses: actions/upload-artifact@v3
-      #   if: steps.coverage_comment.outputs.COMMENT_FILE_WRITTEN == 'true'
-      #   with:
-      #     # If you use a different name, update COMMENT_ARTIFACT_NAME accordingly
-      #     name: python-coverage-comment-action
-      #     # If you use a different name, update COMMENT_FILENAME accordingly
-      #     path: python-coverage-comment-action.txt
-      
-      - name: Build documentation
-        run: mkdocs build
-            
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - run: uv sync --directory backend --extra dev --quiet
+      - run: npm ci --prefix frontend --silent
+      - name: ruff
+        run: uv run --directory backend ruff check app
+      - name: mypy (errors may not increase)
+        run: python3 scripts/mypy_ratchet.py
+      - name: frontend typecheck and lint
+        run: |
+          npm --prefix frontend run typecheck --silent
+          npm --prefix frontend run lint --silent
+      - name: terraform fmt and validate
+        run: .claude/skills/verify-cedars/control-cedars infra validate
+      - name: stack/Terraform parity
+        run: .claude/skills/verify-cedars/control-cedars parity check
+      - name: workflow lint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+      - name: tests were not weakened
+        if: github.event_name == 'pull_request'
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          git fetch --no-tags --depth=200 origin "${{ github.base_ref }}"
+          python3 scripts/check_test_removal.py "origin/${{ github.base_ref }}"
+
+  backend-sqlite:
+    name: Backend tests (SQLite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --extra dev --quiet
+      # fail_under in pyproject.toml is the coverage ratchet.
+      - run: uv run pytest tests -q --cov=app --cov-report=term:skip-covered
+
+  backend-postgres:
+    name: Backend tests (Postgres, from migrations)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cedars
+          POSTGRES_PASSWORD: cedars
+          POSTGRES_DB: cedars
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      CEDARS_TEST_POSTGRES: "1"
+      CEDARS_TEST_POSTGRES_URL: postgresql+asyncpg://cedars:cedars@localhost:5432/cedars
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --extra dev --quiet
+      - run: uv run pytest tests -q
+
+  migrations:
+    name: Migrations (round trip, drift, single head)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cedars
+          POSTGRES_PASSWORD: cedars
+          POSTGRES_DB: cedars
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:cedars@localhost:5432/cedars
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --directory backend --quiet
+      - run: scripts/migration_check.sh
+
+  frontend:
+    name: Frontend (build and unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --silent
+      - run: npm test --silent
+      - run: npm run build --silent
+
+  full-stack:
+    name: Full stack (images, ALB, smoke, browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Unique per run so parallel PRs never share ports, volumes or compose projects.
+      CEDARS_VERIFY_INSTANCE: ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Browser for the e2e steps
+        run: uvx --from playwright==1.58.0 playwright install --with-deps chromium
+      - name: Build amd64 images and start the ECS-parity stack
+        run: .claude/skills/verify-cedars/control-cedars stack up
+      - name: Seed users, project and sample data
+        run: .claude/skills/verify-cedars/control-cedars seed
+      - name: API smoke through the ALB
+        run: |
+          C=.claude/skills/verify-cedars/control-cedars
+          $C api GET /health --as anon --expect 200
+          $C api GET /projects --as admin --expect 200
+          $C api GET /projects --as anon --expect 401
+          $C api GET '/projects/{project}/data/patients?limit=5' --as viewer --expect 200
+      - name: Browser e2e (Playwright)
+        run: .claude/skills/verify-cedars/control-cedars browser run e2e/smoke.json --as admin --strict --save ci-smoke
+      - name: Collect evidence
+        if: always()
+        run: |
+          .claude/skills/verify-cedars/control-cedars stack status || true
+          mkdir -p ci-evidence
+          cp -r "/tmp/cedars-verify/${CEDARS_VERIFY_INSTANCE}/evidence/." ci-evidence/ || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: full-stack-evidence
+          path: ci-evidence
+          retention-days: 7
+      - name: Clean up
+        if: always()
+        run: .claude/skills/verify-cedars/control-cedars cleanup --images || true
+
+  security:
+    name: Security (deps, secrets, images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # A newly published CVE must not turn every open PR red, so on PRs the audit only runs when a
+      # dependency file changed. security-weekly.yml audits unconditionally.
+      - name: Did dependencies change?
+        id: deps
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -E '^(backend/(uv.lock|pyproject.toml)|frontend/package(-lock)?.json)$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Dependency audit (vulnerabilities may not increase)
+        if: steps.deps.outputs.changed == 'true'
+        run: |
+          npm ci --prefix frontend --silent
+          python3 scripts/audit_ratchet.py
+      - name: Secret scan
+        run: >-
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2
+          detect --source /repo --redact --no-banner
+
+  gate:
+    name: CI gate
+    if: always()
+    needs: [static, backend-sqlite, backend-postgres, migrations, frontend, full-stack, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every lane must have succeeded (a skipped or cancelled lane is a failure)
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -c '
+          import json, sys
+          bad = {k: v["result"] for k, v in json.load(sys.stdin).items() if v["result"] != "success"}
+          if bad:
+              print("Not green:", bad); sys.exit(1)
+          print("all lanes green")'

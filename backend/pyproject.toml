@@ -43,6 +43,7 @@ dev = [
     "pytest-cov>=6.0",
     "httpx>=0.28",
     "ruff>=0.9",
+    "mypy>=1.13",
     "aiosqlite>=0.21",
     "testcontainers[postgres]>=4.0",
 ]
@@ -53,7 +54,18 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+# Formatting is not enforced yet (44 files would change); long lines are left to a later cleanup.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.report]
+# Ratchet: only ever raise this. Measured 61% on 2026-10-07.
+fail_under = 60
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+# Gated by scripts/mypy_ratchet.py against backend/.mypy-baseline (errors may not increase).

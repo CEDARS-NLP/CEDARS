@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fast local mirror of the CI "static" lane. Quiet unless something fails.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+run() { local n="$1"; shift; if out=$("$@" 2>&1); then echo "ok   $n"; else echo "FAIL $n"; echo "$out" | tail -40; exit 1; fi; }
+run "ruff"            uv run --directory backend ruff check app
+run "mypy ratchet"    python3 scripts/mypy_ratchet.py
+run "tsc"             npm --prefix frontend run typecheck --silent
+run "eslint"          npm --prefix frontend run lint --silent
+run "terraform fmt"   terraform -chdir=infra/cedars-v2 fmt -check -recursive
+run "parity"          .claude/skills/verify-cedars/control-cedars parity check
+echo "static checks passed; full suite: .claude/skills/verify-cedars/control-cedars test all"
