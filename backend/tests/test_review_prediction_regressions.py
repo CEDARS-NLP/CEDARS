@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from requests import session
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -802,6 +803,7 @@ async def test_reviewable_filter_ignores_inactive_predictors(session_factory):
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
         other = _make_inactive_predictor(seeded)
+        session.add(other)
         await session.flush()
         session.add_all([
             _prediction(seeded, annotation, seeded["config_id"], 1),
@@ -854,6 +856,8 @@ async def test_reviewable_filter_no_active_keeps_any_prediction_ruling_out(sessi
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
         other = _make_inactive_predictor(seeded)
+        session.add(other)
+        await session.flush()
         session.add(_prediction(seeded, annotation, other.id, 0))
         await _deactivate_active(session, seeded["project_id"], seeded["config_id"])
 
