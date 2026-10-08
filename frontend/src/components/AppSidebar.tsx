@@ -154,6 +154,13 @@ export default function AppSidebar() {
             <LogOut className="h-3.5 w-3.5" />
           </button>
         </div>
+        <div
+          className="px-2.5 text-[10px] text-sidebar-foreground/40"
+          title="Frontend build commit"
+          data-testid="build-commit"
+        >
+          v2.0.0 · {__APP_COMMIT__}
+        </div>
       </div>
     </aside>
   );
