@@ -67,8 +67,8 @@ Changes under `.claude/skills/` need the user's approval first (project rule).
 
 - **Ratchets instead of day-one cleanliness.** The repo was not clean, so these fail only when things get worse:
   mypy (`backend/.mypy-baseline`, 497), eslint warnings (`--max-warnings=10`), model/migration drift
-  (`backend/.alembic-drift-baseline`, 48 markers), dependency vulnerabilities (`scripts/audit-baseline.json`,
-  175 Python, 2 high npm) and coverage (`fail_under = 60`, measured 60.9%). Lower each as the debt is paid down.
+  (`backend/.alembic-drift-baseline`, 48 markers), dependency vulnerabilities (`scripts/audit-baseline.json` (IDs),
+  106 distinct Python vulnerability IDs and 2 high npm packages, tracked by ID) and coverage (`fail_under = 60`, measured 60.9%). Lower each as the debt is paid down.
 - **Ruff:** `E501` is ignored (44 long lines) and `ruff format` is not enforced (44 files would change).
 - **Dependency audit** runs on PRs only when a dependency file changed (so a newly published CVE cannot turn every
   open PR red); the weekly workflow audits unconditionally.
