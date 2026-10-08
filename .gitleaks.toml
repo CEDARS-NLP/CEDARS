@@ -6,7 +6,7 @@ title = "CEDARS gitleaks config"
 # Real values belong in an untracked .env / *.tfvars or a private deploy repo.
 #
 # Run locally:  gitleaks git --redact --config .gitleaks.toml
-# The pre-commit hook and the CI job (.github/workflows/secret-scan.yml) use
+# The pre-commit hook and the CI job (.github/workflows/ci.yml (security lane)) use
 # this file.
 
 [extend]

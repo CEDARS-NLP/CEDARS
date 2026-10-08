@@ -58,7 +58,7 @@ CI_POSTGRES_IMAGE = "postgres:16-alpine"  # .github/workflows/ci.yml service ima
 PLAYWRIGHT_CHROMIUM = "1208"  # browser revision for playwright==1.58.0
 DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 AWS_PREFIX = "cedars-v2-dev"  # local.prefix for the dev environment
-GITLEAKS_CONFIG = ".gitleaks.toml"  # repo root; also read by .pre-commit-config.yaml and secret-scan.yml
+GITLEAKS_CONFIG = ".gitleaks.toml"  # repo root; also read by .pre-commit-config.yaml and ci.yml (security lane)
 SCAN_BASE = "origin/feature/v2-platform"  # default PR base for `secrets scan`
 
 
@@ -979,7 +979,7 @@ def cmd_infra_validate(args) -> int:
 
 
 def cmd_secrets_scan(args) -> int:
-    """gitleaks with the repo's .gitleaks.toml, the rules the pre-commit hook and secret-scan.yml use.
+    """gitleaks with the repo's .gitleaks.toml, the rules the pre-commit hook and ci.yml (security lane) use.
 
     Findings are always redacted: rule, file, line and commit, never the matched value.
     """

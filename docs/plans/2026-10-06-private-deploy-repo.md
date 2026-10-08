@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-06
 **Status:** Proposed. Nothing moved yet.
-**Depends on:** the secret-scanning change (`.gitleaks.toml`, the pre-commit hook, `.github/workflows/secret-scan.yml`). It takes the account ID, the Terraform Cloud organization and workspace, and the LLM VPN hosts out of the tracked files.
+**Depends on:** the secret-scanning change (`.gitleaks.toml`, the pre-commit hook, `ci.yml` security lane). It takes the account ID, the Terraform Cloud organization and workspace, and the LLM VPN hosts out of the tracked files.
 
 ## Problem
 
