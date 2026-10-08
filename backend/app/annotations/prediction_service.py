@@ -15,6 +15,7 @@ from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.llm import SYSTEM_PROMPT
 from app.predictors.models import PredictorConfig
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,7 @@ async def run_bulk_predictions(
     4. Record the verdict as an AnnotationPrediction (annotations are not mutated)
     """
     # Get active predictor
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-        PredictorConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    predictor_config = result.scalar_one_or_none()
+    predictor_config = await get_active_predictor_config(session, project_id)
 
     if not predictor_config:
         raise ValueError("No active predictor configured for this project")
@@ -116,12 +111,8 @@ async def estimate_bulk_predictions(
     project_id: str,
 ) -> dict:
     """Estimate token usage for running the active predictor over unscored annotations."""
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-        PredictorConfig.deleted_at.is_(None),
-    )
-    predictor_config = (await session.execute(stmt)).scalar_one_or_none()
+    predictor_config = await get_active_predictor_config(session, project_id)
+
     if not predictor_config:
         return {
             "sentence_count": 0,
@@ -177,13 +168,8 @@ async def dispatch_prediction_job(
     Raises ValueError if no active predictor is configured.
     """
     # Verify active predictor exists before dispatching
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-        PredictorConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    if not result.scalar_one_or_none():
+    predictor_config = await get_active_predictor_config(session, project_id)
+    if not predictor_config:
         raise ValueError("No active predictor configured for this project")
 
     bg_job = BackgroundJob(

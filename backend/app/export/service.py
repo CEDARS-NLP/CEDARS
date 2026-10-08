@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.connectors.models import Patient
 from app.evaluation.models import EvaluationSession
+from app.predictors.service import get_active_predictor_config
 
 
 async def get_export_stats(
@@ -56,11 +57,18 @@ async def export_annotations(
 
     Predictor verdicts, when present, are merged in from annotation_predictions.
     """
+    active = await get_active_predictor_config(session, project_id)
+    active_id = active.id if active else None
+
+    join_cond = (AnnotationPrediction.annotation_id == Annotation.id)
+    if active_id is not None:
+        join_cond = join_cond & (
+            AnnotationPrediction.predictor_config_id == active_id
+        )
+
     stmt = (
         select(Annotation, AnnotationPrediction, Patient)
-        .outerjoin(
-            AnnotationPrediction, AnnotationPrediction.annotation_id == Annotation.id
-        )
+        .outerjoin(AnnotationPrediction, join_cond)
         .join(Patient, Patient.id == Annotation.patient_id)
         .where(Annotation.project_id == project_id)
     )

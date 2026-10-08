@@ -11,6 +11,7 @@ from app.annotations.schemas import AnnotationStatsResponse
 from app.connectors.models import Note, Patient
 from app.evaluation.models import EvaluationSession, PatientResult, SearchMatch
 from app.nlp.models import Sentence
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,14 @@ async def get_next_unreviewed(
     patient_id: str | None = None,
 ) -> Annotation | None:
     """Get the next unreviewed annotation for review."""
+    active = await get_active_predictor_config(session, project_id)
     stmt = select(Annotation).where(
         Annotation.project_id == project_id,
         Annotation.review_status == ReviewStatus.UNREVIEWED,
         Annotation.review_excluded.is_(False),
-        reviewable_filter(),
+        reviewable_filter(active.id if active else None),
     )
+
     if patient_id:
         stmt = stmt.where(Annotation.patient_id == patient_id)
     stmt = stmt.order_by(Annotation.created_at).limit(1)
@@ -77,9 +80,10 @@ async def get_annotation_stats(
     Scoped to the same set the review queue surfaces: annotations not ruled out
     by an optional predictor.
     """
+    active = await get_active_predictor_config(session, project_id)
     base = select(func.count()).select_from(Annotation).where(
         Annotation.project_id == project_id,
-        reviewable_filter(),
+        reviewable_filter(active.id if active else None),
     )
 
     total = (await session.execute(base)).scalar() or 0

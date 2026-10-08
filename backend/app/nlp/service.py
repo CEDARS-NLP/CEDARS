@@ -13,6 +13,7 @@ from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.engine import parse_query, process_note
 from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +373,7 @@ async def _process_notes_into_sentences(
     matched_patients = [pid for pid, count in match_counts.items() if count > 0]
     patients_with_unreviewed = set()
 
+    active = await get_active_predictor_config(session, project_id)
     touched_patient_ids = list(match_counts)
     if touched_patient_ids:
         pending_result = await session.execute(
@@ -381,7 +383,7 @@ async def _process_notes_into_sentences(
                 Annotation.patient_id.in_(touched_patient_ids),
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
                 Annotation.review_excluded.is_(False),
-                reviewable_filter(),
+                _reviewable_filter(active.id if active else None),
             )
             .distinct()
         )

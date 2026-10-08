@@ -6,9 +6,10 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.connectors.databricks import _fqn, connect_databricks
 from app.connectors.models import DataSource, Note
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -149,28 +150,54 @@ async def _fetch_annotation_rows(
 async def _fetch_prediction_rows(
     session: AsyncSession, project_id: str
 ) -> list[tuple]:
-    stmt = (
-        select(Annotation, Note.text_id)
-        .join(Note, Annotation.note_id == Note.id)
-        .where(
-            Annotation.project_id == project_id,
-            Annotation.predicted_label.isnot(None),
+    active = await get_active_predictor_config(session, project_id)
+    active_id = active.id if active else None
+
+    # No active predictor: preserve legacy behavior (inline annotation fields).
+    if active_id is None:
+        stmt = (
+            select(Annotation, Note.text_id)
+            .join(Note, Annotation.note_id == Note.id)
+            .where(
+                Annotation.project_id == project_id,
+                Annotation.predicted_label.isnot(None),
+            )
         )
+        result = await session.execute(stmt)
+        return [
+            (
+                ann.patient_id, text_id, ann.sentence_text,
+                ann.predictor_model, ann.predicted_score,
+                ann.predicted_label, ann.reasoning,
+            )
+            for ann, text_id in result.all()
+        ]
+
+    # Active predictor: source from that predictor's AnnotationPrediction rows.
+    stmt = (
+        select(
+            Annotation, Note.text_id,
+            AnnotationPrediction.predictor_model,
+            AnnotationPrediction.predicted_score,
+            AnnotationPrediction.predicted_label,
+            AnnotationPrediction.reasoning,
+        )
+        .join(Note, Annotation.note_id == Note.id)
+        .join(
+            AnnotationPrediction,
+            (AnnotationPrediction.annotation_id == Annotation.id)
+            & (AnnotationPrediction.predictor_config_id == active_id),
+        )
+        .where(Annotation.project_id == project_id)
     )
     result = await session.execute(stmt)
-    rows = []
-    for ann, text_id in result.all():
-        rows.append((
-            ann.patient_id,
-            text_id,
-            ann.sentence_text,
-            ann.predictor_model,
-            ann.predicted_score,
-            ann.predicted_label,
-            ann.reasoning,
-        ))
-    return rows
-
+    return [
+        (
+            ann.patient_id, text_id, ann.sentence_text,
+            model, score, label, reasoning,
+        )
+        for ann, text_id, model, score, label, reasoning in result.all()
+    ]
 
 async def _fetch_evaluation_rows(
     session: AsyncSession, project_id: str

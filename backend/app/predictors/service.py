@@ -94,3 +94,24 @@ async def activate_predictor(
     await session.commit()
     await session.refresh(pc)
     return pc
+
+async def get_active_predictor_config(
+    session: AsyncSession, project_id: str
+) -> PredictorConfig | None:
+    """Return the project's active predictor config, or None.
+
+    Deterministic even if (against the single-active invariant) more than one row
+    is active: the most recently created wins.
+    """
+    stmt = (
+        select(PredictorConfig)
+        .where(
+            PredictorConfig.project_id == project_id,
+            PredictorConfig.is_active.is_(True),
+            PredictorConfig.deleted_at.is_(None),
+        )
+        .order_by(PredictorConfig.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().first()

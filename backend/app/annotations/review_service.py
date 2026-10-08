@@ -15,6 +15,7 @@ from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
 from app.projects.models import Project
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ async def _check_patient_completion(
     user_id: str,
 ) -> None:
     """Mark patient as REVIEWED if all their annotations are reviewed/skipped."""
+    active = await get_active_predictor_config(session, project_id)
     unreviewed_count = (
         await session.execute(
             select(func.count())
@@ -39,7 +41,7 @@ async def _check_patient_completion(
                 Annotation.patient_id == patient_id,
                 Annotation.review_status == ReviewStatus.UNREVIEWED,
                 Annotation.review_excluded.is_(False),
-                _reviewable_filter(),
+                _reviewable_filter(active.id if active else None),
             )
         )
     ).scalar() or 0
@@ -216,13 +218,15 @@ async def get_next_patient_for_review(
 
     Returns dict with patient info or all_complete flag.
     """
+    active = await get_active_predictor_config(session, project_id)
+    _reviewable = _reviewable_filter(active.id if active else None)
     has_unreviewed = (
         select(Annotation.patient_id)
         .where(
             Annotation.project_id == project_id,
             Annotation.review_status == ReviewStatus.UNREVIEWED,
             Annotation.review_excluded.is_(False),
-            _reviewable_filter(),
+            _reviewable,
         )
         .distinct()
         .scalar_subquery()
@@ -249,7 +253,7 @@ async def get_next_patient_for_review(
                     Annotation.project_id == project_id,
                     Annotation.review_status == ReviewStatus.UNREVIEWED,
                     Annotation.review_excluded.is_(False),
-                    _reviewable_filter(),
+                    _reviewable,
                 )
             )
         ).scalar() or 0
@@ -313,6 +317,9 @@ async def get_patient_annotations(
     """All annotations for a patient, sorted by note_date, then sentence position."""
     from app.nlp.models import Sentence
 
+    active = await get_active_predictor_config(session, project_id)
+    active_id = active.id if active else None
+
     stmt = (
         select(
             Annotation, Note.note_date, Note.text_id,
@@ -324,7 +331,7 @@ async def get_patient_annotations(
             Annotation.project_id == project_id,
             Annotation.patient_id == patient_id,
             Annotation.review_excluded.is_(False),
-            _reviewable_filter(),
+            _reviewable_filter(active_id),
         )
         .order_by(
             Note.note_date.asc().nullslast(),
@@ -334,17 +341,22 @@ async def get_patient_annotations(
     )
     rows = (await session.execute(stmt)).all()
 
-    predictions = {
-        p.annotation_id: p
-        for p in (
-            await session.execute(
-                select(AnnotationPrediction).where(
-                    AnnotationPrediction.project_id == project_id,
-                    AnnotationPrediction.annotation_id.in_([r[0].id for r in rows]),
-                )
+    if not rows:
+        predictions = {}
+    else:
+        pred_stmt = select(AnnotationPrediction).where(
+            AnnotationPrediction.project_id == project_id,
+            AnnotationPrediction.annotation_id.in_([r[0].id for r in rows]),
+        )
+        # Only the active predictor's verdict is authoritative.
+        if active_id is not None:
+            pred_stmt = pred_stmt.where(
+                AnnotationPrediction.predictor_config_id == active_id
             )
-        ).scalars()
-    } if rows else {}
+        predictions = {
+            p.annotation_id: p
+            for p in (await session.execute(pred_stmt)).scalars()
+        }
 
     results = []
     for annotation, note_date, text_id, sentence_number, note_text in rows:

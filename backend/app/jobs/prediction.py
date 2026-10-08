@@ -16,6 +16,7 @@ from app.jobs.models import BackgroundJob, JobStatus
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.models import PredictorConfig
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,7 @@ async def execute_prediction_job(
 
         try:
             # Get active predictor
-            stmt = select(PredictorConfig).where(
-                PredictorConfig.project_id == project_id,
-                PredictorConfig.is_active == True,  # noqa: E712
-                PredictorConfig.deleted_at.is_(None),
-            )
-            result = await session.execute(stmt)
-            predictor_config = result.scalar_one_or_none()
+            predictor_config = await get_active_predictor_config(session, project_id)
             if not predictor_config:
                 raise ValueError("No active predictor configured for this project")
 
