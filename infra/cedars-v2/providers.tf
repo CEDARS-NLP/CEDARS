@@ -1,9 +1,8 @@
 provider "aws" {
   region = var.region
 
-  # Guard against applying to the wrong account. Verified target:
-  # 180294205688 (AWS profile `saml`). Override via var.allowed_account_ids
-  # if the account changes.
+  # Guard against applying to the wrong account. Set var.allowed_account_ids
+  # as a workspace variable; there is deliberately no default.
   allowed_account_ids = var.allowed_account_ids
 
   default_tags {

@@ -1,13 +1,17 @@
 # CEDARS v2 — AWS ECS Terraform
 
-Self-contained ECS Fargate stack for CEDARS v2 in account **180294205688**
+Self-contained ECS Fargate stack for CEDARS v2 in a single AWS account
 (`research-us-east-1` VPC), region `us-east-1`. Separate from
 `clinical-trials-research`; shares only VPC + Bedrock + the ECR registry.
 
-**State & auth:** managed by **Terraform Cloud** (org `mskcc`, workspace
-`APM0004784-aws-research-us-east-1-ctdatahubpoc` — a research-account workspace
-repurposed for CEDARS testing). AWS auth is the workspace's **dynamic OIDC**
-credentials — no static keys, no `AWS_PROFILE`. See "Deploy via Terraform Cloud".
+**State & auth:** managed by **Terraform Cloud**. The organization and workspace
+are not in this repo: export `TF_CLOUD_ORGANIZATION` and `TF_WORKSPACE` before
+`terraform init`. AWS auth is the workspace's **dynamic OIDC** credentials — no
+static keys, no `AWS_PROFILE`. See "Deploy via Terraform Cloud".
+
+**Account ID:** not in this repo either. Set `allowed_account_ids` as a workspace
+variable (required, no default); account-scoped ARNs (permissions boundaries,
+Bedrock inference profiles) are derived from the caller identity at plan time.
 
 Design doc: `../../docs/plans/2026-06-30-aws-ecs-deployment-plan.md`
 
@@ -49,8 +53,8 @@ Controlled by `enable_https` (default **false**).
 ## Prerequisites (Phase 0)
 
 1. **Terraform Cloud access** — membership in `GRP_MIS_TERRAFORM_Users`, an
-   invite accepted to the `mskcc` org, and MSK VPN. State/auth are handled by TFC
-   (`cloud {}` block in `versions.tf`) — no S3 backend, no static AWS creds.
+   invite accepted to the TFC organization, and MSK VPN. State/auth are handled by
+   TFC (`cloud {}` block in `versions.tf`) — no S3 backend, no static AWS creds.
 2. **IAM task role** — pre-create the Bedrock task role via the TFC workspace's
    OIDC role (if it holds `iam:CreateRole` for the `bedrockServiceAccess-` prefix,
    set `create_task_role = true`), otherwise have an IAM admin create it and set
@@ -114,15 +118,16 @@ once (or drop a token in `~/.terraformrc`); the AWS creds come from the workspac
 
 Set non-default inputs as **workspace variables** in the TFC UI (Terraform
 variables), not a local `terraform.tfvars` — that's the TFC-native way and keeps
-secrets/toggles with the workspace. Relevant ones: `create_task_role` or
-`task_role_arn`, and (production only) `enable_https` + `alb_certificate_arn` +
-`app_hostname`. Sensible defaults (VPC, subnets, region, account guard) are baked
-into the code for this account.
+secrets/toggles with the workspace. Relevant ones: `allowed_account_ids`
+(required, HCL list), `create_task_role` or `task_role_arn`, and (production
+only) `enable_https` + `alb_certificate_arn` + `app_hostname`. Sensible defaults
+(VPC, subnets, region) are baked into the code for this account.
 
 ```bash
 cd infra/cedars-v2
+export TF_CLOUD_ORGANIZATION=<tfc-org> TF_WORKSPACE=<tfc-workspace>
 terraform login            # one-time, stores TFC token (VPN required)
-terraform init             # connects to the mskcc workspace, pulls remote state
+terraform init             # connects to the workspace, pulls remote state
 terraform plan             # runs remotely in TFC; review the plan
 terraform apply            # stands up ECR, Aurora, Redis, S3, exec role, ALB, ECS
 ```
@@ -133,7 +138,7 @@ runs. Image tags below can be set as workspace vars instead of `-var`.)
 ```bash
 # 1. Build & push images to the new ECR repos (URLs come from `terraform output`)
 aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin 180294205688.dkr.ecr.us-east-1.amazonaws.com
+  | docker login --username AWS --password-stdin "$(terraform output -raw ecr_backend_repository_url | cut -d/ -f1)"
 docker build -t <backend_repo_url>:<sha> ../../backend  && docker push <backend_repo_url>:<sha>
 docker build -t <frontend_repo_url>:<sha> ../../frontend && docker push <frontend_repo_url>:<sha>
 

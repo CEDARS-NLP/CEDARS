@@ -16,7 +16,7 @@ Two project skills live in `.claude/skills/`. Use both before opening a PR again
 
 1. **Scope:** map the changed files to feature-map rows and multi-surface journeys. The index is `.claude/skills/cedars-feature-map/features/README.md`.
 2. **CI parity:** run `control-cedars test all --ref <sha>`. Report "suite passes locally" and "CI is red because X" as separate facts.
-3. **Static checks:** run `parity check` and `infra validate`.
+3. **Static checks:** run `parity check`, `infra validate` and `secrets scan --ref <sha>`.
 4. **Migrations:** if the PR adds a migration, run `stack up --ref <sha>`, `migrate status` and `migrate check`. Then run `deploy rehearse --from aws --to <sha>` on its own instance.
 5. **Live drive:** on an isolated instance (`CEDARS_VERIFY_INSTANCE=<name>`), run the "Driving it" bullets for every affected row, then the journeys that touch them.
 6. **Report:** use the verify-cedars report shape and map each finding to a feature-map row. Run `cleanup --images` afterwards.

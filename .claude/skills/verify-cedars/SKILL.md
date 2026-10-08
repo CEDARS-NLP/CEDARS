@@ -73,6 +73,7 @@ For what to drive per feature, with exact steps, read the cedars-feature-map ski
 | Migration ratchet CI uses (single head, round trip, drift may not grow) on an empty Postgres | `CEDARS_DATABASE_URL=… scripts/migration_check.sh` (`migrate check` is stricter: it fails on the known drift) |
 | Test-removal guard, dependency audit ratchet | `scripts/check_test_removal.py origin/main`, `scripts/audit_ratchet.py` |
 | Terraform | `$CC infra validate`: fmt -check, init -backend=false, validate. Never plan or apply. |
+| ci.yml (security lane): gitleaks with `.gitleaks.toml` on the commits a PR adds | `$CC secrets scan` (commits after `origin/feature/v2-platform`; `--base REF` for another base). `--tree` scans the files git would commit; `--all` scans all history and fails on old findings. Values are always redacted |
 
 Add `--ref REF` to `test` to test a commit other than the working tree. `migrate check` and `migrate status` have no `--ref`: they use the running stack's image, so `stack up --ref REF` first. `test` runs every step even after a failure and marks the ones real CI never reaches (Lint fails, so CI never runs pytest). Backend CI has never been green on this branch: report "suite passes locally" and "CI is red, because of X" as separate facts.
 
@@ -95,7 +96,7 @@ If `aws status` says credentials expired, ask the user to log in again (suggest 
 ```bash
 export CEDARS_VERIFY_INSTANCE=predeploy-<sha8>; REF=<sha>
 $CC doctor; $CC aws status; $CC ci status             # read-only (ci status exits 1 while CI is red). DEV already on $REF? Stop and say so
-$CC parity check && $CC infra validate                 # local, read-only
+$CC parity check && $CC infra validate && $CC secrets scan --ref $REF   # local, read-only
 $CC test all --ref $REF                                # CI parity on a clean checkout
 $CC stack up --ref $REF && $CC seed && $CC migrate status && $CC migrate check
 # drive the change (feature-map "Driving it" bullets), then the multi-surface journeys

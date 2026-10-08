@@ -9,9 +9,13 @@ variable "region" {
 }
 
 variable "allowed_account_ids" {
-  description = "Account IDs Terraform is permitted to apply to. Verified target: 180294205688 (profile saml)."
+  description = "Account IDs Terraform is permitted to apply to. No default: set it as a workspace variable so the account ID stays out of this repo."
   type        = list(string)
-  default     = ["180294205688"]
+
+  validation {
+    condition     = length(var.allowed_account_ids) > 0 && alltrue([for id in var.allowed_account_ids : can(regex("^[0-9]{12}$", id))])
+    error_message = "allowed_account_ids must list at least one 12-digit AWS account ID."
+  }
 }
 
 variable "environment" {
@@ -240,9 +244,9 @@ variable "frontend_desired_count" {
 ############################
 
 variable "bedrock_inference_profile_arns" {
-  description = "Bedrock inference-profile ARNs the task role may invoke. Defaults to all Anthropic profiles in the region; scope down for least privilege."
+  description = "Bedrock inference-profile ARNs the task role may invoke. null = every inference profile in the current account and region; scope down for least privilege."
   type        = list(string)
-  default     = ["arn:aws:bedrock:us-east-1:180294205688:inference-profile/*"]
+  default     = null
 }
 
 variable "bedrock_foundation_model_arns" {
@@ -295,9 +299,9 @@ variable "execution_role_name_prefix" {
 }
 
 variable "execution_permissions_boundary_arn" {
-  description = "Permissions boundary required on a self-created execution role at MSK."
+  description = "Permissions boundary required on a self-created execution role at MSK. null = the AutomationOrUserServiceRolePermissions policy in the current account."
   type        = string
-  default     = "arn:aws:iam::180294205688:policy/AutomationOrUserServiceRolePermissions"
+  default     = null
 }
 
 variable "execution_role_arn" {
@@ -320,9 +324,9 @@ variable "task_role_name_prefix" {
 }
 
 variable "task_permissions_boundary_arn" {
-  description = "Permissions boundary for a self-created Bedrock task role at MSK."
+  description = "Permissions boundary for a self-created Bedrock task role at MSK. null = the hccp-automation-bedrock-permission-boundary policy in the current account."
   type        = string
-  default     = "arn:aws:iam::180294205688:policy/hccp-automation-bedrock-permission-boundary"
+  default     = null
 }
 
 variable "task_role_arn" {

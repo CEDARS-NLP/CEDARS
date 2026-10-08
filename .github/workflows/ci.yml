@@ -222,10 +222,40 @@ jobs:
         run: |
           npm ci --prefix frontend --silent
           python3 scripts/audit_ratchet.py
+      - name: Install gitleaks (pinned)
+        env:
+          VERSION: "8.30.1"
+          SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          curl -fsSLo gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          rm gitleaks gitleaks.tar.gz
+      # Uses the repo's .gitleaks.toml (also read by the pre-commit hook and `control-cedars secrets scan`).
+      # PRs and pushes scan only the commits they add, so the job gates new work.
       - name: Secret scan
-        run: >-
-          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2
-          detect --source /repo --redact --no-banner
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              log_opts="${PR_BASE}..HEAD" ;;
+            push)
+              if git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                log_opts="${PUSH_BEFORE}..HEAD"
+              else
+                log_opts="-1 HEAD"
+              fi ;;
+            *)
+              log_opts="-1 HEAD" ;;
+          esac
+          echo "Scanning: git log ${log_opts}"
+          gitleaks git --config .gitleaks.toml --redact --verbose --log-opts="${log_opts}" .
 
   gate:
     name: CI gate

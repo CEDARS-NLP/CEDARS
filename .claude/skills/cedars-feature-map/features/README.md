@@ -126,7 +126,7 @@ IDs are kebab-case, prefixed with the area (`data-`, `eval-`, ...), and stable. 
 | [export.md](export.md) | CSV/JSON export, Databricks export | all | beta (JSON stub, Databricks api-only) |
 | [admin-audit.md](admin-audit.md) | Platform admin endpoints, audit log | platform admin | api-only |
 | [predictors-nlp.md](predictors-nlp.md) | Predictor configs, PINES, LLM client, spaCy NLP | admin | api-only (PINES stub, LLM client beta) |
-| [platform-ops.md](platform-ops.md) | Health, config, deploy, migrations, S3, CI | operators | beta |
+| [platform-ops.md](platform-ops.md) | Health, config, deploy, migrations, S3, CI, secret scanning | operators | beta |
 | [multi-surface-journeys.md](multi-surface-journeys.md) | End-to-end journeys that cross areas | all | 3 PASS, 2 PARTIAL, 3 FAIL, 2 not driven (2026-10-05) |
 
 ## Sweep order
