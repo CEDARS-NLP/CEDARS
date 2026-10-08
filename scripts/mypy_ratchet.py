@@ -8,12 +8,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-BASELINE = Path("backend/.mypy-baseline")
+ROOT = Path(__file__).resolve().parents[1]
+BASELINE = ROOT / "backend" / ".mypy-baseline"
 
 
 def current_errors() -> int:
     out = subprocess.run(
-        ["uv", "run", "--directory", "backend", "mypy", "app"],
+        ["uv", "run", "--directory", str(ROOT / "backend"), "mypy", "app"],
         capture_output=True, text=True,
     ).stdout
     m = re.search(r"Found (\d+) errors?", out)
