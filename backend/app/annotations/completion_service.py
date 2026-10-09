@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.common.utils import now_utc
@@ -19,17 +20,17 @@ async def complete_negative_llm_patients(
     rows = (
         await session.execute(
             select(Annotation, AnnotationPrediction)
-            .join(Note, Note.id == Annotation.note_id)
+            .join(Note, col(Note.id) == col(Annotation.note_id))
             .outerjoin(
                 AnnotationPrediction,
-                (AnnotationPrediction.annotation_id == Annotation.id)
-                & (AnnotationPrediction.predictor_config_id == config.id),
+                (col(AnnotationPrediction.annotation_id) == col(Annotation.id))
+                & (col(AnnotationPrediction.predictor_config_id) == config.id),
             )
             .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id.in_(patient_ids),
-                Annotation.review_excluded.is_(False),
-                Note.deleted_at.is_(None),
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id).in_(patient_ids),
+                col(Annotation.review_excluded).is_(False),
+                col(Note.deleted_at).is_(None),
             )
         )
     ).all()

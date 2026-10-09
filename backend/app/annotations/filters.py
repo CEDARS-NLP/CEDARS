@@ -1,6 +1,7 @@
 """Shared query filters for annotations."""
 
 from sqlalchemy import and_, or_, select
+from sqlmodel import col
 
 from app.annotations.models import Annotation, AnnotationPrediction
 
@@ -20,31 +21,31 @@ def reviewable_filter(active_predictor_id: str | None = None):
     """
     if active_predictor_id is not None:
         ruled_out = (
-            select(AnnotationPrediction.id)
+            select(col(AnnotationPrediction.id))
             .where(
-                AnnotationPrediction.annotation_id == Annotation.id,
-                AnnotationPrediction.predictor_config_id == active_predictor_id,
-                AnnotationPrediction.predicted_label == 0,
+                col(AnnotationPrediction.annotation_id) == col(Annotation.id),
+                col(AnnotationPrediction.predictor_config_id) == active_predictor_id,
+                col(AnnotationPrediction.predicted_label) == 0,
             )
             .exists()
         )
         return or_(
-            Annotation.manual_review_override.is_(True),
+            col(Annotation.manual_review_override).is_(True),
             ~ruled_out,
         )
 
     ruled_out_by_predictor = (
-        select(AnnotationPrediction.id)
+        select(col(AnnotationPrediction.id))
         .where(
-            AnnotationPrediction.annotation_id == Annotation.id,
-            AnnotationPrediction.predicted_label == 0,
+            col(AnnotationPrediction.annotation_id) == col(Annotation.id),
+            col(AnnotationPrediction.predicted_label) == 0,
         )
         .exists()
     )
     return or_(
-        Annotation.manual_review_override.is_(True),
+        col(Annotation.manual_review_override).is_(True),
         and_(
-            or_(Annotation.predicted_label.is_(None), Annotation.predicted_label != 0),
+            or_(col(Annotation.predicted_label).is_(None), col(Annotation.predicted_label) != 0),
             ~ruled_out_by_predictor,
         ),
     )

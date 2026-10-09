@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.filters import reviewable_filter
 from app.annotations.models import Annotation, ReviewStatus
@@ -22,8 +23,8 @@ async def get_annotation(
     annotation_id: str,
 ) -> Annotation | None:
     stmt = select(Annotation).where(
-        Annotation.id == annotation_id,
-        Annotation.project_id == project_id,
+        col(Annotation.id) == annotation_id,
+        col(Annotation.project_id) == project_id,
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -38,14 +39,14 @@ async def list_annotations(
     offset: int = 0,
 ) -> list[Annotation]:
     """List annotations with optional filtering."""
-    stmt = select(Annotation).where(Annotation.project_id == project_id)
+    stmt = select(Annotation).where(col(Annotation.project_id) == project_id)
 
     if status:
-        stmt = stmt.where(Annotation.review_status == status)
+        stmt = stmt.where(col(Annotation.review_status) == status)
     if patient_id:
-        stmt = stmt.where(Annotation.patient_id == patient_id)
+        stmt = stmt.where(col(Annotation.patient_id) == patient_id)
 
-    stmt = stmt.order_by(Annotation.created_at).offset(offset).limit(limit)
+    stmt = stmt.order_by(col(Annotation.created_at)).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -58,15 +59,15 @@ async def get_next_unreviewed(
     """Get the next unreviewed annotation for review."""
     active = await get_active_predictor_config(session, project_id)
     stmt = select(Annotation).where(
-        Annotation.project_id == project_id,
-        Annotation.review_status == ReviewStatus.UNREVIEWED,
-        Annotation.review_excluded.is_(False),
+        col(Annotation.project_id) == project_id,
+        col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+        col(Annotation.review_excluded).is_(False),
         reviewable_filter(active.id if active else None),
     )
 
     if patient_id:
-        stmt = stmt.where(Annotation.patient_id == patient_id)
-    stmt = stmt.order_by(Annotation.created_at).limit(1)
+        stmt = stmt.where(col(Annotation.patient_id) == patient_id)
+    stmt = stmt.order_by(col(Annotation.created_at)).limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -82,29 +83,29 @@ async def get_annotation_stats(
     """
     active = await get_active_predictor_config(session, project_id)
     base = select(func.count()).select_from(Annotation).where(
-        Annotation.project_id == project_id,
+        col(Annotation.project_id) == project_id,
         reviewable_filter(active.id if active else None),
     )
 
     total = (await session.execute(base)).scalar() or 0
     unreviewed = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.UNREVIEWED)
+            base.where(col(Annotation.review_status) == ReviewStatus.UNREVIEWED)
         )
     ).scalar() or 0
     reviewed = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.REVIEWED)
+            base.where(col(Annotation.review_status) == ReviewStatus.REVIEWED)
         )
     ).scalar() or 0
     skipped = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.SKIPPED)
+            base.where(col(Annotation.review_status) == ReviewStatus.SKIPPED)
         )
     ).scalar() or 0
     events_found = (
         await session.execute(
-            base.where(Annotation.event_date.isnot(None))
+            base.where(col(Annotation.event_date).isnot(None))
         )
     ).scalar() or 0
 
@@ -123,28 +124,28 @@ async def get_note_context(
     note_id: str,
 ) -> dict | None:
     """Get full note text and all sentences for annotation context display."""
-    note = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
+    note = (await session.execute(select(Note).where(col(Note.id) == note_id))).scalar_one_or_none()
     if not note:
         return None
 
     patient = (
-        await session.execute(select(Patient).where(Patient.id == note.patient_id))
+        await session.execute(select(Patient).where(col(Patient.id) == note.patient_id))
     ).scalar_one_or_none()
 
     sentences = (
         await session.execute(
             select(Sentence)
-            .where(Sentence.note_id == note_id)
-            .order_by(Sentence.sentence_number)
+            .where(col(Sentence.note_id) == note_id)
+            .order_by(col(Sentence.sentence_number))
         )
     ).scalars().all()
     excluded_sentence_ids = set(
         (
             await session.execute(
-                select(Annotation.sentence_id).where(
-                    Annotation.note_id == note_id,
-                    Annotation.review_excluded.is_(True),
-                    Annotation.sentence_id.is_not(None),
+                select(col(Annotation.sentence_id)).where(
+                    col(Annotation.note_id) == note_id,
+                    col(Annotation.review_excluded).is_(True),
+                    col(Annotation.sentence_id).is_not(None),
                 )
             )
         ).scalars().all()
@@ -197,8 +198,8 @@ async def get_patient_matched_notes(
     if pipeline_run_id:
         # Trace pipeline_run → eval session
         stmt = (
-            select(PatientResult.session_id)
-            .where(PatientResult.pipeline_run_id == pipeline_run_id)
+            select(col(PatientResult.session_id))
+            .where(col(PatientResult.pipeline_run_id) == pipeline_run_id)
             .distinct()
             .limit(1)
         )
@@ -210,8 +211,8 @@ async def get_patient_matched_notes(
     if session_id:
         # Get SearchMatch records for this patient in this session
         matches_stmt = select(SearchMatch).where(
-            SearchMatch.session_id == session_id,
-            SearchMatch.patient_id == patient_id,
+            col(SearchMatch.session_id) == session_id,
+            col(SearchMatch.patient_id) == patient_id,
         )
         search_matches = list((await session.execute(matches_stmt)).scalars().all())
 
@@ -228,8 +229,8 @@ async def get_patient_matched_notes(
     note_ids = list(matches_by_note.keys())
     notes_stmt = (
         select(Note)
-        .where(Note.id.in_(note_ids))
-        .order_by(Note.note_date)
+        .where(col(Note.id).in_(note_ids))
+        .order_by(col(Note.note_date))
     )
     notes = list((await session.execute(notes_stmt)).scalars().all())
 
@@ -289,10 +290,10 @@ async def _matched_notes_from_annotations(
     ann_stmt = (
         select(Annotation)
         .where(
-            Annotation.project_id == project_id,
-            Annotation.patient_id == patient_id,
+            col(Annotation.project_id) == project_id,
+            col(Annotation.patient_id) == patient_id,
         )
-        .order_by(Annotation.created_at)
+        .order_by(col(Annotation.created_at))
     )
     annotations = list((await session.execute(ann_stmt)).scalars().all())
     if not annotations:
@@ -306,8 +307,8 @@ async def _matched_notes_from_annotations(
     note_ids = list(anns_by_note.keys())
     notes_stmt = (
         select(Note)
-        .where(Note.id.in_(note_ids))
-        .order_by(Note.note_date)
+        .where(col(Note.id).in_(note_ids))
+        .order_by(col(Note.note_date))
     )
     notes = list((await session.execute(notes_stmt)).scalars().all())
 

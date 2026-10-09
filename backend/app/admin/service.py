@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.jobs.models import BackgroundJob
 
@@ -13,8 +14,12 @@ logger = logging.getLogger(__name__)
 async def get_queue_stats(session: AsyncSession) -> list[dict]:
     """Get job counts grouped by type and status."""
     stmt = (
-        select(BackgroundJob.job_type, BackgroundJob.status, func.count(BackgroundJob.id))
-        .group_by(BackgroundJob.job_type, BackgroundJob.status)
+        select(
+            col(BackgroundJob.job_type),
+            col(BackgroundJob.status),
+            func.count(col(BackgroundJob.id)),
+        )
+        .group_by(col(BackgroundJob.job_type), col(BackgroundJob.status))
     )
     result = await session.execute(stmt)
     rows = result.all()
@@ -70,9 +75,9 @@ async def list_jobs(
     offset: int = 0,
 ) -> list[BackgroundJob]:
     """List background jobs, optionally filtered by status."""
-    stmt = select(BackgroundJob).order_by(BackgroundJob.created_at.desc())
+    stmt = select(BackgroundJob).order_by(col(BackgroundJob.created_at).desc())
     if status:
-        stmt = stmt.where(BackgroundJob.status == status)
+        stmt = stmt.where(col(BackgroundJob.status) == status)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())

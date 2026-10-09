@@ -5,6 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.query_service import get_patient_matched_notes
 from app.annotations.schemas import (
@@ -75,8 +76,8 @@ async def _get_search_keywords(
 
     # Find evaluation session via PatientResult → session
     stmt = (
-        select(PatientResult.session_id)
-        .where(PatientResult.pipeline_run_id == pipeline_run_id)
+        select(col(PatientResult.session_id))
+        .where(col(PatientResult.pipeline_run_id) == pipeline_run_id)
         .distinct()
         .limit(1)
     )

@@ -6,6 +6,7 @@ from dataclasses import asdict
 import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.models import Annotation, AnnotationPrediction
@@ -92,16 +93,16 @@ async def run_bulk_predictions(
 def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
     """Annotations in a project that the given predictor has not scored yet."""
     already_scored = (
-        select(AnnotationPrediction.id)
+        select(col(AnnotationPrediction.id))
         .where(
-            AnnotationPrediction.annotation_id == Annotation.id,
-            AnnotationPrediction.predictor_config_id == predictor_config_id,
+            col(AnnotationPrediction.annotation_id) == col(Annotation.id),
+            col(AnnotationPrediction.predictor_config_id) == predictor_config_id,
         )
         .exists()
     )
     return select(Annotation).where(
-        Annotation.project_id == project_id,
-        Annotation.review_excluded.is_(False),
+        col(Annotation.project_id) == project_id,
+        col(Annotation.review_excluded).is_(False),
         ~already_scored,
     )
 
@@ -123,7 +124,7 @@ async def estimate_bulk_predictions(
 
     result = await session.execute(
         _unscored_annotations_stmt(project_id, predictor_config.id).with_only_columns(
-            Annotation.sentence_text
+            col(Annotation.sentence_text)
         )
     )
     texts = [r[0] for r in result.all()]
@@ -194,10 +195,13 @@ async def dispatch_prediction_job(
         health_key = await redis.exists(b"arq:queue:health-check")
         if health_key:
             arq_job = await redis.enqueue_job("run_prediction_job", project_id, bg_job.id)
-            bg_job.arq_job_id = arq_job.job_id
-            session.add(bg_job)
-            await session.commit()
-            use_sync = False
+            if arq_job is not None:
+                bg_job.arq_job_id = arq_job.job_id
+                session.add(bg_job)
+                await session.commit()
+                use_sync = False
+            else:
+                logger.warning("ARQ refused the job (duplicate ID), running synchronously")
         else:
             logger.warning("No ARQ workers found, running prediction synchronously")
 
@@ -242,10 +246,10 @@ async def get_prediction_job_status(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.PREDICTION,
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.PREDICTION,
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -275,11 +279,11 @@ async def cancel_prediction_job(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.PREDICTION,
-            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.PREDICTION,
+            col(BackgroundJob.status).in_([JobStatus.PENDING, JobStatus.RUNNING]),
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
