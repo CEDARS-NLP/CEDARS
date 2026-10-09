@@ -2,36 +2,48 @@
 
 import logging
 from datetime import datetime
+from typing import cast as typing_cast
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.filters import reviewable_filter as _reviewable_filter
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
 from app.annotations.schemas import NextPatientResponse, PatientReviewStats
 from app.audit.models import AuditAction
 from app.audit.service import log_action
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
+from app.predictors.service import get_active_predictor_config
 from app.projects.models import Project
 
 logger = logging.getLogger(__name__)
+
+
+class ReopenConflictError(ValueError):
+    pass
 
 
 async def _check_patient_completion(
     session: AsyncSession,
     project_id: str,
     patient_id: str,
+    user_id: str,
 ) -> None:
     """Mark patient as REVIEWED if all their annotations are reviewed/skipped."""
+    active = await get_active_predictor_config(session, project_id)
     unreviewed_count = (
         await session.execute(
             select(func.count())
             .select_from(Annotation)
             .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id == patient_id,
-                Annotation.review_status == ReviewStatus.UNREVIEWED,
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id) == patient_id,
+                col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+                col(Annotation.review_excluded).is_(False),
+                _reviewable_filter(active.id if active else None),
             )
         )
     ).scalar() or 0
@@ -39,11 +51,17 @@ async def _check_patient_completion(
     if unreviewed_count == 0:
         patient = (
             await session.execute(
-                select(Patient).where(Patient.id == patient_id)
+                select(Patient).where(col(Patient.id) == patient_id)
             )
         ).scalar_one_or_none()
-        if patient and patient.status != PatientStatus.REVIEWED:
+        if patient:
             patient.status = PatientStatus.REVIEWED
+            patient.review_source = "human"
+            patient.review_reason = "manual_review"
+            patient.reviewed_by = user_id
+            patient.reviewed_at = now_utc()
+            patient.locked_by = None
+            patient.locked_at = None
             session.add(patient)
             await session.commit()
 
@@ -80,7 +98,8 @@ async def review_annotation(
 
         # Check project setting for skip_after_event_date
         project = await session.get(Project, project_id)
-        skip_enabled = (project.settings or {}).get("skip_after_event_date", False) if project else False
+        skip_enabled = (project.settings or {}).get("skip_after_event_date",
+                                                    False) if project else False
 
         # Fallback: also check per-query flag for backwards compatibility
         if not skip_enabled:
@@ -90,10 +109,10 @@ async def review_annotation(
                         select(func.count())
                         .select_from(SearchQuery)
                         .where(
-                            SearchQuery.project_id == project_id,
-                            SearchQuery.is_active == True,  # noqa: E712
-                            SearchQuery.skip_after_event == True,  # noqa: E712
-                            SearchQuery.deleted_at.is_(None),
+                            col(SearchQuery.project_id) == project_id,
+                            col(SearchQuery.is_active) == True,  # noqa: E712
+                            col(SearchQuery.skip_after_event) == True,  # noqa: E712
+                            col(SearchQuery.deleted_at).is_(None),
                         )
                     )
                 ).scalar()
@@ -104,36 +123,38 @@ async def review_annotation(
             # The WHERE review_status = UNREVIEWED predicate is both correct and race-safe:
             # it will only skip annotations that haven't already been acted on.
             notes_on_or_after_subq = (
-                select(Note.id)
-                .where(Note.note_date >= event_date)
+                select(col(Note.id))
+                .where(col(Note.note_date) >= event_date)
                 .scalar_subquery()
             )
             skip_result = await session.execute(
                 update(Annotation)
                 .where(
-                    Annotation.project_id == project_id,
-                    Annotation.patient_id == annotation.patient_id,
-                    Annotation.review_status == ReviewStatus.UNREVIEWED,
-                    Annotation.id != annotation_id,
-                    Annotation.note_id.in_(notes_on_or_after_subq),
+                    col(Annotation.project_id) == project_id,
+                    col(Annotation.patient_id) == annotation.patient_id,
+                    col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+                    col(Annotation.review_excluded).is_(False),
+                    col(Annotation.id) != annotation_id,
+                    col(Annotation.note_id).in_(notes_on_or_after_subq),
                 )
                 .values(review_status=ReviewStatus.SKIPPED)
                 .execution_options(synchronize_session="fetch")
             )
-            skipped_count = skip_result.rowcount
+            skipped_count = typing_cast(CursorResult, skip_result).rowcount
 
         # Count remaining unreviewed annotations from notes BEFORE the event date
         earlier_count = (
             await session.execute(
                 select(func.count())
                 .select_from(Annotation)
-                .join(Note, Annotation.note_id == Note.id)
+                .join(Note, col(Annotation.note_id) == col(Note.id))
                 .where(
-                    Annotation.project_id == project_id,
-                    Annotation.patient_id == annotation.patient_id,
-                    Annotation.review_status == ReviewStatus.UNREVIEWED,
-                    Annotation.id != annotation_id,
-                    Note.note_date < event_date,
+                    col(Annotation.project_id) == project_id,
+                    col(Annotation.patient_id) == annotation.patient_id,
+                    col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+                    col(Annotation.review_excluded).is_(False),
+                    col(Annotation.id) != annotation_id,
+                    col(Note.note_date) < event_date,
                 )
             )
         ).scalar() or 0
@@ -141,7 +162,7 @@ async def review_annotation(
     session.add(annotation)
     await session.commit()
     await session.refresh(annotation)
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
 
     await log_action(
         session, project_id, AuditAction.ANNOTATION_REVIEWED,
@@ -181,7 +202,7 @@ async def skip_annotation(
     session.add(annotation)
     await session.commit()
     await session.refresh(annotation)
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
 
     await log_action(
         session, project_id, AuditAction.ANNOTATION_SKIPPED,
@@ -201,12 +222,15 @@ async def get_next_patient_for_review(
 
     Returns dict with patient info or all_complete flag.
     """
+    active = await get_active_predictor_config(session, project_id)
+    _reviewable = _reviewable_filter(active.id if active else None)
     has_unreviewed = (
-        select(Annotation.patient_id)
+        select(col(Annotation.patient_id))
         .where(
-            Annotation.project_id == project_id,
-            Annotation.review_status == ReviewStatus.UNREVIEWED,
-            Annotation.predicted_label == 1,
+            col(Annotation.project_id) == project_id,
+            col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+            col(Annotation.review_excluded).is_(False),
+            _reviewable,
         )
         .distinct()
         .scalar_subquery()
@@ -215,11 +239,11 @@ async def get_next_patient_for_review(
     stmt = (
         select(Patient)
         .where(
-            Patient.project_id == project_id,
-            Patient.id.in_(has_unreviewed),
-            or_(Patient.locked_by.is_(None), Patient.locked_by == user_id),
+            col(Patient.project_id) == project_id,
+            col(Patient.id).in_(has_unreviewed),
+            or_(col(Patient.locked_by).is_(None), col(Patient.locked_by) == user_id),
         )
-        .order_by(Patient.created_at)
+        .order_by(col(Patient.created_at))
         .limit(1)
     )
     patient = (await session.execute(stmt)).scalar_one_or_none()
@@ -230,9 +254,10 @@ async def get_next_patient_for_review(
                 select(func.count())
                 .select_from(Annotation)
                 .where(
-                    Annotation.project_id == project_id,
-                    Annotation.review_status == ReviewStatus.UNREVIEWED,
-                    Annotation.predicted_label == 1,
+                    col(Annotation.project_id) == project_id,
+                    col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
+                    col(Annotation.review_excluded).is_(False),
+                    _reviewable,
                 )
             )
         ).scalar() or 0
@@ -261,8 +286,8 @@ async def get_next_patient_for_review(
             select(func.count())
             .select_from(Annotation)
             .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id == patient.id,
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id) == patient.id,
             )
         )
     ).scalar() or 0
@@ -272,9 +297,9 @@ async def get_next_patient_for_review(
             select(func.count())
             .select_from(Annotation)
             .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id == patient.id,
-                Annotation.review_status == ReviewStatus.UNREVIEWED,
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id) == patient.id,
+                col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
             )
         )
     ).scalar() or 0
@@ -296,25 +321,46 @@ async def get_patient_annotations(
     """All annotations for a patient, sorted by note_date, then sentence position."""
     from app.nlp.models import Sentence
 
+    active = await get_active_predictor_config(session, project_id)
+    active_id = active.id if active else None
+
     stmt = (
         select(
-            Annotation, Note.note_date, Note.text_id,
-            Sentence.sentence_number, Note.text,
+            Annotation, col(Note.note_date), col(Note.text_id),
+            col(Sentence.sentence_number), col(Note.text),
         )
-        .join(Note, Annotation.note_id == Note.id)
-        .outerjoin(Sentence, Annotation.sentence_id == Sentence.id)
+        .join(Note, col(Annotation.note_id) == col(Note.id))
+        .outerjoin(Sentence, col(Annotation.sentence_id) == col(Sentence.id))
         .where(
-            Annotation.project_id == project_id,
-            Annotation.patient_id == patient_id,
-            Annotation.predicted_label == 1,
+            col(Annotation.project_id) == project_id,
+            col(Annotation.patient_id) == patient_id,
+            col(Annotation.review_excluded).is_(False),
+            _reviewable_filter(active_id),
         )
         .order_by(
-            Note.note_date.asc().nullslast(),
-            Note.id,
-            Sentence.sentence_number.asc().nullslast(),
+            col(Note.note_date).asc().nullslast(),
+            col(Note.id),
+            col(Sentence.sentence_number).asc().nullslast(),
         )
     )
     rows = (await session.execute(stmt)).all()
+
+    if not rows:
+        predictions = {}
+    else:
+        pred_stmt = select(AnnotationPrediction).where(
+            col(AnnotationPrediction.project_id) == project_id,
+            col(AnnotationPrediction.annotation_id).in_([r[0].id for r in rows]),
+        )
+        # Only the active predictor's verdict is authoritative.
+        if active_id is not None:
+            pred_stmt = pred_stmt.where(
+                col(AnnotationPrediction.predictor_config_id) == active_id
+            )
+        predictions = {
+            p.annotation_id: p
+            for p in (await session.execute(pred_stmt)).scalars()
+        }
 
     results = []
     for annotation, note_date, text_id, sentence_number, note_text in rows:
@@ -330,6 +376,8 @@ async def get_patient_annotations(
         ):
             sentence_text = note_text[:1000]
 
+        prediction = predictions.get(annotation.id)
+
         results.append({
             "id": annotation.id,
             "project_id": annotation.project_id,
@@ -339,10 +387,24 @@ async def get_patient_annotations(
             "sentence_text": sentence_text,
             "matched_tokens": annotation.matched_tokens,
             "is_negated": annotation.is_negated,
-            "predicted_score": annotation.predicted_score,
-            "predicted_label": annotation.predicted_label,
-            "predictor_model": annotation.predictor_model,
-            "reasoning": annotation.reasoning,
+            "review_excluded": annotation.review_excluded,
+            "manual_review_override": annotation.manual_review_override,
+            "token": annotation.token,
+            "note_start_index": annotation.note_start_index,
+            "note_end_index": annotation.note_end_index,
+            "sentence_start": annotation.sentence_start,
+            "sentence_end": annotation.sentence_end,
+            "text_date": annotation.text_date,
+            "predicted_score": (
+                prediction.predicted_score if prediction else annotation.predicted_score
+            ),
+            "predicted_label": (
+                prediction.predicted_label if prediction else annotation.predicted_label
+            ),
+            "predictor_model": (
+                prediction.predictor_model if prediction else annotation.predictor_model
+            ),
+            "reasoning": prediction.reasoning if prediction else annotation.reasoning,
             "review_status": annotation.review_status,
             "reviewed_by": annotation.reviewed_by,
             "reviewed_at": annotation.reviewed_at,
@@ -350,7 +412,10 @@ async def get_patient_annotations(
             "created_at": annotation.created_at,
             "note_date": note_date,
             "note_text_id": text_id,
-            "sentence_number": sentence_number,
+            "sentence_number": (
+                annotation.sentence_number if annotation.sentence_number is not None
+                else sentence_number
+            ),
         })
     return results
 
@@ -365,8 +430,8 @@ async def unlock_patient(
     patient = (
         await session.execute(
             select(Patient).where(
-                Patient.id == patient_id,
-                Patient.project_id == project_id,
+                col(Patient.id) == patient_id,
+                col(Patient.project_id) == project_id,
             )
         )
     ).scalar_one_or_none()
@@ -385,6 +450,11 @@ async def unlock_patient(
         session, project_id, AuditAction.PATIENT_UNLOCKED,
         user_id=user_id, patient_id=patient_id,
     )
+
+    # A predictor run can hide the last unreviewed annotations while a reviewer holds the lock
+    # (the completion pass skips locked patients), so close the patient once the lock is gone.
+    if patient.status == PatientStatus.REVIEWING:
+        await _check_patient_completion(session, project_id, patient_id, user_id)
 
 
 async def delete_event_date(
@@ -406,9 +476,9 @@ async def delete_event_date(
     annotation.reviewed_at = None
 
     stmt = select(Annotation).where(
-        Annotation.project_id == project_id,
-        Annotation.patient_id == annotation.patient_id,
-        Annotation.review_status == ReviewStatus.SKIPPED,
+        col(Annotation.project_id) == project_id,
+        col(Annotation.patient_id) == annotation.patient_id,
+        col(Annotation.review_status) == ReviewStatus.SKIPPED,
     )
     reverted_count = 0
     for ann in (await session.execute(stmt)).scalars().all():
@@ -419,12 +489,18 @@ async def delete_event_date(
     await session.commit()
     await session.refresh(annotation)
 
-    await _check_patient_completion(session, project_id, annotation.patient_id)
+    await _check_patient_completion(session, project_id, annotation.patient_id, user_id)
     patient = (
-        await session.execute(select(Patient).where(Patient.id == annotation.patient_id))
+        await session.execute(
+            select(Patient).where(col(Patient.id) == annotation.patient_id)
+        )
     ).scalar_one_or_none()
     if patient and patient.status == PatientStatus.REVIEWED:
         patient.status = PatientStatus.REVIEWING
+        patient.review_source = None
+        patient.review_reason = None
+        patient.reviewed_by = None
+        patient.reviewed_at = None
         session.add(patient)
         await session.commit()
 
@@ -447,34 +523,34 @@ async def get_patient_review_stats(
         select(func.count())
         .select_from(Annotation)
         .where(
-            Annotation.project_id == project_id,
-            Annotation.patient_id == patient_id,
+            col(Annotation.project_id) == project_id,
+            col(Annotation.patient_id) == patient_id,
         )
     )
 
     total = (await session.execute(base)).scalar() or 0
     unreviewed = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.UNREVIEWED)
+            base.where(col(Annotation.review_status) == ReviewStatus.UNREVIEWED)
         )
     ).scalar() or 0
     reviewed = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.REVIEWED)
+            base.where(col(Annotation.review_status) == ReviewStatus.REVIEWED)
         )
     ).scalar() or 0
     skipped = (
         await session.execute(
-            base.where(Annotation.review_status == ReviewStatus.SKIPPED)
+            base.where(col(Annotation.review_status) == ReviewStatus.SKIPPED)
         )
     ).scalar() or 0
 
     event_annotation = (
         await session.execute(
             select(Annotation).where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id == patient_id,
-                Annotation.event_date.isnot(None),
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id) == patient_id,
+                col(Annotation.event_date).isnot(None),
             ).limit(1)
         )
     ).scalar_one_or_none()
@@ -495,12 +571,12 @@ async def reopen_patient(
     patient_id: str,
     user_id: str,
 ) -> bool:
-    """Reopen a REVIEWED patient: revert all annotations to UNREVIEWED."""
+    """Restore all stored annotations for explicit human review."""
     patient = (
         await session.execute(
             select(Patient).where(
-                Patient.id == patient_id,
-                Patient.project_id == project_id,
+                col(Patient.id) == patient_id,
+                col(Patient.project_id) == project_id,
             )
         )
     ).scalar_one_or_none()
@@ -508,18 +584,30 @@ async def reopen_patient(
     if not patient or patient.status != PatientStatus.REVIEWED:
         return False
 
-    patient.status = PatientStatus.REVIEWING
-    session.add(patient)
-
     stmt = select(Annotation).where(
-        Annotation.project_id == project_id,
-        Annotation.patient_id == patient_id,
+        col(Annotation.project_id) == project_id,
+        col(Annotation.patient_id) == patient_id,
     )
-    for ann in (await session.execute(stmt)).scalars().all():
+    annotations = list((await session.execute(stmt)).scalars().all())
+    if not annotations:
+        raise ReopenConflictError(
+            "No stored annotations are available to reopen. Run a new search first."
+        )
+    for ann in annotations:
+        ann.review_excluded = False
+        ann.manual_review_override = True
         ann.review_status = ReviewStatus.UNREVIEWED
         ann.reviewed_by = None
         ann.reviewed_at = None
         ann.event_date = None
+
+    patient.status = PatientStatus.REVIEWING
+    patient.review_source = None
+    patient.review_reason = None
+    patient.reviewed_by = None
+    patient.reviewed_at = None
+    patient.updated_at = now_utc()
+    session.add(patient)
 
     await session.commit()
 

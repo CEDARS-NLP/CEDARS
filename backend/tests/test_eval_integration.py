@@ -1,8 +1,9 @@
 """End-to-end integration test for the unified evaluation session workflow."""
 
 from datetime import datetime
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.pipeline.classifier import ClassificationResult
 
@@ -20,7 +21,7 @@ async def project_with_data(auth_client, app):
 
     # Get the overridden test database session from the app fixture
     from app.common.database import get_session
-    from app.connectors.models import Patient, Note
+    from app.connectors.models import Note, Patient
 
     # Access the dependency override directly from the app
     override_func = app.dependency_overrides[get_session]

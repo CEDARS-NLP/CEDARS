@@ -1,4 +1,5 @@
-"""Evaluation service: session CRUD, search query execution, funnel stats, LLM run, review, metrics, commit."""
+"""Evaluation service: session CRUD, search query execution,
+funnel stats, LLM run, review, metrics, commit."""
 
 import logging
 import math
@@ -89,7 +90,9 @@ async def create_session(
     blocking = result.scalars().first()
     if blocking:
         raise ValueError(
-            f"Cannot create session: project already has a {getattr(blocking.status, 'value', blocking.status)} session"
+            f"Cannot create session: project already has a {getattr(blocking.status,
+                                                                    'value',
+                                                                    blocking.status)} session"
         )
 
     # Handle cloning
@@ -529,7 +532,8 @@ async def run_llm_on_sample(
 
     if not project.llm_provider or not project.llm_model:
         raise ValueError(
-            "Project LLM configuration is required. Set the LLM provider and model in project settings."
+            """Project LLM configuration is required.
+            \nSet the LLM provider and model in project settings."""
         )
 
     # Clear previous sample results (pipeline_run_id IS NULL)
@@ -793,7 +797,8 @@ async def list_patient_results(
     """Return paginated patient results with optional filtering.
 
     Args:
-        label_filter: Filter by finding_label (e.g. "positive", "negative"). "all" or None = no filter.
+        label_filter: Filter by finding_label (e.g. "positive", "negative").
+                                                Note: "all" or None = no filter.
         reviewed_filter: "unreviewed" to show only unreviewed results.
         page: 1-based page number.
         page_size: Results per page.
@@ -1091,7 +1096,8 @@ async def commit_session(
 
     if not project.llm_provider or not project.llm_model:
         raise ValueError(
-            "Project LLM configuration is required. Set the LLM provider and model in project settings before committing."
+            """Project LLM configuration is required.
+            \nSet the LLM provider and model in project settings before committing."""
         )
 
     committed_config = {
@@ -1394,7 +1400,8 @@ async def resume_pipeline(db: AsyncSession, session_id: str, project_id: str) ->
         )
     )).scalar() or 0
 
-    return {"resumed": True, "reset_stuck": len(stuck), "remaining_queued": remaining, "run_id": run_id}
+    return {"resumed": True, "reset_stuck": len(stuck),
+            "remaining_queued": remaining, "run_id": run_id}
 
 
 async def rerun_pipeline(

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.export.databricks import ExportType, SCHEMAS, export_to_databricks
+from app.export.databricks import SCHEMAS, ExportType, export_to_databricks
 
 
 class TestExportType:

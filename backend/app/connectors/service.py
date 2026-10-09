@@ -105,11 +105,11 @@ async def upload_and_create_data_source(
 
     # A bucket is always required. An empty endpoint is valid — it means native
     # AWS S3 (credentials from the environment / task role), as opposed to a
-    # MinIO/S3-compatible endpoint URL.
+    # custom S3-compatible endpoint URL.
     if not settings.s3_bucket:
         raise EnvironmentError(
             "Object storage is not configured. Set CEDARS_S3_BUCKET "
-            "(and CEDARS_S3_ENDPOINT only for MinIO/S3-compatible storage)."
+            "(and CEDARS_S3_ENDPOINT only for custom S3-compatible storage)."
         )
 
     if not filename:
@@ -120,7 +120,10 @@ async def upload_and_create_data_source(
         raise ValueError("Only CSV and JSON files are supported")
 
     # Parse column mapping
-    mapping = {"patient_id": "patient_id", "text_id": "text_id", "text": "text", "note_date": "note_date"}
+    mapping = {"patient_id": "patient_id",
+               "text_id": "text_id",
+               "text": "text",
+               "note_date": "note_date"}
     if column_mapping:
         try:
             user_mapping = json.loads(column_mapping)
@@ -143,7 +146,8 @@ async def upload_and_create_data_source(
         "column_mapping": mapping,
     }
 
-    return await create_data_source(session, project_id, filename, ConnectorType.FILE_UPLOAD, config)
+    return await create_data_source(session, project_id,
+                                    filename, ConnectorType.FILE_UPLOAD, config)
 
 
 # ── Ingestion ─────────────────────────────────────────────────────
@@ -498,9 +502,10 @@ async def purge_data_source(
     All deletes run inside a savepoint so a partial failure leaves the DB consistent.
     Returns count of deleted notes.
     """
-    from sqlalchemy import delete, exists
+    from sqlalchemy import delete, exists, update
 
-    from app.annotations.models import Annotation
+    from app.annotations.models import Annotation, AnnotationPrediction
+    from app.audit.models import AuditEntry
     from app.nlp.models import Sentence
 
     ds = await get_data_source(session, project_id, data_source_id)
@@ -517,6 +522,12 @@ async def purge_data_source(
         return 0
 
     async with session.begin_nested():
+        annotation_ids = select(Annotation.id).where(Annotation.note_id.in_(note_ids))
+        await session.execute(
+            delete(AnnotationPrediction).where(
+                AnnotationPrediction.annotation_id.in_(annotation_ids)
+            )
+        )
         await session.execute(
             delete(Annotation).where(Annotation.note_id.in_(note_ids))
         )
@@ -534,6 +545,12 @@ async def purge_data_source(
             Patient.data_source_id == data_source_id,
             ~exists(select(Note.id).where(Note.patient_id == Patient.id)),
         ).scalar_subquery()
+        # Keep the audit trail: detach its rows from the patients about to be deleted.
+        await session.execute(
+            update(AuditEntry)
+            .where(AuditEntry.patient_id.in_(patient_ids_subq))
+            .values(patient_id=None)
+        )
         await session.execute(
             delete(Patient).where(Patient.id.in_(patient_ids_subq))
         )
@@ -716,7 +733,8 @@ async def list_patients(
             func.count(Annotation.id).label("annotation_count"),
             func.sum(
                 case(
-                    (Annotation.review_status.in_(["reviewed", "confirmed", "rejected", "skipped"]), 1),
+                    (Annotation.review_status.in_(["reviewed", "confirmed",
+                                                   "rejected", "skipped"]), 1),
                     else_=0,
                 )
             ).label("reviewed_count"),
@@ -745,6 +763,10 @@ async def list_patients(
     items = [
         {
             "patient": row[0],
+            "review_source": row[0].review_source,
+            "review_reason": row[0].review_reason,
+            "reviewed_by": row[0].reviewed_by,
+            "reviewed_at": row[0].reviewed_at,
             "note_count": row[1],
             "annotation_count": row[2],
             "reviewed_count": row[3],

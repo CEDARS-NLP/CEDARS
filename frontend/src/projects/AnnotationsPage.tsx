@@ -18,6 +18,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { api } from "@/api/client";
+import type { ReviewMetadata } from "./ReviewProvenance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +33,7 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────
 
-interface Annotation {
+interface Annotation extends ReviewMetadata {
   id: string;
   project_id: string;
   patient_id: string;
@@ -46,8 +47,6 @@ interface Annotation {
   predictor_model: string;
   reasoning: string;
   review_status: string;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   event_date: string | null;
   created_at: string;
 }
@@ -58,7 +57,7 @@ interface PatientAnnotation extends Annotation {
   sentence_number: number;
 }
 
-interface PatientInfo {
+interface PatientInfo extends ReviewMetadata {
   patient_id: string | null;
   patient_id_ext: string | null;
   total_annotations: number;
@@ -102,6 +101,7 @@ interface NoteContext {
     end_pos: number;
     is_target: boolean;
     is_negated: boolean;
+    review_excluded: boolean;
     matched_tokens: string[];
   }[];
 }
@@ -328,7 +328,7 @@ function NoteViewer({
     >
       {context.sentences.map((sent) => {
         const isTarget = sent.id === targetSentenceId;
-        const isOtherTarget = sent.is_target && !isTarget;
+        const isOtherTarget = sent.is_target && !sent.review_excluded && !isTarget;
 
         return (
           <span
@@ -1118,25 +1118,30 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               </div>
 
               <div className="space-y-3">
-                {/* Label + confidence */}
-                <div className="flex items-center gap-2">
-                  {current.predicted_label !== null && (
-                    <Badge
-                      className={
-                        current.predicted_label === 1
-                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                          : "bg-zinc-500 text-white hover:bg-zinc-600"
-                      }
-                    >
-                      {current.predicted_label === 1
-                        ? "Event Detected"
-                        : "No Event"}
-                    </Badge>
-                  )}
-                  <span className="text-sm tabular-nums text-muted-foreground">
-                    {formatScore(current.predicted_score)} likely
-                  </span>
-                </div>
+                {current.predicted_label === null &&
+                current.predicted_score === null &&
+                !current.predictor_model ? (
+                  <p className="text-sm text-muted-foreground">SpaCy Match Found</p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {current.predicted_label !== null && (
+                      <Badge
+                        className={
+                          current.predicted_label === 1
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-zinc-500 text-white hover:bg-zinc-600"
+                        }
+                      >
+                        {current.predicted_label === 1
+                          ? "Event Detected"
+                          : "No Event"}
+                      </Badge>
+                    )}
+                    <span className="text-sm tabular-nums text-muted-foreground">
+                      {formatScore(current.predicted_score)} likely
+                    </span>
+                  </div>
+                )}
 
                 {current.is_negated && (
                   <Badge

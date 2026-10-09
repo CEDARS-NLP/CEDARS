@@ -7,10 +7,11 @@ import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import ReviewProvenance, { type ReviewMetadata } from "./ReviewProvenance";
 
 // ── Types ───────────────────────────────────────────────────────
 
-interface Patient {
+interface Patient extends ReviewMetadata {
   id: string;
   patient_id_ext: string;
   status: string;
@@ -179,6 +180,7 @@ export default function PatientsPage() {
                     <Badge variant={statusBadgeVariant(patient.status)}>
                       {statusLabel(patient.status)}
                     </Badge>
+                    <ReviewProvenance {...patient} />
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {patient.note_count}

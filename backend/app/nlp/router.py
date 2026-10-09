@@ -1,6 +1,7 @@
 """API routes for NLP pipeline: search queries, processing, sentences."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -13,11 +14,14 @@ from app.nlp.schemas import (
     CreateSearchQueryRequest,
     NlpJobResponse,
     NlpStatsResponse,
+    ReprocessImpact,
+    ReprocessRequest,
     SearchQueryResponse,
     SentenceResponse,
     UpdateSearchQueryRequest,
 )
 from app.nlp.service import (
+    activate_search_query,
     cancel_nlp_job,
     clear_sentences,
     create_search_query,
@@ -26,9 +30,11 @@ from app.nlp.service import (
     get_latest_job,
     get_nlp_job_status,
     get_nlp_stats,
+    get_reprocess_impact,
     get_search_query,
     list_search_queries,
     list_target_sentences,
+    reprocess_is_busy,
     run_nlp_pipeline,
     update_search_query,
 )
@@ -50,16 +56,26 @@ async def create_query_endpoint(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
-    sq = await create_search_query(
-        session,
-        project_id,
-        body.query,
-        name=body.name,
-        created_by=current_user.id,
-        nlp_apply=body.nlp_apply,
-        hide_duplicates=body.hide_duplicates,
-        skip_after_event=body.skip_after_event,
-    )
+    try:
+        sq = await create_search_query(
+            session,
+            project_id,
+            body.query,
+            name=body.name,
+            created_by=current_user.id,
+            nlp_apply=body.nlp_apply,
+            hide_duplicates=body.hide_duplicates,
+            skip_after_event=body.skip_after_event,
+            exclude_negated=body.exclude_negated,
+        )
+    except IntegrityError:
+        # Race backstop: the partial unique index caught a concurrent
+        # create. Roll back so the session is reusable.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another query was created concurrently. Retry.",
+        ) from None
     return sq
 
 
@@ -112,6 +128,28 @@ async def delete_query_endpoint(
         raise_not_found("Search query not found")
 
 
+@router.post("/queries/{query_id}/activate", response_model=SearchQueryResponse)
+async def activate_query_endpoint(
+    project_id: str,
+    query_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    try:
+        sq = await activate_search_query(session, project_id, query_id)
+    except IntegrityError:
+        # Race backstop: the partial unique index caught a concurrent
+        # activation. Roll back so the session is reusable.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another query was activated concurrently. Retry.",
+        ) from None
+    if not sq:
+        raise_not_found("Search query not found")
+    return sq
+
+
 # ── NLP Processing ───────────────────────────────────────────────
 
 
@@ -148,13 +186,43 @@ async def cancel_nlp_endpoint(
     return result
 
 
-@router.post("/reprocess", response_model=NlpJobResponse)
-async def reprocess_nlp_endpoint(
+@router.get("/reprocess-impact", response_model=ReprocessImpact)
+async def reprocess_impact_endpoint(
     project_id: str,
     session: AsyncSession = Depends(get_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
+    return await get_reprocess_impact(session, project_id)
+
+
+@router.post("/reprocess", response_model=NlpJobResponse)
+async def reprocess_nlp_endpoint(
+    project_id: str,
+    body: ReprocessRequest,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
     """Clear all sentences and re-run the NLP pipeline from scratch."""
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Confirm deletion before reprocessing.")
+    if await reprocess_is_busy(session, project_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Finish active processing and wait for open patient reviews "
+                "(locked in the last hour) before reprocessing."
+            ),
+        )
+    impact = await get_reprocess_impact(session, project_id)
+    expected = {
+        "annotations": body.expected_annotations, "predictions": body.expected_predictions,
+        "sentences": body.expected_sentences,
+    }
+    if impact != expected:
+        raise HTTPException(
+            status_code=409,
+            detail="Deletion counts changed. Review the updated counts and confirm again.",
+        )
     await clear_sentences(session, project_id)
     job = await run_nlp_pipeline(session, project_id)
     return job

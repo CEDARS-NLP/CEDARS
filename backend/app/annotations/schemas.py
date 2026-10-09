@@ -14,6 +14,15 @@ class AnnotationResponse(BaseModel):
     sentence_text: str
     matched_tokens: str | None = None
     is_negated: bool = False
+    review_excluded: bool = False
+    manual_review_override: bool = False
+    token: str | None = None
+    note_start_index: int | None = None
+    note_end_index: int | None = None
+    sentence_number: int | None = None
+    sentence_start: int | None = None
+    sentence_end: int | None = None
+    text_date: datetime | None = None
     predicted_score: float | None
     predicted_label: int | None
     predictor_model: str

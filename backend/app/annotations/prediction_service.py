@@ -1,20 +1,21 @@
 """Prediction service: bulk prediction runs and token estimation."""
 
 import logging
+from dataclasses import asdict
 
 import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
-from app.annotations.models import Annotation
+from app.annotations.completion_service import complete_negative_llm_patients
+from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
-from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus, JobType
-from app.nlp.models import Sentence
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.llm import SYSTEM_PROMPT
-from app.predictors.models import PredictorConfig
+from app.predictors.service import get_active_predictor_config
 
 logger = logging.getLogger(__name__)
 
@@ -23,106 +24,109 @@ async def run_bulk_predictions(
     session: AsyncSession,
     project_id: str,
 ) -> dict:
-    """Run the active predictor on all target sentences without annotations.
+    """Run the active predictor over existing annotations as an optional filter.
 
     Flow:
     1. Get the active predictor config for the project
-    2. Find target sentences that don't yet have annotations
-    3. Run predictor on each sentence
-    4. Create annotation records with prediction results
+    2. Find annotations it has not scored yet
+    3. Run predictor on each annotation's sentence
+    4. Record the verdict as an AnnotationPrediction (annotations are not mutated)
     """
     # Get active predictor
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-        PredictorConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    predictor_config = result.scalar_one_or_none()
+    predictor_config = await get_active_predictor_config(session, project_id)
 
     if not predictor_config:
         raise ValueError("No active predictor configured for this project")
 
     predictor = create_predictor(predictor_config)
 
-    # Find target sentences without annotations
-    existing_annotations = (
-        select(Annotation.sentence_id)
-        .where(Annotation.project_id == project_id)
-        .scalar_subquery()
-    )
-
-    stmt = (
-        select(Sentence, Note.patient_id)
-        .join(Note, Sentence.note_id == Note.id)
-        .where(
-            Sentence.project_id == project_id,
-            Sentence.is_target == True,  # noqa: E712
-            Note.deleted_at.is_(None),
-            Sentence.id.notin_(existing_annotations),
-        )
-    )
-    result = await session.execute(stmt)
-    rows = result.all()
+    result = await session.execute(_unscored_annotations_stmt(project_id, predictor_config.id))
+    annotations = list(result.scalars().all())
 
     stats: dict = {
-        "total_sentences": len(rows),
+        "total_sentences": len(annotations),
         "predictions_made": 0,
         "annotations_created": 0,
         "errors": 0,
         "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
 
-    for sentence, patient_id in rows:
+    for annotation in annotations:
         prediction: PredictionResult | None = None
         try:
-            prediction = await predictor.predict(sentence.text)
+            prediction = await predictor.predict(annotation.sentence_text)
             stats["predictions_made"] += 1
-            if prediction.token_usage:
-                stats["token_usage"]["prompt_tokens"] += prediction.token_usage.prompt_tokens
-                stats["token_usage"]["completion_tokens"] += prediction.token_usage.completion_tokens
-                stats["token_usage"]["total_tokens"] += prediction.token_usage.total_tokens
+            pred_usage = prediction.token_usage
+            if pred_usage:
+                stats["token_usage"]["prompt_tokens"] += pred_usage.prompt_tokens
+                stats["token_usage"]["completion_tokens"] += pred_usage.completion_tokens
+                stats["token_usage"]["total_tokens"] += pred_usage.total_tokens
         except PredictorError as e:
-            logger.warning("Prediction failed for sentence %s: %s", sentence.id, e)
+            logger.warning("Prediction failed for annotation %s: %s", annotation.id, e)
             stats["errors"] += 1
+            continue
 
-        annotation = Annotation(
-            project_id=project_id,
-            patient_id=patient_id,
-            note_id=sentence.note_id,
-            sentence_id=sentence.id,
-            sentence_text=sentence.text,
-            matched_tokens=",".join(sentence.matched_tokens) if sentence.matched_tokens else "",
-            is_negated=sentence.is_negated,
-            predicted_score=prediction.score if prediction else None,
-            predicted_label=prediction.label if prediction else None,
-            predictor_model=prediction.model if prediction else "",
-            reasoning=prediction.reasoning if prediction else "",
+        session.add(
+            AnnotationPrediction(
+                annotation_id=annotation.id,
+                project_id=project_id,
+                predictor_config_id=predictor_config.id,
+                predictor_model=prediction.model,
+                predicted_score=prediction.score,
+                predicted_label=prediction.label,
+                reasoning=prediction.reasoning or "",
+                token_usage=(
+                    asdict(prediction.token_usage) if prediction.token_usage else None
+                ),
+            )
         )
-        session.add(annotation)
         stats["annotations_created"] += 1
 
+    await complete_negative_llm_patients(
+        session, project_id, list({annotation.patient_id for annotation in annotations}),
+        predictor_config,
+    )
     await session.commit()
     return stats
+
+
+def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
+    """Annotations in a project that the given predictor has not scored yet."""
+    already_scored = (
+        select(col(AnnotationPrediction.id))
+        .where(
+            col(AnnotationPrediction.annotation_id) == col(Annotation.id),
+            col(AnnotationPrediction.predictor_config_id) == predictor_config_id,
+        )
+        .exists()
+    )
+    return select(Annotation).where(
+        col(Annotation.project_id) == project_id,
+        col(Annotation.review_excluded).is_(False),
+        ~already_scored,
+    )
 
 
 async def estimate_bulk_predictions(
     session: AsyncSession,
     project_id: str,
 ) -> dict:
-    """Estimate token usage for bulk predictions on unannotated target sentences."""
-    existing_annotations = (
-        select(Annotation.sentence_id)
-        .where(Annotation.project_id == project_id)
-        .scalar_subquery()
-    )
+    """Estimate token usage for running the active predictor over unscored annotations."""
+    predictor_config = await get_active_predictor_config(session, project_id)
 
-    stmt = select(Sentence.text).where(
-        Sentence.project_id == project_id,
-        Sentence.is_target == True,  # noqa: E712
-        Sentence.id.notin_(existing_annotations),
+    if not predictor_config:
+        return {
+            "sentence_count": 0,
+            "estimated_prompt_tokens": 0,
+            "estimated_completion_tokens": 0,
+            "estimated_total_tokens": 0,
+        }
+
+    result = await session.execute(
+        _unscored_annotations_stmt(project_id, predictor_config.id).with_only_columns(
+            col(Annotation.sentence_text)
+        )
     )
-    result = await session.execute(stmt)
     texts = [r[0] for r in result.all()]
 
     sentence_count = len(texts)
@@ -165,13 +169,8 @@ async def dispatch_prediction_job(
     Raises ValueError if no active predictor is configured.
     """
     # Verify active predictor exists before dispatching
-    stmt = select(PredictorConfig).where(
-        PredictorConfig.project_id == project_id,
-        PredictorConfig.is_active == True,  # noqa: E712
-        PredictorConfig.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    if not result.scalar_one_or_none():
+    predictor_config = await get_active_predictor_config(session, project_id)
+    if not predictor_config:
         raise ValueError("No active predictor configured for this project")
 
     bg_job = BackgroundJob(
@@ -196,10 +195,13 @@ async def dispatch_prediction_job(
         health_key = await redis.exists(b"arq:queue:health-check")
         if health_key:
             arq_job = await redis.enqueue_job("run_prediction_job", project_id, bg_job.id)
-            bg_job.arq_job_id = arq_job.job_id
-            session.add(bg_job)
-            await session.commit()
-            use_sync = False
+            if arq_job is not None:
+                bg_job.arq_job_id = arq_job.job_id
+                session.add(bg_job)
+                await session.commit()
+                use_sync = False
+            else:
+                logger.warning("ARQ refused the job (duplicate ID), running synchronously")
         else:
             logger.warning("No ARQ workers found, running prediction synchronously")
 
@@ -244,10 +246,10 @@ async def get_prediction_job_status(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.PREDICTION,
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.PREDICTION,
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -277,11 +279,11 @@ async def cancel_prediction_job(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.PREDICTION,
-            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.PREDICTION,
+            col(BackgroundJob.status).in_([JobStatus.PENDING, JobStatus.RUNNING]),
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)

@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const WORKFLOW_STEPS = [
   { label: "Data", path: "data" },
-  { label: "Evaluation", path: "evaluation" },
+  { label: "Search", path: "evaluation" },
   { label: "Annotations", path: "annotations" },
   { label: "Export", path: "export" },
 ];

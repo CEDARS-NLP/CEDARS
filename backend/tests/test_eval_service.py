@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
+from app.annotations.models import Annotation  # noqa: F401
+from app.audit.models import AuditEntry  # noqa: F401
+
 # Import ALL models so SQLModel.metadata.create_all creates all tables
 from app.auth.models import User  # noqa: F401
-from app.projects.models import Project, ProjectMember  # noqa: F401
-from app.connectors.models import DataSource, Patient, Note  # noqa: F401
-from app.predictors.models import PredictorConfig  # noqa: F401
-from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: F401
-from app.annotations.models import Annotation  # noqa: F401
+from app.connectors.models import DataSource, Note, Patient  # noqa: F401
+from app.evaluation import service as eval_service
 from app.evaluation.models import (
     EvaluationSession,
     PatientResult,
@@ -23,10 +23,13 @@ from app.evaluation.models import (
     SessionStatus,
 )
 from app.jobs.models import BackgroundJob  # noqa: F401
-from app.pipeline.models import EventConfig as _EC, PipelineRun as _PR, PatientTask as _PT, Evidence as _Ev  # noqa: F401
-from app.audit.models import AuditEntry  # noqa: F401
-
-from app.evaluation import service as eval_service
+from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
+from app.pipeline.models import EventConfig as _EC  # noqa: F401
+from app.pipeline.models import Evidence as _Ev
+from app.pipeline.models import PatientTask as _PT
+from app.pipeline.models import PipelineRun as _PR
+from app.predictors.models import PredictorConfig  # noqa: F401
+from app.projects.models import Project, ProjectMember  # noqa: F401
 
 
 @pytest.fixture
@@ -593,6 +596,7 @@ class TestUpdateLlmConfig:
 # ── Helpers for LLM tests ────────────────────────────────────────
 
 from unittest.mock import AsyncMock
+
 from app.pipeline.classifier import ClassificationResult
 
 

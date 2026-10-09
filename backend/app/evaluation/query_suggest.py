@@ -10,7 +10,9 @@ from app.llm import complete_json
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clinical NLP expert. Given a clinical event description, generate broad search queries to find relevant mentions in clinical notes.
+SYSTEM_PROMPT = """You are a clinical NLP expert.
+Given a clinical event description,
+    generate broad search queries to find relevant mentions in clinical notes.
 
 Use this query syntax:
 - `term1 OR term2` — match notes containing either term in a sentence

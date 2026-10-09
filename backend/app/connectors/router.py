@@ -258,10 +258,16 @@ async def resync_data_source_endpoint(
 
     from app.connectors.service import resync_data_source
     result = await resync_data_source(session, project_id, data_source_id)
+
+    if result.row_count:
+        response = f"Re-synced {result.row_count or 0} rows"
+    else:
+        response = result.error_message or "No data"
+
     return IngestionResponse(
         data_source_id=result.id,
         status=result.status,
-        message=f"Re-synced {result.row_count or 0} rows" if result.row_count else result.error_message or "No data",
+        message=response,
     )
 
 
@@ -310,6 +316,10 @@ async def list_patients_endpoint(
                 id=r["patient"].id,
                 patient_id_ext=r["patient"].patient_id_ext,
                 status=r["patient"].status.value,
+                review_source=r["review_source"],
+                review_reason=r["review_reason"],
+                reviewed_by=r["reviewed_by"],
+                reviewed_at=r["reviewed_at"],
                 note_count=r["note_count"],
                 annotation_count=r["annotation_count"],
                 reviewed_count=r["reviewed_count"],

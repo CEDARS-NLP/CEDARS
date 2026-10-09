@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.nlp.models import NlpJobStatus
 
@@ -13,15 +13,16 @@ class CreateSearchQueryRequest(BaseModel):
     nlp_apply: bool = True
     hide_duplicates: bool = True
     skip_after_event: bool = True
+    exclude_negated: bool = True
 
 
 class UpdateSearchQueryRequest(BaseModel):
     name: str | None = None
     query: str | None = None
-    is_active: bool | None = None
     nlp_apply: bool | None = None
     hide_duplicates: bool | None = None
     skip_after_event: bool | None = None
+    exclude_negated: bool | None = None
 
 
 class SearchQueryResponse(BaseModel):
@@ -33,6 +34,7 @@ class SearchQueryResponse(BaseModel):
     nlp_apply: bool
     hide_duplicates: bool
     skip_after_event: bool
+    exclude_negated: bool
     created_at: datetime
 
 
@@ -67,3 +69,16 @@ class NlpStatsResponse(BaseModel):
     total_sentences: int
     target_sentences: int
     negated_sentences: int
+
+
+class ReprocessImpact(BaseModel):
+    annotations: int
+    predictions: int
+    sentences: int
+
+
+class ReprocessRequest(BaseModel):
+    confirmed: bool
+    expected_annotations: int = Field(ge=0)
+    expected_predictions: int = Field(ge=0)
+    expected_sentences: int = Field(ge=0)

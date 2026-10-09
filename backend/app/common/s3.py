@@ -13,9 +13,12 @@ from app.config import settings
 @functools.lru_cache(maxsize=1)
 def get_s3_client():
     """Create or return cached boto3 S3 client."""
+    config_options = {"signature_version": "s3v4"}
+    if settings.s3_endpoint:
+        config_options["s3"] = {"addressing_style": "path"}
     kwargs: dict = {
         "region_name": settings.s3_region or None,
-        "config": BotoConfig(signature_version="s3v4"),
+        "config": BotoConfig(**config_options),
     }
     if settings.s3_endpoint:
         kwargs["endpoint_url"] = settings.s3_endpoint

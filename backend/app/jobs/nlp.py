@@ -72,13 +72,22 @@ async def execute_nlp_job(
 
         except _NlpCancelledError:
             logger.info("NLP job cancelled for project %s", project_id)
+            await session.rollback()
+            bg_job = await session.get(BackgroundJob, job_db_id)
+            if bg_job is None:
+                return {"error": "Job not found"}
             bg_job.status = JobStatus.CANCELLED
             bg_job.completed_at = now_utc()
 
-        except Exception as exc:
+        except Exception:
             logger.exception("NLP job failed for project %s", project_id)
+            await session.rollback()
+            bg_job = await session.get(BackgroundJob, job_db_id)
+            if bg_job is None:
+                return {"error": "Job not found"}
             bg_job.status = JobStatus.FAILED
-            bg_job.error_message = str(exc)
+            bg_job.error_message = "NLP processing failed. Check server logs for details."
+            bg_job.completed_at = now_utc()
 
         session.add(bg_job)
         await session.commit()

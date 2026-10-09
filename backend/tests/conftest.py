@@ -1,3 +1,4 @@
+import asyncio
 import os
 from unittest.mock import patch
 
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from app.annotations.models import Annotation  # noqa: F401
+from app.annotations.models import Annotation, AnnotationPrediction  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
 from app.common.database import get_session
@@ -112,6 +113,7 @@ async def app(_postgres_url):
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     application = create_app()
+    application.state.test_session_factory = test_session
 
     async def override_get_session():
         async with test_session() as session:
@@ -119,6 +121,21 @@ async def app(_postgres_url):
 
     application.dependency_overrides[get_session] = override_get_session
     yield application
+
+    # Drain fire-and-forget background tasks (e.g. the ARQ-unavailable sync
+    # fallback for prediction jobs) so they commit/finish before we drop the
+    # schema — otherwise they race drop_all and raise "database table is locked"
+    # (SQLite) or touch dropped tables ("no such table: ...").
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    if pending:
+        done, still_pending = await asyncio.wait(pending, timeout=10.0)
+        for t in still_pending:
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
     if _USE_POSTGRES:
         # Nuke and recreate the public schema — drops all tables, enum types, and
@@ -137,6 +154,12 @@ async def app(_postgres_url):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture
+def session_factory(app):
+    """Reuse the app fixture's migration-backed session factory."""
+    return app.state.test_session_factory
 
 
 @pytest.fixture

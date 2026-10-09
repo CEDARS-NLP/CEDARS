@@ -20,6 +20,7 @@ export interface SearchQuery {
   nlp_apply: boolean;
   hide_duplicates: boolean;
   skip_after_event: boolean;
+  exclude_negated: boolean;
   created_at: string;
 }
 
@@ -74,6 +75,7 @@ export interface BackgroundJobStatus {
   status: string;
   progress: number;
   result_summary: Record<string, unknown> | null;
+  error_message?: string | null;
 }
 
 // ── Agentic Pipeline Types ─────────────────────────────────────

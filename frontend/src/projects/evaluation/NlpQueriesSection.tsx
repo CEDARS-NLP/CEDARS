@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -8,8 +8,12 @@ import {
   RefreshCw,
   BarChart3,
 } from "lucide-react";
-import { api } from "@/api/client";
+import { api, ApiError } from "@/api/client";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -18,12 +22,37 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { SearchQuery, NlpStats, NlpJob } from "@/projects/types";
+import type {
+  BackgroundJobStatus,
+  SearchQuery,
+  NlpStats,
+  NlpJob,
+} from "@/projects/types";
+
+interface ReprocessImpact {
+  annotations: number;
+  predictions: number;
+  sentences: number;
+}
 
 export default function NlpQueriesSection({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [newQuery, setNewQuery] = useState("");
   const [newQueryName, setNewQueryName] = useState("");
+  const [excludeNegated, setExcludeNegated] = useState(true);
+  const [reprocessOpen, setReprocessOpen] = useState(false);
+  const reprocessSubmitting = useRef(false);
+  const impactPreview = useMutation({
+    mutationFn: () => api.get<ReprocessImpact>(`/projects/${projectId}/nlp/reprocess-impact`),
+  });
+
+  const { data: project } = useQuery<{ role: string | null }>({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get(`/projects/${projectId}`),
+    enabled: !!projectId,
+  });
+
+  const isAdmin = project?.role === "admin";
 
   const { data: queries } = useQuery<SearchQuery[]>({
     queryKey: ["nlp-queries", projectId],
@@ -38,15 +67,44 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
   const { data: latestJob } = useQuery<NlpJob | null>({
     queryKey: ["nlp-job", projectId],
     queryFn: () => api.get<NlpJob | null>(`/projects/${projectId}/nlp/job`),
+    refetchInterval: (query) =>
+      ["pending", "queued", "running"].includes(query.state.data?.status ?? "")
+        ? 2000
+        : false,
   });
 
+  const { data: latestBackgroundJob } = useQuery<BackgroundJobStatus | null>({
+    queryKey: ["nlp-background-job", projectId],
+    queryFn: () =>
+      api.get<BackgroundJobStatus | null>(`/projects/${projectId}/nlp/job/status`),
+    refetchInterval: (query) =>
+      ["pending", "running"].includes(query.state.data?.status ?? "")
+        ? 2000
+        : false,
+  });
+
+  const backgroundJobId = latestBackgroundJob?.job_id;
+  const backgroundJobStatus = latestBackgroundJob?.status;
+
+  useEffect(() => {
+    if (!backgroundJobId || !backgroundJobStatus ||
+      ["pending", "running"].includes(backgroundJobStatus)) {
+      return;
+    }
+
+    void queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
+  }, [backgroundJobId, backgroundJobStatus, projectId, queryClient]);
+
   const createQuery = useMutation({
-    mutationFn: (body: { query: string; name?: string }) =>
+    mutationFn: (body: { query: string; name?: string; exclude_negated: boolean }) =>
       api.post(`/projects/${projectId}/nlp/queries`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] });
       setNewQuery("");
       setNewQueryName("");
+      setExcludeNegated(true);
     },
   });
 
@@ -57,23 +115,58 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
       queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] }),
   });
 
+  const activateQuery = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/projects/${projectId}/nlp/queries/${id}/activate`, {}),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["nlp-queries", projectId] }),
+  });
+
   const runNlp = useMutation({
-    mutationFn: () => api.post(`/projects/${projectId}/nlp/run`, {}),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.post<BackgroundJobStatus>(`/projects/${projectId}/nlp/run`, {}),
+    onSuccess: (job) => {
+      queryClient.setQueryData(["nlp-background-job", projectId], job);
+      queryClient.invalidateQueries({ queryKey: ["nlp-background-job", projectId] });
       queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["nlp-job", projectId] });
     },
   });
 
   const reprocessNlp = useMutation({
-    mutationFn: () => api.post(`/projects/${projectId}/nlp/reprocess`, {}),
+    mutationFn: (impact: ReprocessImpact) => api.post(`/projects/${projectId}/nlp/reprocess`, {
+      confirmed: true,
+      expected_annotations: impact.annotations,
+      expected_predictions: impact.predictions,
+      expected_sentences: impact.sentences,
+    }),
     onSuccess: () => {
+      setReprocessOpen(false);
       queryClient.invalidateQueries({ queryKey: ["nlp-stats", projectId] });
       queryClient.invalidateQueries({ queryKey: ["nlp-job", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-stats", projectId] });
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        impactPreview.reset();
+        impactPreview.mutate();
+      }
+    },
+    onSettled: () => { reprocessSubmitting.current = false; },
   });
 
-  const isRunning = runNlp.isPending || reprocessNlp.isPending;
+  const backgroundJobIsRunning = ["pending", "running"].includes(
+    latestBackgroundJob?.status ?? "",
+  );
+  const isRunning =
+    runNlp.isPending || reprocessNlp.isPending || backgroundJobIsRunning ||
+    ["pending", "queued", "running"].includes(latestJob?.status ?? "");
+  const confirmReprocess = () => {
+    if (!impactPreview.data || impactPreview.isPending || impactPreview.isError ||
+      isRunning || reprocessSubmitting.current) return;
+    reprocessSubmitting.current = true;
+    reprocessNlp.mutate(impactPreview.data);
+  };
 
   return (
     <div className="space-y-4">
@@ -85,6 +178,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
       </div>
 
       {/* Add query form */}
+      {isAdmin && (
       <Card>
         <CardContent className="pt-4">
           <div className="flex items-end gap-3">
@@ -99,6 +193,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                     createQuery.mutate({
                       query: newQuery.trim(),
                       name: newQueryName.trim() || undefined,
+                      exclude_negated: excludeNegated,
                     });
                   }
                 }}
@@ -117,6 +212,7 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 createQuery.mutate({
                   query: newQuery.trim(),
                   name: newQueryName.trim() || undefined,
+                  exclude_negated: excludeNegated,
                 })
               }
               disabled={!newQuery.trim() || createQuery.isPending}
@@ -125,6 +221,15 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
               Add
             </Button>
           </div>
+          <label className="mt-3 flex w-fit items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={excludeNegated}
+              onChange={(event) => setExcludeNegated(event.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            Hide negated mentions from manual review
+          </label>
           <p className="mt-2 text-xs text-muted-foreground">
             Syntax: terms joined by <code className="rounded bg-muted px-1">OR</code> (any match)
             or <code className="rounded bg-muted px-1">AND</code> (all must match).
@@ -133,10 +238,16 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </p>
         </CardContent>
       </Card>
+      )}
 
       {/* Query list */}
       {queries && queries.length > 0 && (
         <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Only one query can be active at a time. Adding or activating a query
+            deactivates the previous one. Use Reprocess all to apply a different
+            query to already-extracted annotations.
+          </p>
           {queries.map((q) => (
             <div
               key={q.id}
@@ -148,20 +259,43 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
                 {q.name && (
                   <span className="text-xs text-muted-foreground">({q.name})</span>
                 )}
-                {!q.is_active && (
+                {q.exclude_negated && (
+                  <span className="text-xs text-muted-foreground">
+                    Negated mentions hidden
+                  </span>
+                )}
+                {q.is_active ? (
+                  <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    Active
+                  </Badge>
+                ) : (
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                     inactive
                   </span>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                onClick={() => deleteQuery.mutate(q.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {isAdmin && !q.is_active && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={activateQuery.isPending}
+                    onClick={() => activateQuery.mutate(q.id)}
+                  >
+                    Activate
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => deleteQuery.mutate(q.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -178,26 +312,59 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-2">
-              <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
-                {runNlp.isPending ? "Processing..." : "Run NLP"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => reprocessNlp.mutate()}
-                disabled={isRunning}
-              >
-                <RefreshCw className="mr-1.5 h-4 w-4" />
-                {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess All"}
-              </Button>
+              {isAdmin && (
+                <Button onClick={() => runNlp.mutate()} disabled={isRunning}>
+                  {runNlp.isPending || backgroundJobIsRunning ? "Processing..." : "Run NLP"}
+                </Button>
+              )}
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    reprocessNlp.reset();
+                    impactPreview.reset();
+                    setReprocessOpen(true);
+                    impactPreview.mutate();
+                  }}
+                  disabled={isRunning}
+                >
+                  <RefreshCw className="mr-1.5 h-4 w-4" />
+                  {reprocessNlp.isPending ? "Reprocessing..." : "Reprocess all"}
+                </Button>
+              )}
             </div>
             {(runNlp.isError || reprocessNlp.isError) && (
               <p className="text-sm text-destructive">
                 {((runNlp.error || reprocessNlp.error) as Error)?.message || "Pipeline failed"}
               </p>
             )}
+            {latestBackgroundJob && (
+              <div className="text-sm text-muted-foreground">
+                Search run: {" "}
+                <span
+                  className={
+                    latestBackgroundJob.status === "completed"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : latestBackgroundJob.status === "failed"
+                        ? "text-destructive"
+                        : ""
+                  }
+                >
+                  {latestBackgroundJob.status}
+                </span>
+                {latestBackgroundJob.status === "running" && (
+                  <> ({latestBackgroundJob.progress}%)</>
+                )}
+                {latestBackgroundJob.error_message && (
+                  <p className="mt-1 text-destructive">
+                    {latestBackgroundJob.error_message}
+                  </p>
+                )}
+              </div>
+            )}
             {latestJob && (
               <div className="text-sm text-muted-foreground">
-                Last run:{" "}
+                Last full reprocess: {" "}
                 <span
                   className={
                     latestJob.status === "completed"
@@ -251,6 +418,48 @@ export default function NlpQueriesSection({ projectId }: { projectId: string }) 
           </CardContent>
         </Card>
       </div>
+      <Dialog open={reprocessOpen} onOpenChange={(open) => {
+        if (!reprocessSubmitting.current) setReprocessOpen(open);
+      }}>
+        <DialogContent showCloseButton={!reprocessNlp.isPending}>
+          <DialogHeader>
+            <DialogTitle>Reprocess all notes?</DialogTitle>
+            <DialogDescription>
+              This deletes existing annotations, predictions, and sentences, including manual review decisions.
+              Source notes remain. The pipeline will regenerate the NLP results.
+            </DialogDescription>
+          </DialogHeader>
+          {impactPreview.isPending && <p role="status">Loading deletion counts...</p>}
+          {impactPreview.data && !impactPreview.isPending && !impactPreview.isError && (
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt>Annotations to delete</dt><dd>{impactPreview.data.annotations}</dd>
+              <dt>Predictions to delete</dt><dd>{impactPreview.data.predictions}</dd>
+              <dt>Sentences to delete</dt><dd>{impactPreview.data.sentences}</dd>
+            </dl>
+          )}
+          {impactPreview.isError && (
+            <p role="alert" className="text-sm text-destructive">{impactPreview.error.message}</p>
+          )}
+          {reprocessNlp.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {reprocessNlp.error.message}
+              {reprocessNlp.error instanceof ApiError && reprocessNlp.error.status === 409 &&
+                " Review the refreshed counts and confirm again to proceed."}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={reprocessNlp.isPending}
+              onClick={() => setReprocessOpen(false)}>Cancel</Button>
+            {impactPreview.isError && (
+              <Button variant="outline" onClick={() => impactPreview.mutate()}>Retry counts</Button>
+            )}
+            <Button variant="destructive" onClick={confirmReprocess}
+              disabled={!impactPreview.data || impactPreview.isPending || impactPreview.isError || isRunning}>
+              {reprocessNlp.isPending ? "Reprocessing..." : "Confirm reprocess"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

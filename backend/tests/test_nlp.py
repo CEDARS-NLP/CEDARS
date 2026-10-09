@@ -2,9 +2,9 @@
 
 from app.nlp.engine import (
     _detect_negation_proximity,
+    get_nlp,
     parse_query,
     process_note,
-    get_nlp,
 )
 from app.nlp.models import NlpJobStatus, SearchQuery, Sentence
 

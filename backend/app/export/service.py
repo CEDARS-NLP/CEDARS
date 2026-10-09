@@ -6,8 +6,10 @@ import io
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from app.connectors.models import Patient
 from app.evaluation.models import EvaluationSession
+from app.predictors.service import get_active_predictor_config
 
 
 async def get_export_stats(
@@ -42,16 +44,34 @@ async def get_export_stats(
             if tu and isinstance(tu, dict):
                 total_eval_tokens += tu.get("total_tokens", 0)
 
-    return {"total": total, "reviewed": reviewed, "events": events, "total_eval_tokens": total_eval_tokens}
+    return {"total": total, "reviewed": reviewed,
+            "events": events, "total_eval_tokens": total_eval_tokens}
 
 
 async def export_annotations(
     session: AsyncSession,
     project_id: str,
     status_filter: str | None = None,
-) -> list[Annotation]:
-    """Query annotations for export with optional status filter."""
-    stmt = select(Annotation).where(Annotation.project_id == project_id)
+) -> list[dict]:
+    """Query annotations for export with optional status filter.
+
+    Predictor verdicts, when present, are merged in from annotation_predictions.
+    """
+    active = await get_active_predictor_config(session, project_id)
+    active_id = active.id if active else None
+
+    join_cond = (AnnotationPrediction.annotation_id == Annotation.id)
+    if active_id is not None:
+        join_cond = join_cond & (
+            AnnotationPrediction.predictor_config_id == active_id
+        )
+
+    stmt = (
+        select(Annotation, AnnotationPrediction, Patient)
+        .outerjoin(AnnotationPrediction, join_cond)
+        .join(Patient, Patient.id == Annotation.patient_id)
+        .where(Annotation.project_id == project_id)
+    )
 
     if status_filter == "reviewed":
         stmt = stmt.where(Annotation.review_status == ReviewStatus.REVIEWED)
@@ -59,45 +79,90 @@ async def export_annotations(
         stmt = stmt.where(Annotation.event_date.isnot(None))
 
     stmt = stmt.order_by(Annotation.patient_id, Annotation.created_at)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    rows = (await session.execute(stmt)).all()
+
+    return [
+        {
+            "annotation_id": ann.id,
+            "predictor_config_id": pred.predictor_config_id if pred else None,
+            "patient_id": ann.patient_id,
+            "note_id": ann.note_id,
+            "sentence_id": ann.sentence_id,
+            "sentence_text": ann.sentence_text,
+            "token": ann.token,
+            "is_negated": ann.is_negated,
+            "review_excluded": ann.review_excluded,
+            "manual_review_override": ann.manual_review_override,
+            "note_start_index": ann.note_start_index,
+            "note_end_index": ann.note_end_index,
+            "sentence_number": ann.sentence_number,
+            "sentence_start": ann.sentence_start,
+            "sentence_end": ann.sentence_end,
+            "text_date": ann.text_date,
+            "predicted_label": pred.predicted_label if pred else ann.predicted_label,
+            "predicted_score": pred.predicted_score if pred else ann.predicted_score,
+            "predictor_model": pred.predictor_model if pred else ann.predictor_model,
+            "reasoning": (pred.reasoning if pred else ann.reasoning) or "",
+            "review_status": getattr(ann.review_status, "value", ann.review_status),
+            "reviewed_by": ann.reviewed_by,
+            "reviewed_at": ann.reviewed_at,
+            "event_date": ann.event_date,
+            "patient_review_source": patient.review_source,
+            "patient_review_reason": patient.review_reason,
+            "patient_reviewed_by": patient.reviewed_by,
+            "patient_reviewed_at": patient.reviewed_at,
+        }
+        for ann, pred, patient in rows
+    ]
 
 
-def format_csv(annotations: list[Annotation]) -> str:
-    """Format annotations as CSV string."""
+_CSV_HEADERS = [
+    "annotation_id",
+    "predictor_config_id",
+    "patient_id",
+    "note_id",
+    "sentence_id",
+    "sentence_text",
+    "token",
+    "is_negated",
+    "review_excluded",
+    "manual_review_override",
+    "note_start_index",
+    "note_end_index",
+    "sentence_number",
+    "sentence_start",
+    "sentence_end",
+    "text_date",
+    "predicted_label",
+    "predicted_score",
+    "predictor_model",
+    "reasoning",
+    "review_status",
+    "reviewed_by",
+    "reviewed_at",
+    "event_date",
+    "patient_review_source",
+    "patient_review_reason",
+    "patient_reviewed_by",
+    "patient_reviewed_at",
+]
+
+_CSV_DATE_FIELDS = ("text_date", "reviewed_at", "event_date", "patient_reviewed_at")
+
+
+def format_csv(annotations: list[dict]) -> str:
+    """Format annotation export rows as a CSV string."""
     output = io.StringIO()
     writer = csv.writer(output)
-
-    headers = [
-        "patient_id",
-        "note_id",
-        "sentence_id",
-        "sentence_text",
-        "predicted_label",
-        "predicted_score",
-        "predictor_model",
-        "reasoning",
-        "review_status",
-        "reviewed_by",
-        "reviewed_at",
-        "event_date",
-    ]
-    writer.writerow(headers)
+    writer.writerow(_CSV_HEADERS)
 
     for ann in annotations:
-        writer.writerow([
-            ann.patient_id,
-            ann.note_id,
-            ann.sentence_id,
-            ann.sentence_text,
-            ann.predicted_label,
-            ann.predicted_score,
-            ann.predictor_model,
-            ann.reasoning,
-            ann.review_status.value if hasattr(ann.review_status, 'value') else ann.review_status,
-            ann.reviewed_by or "",
-            ann.reviewed_at.isoformat() if ann.reviewed_at else "",
-            ann.event_date.isoformat() if ann.event_date else "",
-        ])
+        row = []
+        for field in _CSV_HEADERS:
+            value = ann.get(field)
+            if field in _CSV_DATE_FIELDS:
+                value = value.isoformat() if value else ""
+            row.append("" if value is None else value)
+        writer.writerow(row)
 
     return output.getvalue()

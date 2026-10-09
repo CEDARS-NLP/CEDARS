@@ -5,6 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.query_service import get_patient_matched_notes
 from app.annotations.schemas import (
@@ -75,8 +76,8 @@ async def _get_search_keywords(
 
     # Find evaluation session via PatientResult → session
     stmt = (
-        select(PatientResult.session_id)
-        .where(PatientResult.pipeline_run_id == pipeline_run_id)
+        select(col(PatientResult.session_id))
+        .where(col(PatientResult.pipeline_run_id) == pipeline_run_id)
         .distinct()
         .limit(1)
     )
@@ -259,7 +260,12 @@ async def reopen_patient_endpoint(
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Re-queue a reviewed patient. Admin only. Preserves annotation decisions."""
-    success = await reopen_patient(session, project_id, patient_id, current_user.id)
+    from app.annotations.review_service import ReopenConflictError
+
+    try:
+        success = await reopen_patient(session, project_id, patient_id, current_user.id)
+    except ReopenConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not success:
         raise_not_found("Patient not found or not in reviewed state")
     return {"ok": True}

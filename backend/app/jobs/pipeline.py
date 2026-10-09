@@ -365,7 +365,9 @@ async def execute_pipeline_run(
 
             # All done?
             if done >= total:
-                if failed > 0 and counts.get("completed", 0) == 0 and counts.get("no_match", 0) == 0:
+                n_completed = counts.get("completed", 0)
+                n_no_match = counts.get("no_match", 0)
+                if failed > 0 and n_completed == 0 and n_no_match == 0:
                     run.status = PipelineRunStatus.FAILED
                 else:
                     run.status = PipelineRunStatus.COMPLETED

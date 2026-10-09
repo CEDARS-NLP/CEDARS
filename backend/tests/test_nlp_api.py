@@ -4,6 +4,9 @@ from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
+
+from app.nlp.models import SearchQuery
 
 
 async def register_and_login(client: AsyncClient) -> None:
@@ -27,6 +30,21 @@ async def create_project(client: AsyncClient) -> str:
     return resp.json()["id"]
 
 
+async def reprocess_with_current_impact(client: AsyncClient, project_id: str):
+    impact = await client.get(f"/api/v1/projects/{project_id}/nlp/reprocess-impact")
+    assert impact.status_code == 200
+    counts = impact.json()
+    return await client.post(
+        f"/api/v1/projects/{project_id}/nlp/reprocess",
+        json={
+            "confirmed": True,
+            "expected_annotations": counts["annotations"],
+            "expected_predictions": counts["predictions"],
+            "expected_sentences": counts["sentences"],
+        },
+    )
+
+
 class TestSearchQueryCRUD:
     async def test_create_query(self, client):
         await register_and_login(client)
@@ -40,20 +58,96 @@ class TestSearchQueryCRUD:
         data = resp.json()
         assert data["query"] == "troponin OR myocardial AND !suspected"
         assert data["is_active"] is True
+        assert data["exclude_negated"] is True
+
+    async def test_create_query_can_include_negated_mentions(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT", "exclude_negated": False},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["exclude_negated"] is False
 
     async def test_list_queries(self, client):
         await register_and_login(client)
         pid = await create_project(client)
 
+        created_ids = []
         for q in ["DVT", "PE"]:
-            await client.post(
+            resp = await client.post(
                 f"/api/v1/projects/{pid}/nlp/queries",
                 json={"query": q},
             )
+            created_ids.append(resp.json()["id"])
 
         resp = await client.get(f"/api/v1/projects/{pid}/nlp/queries")
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        queries = resp.json()
+        assert len(queries) == 2
+        # Only one query may be active per project: the most recently created.
+        active = [q for q in queries if q["is_active"]]
+        assert len(active) == 1
+        assert active[0]["id"] == created_ids[-1]
+
+    async def test_create_query_deactivates_previous(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )
+        assert first.status_code == 201
+        assert first.json()["is_active"] is True
+
+        second = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "PE"},
+        )
+        assert second.status_code == 201
+        assert second.json()["is_active"] is True
+
+        resp = await client.get(f"/api/v1/projects/{pid}/nlp/queries")
+        queries = resp.json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first.json()["id"]]["is_active"] is False
+        assert by_id[second.json()["id"]]["is_active"] is True
+
+    async def test_activate_query_switches_exclusivity(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )).json()
+        second = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "PE"},
+        )).json()
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries/{first['id']}/activate"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+        queries = (await client.get(f"/api/v1/projects/{pid}/nlp/queries")).json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first["id"]]["is_active"] is True
+        assert by_id[second["id"]]["is_active"] is False
+
+    async def test_activate_unknown_query_returns_404(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries/nonexistent/activate"
+        )
+        assert resp.status_code == 404
 
     async def test_update_query(self, client):
         await register_and_login(client)
@@ -67,11 +161,54 @@ class TestSearchQueryCRUD:
 
         resp = await client.put(
             f"/api/v1/projects/{pid}/nlp/queries/{qid}",
-            json={"query": "new query", "is_active": False},
+            json={"query": "new query"},
         )
         assert resp.status_code == 200
         assert resp.json()["query"] == "new query"
-        assert resp.json()["is_active"] is False
+        assert resp.json()["is_active"] is True
+
+    async def test_update_query_ignores_is_active(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        create_resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "old query"},
+        )
+        qid = create_resp.json()["id"]
+
+        # is_active is no longer updatable via PUT; activation goes through
+        # the dedicated activate endpoint.
+        resp = await client.put(
+            f"/api/v1/projects/{pid}/nlp/queries/{qid}",
+            json={"query": "new query", "is_active": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+
+    async def test_second_active_query_insert_rejected_by_index(
+        self, client, session_factory
+    ):
+        """The partial unique index blocks a second active query per project."""
+        await register_and_login(client)
+        pid = await create_project(client)
+
+        first = (await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )).json()
+
+        async with session_factory() as session:
+            session.add(
+                SearchQuery(project_id=pid, query="PE", is_active=True)
+            )
+            with pytest.raises(IntegrityError):
+                await session.commit()
+
+        # The original active query is untouched after the failed insert.
+        queries = (await client.get(f"/api/v1/projects/{pid}/nlp/queries")).json()
+        by_id = {q["id"]: q for q in queries}
+        assert by_id[first["id"]]["is_active"] is True
 
     async def test_delete_query(self, client):
         await register_and_login(client)
@@ -183,6 +320,44 @@ class TestNlpProcessing:
         stats = stats_resp.json()
         assert stats["target_sentences"] == 0
 
+    async def test_negated_matches_are_auto_reviewed_without_a_predictor(self, client):
+        await register_and_login(client)
+        pid = await create_project(client)
+        await self._setup_project_with_notes(client, pid)
+
+        query_resp = await client.post(
+            f"/api/v1/projects/{pid}/nlp/queries",
+            json={"query": "DVT"},
+        )
+        assert query_resp.status_code == 201
+        assert query_resp.json()["exclude_negated"] is True
+
+        resp = await reprocess_with_current_impact(client, pid)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+
+        annotations_resp = await client.get(f"/api/v1/projects/{pid}/annotations")
+        assert annotations_resp.status_code == 200
+        negated = [row for row in annotations_resp.json() if row["is_negated"]]
+        assert negated
+        assert all(row["review_status"] == "reviewed" for row in negated)
+        assert all(row["review_excluded"] is True for row in negated)
+        assert all(row["predicted_label"] is None for row in negated)
+
+        context_resp = await client.get(
+            f"/api/v1/projects/{pid}/annotations/{negated[0]['id']}/context"
+        )
+        assert context_resp.status_code == 200
+        assert any(sentence["review_excluded"] for sentence in context_resp.json()["sentences"])
+
+        stats_resp = await client.get(f"/api/v1/projects/{pid}/annotations/stats")
+        assert stats_resp.status_code == 200
+        assert stats_resp.json()["reviewed"] == len(negated)
+
+        next_patient = await client.get(f"/api/v1/projects/{pid}/annotations/patient/next")
+        assert next_patient.status_code == 200
+        assert next_patient.json()["patient_id"] is None
+
     async def test_list_target_sentences(self, client):
         await register_and_login(client)
         pid = await create_project(client)
@@ -218,7 +393,7 @@ class TestNlpProcessing:
         await asyncio.sleep(0.5)
 
         # Reprocess
-        resp = await client.post(f"/api/v1/projects/{pid}/nlp/reprocess")
+        resp = await reprocess_with_current_impact(client, pid)
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
 

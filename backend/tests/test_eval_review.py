@@ -118,10 +118,11 @@ async def test_result_notes_returns_full_context(client, app):
     )
     session_id = resp.json()["id"]
 
+    from datetime import UTC, datetime
+
     from app.common.database import get_session
-    from app.connectors.models import Patient, Note
+    from app.connectors.models import Note, Patient
     from app.evaluation.models import PatientResult, PatientResultStatus, SearchMatch
-    from datetime import datetime, UTC
 
     # Use the test's overridden database session
     async for db in app.dependency_overrides[get_session]():

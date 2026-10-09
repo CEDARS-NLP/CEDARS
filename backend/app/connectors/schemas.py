@@ -48,6 +48,10 @@ class PatientResponse(BaseModel):
     id: str
     patient_id_ext: str
     status: str
+    review_source: str | None = None
+    review_reason: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
     note_count: int = 0
     annotation_count: int = 0
     reviewed_count: int = 0

@@ -1,11 +1,10 @@
 """API integration tests for data source endpoints."""
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-
 
 # -- Helpers ───────────────────────────────────────────────────────
 

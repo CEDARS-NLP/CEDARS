@@ -118,6 +118,11 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
     )
     failed_count = failed_q.scalar_one()
 
+    if latest_job:
+        completed_at = latest_job.completed_at.isoformat()
+    else:
+        completed_at = None
+
     return {
         "patients": {
             "total": patient_total,
@@ -140,11 +145,13 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
         "jobs": {
             "latest": {
                 "id": latest_job.id,
-                "job_type": latest_job.job_type.value if hasattr(latest_job.job_type, "value") else latest_job.job_type,
-                "status": latest_job.status.value if hasattr(latest_job.status, "value") else latest_job.status,
+                "job_type": latest_job.job_type.value if hasattr(latest_job.job_type,
+                                                                 "value") else latest_job.job_type,
+                "status": latest_job.status.value if hasattr(latest_job.status,
+                                                             "value") else latest_job.status,
                 "progress": latest_job.progress,
                 "started_at": latest_job.started_at.isoformat() if latest_job.started_at else None,
-                "completed_at": latest_job.completed_at.isoformat() if latest_job.completed_at else None,
+                "completed_at": completed_at,
             }
             if latest_job
             else None,

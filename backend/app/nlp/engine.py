@@ -172,6 +172,7 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
             "is_target": bool,
             "is_negated": bool,
             "matched_tokens": [str, ...],
+            "matches": [{"token": str, "note_start_index": int, "note_end_index": int}, ...],
         }
     """
     nlp = get_nlp()
@@ -193,8 +194,10 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
             continue
 
         # Run matcher on this sentence span
-        matches = matcher(sent.as_doc()) if query_groups else []
+        sent_doc = sent.as_doc() if query_groups else None
+        matches = matcher(sent_doc) if query_groups else []
         matched_tokens = []
+        match_spans: list[dict] = []
         has_positive_match = False
         has_negation_violation = False
 
@@ -207,12 +210,19 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
                 meta_idx = sum(len(query_groups[i]) for i in range(g_idx)) + c_idx
                 if meta_idx < len(pattern_meta):
                     _term_text, is_negated_condition = pattern_meta[meta_idx]
-                    sent_doc = sent.as_doc()
-                    token_text = sent_doc[start:end].text
+                    token_span = sent_doc[start:end]
+                    token_text = token_span.text
                     if is_negated_condition:
                         has_negation_violation = True
                     else:
                         matched_tokens.append(token_text)
+                        # Offsets are relative to the whole note, as in v1.
+                        token_start = sent.start_char + token_span.start_char
+                        match_spans.append({
+                            "token": token_text,
+                            "note_start_index": token_start,
+                            "note_end_index": token_start + len(token_text),
+                        })
                         has_positive_match = True
 
         is_target = has_positive_match and not has_negation_violation
@@ -230,6 +240,7 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
             "is_target": is_target,
             "is_negated": is_negated,
             "matched_tokens": matched_tokens if is_target else [],
+            "matches": match_spans if is_target else [],
         })
 
     return sentences

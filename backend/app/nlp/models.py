@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Text, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -45,6 +45,15 @@ class SearchQuery(SQLModel, table=True):
     """
 
     __tablename__ = "search_queries"
+    __table_args__ = (
+        Index(
+            "uq_search_queries_project_active",
+            "project_id",
+            unique=True,
+            postgresql_where=text("is_active AND deleted_at IS NULL"),
+            sqlite_where=text("is_active AND deleted_at IS NULL"),
+        ),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
@@ -54,6 +63,10 @@ class SearchQuery(SQLModel, table=True):
     nlp_apply: bool = Field(default=True)  # apply predictor after NLP
     hide_duplicates: bool = Field(default=True)  # filter duplicate sentences
     skip_after_event: bool = Field(default=True)  # skip sentences after event date
+    exclude_negated: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False, server_default="false"),
+    )
     created_by: str | None = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(
         default_factory=now_utc,
