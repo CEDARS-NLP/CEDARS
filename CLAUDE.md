@@ -5,6 +5,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Rules
 
 - **Never run ad-hoc database patches or data fixes** without explicit user permission. All recovery must be possible from the UI or happen automatically.
+- **Verify with the project skills before submitting a PR** (see Pull Requests below). Do the same when reviewing one.
+- **Change the skills only with the user's approval.** That includes the scripts and stack files under `.claude/skills/`.
+
+## Pull Requests
+
+Two project skills live in `.claude/skills/`. Use both before opening a PR against `feature/v2-platform` or `main`, and when reviewing one:
+- **`verify-cedars`**: the `control-cedars` CLI, which runs a local copy of the ECS deployment.
+- **`cedars-feature-map`**: `features/*.md`, which records each feature's maturity and how to drive it.
+
+1. **Scope:** map the changed files to feature-map rows and multi-surface journeys. The index is `.claude/skills/cedars-feature-map/features/README.md`.
+2. **CI parity:** run `control-cedars test all --ref <sha>`. Report "suite passes locally" and "CI is red because X" as separate facts.
+3. **Static checks:** run `parity check` and `infra validate`.
+4. **Migrations:** if the PR adds a migration, run `stack up --ref <sha>`, `migrate status` and `migrate check`. Then run `deploy rehearse --from aws --to <sha>` on its own instance.
+5. **Live drive:** on an isolated instance (`CEDARS_VERIFY_INSTANCE=<name>`), run the "Driving it" bullets for every affected row, then the journeys that touch them.
+6. **Report:** use the verify-cedars report shape and map each finding to a feature-map row. Run `cleanup --images` afterwards.
+
+Posting a review or comment on GitHub needs the user's go-ahead.
+
+When a PR makes a major change, propose matching skill updates in that PR and make them only once the user approves. Major changes include:
+- a new feature area;
+- a sub-feature changing grade;
+- a new migration, service or deploy step;
+- a change to `infra/cedars-v2`.
+
+The edits go in the feature-map rows and `Last verified`. If the deployment changed, they also go in the verify-cedars stack and `parity check`.
 
 ## Research Guidelines
 

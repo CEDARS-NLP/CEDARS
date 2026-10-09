@@ -118,6 +118,77 @@ class TestCompleteParams:
         assert acompletion.call_args.kwargs["max_tokens"] == 128
 
 
+class TestTemperatureRejectedByModel:
+    """A model the prefix list doesn't know can still reject ``temperature`` with a 400."""
+
+    MODEL = "us.anthropic.claude-newfamily-9"  # deliberately not in _NO_SAMPLING_PARAMS
+    REJECTION = (
+        'BedrockException - {"message":"The model returned the following errors: '
+        '`temperature` is deprecated for this model."}'
+    )
+
+    @pytest.fixture(autouse=True)
+    def _forget_rejections(self):
+        from app.llm import client
+
+        client._REJECTS_TEMPERATURE.clear()
+        yield
+        client._REJECTS_TEMPERATURE.clear()
+
+    def _rejection(self, message=None):
+        import litellm
+
+        return litellm.BadRequestError(
+            message=message or self.REJECTION, model=self.MODEL, llm_provider="bedrock"
+        )
+
+    @pytest.fixture
+    def acompletion(self):
+        with patch("litellm.acompletion", new_callable=AsyncMock) as mock:
+            yield mock
+
+    async def test_retries_without_temperature_and_returns_the_answer(self, acompletion):
+        acompletion.side_effect = [self._rejection(), "ok"]
+        result = await complete(
+            provider="bedrock", model=self.MODEL, messages=[{"role": "user", "content": "hi"}]
+        )
+        assert result == "ok"
+        assert acompletion.call_count == 2
+        assert "temperature" in acompletion.call_args_list[0].kwargs
+        assert "temperature" not in acompletion.call_args_list[1].kwargs
+
+    async def test_remembers_the_model_so_later_calls_skip_the_failed_attempt(self, acompletion):
+        acompletion.side_effect = [self._rejection(), "ok", "ok"]
+        for _ in range(2):
+            await complete(
+                provider="bedrock", model=self.MODEL, messages=[{"role": "user", "content": "hi"}]
+            )
+        assert acompletion.call_count == 3  # 2 for the first call, 1 for the second
+        assert "temperature" not in acompletion.call_args_list[2].kwargs
+
+    async def test_other_bad_requests_still_propagate(self, acompletion):
+        import litellm
+
+        acompletion.side_effect = self._rejection("BedrockException - max_tokens too large")
+        with pytest.raises(litellm.BadRequestError):
+            await complete(
+                provider="bedrock", model=self.MODEL, messages=[{"role": "user", "content": "hi"}]
+            )
+        assert acompletion.call_count == 1
+
+    async def test_does_not_retry_when_temperature_was_never_sent(self, acompletion):
+        import litellm
+
+        acompletion.side_effect = self._rejection()
+        with pytest.raises(litellm.BadRequestError):
+            await complete(
+                provider="bedrock",
+                model="us.anthropic.claude-sonnet-5",  # known: temperature already omitted
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        assert acompletion.call_count == 1
+
+
 class TestJsonModeParam:
     """``response_format`` only reaches providers that implement it natively.
 

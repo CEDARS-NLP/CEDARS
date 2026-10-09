@@ -68,7 +68,10 @@ services:
       start_period: 30s
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
     ports:
       - "8000:8000"
     extra_hosts:
@@ -94,7 +97,10 @@ services:
       CEDARS_SECRET_KEY: dev-secret-key
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
     command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
     extra_hosts:
       - "plmimskbia4:10.254.130.44"
@@ -120,7 +126,10 @@ services:
       CEDARS_SECRET_KEY: dev-secret-key
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
     ports:
       - "3000:80"
     depends_on:

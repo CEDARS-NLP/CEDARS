@@ -42,6 +42,12 @@ _NO_SAMPLING_PARAMS = (
     "claude-mythos-5",
 )
 
+# Bare model names learned at runtime to reject ``temperature``. The prefix list above can only
+# cover families someone has already added; a model it doesn't know answers with the same 400, so
+# ``complete`` retries once without sampling params and remembers the model here for this process.
+_REJECTS_TEMPERATURE: set[str] = set()
+_TEMPERATURE_REJECTION = re.compile(r"`?temperature`?\s+(?:is\s+)?(?:deprecated|not supported)", re.I)
+
 # Providers whose ``response_format={"type": "json_object"}`` LiteLLM passes
 # through to a native JSON mode. Everywhere else it *emulates* the param by
 # forcing a synthetic tool call, and on Bedrock (litellm 1.82) that emulation
@@ -81,7 +87,8 @@ def supports_temperature(model: str) -> bool:
 
     See ``_NO_SAMPLING_PARAMS`` — the newest Claude families reject it outright.
     """
-    return not strip_bedrock_prefixes(model).startswith(_NO_SAMPLING_PARAMS)
+    bare = strip_bedrock_prefixes(model)
+    return bare not in _REJECTS_TEMPERATURE and not bare.startswith(_NO_SAMPLING_PARAMS)
 
 
 def build_litellm_model(provider: str, model: str) -> str:
@@ -204,11 +211,12 @@ async def complete(
     pass straight through to LiteLLM. Returns the raw LiteLLM response; callers
     map exceptions to their own domain errors.
 
-    Three layers of unsupported-param defence, because one isn't enough:
+    Four layers of unsupported-param defence, because one isn't enough:
     ``drop_params=True`` lets LiteLLM silently drop any param its model map
     knows the target rejects, ``supports_temperature`` covers the models that
     map doesn't know about yet, and ``_NATIVE_JSON_MODE`` covers the param the
-    map wrongly claims *is* supported.
+    map wrongly claims *is* supported. The last layer is reactive: if a model none of these
+    know still answers "`temperature` is deprecated", retry once without it and remember the model.
     """
     if supports_temperature(model):
         litellm_kwargs.setdefault("temperature", temperature)
@@ -216,13 +224,26 @@ async def complete(
         litellm_kwargs.pop("response_format")
         logger.debug("Dropped response_format for provider %s (see _NATIVE_JSON_MODE)", provider)
     litellm_kwargs.setdefault("drop_params", True)
-    return await litellm.acompletion(
-        model=build_litellm_model(provider, model),
-        messages=messages,
-        timeout=timeout,
-        **build_connection_kwargs(provider, api_base, api_key),
-        **litellm_kwargs,
-    )
+
+    def call():
+        return litellm.acompletion(
+            model=build_litellm_model(provider, model),
+            messages=messages,
+            timeout=timeout,
+            **build_connection_kwargs(provider, api_base, api_key),
+            **litellm_kwargs,
+        )
+
+    try:
+        return await call()
+    except litellm.BadRequestError as e:
+        # Fourth layer: a model none of the above knows rejected the temperature we sent.
+        if "temperature" not in litellm_kwargs or not _TEMPERATURE_REJECTION.search(str(e)):
+            raise
+        _REJECTS_TEMPERATURE.add(strip_bedrock_prefixes(model))
+        logger.warning("Model %s rejects temperature; retrying without it", model)
+        litellm_kwargs.pop("temperature")
+        return await call()
 
 
 async def complete_json(

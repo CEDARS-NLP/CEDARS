@@ -138,7 +138,9 @@ def create_app() -> FastAPI:
 
     @application.get("/api/v1/health")
     async def health_check():
-        return {"status": "ok", "version": "2.0.0"}
+        from app.config import settings
+
+        return {"status": "ok", "version": "2.0.0", "commit": settings.git_sha}
 
     return application
 

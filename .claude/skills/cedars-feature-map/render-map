@@ -1,0 +1,432 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""render-map: turn features/*.md into one self-contained, interactive HTML page.
+
+The markdown stays the source of truth; this only reads it. The page has no
+external assets, so it opens offline and can be attached to a ticket.
+
+  render-map                      write /tmp/cedars-feature-map.html
+  render-map --open               ... and open it in the default browser
+  render-map --out map.html       write somewhere else
+"""
+import argparse
+import html
+import json
+import re
+import sys
+import webbrowser
+from pathlib import Path
+
+FEATURES = Path(__file__).resolve().parent / "features"
+MATURITY = ["deferred", "stub", "api-only", "beta", "beta (stable pending live)", "stable"]
+
+
+def inline(s: str) -> str:
+    """Markdown inline (code, bold, links) to HTML; everything else escaped."""
+    parts = re.split(r"(`[^`]*`)", s)
+    out = []
+    for p in parts:
+        if p.startswith("`") and p.endswith("`") and len(p) > 1:
+            out.append(f"<code>{html.escape(p[1:-1])}</code>")
+        else:
+            p = html.escape(p, quote=False)
+            p = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", p)
+            p = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", p)
+            out.append(p)
+    return "".join(out)
+
+
+def block(md: str) -> str:
+    """Just enough block markdown for these files: paragraphs, nested lists, code fences, tables."""
+    out, para, lists, in_code, code = [], [], [], False, []
+
+    def flush_para():
+        if para:
+            out.append(f"<p>{inline(' '.join(para))}</p>")
+            para.clear()
+
+    def close_lists(depth=0):
+        while len(lists) > depth:
+            out.append(f"</li></{lists.pop()}>")
+
+    for line in md.splitlines():
+        if line.strip().startswith("```"):
+            if in_code:
+                out.append(f"<pre>{html.escape(chr(10).join(code))}</pre>")
+                code, in_code = [], False
+            else:
+                flush_para()
+                close_lists()
+                in_code = True
+            continue
+        if in_code:
+            code.append(line)
+            continue
+        m = re.match(r"^(\s*)([-*]|\d+\.) (.*)$", line)
+        if m:
+            flush_para()
+            depth = len(m.group(1)) // 2 + 1
+            tag = "ol" if m.group(2)[0].isdigit() else "ul"
+            if depth > len(lists):
+                while depth > len(lists):
+                    out.append(f"<{tag}><li>")
+                    lists.append(tag)
+            else:
+                close_lists(depth)
+                out.append("</li><li>")
+            out.append(inline(m.group(3)))
+        elif line.startswith("|"):
+            flush_para()
+            close_lists()
+            cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
+            if all(re.fullmatch(r":?-+:?", c) for c in cells):
+                continue
+            out.append("<div class='trow'>" + "".join(f"<span>{inline(c)}</span>" for c in cells) + "</div>")
+        elif not line.strip():
+            flush_para()
+            close_lists()
+        elif lists:
+            out.append(" " + inline(line.strip()))
+        else:
+            para.append(line.strip())
+    flush_para()
+    close_lists()
+    return "".join(out)
+
+
+def section(text: str, heading: str) -> str:
+    m = re.search(rf"^## {re.escape(heading)}[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def bullets(md: str) -> list[str]:
+    """Top-level `- ` bullets with their continuation and nested lines."""
+    items, cur = [], None
+    for line in md.splitlines():
+        if line.startswith("- "):
+            if cur is not None:
+                items.append("\n".join(cur))
+            cur = [line]
+        elif cur is not None:
+            cur.append(line)
+    if cur is not None:
+        items.append("\n".join(cur))
+    return items
+
+
+def cites(md: str) -> list[tuple[str, int, int]]:
+    """`dir/name.py:12-30` → ("name.py", 12, 30). Bare `:47` continuations are skipped."""
+    return [(m[0], int(m[1]), int(m[2] or m[1]))
+            for m in re.findall(r"([A-Za-z_][\w.-]*\.(?:py|tsx?|tf|ya?ml|conf|md)):(\d+)(?:-(\d+))?", md)]
+
+
+def near(a: list, b: list, slack: int = 10) -> bool:
+    return any(fa == fb and la - slack <= hb and lb - slack <= ha for fa, la, ha in a for fb, lb, hb in b)
+
+
+def parse_area(f: Path) -> dict:
+    t = f.read_text()
+    title = t.splitlines()[0].lstrip("# ").strip()
+    lv = re.search(r"^Last verified: (.*)$", t, re.M)
+    intro = t.split("## Sub-features")[0]
+    intro = re.sub(r"^#.*\n|^Last verified:.*\n", "", intro, flags=re.M).strip()
+    subs = []
+    for rid, rest in re.findall(r"^\| ([a-z][a-z0-9-]+) \| (.*)$", section(t, "Sub-features"), re.M):
+        cells = [c.strip() for c in rest.rstrip().rstrip("|").split(" | ")]
+        if len(cells) != 6:
+            sys.exit(f"{f.name}: row {rid} has {len(cells)} cells, expected 6")
+        what, mat, surface, since, live, evidence = cells
+        subs.append({"id": rid, "what": inline(what), "what_text": re.sub(r"[`*]", "", what), "maturity": mat,
+                     "surface": surface, "since": since, "live": inline(live), "live_text": live,
+                     "evidence": inline(evidence)})
+    known = {s["id"] for s in subs}
+
+    def named(md: str) -> set[str]:
+        return {i for i in known if re.search(rf"(?<![a-z0-9-]){re.escape(i)}(?![a-z0-9-])", md)}
+
+    driving = {}
+    for b in bullets(section(t, "Driving it with control-cedars")):
+        # "**a**, **b** and **c**:", "**a / b**:", or "This also drives **c**" all count
+        bold = " ".join(re.findall(r"\*\*([^*]+)\*\*", b))
+        for rid in named(bold):
+            driving.setdefault(rid, []).append(block(b))
+    notes = {}
+    for b in bullets(section(t, "Sub-features")):  # grade notes under the table
+        for rid in named(b):
+            notes.setdefault(rid, []).append(block(b))
+    evidence = {s["id"]: cites(s["evidence"]) for s in subs}
+    gotchas = []
+    for b in bullets(section(t, "Gotchas")):
+        m = re.match(r"- \*\*(.+?)\*\*", b)
+        c = cites(b)
+        gotchas.append({"title": inline(m.group(1)) if m else "", "html": block(b), "ids": sorted(named(b)),
+                        "near": sorted(i for i, e in evidence.items() if near(e, c))})
+    for s in subs:
+        s["driving"] = "".join(driving.get(s["id"], []))
+        s["notes"] = "".join(notes.get(s["id"], []))
+    return {"file": f.name, "title": title, "last_verified": lv.group(1) if lv else "", "intro": block(intro),
+            "subs": subs, "gotchas": gotchas, "how": block(section(t, "How to get to it (user POV)"))}
+
+
+def parse_readme() -> dict:
+    t = (FEATURES / "README.md").read_text()
+    index = {}
+    for f, area, roles, overall in re.findall(r"^\| \[([^\]]+)\]\([^)]+\) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$", t, re.M):
+        index[f] = {"scope": area.strip(), "roles": roles.strip(), "overall": overall.strip()}
+    order = [m.strip() for m in re.findall(r"^\d+\. ([a-z-]+)$", section(t, "Sweep order"), re.M)]
+    snap = re.search(r"^Snapshot \(.*?\):\n((?:- .*\n)+)", t, re.M)
+    return {"index": index, "order": order, "snapshot": block(snap.group(0)) if snap else ""}
+
+
+def parse_journeys(all_ids: set[str]) -> list[dict]:
+    t = (FEATURES / "multi-surface-journeys.md").read_text()
+    out = []
+    for jid, name, areas, last, result in re.findall(r"^\| (j-[a-z-]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$", t, re.M):
+        body = section(t, jid)
+        touches = re.search(r"^Touches[^\n]*\n?", body, re.M)
+        ids = set()
+        if touches:
+            line = touches.group(0)
+            ids = {i for i in re.findall(r"`([a-z][a-z0-9-]+)`", line) if i in all_ids}
+            for pat in re.findall(r"`\*(-[a-z-]+)`", line):
+                ids |= {i for i in all_ids if i.endswith(pat)}
+        r = result.strip()
+        verdict = next((v for v in ("PARTIAL", "FAIL", "PASS", "SKIP") if r.startswith(v)), "NOT DRIVEN")
+        out.append({"id": jid, "name": name.strip(), "areas": areas.strip(), "last": last.strip(),
+                    "result": inline(r), "verdict": verdict, "ids": sorted(ids),
+                    "html": block(body.replace(touches.group(0), "") if touches else body)})
+    return out
+
+
+def build() -> dict:
+    readme = parse_readme()
+    files = {p.stem: p for p in FEATURES.glob("*.md") if p.name not in ("README.md", "multi-surface-journeys.md")}
+    order = [a for a in readme["order"] if a in files] + sorted(set(files) - set(readme["order"]))
+    areas = []
+    for stem in order:
+        a = parse_area(files[stem])
+        a.update(readme["index"].get(a["file"], {}))
+        areas.append(a)
+    ids = {s["id"] for a in areas for s in a["subs"]}
+    return {"areas": areas, "journeys": parse_journeys(ids), "snapshot": readme["snapshot"], "maturity": MATURITY}
+
+
+PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CEDARS v2 feature map</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e3e3e0;
+--deferred:#b8b8bd;--stub:#d9534f;--api-only:#e8a33d;--beta:#4a7fd4;--pending:#36a3a3;--stable:#3a9d5d;
+--pass:#3a9d5d;--fail:#d9534f;--partial:#e8a33d;--skip:#9a9aa0}
+@media (prefers-color-scheme:dark){:root{--bg:#151517;--card:#1f1f22;--ink:#ececee;--mute:#9a9aa2;--line:#2f2f34}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:18px 24px 8px}h1{margin:0 0 4px;font-size:20px}.sub{color:var(--mute);font-size:13px}
+.sub p,.sub ul{margin:2px 0}.sub ul{padding-left:18px}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 6px;background:var(--line)}
+.bar span{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:2px 10px;cursor:pointer;user-select:none;font-size:12px;color:var(--ink)}
+.chip i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:0}
+.chip.off{opacity:.35}
+.controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:4px 24px 10px;position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}
+.controls input{padding:6px 10px;border:1px solid var(--line);border-radius:6px;width:260px;background:var(--card);color:var(--ink)}
+.group{display:flex;gap:5px;align-items:center}.group b{font-size:12px;color:var(--mute);font-weight:600;margin-right:2px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px;padding:14px 24px 40px}
+@media (max-width:1100px){main{grid-template-columns:1fr}}
+.tabs{display:flex;gap:6px;margin-bottom:10px}.tab{padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:var(--card)}
+.tab.on{background:var(--ink);color:var(--bg)}
+.areas{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.area{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.area h2{margin:0;font-size:15px;cursor:pointer}.area h2:hover{text-decoration:underline}
+.area .meta{color:var(--mute);font-size:12px;margin:2px 0 6px}
+.area .bar{height:8px;margin:6px 0 8px}
+.tiles{display:flex;flex-wrap:wrap;gap:4px}
+.tile{width:22px;height:22px;border-radius:4px;cursor:pointer;position:relative;border:2px solid transparent}
+.tile.notdriven{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.45) 0 3px,transparent 3px 6px)}
+.tile.failed::after{content:"";position:absolute;right:-3px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--fail);border:1.5px solid var(--card)}
+.tile.dim{opacity:.12}.tile.hit{border-color:var(--ink)}.tile.sel{outline:3px solid var(--ink);outline-offset:1px}
+.tile:hover{transform:scale(1.15)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;position:sticky;top:64px;max-height:calc(100vh - 80px);overflow:auto}
+.panel h3{margin:0 0 4px;font-size:16px}.panel h4{margin:14px 0 4px;font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;font-size:12px;font-weight:600}
+.kv{display:grid;grid-template-columns:90px 1fr;gap:3px 10px;font-size:13px;margin-top:8px}.kv div:nth-child(odd){color:var(--mute)}
+code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(127,127,127,.13);padding:0 3px;border-radius:3px;word-break:break-word}
+pre{font:12px ui-monospace,Menlo,monospace;background:rgba(127,127,127,.1);padding:8px;border-radius:6px;overflow:auto;white-space:pre}
+.gotcha{border-left:3px solid var(--line);padding:2px 0 2px 10px;margin:8px 0;font-size:13px}.gotcha p,.gotcha ul{margin:2px 0}
+.gotcha.hit{border-left-color:var(--fail)}.gotcha.near{border-left-color:var(--api-only)}
+ul,ol{padding-left:20px;margin:4px 0}
+.journeys{display:flex;flex-direction:column;gap:8px}
+.journey{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center}
+.journey.on{outline:2px solid var(--ink)}.journey .n{color:var(--mute);font-size:12px}
+.matrix{border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden;width:100%}
+.matrix th,.matrix td{border:1px solid var(--line);padding:6px 8px;text-align:center;font-size:13px}
+.matrix th:first-child,.matrix td:first-child{text-align:left}
+.matrix td.c{cursor:pointer;font-weight:600}
+.trow{display:flex;gap:8px;font-size:12px;border-bottom:1px solid var(--line);padding:2px 0}.trow span{flex:1}
+.empty{color:var(--mute)}
+a.link{color:inherit;cursor:pointer;text-decoration:underline dotted}
+</style></head><body>
+<header>
+<h1>CEDARS v2 feature map</h1>
+<div class="sub" id="hdr"></div>
+<div class="bar" id="totalbar"></div>
+</header>
+<div class="controls">
+<input id="q" placeholder="Search id, description, evidence…" autocomplete="off">
+<div class="group" id="fmat"><b>Maturity</b></div>
+<div class="group" id="flive"><b>Live</b></div>
+<div class="group" id="fsurf"><b>Surface</b></div>
+</div>
+<main>
+<section>
+<div class="tabs" id="tabs"></div>
+<div id="view"></div>
+</section>
+<aside class="panel" id="panel"></aside>
+</main>
+<script>
+const D = __DATA__;
+const MCOL = {"deferred":"var(--deferred)","stub":"var(--stub)","api-only":"var(--api-only)","beta":"var(--beta)","beta (stable pending live)":"var(--pending)","stable":"var(--stable)"};
+const VCOL = {"PASS":"var(--pass)","FAIL":"var(--fail)","PARTIAL":"var(--partial)","SKIP":"var(--skip)","NOT DRIVEN":"var(--skip)"};
+const LIVE = ["driven","failed","not driven"], SURF = ["UI","API","WS","infra"];
+const subs = D.areas.flatMap(a => a.subs.map(s => Object.assign(s, {area: a.title, file: a.file,
+  liveState: /FAIL/.test(s.live_text) ? "failed" : /^\d{4}-/.test(s.live_text) ? "driven" : "not driven",
+  surf: /UI/.test(s.surface) ? "UI" : /^API/.test(s.surface) ? "API" : /WS/.test(s.surface) ? "WS" : "infra",
+  hay: [s.id, s.what_text, s.surface, s.live_text, s.evidence, a.title, s.notes].join(" ").toLowerCase()})));
+const byId = Object.fromEntries(subs.map(s => [s.id, s]));
+const st = {q:"", mat:new Set(D.maturity), live:new Set(LIVE), surf:new Set(SURF), tab:"map", journey:null, sel:null};
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ok = s => st.mat.has(s.maturity) && st.live.has(s.liveState) && st.surf.has(s.surf) && (!st.q || s.hay.includes(st.q));
+const badge = m => `<span class="badge" style="background:${MCOL[m]||VCOL[m]}">${esc(m)}</span>`;
+const count = (list, key, val) => list.filter(x => x[key] === val).length;
+
+function bar(list) {
+  return D.maturity.map(m => { const n = count(list, "maturity", m);
+    return n ? `<span title="${m}: ${n}" style="width:${100*n/list.length}%;background:${MCOL[m]}"></span>` : ""; }).join("");
+}
+function chips(el, values, set, color) {
+  el.innerHTML = el.querySelector("b").outerHTML + values.map(v => {
+    const n = v in MCOL ? count(subs, "maturity", v) : count(subs, el.id === "flive" ? "liveState" : "surf", v);
+    return `<span class="chip ${set.has(v) ? "" : "off"}" data-v="${esc(v)}">${color ? `<i style="background:${color(v)}"></i>` : ""}${esc(v)} ${n}</span>`;
+  }).join("");
+  el.querySelectorAll(".chip").forEach(c => c.onclick = ev => {
+    const v = c.dataset.v;
+    if (ev.altKey || ev.metaKey) { set.clear(); set.add(v); } else if (set.has(v)) set.delete(v); else set.add(v);
+    render();
+  });
+}
+function header() {
+  const lv = [...new Set(D.areas.map(a => a.last_verified.split(" (")[0]))].join(", ");
+  $("hdr").innerHTML = `${subs.length} sub-features in ${D.areas.length} areas, ${D.journeys.length} journeys. Last verified ${esc(lv)}. Click a tile for details; ⌥/⌘-click a chip to show only that value.` + D.snapshot;
+  $("totalbar").innerHTML = bar(subs);
+}
+function tiles(a) {
+  const hit = st.journey ? new Set(D.journeys.find(j => j.id === st.journey).ids) : null;
+  return a.subs.map(s => {
+    const cls = ["tile", s.liveState === "not driven" ? "notdriven" : "", s.liveState === "failed" ? "failed" : "",
+      !ok(s) || (hit && !hit.has(s.id)) ? "dim" : "", hit && hit.has(s.id) ? "hit" : "", st.sel === s.id ? "sel" : ""].join(" ");
+    return `<span class="${cls}" style="background-color:${MCOL[s.maturity]}" data-id="${s.id}" title="${esc(s.id)} · ${esc(s.maturity)} · ${esc(s.liveState)}\n${esc(s.what_text)}"></span>`;
+  }).join("");
+}
+function viewMap() {
+  return `<div class="areas">` + D.areas.map(a => {
+    const shown = a.subs.filter(ok).length;
+    return `<div class="area"><h2 data-area="${esc(a.file)}">${esc(a.title)}</h2>
+      <div class="meta">${esc(a.overall||"")} · ${a.subs.length} sub-features${shown < a.subs.length ? `, ${shown} shown` : ""} · ${a.gotchas.length} gotchas · ${esc(a.roles||"")}</div>
+      <div class="bar">${bar(a.subs)}</div><div class="tiles">${tiles(a)}</div></div>`;
+  }).join("") + `</div>`;
+}
+function viewJourneys() {
+  return `<div class="journeys">` + D.journeys.map(j => `<div class="journey ${st.journey === j.id ? "on" : ""}" data-j="${j.id}">
+    ${badge(j.verdict)}<div><b>${esc(j.name)}</b><div class="n">${esc(j.id)} · ${esc(j.areas)} · last live ${esc(j.last)}</div><div class="n">${j.result}</div></div>
+    <div class="n">${j.ids.length} touched</div></div>`).join("") + `</div>`;
+}
+function viewMatrix() {
+  const head = `<tr><th>Area</th>${D.maturity.map(m => `<th>${badge(m)}</th>`).join("")}<th>driven live</th><th>gotchas</th></tr>`;
+  const rows = D.areas.map(a => `<tr><td><a class="link" data-area="${esc(a.file)}">${esc(a.title)}</a></td>` +
+    D.maturity.map(m => { const n = a.subs.filter(s => s.maturity === m && ok(s)).length;
+      return `<td class="c" data-area-m="${esc(a.file)}|${esc(m)}" style="${n ? `background:color-mix(in srgb, ${MCOL[m]} ${Math.min(85, 18 + n*9)}%, transparent)` : ""}">${n || ""}</td>`; }).join("") +
+    `<td>${a.subs.filter(s => s.liveState !== "not driven").length}/${a.subs.length}</td><td>${a.gotchas.length}</td></tr>`).join("");
+  return `<table class="matrix">${head}${rows}</table>`;
+}
+function panelSub(s) {
+  const js = D.journeys.filter(j => j.ids.includes(s.id));
+  const area = D.areas.find(a => a.file === s.file);
+  const g = area.gotchas.filter(g => g.ids.includes(s.id)), gn = area.gotchas.filter(g => !g.ids.includes(s.id) && g.near.includes(s.id));
+  return `<h3>${esc(s.id)}</h3><div class="n">${esc(s.area)} · <a class="link" data-area="${esc(s.file)}">${esc(s.file)}</a></div>
+    <p>${s.what}</p><div>${badge(s.maturity)}</div>
+    <div class="kv"><div>Surface</div><div>${esc(s.surface)}</div><div>Since</div><div><code>${esc(s.since)}</code></div>
+    <div>Live</div><div>${s.live}</div><div>Evidence</div><div>${s.evidence}</div></div>
+    ${s.notes ? `<h4>Grade notes</h4>${s.notes}` : ""}
+    <h4>How to prove it</h4>${s.driving || `<p class="empty">No "Driving it" bullet names this id.</p>`}
+    <h4>Gotchas</h4>${g.map(x => `<div class="gotcha hit">${x.html}</div>`).join("")}
+    ${gn.length ? `<div class="n">Cite the same source lines as this row's evidence:</div>` + gn.map(x => `<div class="gotcha near">${x.html}</div>`).join("") : ""}
+    ${g.length + gn.length ? "" : `<p class="empty">None tied to this row.</p>`}
+    <p><a class="link" data-area="${esc(s.file)}">All ${area.gotchas.length} ${esc(s.area)} gotchas</a></p>
+    <h4>Journeys</h4>${js.length ? js.map(j => `<div><a class="link" data-j="${j.id}">${esc(j.name)}</a> ${badge(j.verdict)}</div>`).join("") : `<p class="empty">Not part of a journey.</p>`}`;
+}
+function panelArea(a) {
+  return `<h3>${esc(a.title)}</h3><div class="n">${esc(a.file)} · last verified ${esc(a.last_verified)}</div>
+    <div class="bar">${bar(a.subs)}</div>${a.intro}<h4>How to get to it</h4>${a.how}
+    <h4>Gotchas (${a.gotchas.length})</h4>${a.gotchas.map(g => `<div class="gotcha">${g.html}</div>`).join("")}`;
+}
+function panelJourney(j) {
+  return `<h3>${esc(j.name)}</h3><div>${badge(j.verdict)} <span class="n">${esc(j.id)} · ${esc(j.areas)} · last live ${esc(j.last)}</span></div><p>${j.result}</p>
+    <h4>Touches (${j.ids.length})</h4><div>${j.ids.map(i => `<a class="link" data-id="${i}">${i}</a>`).join(", ")}</div>${j.html}`;
+}
+function panelHome() {
+  const worst = subs.filter(s => s.maturity === "stub" || s.liveState === "failed");
+  return `<h3>Start here</h3><p>Tiles are sub-features, colored by maturity. <b>Striped</b>: never driven live. <b>Red dot</b>: a live drive failed. Click an area title for its summary and gotchas, the Journeys tab for cross-area flows, Matrix for counts.</p>
+    <h4>Stub or failed live (${worst.length})</h4>${worst.map(s => `<div><a class="link" data-id="${s.id}">${s.id}</a> ${badge(s.maturity)}</div>`).join("")}`;
+}
+function render() {
+  chips($("fmat"), D.maturity, st.mat, m => MCOL[m]);
+  chips($("flive"), LIVE, st.live);
+  chips($("fsurf"), SURF, st.surf);
+  $("tabs").innerHTML = [["map","Map"],["journeys","Journeys"],["matrix","Matrix"]].map(([k,l]) =>
+    `<span class="tab ${st.tab === k ? "on" : ""}" data-tab="${k}">${l}</span>`).join("") +
+    (st.journey ? `<span class="chip" id="clearj">✕ journey filter: ${esc(st.journey)}</span>` : "");
+  $("view").innerHTML = st.tab === "map" ? viewMap() : st.tab === "journeys" ? viewJourneys() : viewMatrix();
+  const p = st.panel || {};
+  $("panel").innerHTML = p.sub ? panelSub(byId[p.sub]) : p.area ? panelArea(D.areas.find(a => a.file === p.area))
+    : p.j ? panelJourney(D.journeys.find(j => j.id === p.j)) : panelHome();
+}
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-id],[data-area],[data-j],[data-tab],[data-area-m],#clearj");
+  if (!t) return;
+  if (t.id === "clearj") { st.journey = null; }
+  else if (t.dataset.tab) st.tab = t.dataset.tab;
+  else if (t.dataset.id) { st.sel = t.dataset.id; st.panel = {sub: t.dataset.id}; }
+  else if (t.dataset.area) st.panel = {area: t.dataset.area};
+  else if (t.dataset.areaM) { const [f, m] = t.dataset.areaM.split("|"); st.mat = new Set([m]); st.tab = "map"; st.panel = {area: f}; }
+  else if (t.dataset.j) { st.journey = st.journey === t.dataset.j && st.tab === "journeys" ? null : t.dataset.j; st.panel = {j: t.dataset.j};
+    if (t.closest("#panel")) st.tab = "map"; }
+  render();
+});
+$("q").oninput = ev => { st.q = ev.target.value.trim().toLowerCase(); render(); };
+header(); render();
+</script></body></html>
+"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out", default="/tmp/cedars-feature-map.html", help="output file (default: %(default)s)")
+    ap.add_argument("--open", action="store_true", help="open the page in the default browser")
+    args = ap.parse_args()
+    data = build()
+    out = Path(args.out).resolve()
+    out.write_text(PAGE.replace("__DATA__", json.dumps(data).replace("</", "<\\/")))
+    n = sum(len(a["subs"]) for a in data["areas"])
+    print(f"wrote {out}: {n} sub-features, {len(data['areas'])} areas, {len(data['journeys'])} journeys")
+    if args.open:
+        webbrowser.open(out.as_uri())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

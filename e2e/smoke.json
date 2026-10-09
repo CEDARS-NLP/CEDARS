@@ -1,0 +1,12 @@
+[
+  {"goto": "/projects"},
+  {"expect": {"role": "heading", "name": "Projects"}, "state": "visible"},
+  {"expect_text": "control-cedars seed"},
+  {"goto": "/projects/{project}"},
+  {"expect_url": "/projects/"},
+  {"goto": "/projects/{project}/data"},
+  {"expect_no_text": "Something went wrong"},
+  {"goto": "/projects/{project}/patients"},
+  {"expect_no_text": "Something went wrong"},
+  {"screenshot": "smoke-done"}
+]

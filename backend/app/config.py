@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # LLM settings
     allow_cloud_llm: bool = True
 
+    # Build identity: the git commit baked into the image (Dockerfile ARG GIT_SHA), "dev" when unset.
+    git_sha: str = "dev"
+
     # CORS
     cors_origins: str = "http://localhost:5173"
 
