@@ -10,6 +10,7 @@ from app.dependencies import require_project_role
 from app.evaluation.schemas import (
     CommitRequest,
     CommitResponse,
+    CostResponse,
     CreateSessionRequest,
     EventConfigRequest,
     FunnelResponse,
@@ -31,6 +32,7 @@ from app.evaluation.service import (
     create_session,
     discard_session,
     execute_search_queries,
+    get_cost_summary,
     get_funnel_stats,
     get_next_unreviewed_result,
     get_query_matches,
@@ -45,6 +47,7 @@ from app.evaluation.service import (
 from app.evaluation.service import (
     get_session as get_eval_session,
 )
+from app.llm.usage import UsageScope
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/evaluation",
@@ -193,13 +196,18 @@ async def suggest_queries_endpoint(
                             \nYou may set it in project settings.""")
 
     try:
-        suggestions = await suggest_queries(
-            description=body.description,
-            llm_provider=project.llm_provider,
-            llm_model=project.llm_model,
-            llm_api_base=project.llm_api_base,
-            llm_api_key=project.llm_api_key,
-        )
+        with UsageScope(
+            project_id, "query_suggestion", ref_id=session_id, user_id=_user.id
+        ) as usage_scope:
+            suggestions = await suggest_queries(
+                description=body.description,
+                llm_provider=project.llm_provider,
+                llm_model=project.llm_model,
+                llm_api_base=project.llm_api_base,
+                llm_api_key=project.llm_api_key,
+            )
+        usage_scope.flush(db)
+        await db.commit()
         return SuggestQueriesResponse(suggestions=suggestions)
     except ValueError as e:
         import logging
@@ -437,6 +445,18 @@ async def funnel_endpoint(
     return FunnelResponse(**stats)
 
 
+@router.get("/sessions/{session_id}/cost", response_model=CostResponse)
+async def cost_endpoint(
+    project_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
+):
+    """Actual LLM spend so far and a projected cost for the whole project."""
+    await _get_session_or_404(db, project_id, session_id)
+    return CostResponse(**await get_cost_summary(db, session_id))
+
+
 # ── Commit ───────────────────────────────────────────────────────
 
 
@@ -459,12 +479,15 @@ async def commit_endpoint(
         )
 
         from app.evaluation.service import dispatch_full_pipeline_run
-        run = await dispatch_full_pipeline_run(db, session)
+        projection = (await get_cost_summary(db, session_id))["projection"]
+        run = await dispatch_full_pipeline_run(db, session, cost_estimate=projection)
 
         return CommitResponse(
             session=SessionResponse.model_validate(session, from_attributes=True),
             pipeline_run_id=run.id,
             total_patients=run.total_patients,
+            estimated_cost=projection["estimated_cost"] if projection else None,
+            cost_basis=projection["basis"] if projection else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))

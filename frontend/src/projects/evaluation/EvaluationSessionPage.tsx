@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
-import type { UnifiedSession, FunnelStats } from "@/projects/types";
+import type { UnifiedSession, FunnelStats, SessionCost } from "@/projects/types";
 import FunnelBar from "./FunnelBar";
 import StepCard, { type StepState } from "./StepCard";
 import EventDefinitionSection from "./EventDefinitionSection";
@@ -62,6 +62,17 @@ export default function EvaluationSessionPage() {
     refetchInterval: llmRunning ? 3000 : false,
   });
 
+  // Actual spend (from stored per-patient usage) and the full-dataset projection.
+  const { data: cost } = useQuery({
+    queryKey: ["cost", projectId, sessionId],
+    queryFn: () =>
+      api.get<SessionCost>(
+        `/projects/${projectId}/evaluation/sessions/${sessionId}/cost`
+      ),
+    enabled: !!session,
+    refetchInterval: llmRunning ? 3000 : false,
+  });
+
   // When a classification run ends, the results and metrics are new.
   const wasRunning = useRef(false);
   useEffect(() => {
@@ -76,6 +87,7 @@ export default function EvaluationSessionPage() {
   function refresh() {
     qc.invalidateQueries({ queryKey: ["eval-session", projectId, sessionId] });
     qc.invalidateQueries({ queryKey: ["funnel", projectId, sessionId] });
+    qc.invalidateQueries({ queryKey: ["cost", projectId, sessionId] });
     qc.invalidateQueries({ queryKey: ["eval-sessions", projectId] });
   }
 
@@ -138,7 +150,12 @@ export default function EvaluationSessionPage() {
         )}
       </div>
 
-      <FunnelBar stats={funnel ?? null} isLoading={funnelLoading} stale={searchStale} />
+      <FunnelBar
+        stats={funnel ?? null}
+        isLoading={funnelLoading}
+        stale={searchStale}
+        cost={cost ?? null}
+      />
 
       <div className="space-y-3 p-6">
         <StepCard
@@ -286,6 +303,7 @@ export default function EvaluationSessionPage() {
               projectId={projectId!}
               session={session}
               onRefresh={refresh}
+              cost={cost ?? null}
             />
           ) : (
             <p className="text-sm text-muted-foreground">

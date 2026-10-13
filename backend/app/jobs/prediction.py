@@ -13,6 +13,7 @@ from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus
+from app.llm.usage import add_usage
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.service import get_active_predictor_config
@@ -119,6 +120,15 @@ async def execute_prediction_job(
                         prediction = await predictor.predict(annotation.sentence_text)
                         stats["predictions_made"] += 1
                         pred_use = prediction.token_usage
+                        add_usage(
+                            session,
+                            project_id=project_id,
+                            source="bulk_prediction",
+                            provider=predictor_config.config.get("provider"),
+                            model=predictor_config.config.get("model"),
+                            usage=asdict(pred_use) if pred_use else None,
+                            ref_id=bg_job.id,
+                        )
                         if pred_use:
                             stats["token_usage"]["prompt_tokens"] += pred_use.prompt_tokens
                             stats["token_usage"]["completion_tokens"] += pred_use.completion_tokens

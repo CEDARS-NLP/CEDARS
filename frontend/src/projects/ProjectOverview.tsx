@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ProjectStats } from "@/projects/types";
+import LlmUsagePanel from "@/projects/LlmUsagePanel";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -508,6 +509,8 @@ export default function ProjectOverview() {
     <div className="space-y-6">
       {/* Project settings */}
       <ProjectSettings projectId={projectId!} />
+
+      <LlmUsagePanel projectId={projectId!} />
 
       {/* Stats cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

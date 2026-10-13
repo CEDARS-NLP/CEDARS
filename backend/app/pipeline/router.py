@@ -7,6 +7,7 @@ from app.auth.models import User
 from app.common.database import get_session
 from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
+from app.llm.usage import UsageScope
 from app.pipeline.schemas import (
     CommitEventConfigRequest,
     CreateEventConfigRequest,
@@ -153,16 +154,20 @@ async def generate_patterns_endpoint(
     from app.pipeline.pattern_generator import generate_search_patterns
 
     try:
-        patterns = await generate_search_patterns(
-            event_name=ec.name,
-            description=ec.description,
-            include_criteria=ec.include_criteria,
-            exclude_criteria=ec.exclude_criteria,
-            llm_provider=ec.llm_provider,
-            llm_model=ec.llm_model,
-            llm_api_base=ec.llm_api_base,
-            llm_api_key=ec.llm_api_key,
-        )
+        with UsageScope(
+            project_id, "pattern_generation", ref_id=event_config_id, user_id=current_user.id
+        ) as usage_scope:
+            patterns = await generate_search_patterns(
+                event_name=ec.name,
+                description=ec.description,
+                include_criteria=ec.include_criteria,
+                exclude_criteria=ec.exclude_criteria,
+                llm_provider=ec.llm_provider,
+                llm_model=ec.llm_model,
+                llm_api_base=ec.llm_api_base,
+                llm_api_key=ec.llm_api_key,
+            )
+        usage_scope.flush(session)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

@@ -12,6 +12,8 @@ from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
 from app.jobs.models import BackgroundJob, JobStatus, JobType
+from app.llm.pricing import estimate_cost
+from app.llm.usage import add_usage
 from app.predictors.base import PredictionResult, PredictorError
 from app.predictors.factory import create_predictor
 from app.predictors.llm import SYSTEM_PROMPT
@@ -57,6 +59,14 @@ async def run_bulk_predictions(
             prediction = await predictor.predict(annotation.sentence_text)
             stats["predictions_made"] += 1
             pred_usage = prediction.token_usage
+            add_usage(
+                session,
+                project_id=project_id,
+                source="bulk_prediction",
+                provider=predictor_config.config.get("provider"),
+                model=predictor_config.config.get("model"),
+                usage=asdict(pred_usage) if pred_usage else None,
+            )
             if pred_usage:
                 stats["token_usage"]["prompt_tokens"] += pred_usage.prompt_tokens
                 stats["token_usage"]["completion_tokens"] += pred_usage.completion_tokens
@@ -120,6 +130,7 @@ async def estimate_bulk_predictions(
             "estimated_prompt_tokens": 0,
             "estimated_completion_tokens": 0,
             "estimated_total_tokens": 0,
+            "estimated_cost": None,
         }
 
     result = await session.execute(
@@ -136,6 +147,7 @@ async def estimate_bulk_predictions(
             "estimated_prompt_tokens": 0,
             "estimated_completion_tokens": 0,
             "estimated_total_tokens": 0,
+            "estimated_cost": None,
         }
 
     enc = tiktoken.get_encoding("cl100k_base")
@@ -155,6 +167,12 @@ async def estimate_bulk_predictions(
         "estimated_prompt_tokens": total_prompt_tokens,
         "estimated_completion_tokens": estimated_completion_tokens,
         "estimated_total_tokens": total_prompt_tokens + estimated_completion_tokens,
+        "estimated_cost": estimate_cost(
+            predictor_config.config.get("provider"),
+            predictor_config.config.get("model"),
+            total_prompt_tokens,
+            estimated_completion_tokens,
+        ),
     }
 
 

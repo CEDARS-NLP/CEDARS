@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { approxCost } from "@/lib/cost";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -86,10 +87,18 @@ export default function SampleRunSection({
         <Fact label="Matched the search">{funnel ? matched : "—"}</Fact>
         <Fact label="Estimated cost">
           {funnel?.estimated_cost != null
-            ? `~$${funnel.estimated_cost.toFixed(2)}`
+            ? approxCost(funnel.estimated_cost)
             : "—"}
         </Fact>
       </dl>
+
+      <p className="max-w-prose text-xs text-muted-foreground">
+        Models bill by <em>tokens</em> — small chunks of text, roughly ¾ of a word
+        each — for what they read and what they write. The estimate multiplies an
+        average excerpt size by the matched notes and applies the provider's list
+        price, so treat it as a ballpark; local models (Ollama, vLLM) cost nothing
+        per token and show no estimate.
+      </p>
 
       {!modelReady && (
         <Notice>

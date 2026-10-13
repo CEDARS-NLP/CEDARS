@@ -1,13 +1,24 @@
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import type { UnifiedSession, CommitResult } from "@/projects/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { UnifiedSession, CommitResult, SessionCost } from "@/projects/types";
+import { approxCost, formatCost, formatTokens } from "@/lib/cost";
 import { CheckCircle2, Loader2, Lock } from "lucide-react";
 
 interface CommitSectionProps {
   projectId: string;
   session: UnifiedSession;
   onRefresh: () => void;
+  cost?: SessionCost | null;
 }
 
 /**
@@ -20,7 +31,10 @@ export default function CommitSection({
   projectId,
   session,
   onRefresh,
+  cost,
 }: CommitSectionProps) {
+  const projection = cost?.projection ?? null;
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const qc = useQueryClient();
   const reviewed = session.metrics?.total_reviewed ?? 0;
   const pending = session.metrics?.total_pending ?? 0;
@@ -32,6 +46,7 @@ export default function CommitSection({
         {}
       ),
     onSuccess: () => {
+      setConfirmOpen(false);
       qc.invalidateQueries({ queryKey: ["eval-session", projectId, session.id] });
       onRefresh();
     },
@@ -66,6 +81,30 @@ export default function CommitSection({
         </div>
       </dl>
 
+      {projection && (
+        <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+          <p>
+            <span className="text-muted-foreground">Projected cost to run on all </span>
+            <span className="tabular-nums">{projection.total_patients}</span>
+            <span className="text-muted-foreground"> patients: </span>
+            <span className="font-medium tabular-nums">
+              {projection.estimated_cost != null
+                ? approxCost(projection.estimated_cost)
+                : "no per-token price for this model"}
+            </span>
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {projection.basis !== "sample"
+              ? "A rough guess: the model hasn't run on a sample yet. Run step 3 for a figure based on real token counts."
+              : projection.patients_to_classify === 0
+              ? "Every patient the search is expected to match was already classified in the sample, so committing adds no model cost."
+              : `Based on the ${projection.sample_patients_classified} sample patients the model read (${formatTokens(
+                  projection.tokens_per_patient
+                )} tokens each). About ${projection.projected_matched_patients} patients should match the search; ${projection.patients_to_classify} still need the model, the rest reuse the sample's answers.`}
+          </p>
+        </div>
+      )}
+
       {reviewed === 0 && (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           You haven&rsquo;t judged any sample patients yet, so there is no evidence
@@ -79,31 +118,85 @@ export default function CommitSection({
         </p>
       )}
 
-      <Button
-        onClick={() => commitMutation.mutate()}
-        disabled={commitMutation.isPending}
-      >
-        {commitMutation.isPending ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Committing
-          </>
-        ) : (
-          <>
-            <Lock className="mr-2 h-4 w-4" /> Commit and run on all patients
-          </>
-        )}
+      <Button onClick={() => setConfirmOpen(true)} disabled={commitMutation.isSuccess}>
+        <Lock className="mr-2 h-4 w-4" /> Commit and run on all patients
       </Button>
 
-      {commitMutation.isError && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {(commitMutation.error as Error).message}
-        </p>
-      )}
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          if (!commitMutation.isPending) setConfirmOpen(open);
+        }}
+      >
+        <DialogContent showCloseButton={!commitMutation.isPending}>
+          <DialogHeader>
+            <DialogTitle>Commit and run on all patients?</DialogTitle>
+            <DialogDescription>
+              This locks the queries and event definition, then sends the matched
+              notes for every patient to the model. It can&rsquo;t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <dt className="text-muted-foreground">Patients in the project</dt>
+            <dd className="tabular-nums">{projection?.total_patients ?? "—"}</dd>
+            <dt className="text-muted-foreground">Still to send to the model</dt>
+            <dd className="tabular-nums">{projection?.patients_to_classify ?? "—"}</dd>
+            <dt className="text-muted-foreground">Estimated tokens</dt>
+            <dd className="tabular-nums">
+              {projection
+                ? formatTokens(projection.prompt_tokens + projection.completion_tokens)
+                : "—"}
+            </dd>
+            <dt className="text-muted-foreground">Estimated cost</dt>
+            <dd className="font-medium tabular-nums">
+              {projection?.estimated_cost != null
+                ? approxCost(projection.estimated_cost)
+                : "no per-token price for this model"}
+            </dd>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            {projection?.basis !== "sample"
+              ? "A rough guess: the model hasn't run on a sample yet, so no real token counts exist."
+              : projection.patients_to_classify === 0
+              ? "Every patient the search is expected to match was already classified in the sample, so this adds no model cost."
+              : "Scaled from the tokens the model used on your sample, so it is a ballpark. Patients already classified in the sample are reused and cost nothing more."}
+          </p>
+          {commitMutation.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {(commitMutation.error as Error).message}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={commitMutation.isPending}
+              onClick={() => setConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => commitMutation.mutate()}
+              disabled={commitMutation.isPending}
+            >
+              {commitMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Committing
+                </>
+              ) : (
+                "Commit and run"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {commitMutation.isSuccess && commitMutation.data && (
         <p className="flex items-center gap-2 rounded-md border border-emerald-600/30 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4" />
-          Started. Processing {commitMutation.data.total_patients} patients.
+          Started. Processing {commitMutation.data.total_patients} patients
+          {commitMutation.data.estimated_cost != null &&
+            ` · estimated ${formatCost(commitMutation.data.estimated_cost)} more`}
+          .
         </p>
       )}
     </div>
