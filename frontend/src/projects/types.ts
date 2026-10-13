@@ -66,6 +66,7 @@ export interface BulkEstimate {
   estimated_prompt_tokens: number;
   estimated_completion_tokens: number;
   estimated_total_tokens: number;
+  estimated_cost: number | null;
 }
 
 // ── Background Job (used by JobBanner) ─────────────────────────
@@ -307,6 +308,7 @@ export interface CommitResult {
   pipeline_run_id: string;
   total_patients: number;
   estimated_cost: number | null;
+  cost_basis: "sample" | "heuristic" | null;
 }
 
 export interface NextEvalResult {
@@ -343,4 +345,48 @@ export interface ResultNotesContext {
   patient_id_ext: string | null;
   notes: ResultNoteContext[];
   search_keywords: string[];
+}
+
+export interface CostProjection {
+  /** "sample" extrapolates measured tokens; "heuristic" is a guess before any sample run. */
+  basis: "sample" | "heuristic";
+  sample_patients_classified: number;
+  total_patients: number;
+  projected_matched_patients: number;
+  /** Projected matches minus those the sample already classified (reused on commit). */
+  patients_to_classify: number;
+  /** Average tokens (read + written) for one classified patient. */
+  tokens_per_patient: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost: number | null;
+}
+
+export interface SessionCost {
+  provider: string | null;
+  model: string | null;
+  spent_prompt_tokens: number;
+  spent_completion_tokens: number;
+  spent_cost: number | null;
+  projection: CostProjection | null;
+}
+
+export interface LlmUsageTotals {
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost: number | null;
+  unpriced_calls: number;
+}
+
+export interface LlmUsageGroup extends LlmUsageTotals {
+  key: string;
+}
+
+export interface LlmUsageReport {
+  days: number;
+  totals: LlmUsageTotals;
+  by_source: LlmUsageGroup[];
+  by_model: LlmUsageGroup[];
+  by_day: { date: string; tokens: number; estimated_cost: number | null }[];
 }

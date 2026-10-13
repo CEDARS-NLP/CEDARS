@@ -20,8 +20,10 @@ from app.evaluation.models import (
     SearchMatch,
     SessionStatus,
 )
+from app.llm.pricing import estimate_cost
+from app.llm.usage import LlmUsage, add_usage
 from app.nlp.engine import parse_query, process_note
-from app.pipeline.classifier import classify_patient
+from app.pipeline.classifier import SYSTEM_PROMPT, classify_patient
 from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
 
 # True when running against PostgreSQL (supports SELECT FOR UPDATE).
@@ -325,6 +327,125 @@ async def execute_search_queries(
 
 # ── Stats & queries ──────────────────────────────────────────────
 
+# Ballpark sizes for the pre-run cost estimate. Excerpts aren't stored until the
+# model runs, so assume an average excerpt and a short JSON verdict.
+_EST_EXCERPT_TOKENS = 400
+_EST_COMPLETION_TOKENS = 150
+_EST_PROMPT_OVERHEAD_TOKENS = len(SYSTEM_PROMPT) // 4 + 150  # ~4 chars/token
+
+
+async def get_cost_summary(db: AsyncSession, session_id: str) -> dict:
+    """Actual spend to date plus a full-dataset projection, for one session.
+
+    Spend is summed from ``PatientResult.token_usage`` (written by both the
+    sample run and the full run), so it survives reloads and needs no extra
+    column. The projection scales the sample's measured tokens per classified
+    patient by the sample's match rate times the project's patient count.
+    """
+    from app.projects.models import Project
+
+    session = (
+        await db.execute(select(EvaluationSession).where(EvaluationSession.id == session_id))
+    ).scalar_one()
+    project = (
+        await db.execute(select(Project).where(Project.id == session.project_id))
+    ).scalar_one()
+    provider, model = project.llm_provider, project.llm_model
+
+    # Spend comes from the ledger. PatientResult.token_usage is copied into the
+    # full run when a session is committed, so summing it would count the sample twice.
+    run_ids = [
+        r[0]
+        for r in (
+            await db.execute(
+                select(PatientResult.pipeline_run_id)
+                .where(
+                    PatientResult.session_id == session_id,
+                    PatientResult.pipeline_run_id.is_not(None),
+                )
+                .distinct()
+            )
+        ).all()
+    ]
+    spent_prompt, spent_completion = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+            ).where(
+                LlmUsage.project_id == session.project_id,
+                LlmUsage.ref_id.in_([session_id, *run_ids]),
+                LlmUsage.source.in_(["evaluation_sample", "pipeline_run"]),
+            )
+        )
+    ).one()
+
+    # The sample's measured tokens per classified patient drive the projection.
+    # Only original sample rows (no pipeline_run_id) count; a failed patient stores
+    # token_usage=None as JSON null, which IS NOT NULL lets through, so skip it.
+    sample_rows = (
+        await db.execute(
+            select(PatientResult.token_usage).where(
+                PatientResult.session_id == session_id,
+                PatientResult.pipeline_run_id.is_(None),
+                PatientResult.token_usage.is_not(None),
+            )
+        )
+    ).all()
+    sample_prompt = sample_completion = sample_n = 0
+    for (usage,) in sample_rows:
+        if not usage:
+            continue
+        sample_prompt += usage.get("prompt_tokens", 0) or 0
+        sample_completion += usage.get("completion_tokens", 0) or 0
+        sample_n += 1
+
+    funnel = await get_funnel_stats(db, session_id)
+    projection = None
+    if funnel["sample_patients"] > 0 and funnel["matched_patients"] > 0:
+        total_patients = (
+            await db.execute(
+                select(func.count(Patient.id)).where(
+                    Patient.project_id == session.project_id,
+                    Patient.deleted_at.is_(None),
+                )
+            )
+        ).scalar() or 0
+        projected = round(total_patients * funnel["matched_patients"] / funnel["sample_patients"])
+        if sample_n:
+            basis = "sample"
+            per_prompt = sample_prompt / sample_n
+            per_completion = sample_completion / sample_n
+        else:
+            basis = "heuristic"
+            notes_per_patient = funnel["matched_notes"] / funnel["matched_patients"]
+            per_prompt = _EST_PROMPT_OVERHEAD_TOKENS + notes_per_patient * _EST_EXCERPT_TOKENS
+            per_completion = _EST_COMPLETION_TOKENS
+        # Committing reuses the sample's classifications, so only the rest cost money.
+        to_classify = max(0, projected - sample_n)
+        prompt_tokens = round(per_prompt * to_classify)
+        completion_tokens = round(per_completion * to_classify)
+        projection = {
+            "basis": basis,
+            "sample_patients_classified": sample_n,
+            "total_patients": total_patients,
+            "projected_matched_patients": projected,
+            "patients_to_classify": to_classify,
+            "tokens_per_patient": round(per_prompt + per_completion),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "estimated_cost": estimate_cost(provider, model, prompt_tokens, completion_tokens),
+        }
+
+    return {
+        "provider": provider,
+        "model": model,
+        "spent_prompt_tokens": int(spent_prompt),
+        "spent_completion_tokens": int(spent_completion),
+        "spent_cost": estimate_cost(provider, model, int(spent_prompt), int(spent_completion)),
+        "projection": projection,
+    }
+
 
 async def get_funnel_stats(
     db: AsyncSession,
@@ -377,6 +498,19 @@ async def get_funnel_stats(
         round((1 - matched_notes / sample_notes) * 100, 1) if sample_notes > 0 else 0.0
     )
 
+    from app.projects.models import Project
+
+    project = (
+        await db.execute(select(Project).where(Project.id == session.project_id))
+    ).scalar_one()
+    estimated_cost = estimate_cost(
+        project.llm_provider,
+        project.llm_model,
+        prompt_tokens=matched_patients * _EST_PROMPT_OVERHEAD_TOKENS
+        + matched_notes * _EST_EXCERPT_TOKENS,
+        completion_tokens=matched_patients * _EST_COMPLETION_TOKENS,
+    )
+
     # LLM stats from patient results
     llm_completed_result = await db.execute(
         select(func.count(PatientResult.id)).where(
@@ -411,6 +545,7 @@ async def get_funnel_stats(
         "matched_patients": matched_patients,
         "matched_notes": matched_notes,
         "filter_percent": filter_percent,
+        "estimated_cost": estimated_cost,
         "llm_stats": {
             "completed": llm_completed,
             "pending": llm_pending,
@@ -717,6 +852,15 @@ async def _execute_sample_llm_impl(
                     completed_at=now_utc(),
                 )
                 db.add(pr)
+                add_usage(
+                    db,
+                    project_id=project_id,
+                    source="evaluation_sample",
+                    provider=project.llm_provider,
+                    model=project.llm_model,
+                    usage=classification.token_usage,
+                    ref_id=session_id,
+                )
                 patients_classified += 1
 
                 if classification.token_usage:
@@ -1163,7 +1307,9 @@ async def _get_or_create_event_config_for_session(
 
 
 async def dispatch_full_pipeline_run(
-    db: AsyncSession, eval_session: EvaluationSession
+    db: AsyncSession,
+    eval_session: EvaluationSession,
+    cost_estimate: dict | None = None,
 ) -> PipelineRun:
     """Create a PipelineRun for the committed session and dispatch to workers."""
     # Create synthetic EventConfig for pipeline compatibility
@@ -1182,7 +1328,11 @@ async def dispatch_full_pipeline_run(
         event_config_id=ec.id,
         run_type="full",
         status=PipelineRunStatus.QUEUED,
-        config_snapshot=eval_session.committed_config or {},
+        # The estimate is kept with the run so it can be compared to actual spend.
+        config_snapshot={
+            **(eval_session.committed_config or {}),
+            **({"cost_estimate": cost_estimate} if cost_estimate else {}),
+        },
         total_patients=total_patients,
         created_by=eval_session.committed_by or "",
     )

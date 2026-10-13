@@ -12,6 +12,7 @@ from app.auth.router import router as auth_router
 from app.connectors.router import router as data_router
 from app.evaluation.router import router as evaluation_router
 from app.export.router import router as export_router
+from app.llm.router import router as llm_usage_router
 from app.nlp.router import router as nlp_router
 from app.pipeline.router import router as pipeline_router
 from app.predictors.router import router as predictors_router
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     application.include_router(admin_router)
     application.include_router(audit_router)
     application.include_router(pipeline_router)
+    application.include_router(llm_usage_router)
 
     from app.evaluation.ws import eval_pipeline_progress_ws
     from app.jobs.ws import job_progress_ws

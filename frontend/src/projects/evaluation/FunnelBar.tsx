@@ -1,10 +1,13 @@
-import type { FunnelStats } from "@/projects/types";
+import type { FunnelStats, SessionCost } from "@/projects/types";
+import { formatCost, formatTokens } from "@/lib/cost";
 
 interface FunnelBarProps {
   stats: FunnelStats | null;
   isLoading: boolean;
   /** Saved queries no longer match the search these numbers came from. */
   stale?: boolean;
+  /** Real spend to date; replaces the pre-run guess once the model has run. */
+  cost?: SessionCost | null;
 }
 
 /**
@@ -14,7 +17,7 @@ interface FunnelBarProps {
  * weighted, which hid the point: the search is what keeps the run affordable.
  * Nested fills on a single track show that proportion directly.
  */
-export default function FunnelBar({ stats, isLoading, stale }: FunnelBarProps) {
+export default function FunnelBar({ stats, isLoading, stale, cost }: FunnelBarProps) {
   if (isLoading || !stats) {
     return (
       <div className="border-b border-border bg-card px-6 py-3">
@@ -46,12 +49,26 @@ export default function FunnelBar({ stats, isLoading, stale }: FunnelBarProps) {
             label={hasLlm ? "called positive by the model" : "not classified yet"}
           />
         </div>
-        {stats.estimated_cost !== null && (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            Search skipped {stats.filter_percent.toFixed(0)}% of notes · about $
-            {stats.estimated_cost.toFixed(2)} for this sample
-          </span>
-        )}
+        {(() => {
+          const spentTokens = cost
+            ? cost.spent_prompt_tokens + cost.spent_completion_tokens
+            : 0;
+          const skipped = `Search skipped ${stats.filter_percent.toFixed(0)}% of notes`;
+          if (cost && spentTokens > 0) {
+            return (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {skipped} · spent{" "}
+                {cost.spent_cost != null ? formatCost(cost.spent_cost) : "—"} so far (
+                {formatTokens(spentTokens)} tokens)
+              </span>
+            );
+          }
+          return stats.estimated_cost !== null ? (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {skipped} · about {formatCost(stats.estimated_cost)} for this sample
+            </span>
+          ) : null;
+        })()}
       </div>
 
       <div

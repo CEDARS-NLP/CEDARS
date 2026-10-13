@@ -16,6 +16,8 @@ from typing import Any
 
 import litellm
 
+from app.llm.usage import current_scope
+
 logger = logging.getLogger(__name__)
 
 # Providers that speak the OpenAI-compatible HTTP API and need an "openai/"
@@ -235,7 +237,7 @@ async def complete(
         )
 
     try:
-        return await call()
+        response = await call()
     except litellm.BadRequestError as e:
         # Fourth layer: a model none of the above knows rejected the temperature we sent.
         if "temperature" not in litellm_kwargs or not _TEMPERATURE_REJECTION.search(str(e)):
@@ -243,7 +245,12 @@ async def complete(
         _REJECTS_TEMPERATURE.add(strip_bedrock_prefixes(model))
         logger.warning("Model %s rejects temperature; retrying without it", model)
         litellm_kwargs.pop("temperature")
-        return await call()
+        response = await call()
+
+    scope = current_scope()
+    if scope:
+        scope.record(provider, model, extract_token_usage(response))
+    return response
 
 
 async def complete_json(

@@ -20,6 +20,7 @@ import app.pipeline.models  # noqa: F401
 import app.projects.models  # noqa: F401
 from app.common.utils import now_utc
 from app.config import settings
+from app.llm.usage import add_usage
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,16 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                     pr.event_date = classification.event_date
                     pr.predicted_score = classification.score
                     pr.token_usage = classification.token_usage
+                    add_usage(
+                        db,
+                        project_id=run.project_id,
+                        source="pipeline_run",
+                        provider=classifier_config.llm_provider,
+                        model=classifier_config.llm_model,
+                        usage=classification.token_usage,
+                        ref_id=run_id,
+                        user_id=run.created_by or None,
+                    )
                     pr.status = PatientResultStatus.COMPLETED
                     pr.completed_at = now_utc()
 

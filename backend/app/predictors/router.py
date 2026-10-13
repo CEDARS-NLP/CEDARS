@@ -1,5 +1,7 @@
 """API routes for predictor configuration."""
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +9,7 @@ from app.auth.models import User
 from app.common.database import get_session
 from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
+from app.llm.usage import add_usage
 from app.predictors.factory import create_predictor
 from app.predictors.schemas import (
     CreatePredictorRequest,
@@ -122,6 +125,18 @@ async def test_predictor_endpoint(
         result = await predictor.predict(body.text)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    add_usage(
+        session,
+        project_id=project_id,
+        source="predictor_test",
+        provider=pc.config.get("provider"),
+        model=pc.config.get("model"),
+        usage=asdict(result.token_usage) if result.token_usage else None,
+        ref_id=predictor_id,
+        user_id=_current_user.id,
+    )
+    await session.commit()
 
     token_usage = None
     if result.token_usage:
