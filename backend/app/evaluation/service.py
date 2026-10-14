@@ -20,9 +20,9 @@ from app.evaluation.models import (
     SearchMatch,
     SessionStatus,
 )
+from app.evaluation.query_expression import normalize_queries
 from app.llm.pricing import estimate_cost
 from app.llm.usage import LlmUsage, add_usage
-from app.evaluation.query_expression import normalize_queries
 from app.nlp.engine import parse_query, process_note
 from app.nlp.schemas import ReprocessRequest
 from app.pipeline.classifier import SYSTEM_PROMPT, classify_patient

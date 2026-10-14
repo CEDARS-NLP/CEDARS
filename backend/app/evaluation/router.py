@@ -51,8 +51,8 @@ from app.evaluation.service import (
 from app.evaluation.service import (
     get_session as get_eval_session,
 )
-from app.llm.usage import UsageScope
 from app.jobs.schemas import BackgroundJobResponse
+from app.llm.usage import UsageScope
 from app.nlp.schemas import NlpJobResponse
 
 router = APIRouter(
