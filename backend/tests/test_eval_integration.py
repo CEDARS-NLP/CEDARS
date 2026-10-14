@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.pipeline.classifier import ClassificationResult
+from tests.conftest import create_legacy_eval_session
 
 
 @pytest.fixture
@@ -66,11 +67,7 @@ class TestUnifiedEvalSessionWorkflow:
         base = f"/api/v1/projects/{pid}/evaluation"
 
         # 1. Create session
-        resp = await auth_client.post(f"{base}/sessions", json={
-            "search_queries": [{"query": "troponin", "type": "include"}],
-        })
-        assert resp.status_code == 201
-        session = resp.json()
+        session = await create_legacy_eval_session(auth_client, pid)
         sid = session["id"]
         assert session["status"] == "draft"
         assert session["sample_size"] == 5

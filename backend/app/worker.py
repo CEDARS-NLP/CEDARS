@@ -7,6 +7,7 @@ import logging
 from urllib.parse import urlparse
 
 from arq.connections import RedisSettings
+from sqlmodel import col
 
 import app.annotations.models  # noqa: F401
 
@@ -383,6 +384,15 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
     return {"processed": processed, "failed": failed}
 
 
+async def run_query_first_attempt_job(ctx: dict, attempt_id: str) -> dict:
+    from app.common.database import async_session
+    from app.evaluation.query_first import execute_attempt
+
+    async with async_session() as db:
+        await execute_attempt(db, attempt_id)
+    return {"attempt_id": attempt_id}
+
+
 async def on_worker_startup(ctx: dict) -> None:
     """Auto-recover orphaned RUNNING pipeline runs on worker startup.
 
@@ -407,7 +417,22 @@ async def on_worker_startup(ctx: dict) -> None:
             result = await db.execute(stmt)
             orphaned_runs = list(result.scalars().all())
 
+            from app.evaluation.models import EvaluationAttempt
+
+            attempts = list((await db.execute(select(EvaluationAttempt).where(
+                col(EvaluationAttempt.status).in_(["queued", "running"]),
+            ))).scalars().all())
+            for attempt in attempts:
+                attempt.status = "queued"
+                attempt.claim_token = None
+                db.add(attempt)
+            await db.commit()
+            for attempt in attempts:
+                await ctx["redis"].enqueue_job("run_query_first_attempt_job", attempt.id)
+
             for run in orphaned_runs:
+                if run.attempt_id:
+                    continue
                 # Reset stuck 'processing' rows
                 stuck_stmt = select(PatientResult).where(
                     PatientResult.pipeline_run_id == run.id,
@@ -449,6 +474,7 @@ class WorkerSettings:
         run_patient_task,
         run_sample_llm_job,
         run_eval_pipeline_job,
+        run_query_first_attempt_job,
     ]
     on_startup = on_worker_startup
     redis_settings = parse_redis_settings()

@@ -165,6 +165,7 @@ export interface SearchQueryItem {
 
 export interface UnifiedSession {
   id: string;
+  workflow_version?: number;
   project_id: string;
   status: UnifiedSessionStatus;
   search_queries: SearchQueryItem[];
@@ -184,6 +185,7 @@ export interface UnifiedSession {
 
 export interface UnifiedSessionListItem {
   id: string;
+  workflow_version?: number;
   project_id: string;
   status: UnifiedSessionStatus;
   search_queries: SearchQueryItem[];

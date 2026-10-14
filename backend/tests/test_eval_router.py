@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import create_legacy_eval_session
+
 
 async def register_and_login(client, email="eval@test.com"):
     """Register and login a user."""
@@ -25,12 +27,7 @@ async def create_project(client, name="Eval Project"):
 
 async def create_eval_session(client, project_id):
     """Create an evaluation session, return the response data."""
-    resp = await client.post(
-        f"/api/v1/projects/{project_id}/evaluation/sessions",
-        json={"search_queries": [{"query": "troponin", "type": "include"}]},
-    )
-    assert resp.status_code == 201
-    return resp.json()
+    return await create_legacy_eval_session(client, project_id)
 
 
 class TestSessionCRUD:

@@ -15,6 +15,8 @@ from app.common.database import get_session
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
+    EvaluationAttempt,
+    LLMPromptRevision,
     PatientResult,
     SearchMatch,
 )
@@ -215,6 +217,17 @@ async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
         await session.commit()
         break
     return project_id, user_id
+
+
+async def create_legacy_eval_session(client, project_id, query="troponin"):
+    from app.evaluation.service import create_session
+
+    application = client._transport.app
+    async with application.state.test_session_factory() as db:
+        project = await db.get(Project, project_id)
+        session = await create_session(db, project_id, project.owner_id,
+                                       search_queries=[{"query": query, "type": "include"}])
+        return session.model_dump(mode="json")
 
 
 @pytest.fixture

@@ -1,26 +1,23 @@
 // frontend/src/projects/evaluation/EvaluationListPage.tsx
-import { useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { UnifiedSessionListItem } from "@/projects/types";
-import { Plus, Copy, Trash2, Search, Sparkles, ArrowRight } from "lucide-react";
+import useProjectPermissions from "@/projects/useProjectPermissions";
+import { Plus, Copy, Trash2 } from "lucide-react";
 
-import NlpQueriesSection from "./NlpQueriesSection";
 import { STATUS_STYLES, statusLabel } from "./sessionStatus";
-
-type Mode = "search" | "llm";
 
 export default function EvaluationListPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [mode, setMode] = useState<Mode>("search");
+  const { canManage } = useProjectPermissions(projectId!);
 
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = [], isLoading, error: sessionsError } = useQuery({
     queryKey: ["eval-sessions", projectId],
     queryFn: () =>
       api.get<UnifiedSessionListItem[]>(
@@ -28,17 +25,11 @@ export default function EvaluationListPage() {
       ),
   });
 
-  const { data: annotationStats } = useQuery({
-    queryKey: ["annotation-stats", projectId],
-    queryFn: () =>
-      api.get<{ total: number }>(`/projects/${projectId}/annotations/stats`),
-  });
-
   const createMutation = useMutation({
     mutationFn: () =>
       api.post<UnifiedSessionListItem>(
         `/projects/${projectId}/evaluation/sessions`,
-        { search_queries: [] }
+        { search_queries: [], workflow_version: 2 }
       ),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["eval-sessions", projectId] });
@@ -56,7 +47,8 @@ export default function EvaluationListPage() {
   const cloneMutation = useMutation({
     mutationFn: (sessionId: string) =>
       api.post<UnifiedSessionListItem>(
-        `/projects/${projectId}/evaluation/sessions/${sessionId}/clone`
+        `/projects/${projectId}/evaluation/sessions/${sessionId}/clone`,
+        { workflow_version: 2 }
       ),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["eval-sessions", projectId] });
@@ -68,67 +60,29 @@ export default function EvaluationListPage() {
     ["draft", "reviewing"].includes(s.status)
   );
   const hasCommitted = sessions.some((s) => s.status === "committed");
-  const annotationCount = annotationStats?.total ?? 0;
 
   return (
     <div className="space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold">Find notes to review</h1>
-        <p className="text-sm text-muted-foreground">
-          Search every note with keyword queries, or test an LLM filter on a
-          sample first and commit the version you trust.
-        </p>
+        <h1 className="text-2xl font-bold">Evaluation sessions</h1>
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <ModeCard
-          icon={<Search className="h-5 w-5" />}
-          title="Run a search query"
-          description="Match keywords across all notes with spaCy and send every hit straight to annotation. No model needed."
-          selected={mode === "search"}
-          onSelect={() => setMode("search")}
-        />
-        <ModeCard
-          icon={<Sparkles className="h-5 w-5" />}
-          title="Test an LLM filter first"
-          description="Define an event, check the model against your own judgment on a small sample, then apply it across every patient."
-          selected={mode === "llm"}
-          onSelect={() => setMode("llm")}
-        />
-      </div>
-
-      {mode === "search" ? (
-        <div className="space-y-4">
-          <NlpQueriesSection projectId={projectId!} />
-          {annotationCount > 0 && (
-            <Card>
-              <CardContent className="flex items-center justify-between py-4">
-                <p className="text-sm text-muted-foreground">
-                  {annotationCount} matched annotation
-                  {annotationCount === 1 ? "" : "s"} ready for review.
-                </p>
-                <Button asChild>
-                  <Link to={`/projects/${projectId}/annotations`}>
-                    Review annotations
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      ) : (
         <>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Evaluation sessions</h2>
             <Button
               onClick={() => createMutation.mutate()}
-              disabled={hasActive || hasCommitted || createMutation.isPending}
+              disabled={!canManage || isLoading || !!sessionsError || hasActive || hasCommitted || createMutation.isPending}
             >
               <Plus className="mr-2 h-4 w-4" />
-              New session
+              Create evaluation session
             </Button>
           </div>
+
+          {(sessionsError || createMutation.error || cloneMutation.error || discardMutation.error) && (
+            <p role="alert" className="text-sm text-destructive">
+              {(sessionsError || createMutation.error || cloneMutation.error || discardMutation.error)?.message}
+            </p>
+          )}
 
           {hasCommitted && (
             <div className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
@@ -142,7 +96,7 @@ export default function EvaluationListPage() {
           ) : sessions.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                No sessions yet. Start one to define an event and try it on a sample.
+                No evaluation sessions yet
               </CardContent>
             </Card>
           ) : (
@@ -168,23 +122,26 @@ export default function EvaluationListPage() {
                   className="flex gap-1"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {s.status !== "discarded" && (
+                  {canManage && s.status !== "discarded" && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => cloneMutation.mutate(s.id)}
-                      disabled={hasActive || hasCommitted}
+                      disabled={hasActive || hasCommitted || cloneMutation.isPending}
                       title="Clone to new session"
+                      aria-label="Clone to new session"
                     >
                       <Copy className="h-4 w-4" />
                     </Button>
                   )}
-                  {["draft", "reviewing"].includes(s.status) && (
+                  {canManage && ["draft", "reviewing"].includes(s.status) && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => discardMutation.mutate(s.id)}
                       title="Discard session"
+                      aria-label="Discard session"
+                      disabled={discardMutation.isPending}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -204,7 +161,9 @@ export default function EvaluationListPage() {
                   </span>
                 )}
                 <span className="ml-auto">
-                  {new Date(s.created_at).toLocaleDateString()}
+                  {new Date(s.created_at).toLocaleDateString("en-US", {
+                    month: "long", day: "numeric", year: "numeric",
+                  })}
                 </span>
               </CardContent>
             </Card>
@@ -212,40 +171,6 @@ export default function EvaluationListPage() {
             </div>
           )}
         </>
-      )}
     </div>
-  );
-}
-
-function ModeCard({
-  icon,
-  title,
-  description,
-  selected,
-  onSelect,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={`rounded-lg border p-4 text-left transition-colors ${
-        selected
-          ? "border-primary bg-primary/5"
-          : "border-border hover:bg-muted/50"
-      }`}
-    >
-      <div className="flex items-center gap-2 font-medium">
-        {icon}
-        {title}
-      </div>
-      <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
-    </button>
   );
 }

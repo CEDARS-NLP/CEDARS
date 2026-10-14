@@ -4,11 +4,13 @@ funnel stats, LLM run, review, metrics, commit."""
 import logging
 import math
 import random
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -66,6 +68,7 @@ async def create_session(
     user_id: str,
     search_queries: list[dict] | None = None,
     cloned_from_id: str | None = None,
+    workflow_version: int = 1,
 ) -> EvaluationSession:
     """Create a new evaluation session with patient sampling.
 
@@ -75,6 +78,13 @@ async def create_session(
     - Sample min(100, total_patients) patients from the project.
     - If cloned_from_id is provided, copy queries + LLM config from that session.
     """
+    if workflow_version == 2:
+        from app.projects.models import Project
+
+        await db.execute(
+            select(Project).where(cast(ColumnElement[str], Project.id) == project_id)
+            .with_for_update()
+        )
     # Check for blocking sessions, locking the rows to prevent concurrent creation
     blocking_stmt = select(EvaluationSession).where(
         EvaluationSession.project_id == project_id,
@@ -109,6 +119,8 @@ async def create_session(
             )
         ).scalar_one_or_none()
         if clone_source:
+            if clone_source.project_id != project_id:
+                raise ValueError("Clone source belongs to another project")
             queries = queries or clone_source.search_queries or []
             event_name = clone_source.event_name
             event_description = clone_source.event_description
@@ -117,6 +129,10 @@ async def create_session(
 
     # Sample patients
     patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
+    if workflow_version == 2:
+        patient_stmt = patient_stmt.where(
+            cast(ColumnElement[datetime | None], Patient.deleted_at).is_(None)
+        )
     result = await db.execute(patient_stmt)
     all_patient_ids = [r[0] for r in result.all()]
 
@@ -125,6 +141,7 @@ async def create_session(
 
     session = EvaluationSession(
         project_id=project_id,
+        workflow_version=workflow_version,
         created_by=user_id,
         status=SessionStatus.DRAFT,
         search_queries=queries,
@@ -138,6 +155,39 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+    if workflow_version == 2:
+        from app.evaluation.models import LLMPromptRevision
+        from app.evaluation.query_first import save_prompt, save_query
+        from app.nlp.models import SearchQuery
+
+        source_query = None
+        if cloned_from_id:
+            source_query = (await db.execute(select(SearchQuery).where(
+                cast(ColumnElement[str | None], SearchQuery.evaluation_session_id)
+                == cloned_from_id,
+            ).order_by(cast(ColumnElement[int | None], SearchQuery.revision).desc())
+            .limit(1))).scalar_one_or_none()
+        if queries:
+            await save_query(db, session, source_query.source_queries if source_query else queries,
+                             source_query.exclude_negated if source_query else True, user_id)
+        if cloned_from_id:
+            source_prompt = (await db.execute(select(LLMPromptRevision).where(
+                cast(ColumnElement[str], LLMPromptRevision.session_id) == cloned_from_id,
+            ).order_by(cast(ColumnElement[int], LLMPromptRevision.revision).desc())
+            .limit(1))).scalar_one_or_none()
+            if source_prompt:
+                payload = source_prompt.model_dump(exclude={"id", "session_id", "project_id",
+                                                           "revision", "created_by", "created_at"})
+                db.add(LLMPromptRevision(session_id=session.id, project_id=project_id,
+                                        revision=1, created_by=user_id, **payload))
+            elif event_name and event_description:
+                project = await db.get(Project, project_id)
+                if project and project.llm_provider and project.llm_model:
+                    await save_prompt(db, session, {
+                        "event_name": event_name, "event_description": event_description,
+                        "include_criteria": include_criteria or "",
+                        "exclude_criteria": exclude_criteria or "",
+                    }, user_id)
     await db.commit()
     await db.refresh(session)
     return session
@@ -187,6 +237,15 @@ async def discard_session(
 
     session.status = SessionStatus.DISCARDED
     session.updated_at = now_utc()
+    if session.workflow_version == 2:
+        from sqlalchemy import update
+
+        from app.evaluation.models import EvaluationAttempt
+
+        await db.execute(update(EvaluationAttempt).where(
+            cast(ColumnElement[str], EvaluationAttempt.session_id) == session.id,
+            cast(ColumnElement[str], EvaluationAttempt.status).in_(["queued", "running"]),
+        ).values(status="cancelled", claim_token=None, updated_at=now_utc()))
     db.add(session)
     await db.commit()
     await db.refresh(session)

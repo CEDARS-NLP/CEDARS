@@ -1,23 +1,91 @@
 # Multi-surface journeys
 
-Last verified: cef611321063 on 2026-10-05 (live)
+Last verified: db8175b73584 on 2026-10-13 (source + targeted local tests; uncommitted implementation, not a deployment)
 
-A journey crosses areas, so it can fail where no single area file looks. Each one names the sub-feature IDs it touches, the invariant that must hold across areas, the last live result, and the API path to drive it. For the UI path, follow each area file's "Driving it" bullet for that sub-feature. Use this file for questions like "what happens to X after Y" and for release smoke tests. Journeys run in the order below, and each assumes the state the one before it left.
+A journey crosses areas, so it can fail where no single area file looks. Current version-2 query-first journeys below are implemented-source drives, all beta and not live-driven. They preserve attempts/revisions, select explicit historical pairs, and intentionally retain separate annotation sets across full runs. October 5 live results and old five-step transcripts remain legacy evidence only; they do not establish deployment or proof of the uncommitted October 13 implementation. Use each area's current drives for exact UI labels and roles.
 
 Preconditions for all: an isolated instance, because these journeys mutate data and inject failures. Run `export CEDARS_VERIFY_INSTANCE=journeys-<date>`, then `$CC doctor` (if your name is UP and you did not start it, pick another), then the README baseline (`stack up`, `seed`). The evidence cited below is on instance `journeys`; a new name keeps it intact. The blocks are copy-pasteable in bash or zsh, in order, in one shell: each one reuses `$CC`, `$P`, `$S`, `$B` and `$RUN` from the block before. `api --field` prints one value, and `api GET … --until PATH=VALUE` polls until it holds (exit 1 on timeout). To run a subset, run journey 1 first, then close each journey's session before the next one clones (commit it as journey 3 does, or `$CC api DELETE $B --expect 200` to discard): a clone is a new session, and it returns 409 while one is draft, reviewing or committed (`evaluation/service.py:78-93`). Counts such as journey 5's 20 annotations assume all five ran. Journey 2 starts from a clone of journey 1's session. Once a session is committed, its results list shows only the pipeline copies (`evaluation/service.py:806-818`), so a re-run's new sample results would be invisible there.
 
 | ID | Journey | Areas | Last live | Result |
 |---|---|---|---|---|
-| j-evaluate-to-export | Evaluate, commit, full pipeline, annotate, export | evaluation, jobs, annotations, export | 2026-10-05 | PARTIAL: counts agree; event dates dropped; JSON export 500 |
-| j-llm-failure-recovery | LLM returns empty, then errors, then recovers | evaluation-run, predictors-nlp | 2026-10-05 | PASS |
+| j-evaluate-to-export | Selected LLM attempt -> derived full run -> independent annotations -> project-wide export | evaluation, jobs, annotations, export | 2026-10-05 (legacy only) | beta, v2 not driven; legacy PARTIAL: event dates dropped, JSON 500 (schema since permits null) |
+| j-llm-failure-recovery | Failed attempt retained, provider recovers, retry/new attempt succeeds | evaluation-run, predictors-nlp | 2026-10-05 (legacy only) | beta, v2 not driven; legacy PASS |
 | j-worker-crash-recovery | Worker dies mid-run; the run still finishes | jobs, evaluation-run, platform-ops | 2026-10-05 | PASS (WebSocket progress FAIL) |
 | j-security-sweep | Security checks across roles (details tracked privately) | projects, evaluation-run, jobs | 2026-10-05 | FAIL (known security defect) |
-| j-repeat-commit | A second committed session on the same project | evaluation-run, annotations, export | 2026-10-05 | FAIL: duplicate annotations |
+| j-repeat-commit | Distinct full runs retain independent annotations; replay same run must not add rows | evaluation-run, annotations, export | 2026-10-05 (legacy only) | beta, v2 not driven; legacy row growth observed, now intentional across runs |
 | j-role-sweep | Each role walks every page; UI and API must agree | all | 2026-10-05 (per area, read-only) | FAIL: UI shows controls the API rejects |
 | j-review-reopen | Review a patient, reopen it, re-claim it | annotations, patients | not driven | source: decisions wiped, lock kept |
 | j-ingest-visibility | Upload, ingest, watch progress, browse patients | data, jobs, patients | 2026-10-05 (seed path) | PARTIAL: counts agree; status lookup loses the job |
 | j-deploy-rehearsal | Old release with data, new migration, roll | platform-ops | 2026-10-05 | PASS (64d13687 → cef61132, 16 steps) |
 | j-databricks-round-trip | Connect, ingest, evaluate, export to Databricks | data, export | not driven | SKIP: needs a Databricks workspace |
+| j-query-only-to-annotation | Inactive draft -> keyword-only full attempt -> reviewable null-prediction sentence annotations | evaluation-setup, evaluation-run, annotations, export | not driven | beta; SQLite tests passed, zero-call/live/browser proof pending |
+| j-versioned-attempt-selection | New draft leaves old results intact; explicitly commit older successful query/prompt pair | evaluation-setup, evaluation-run, predictors-nlp, annotations | not driven | beta; SQLite/frontend tests passed, PostgreSQL/live proof pending |
+
+## Current version-2 journey drives (not driven)
+
+Preconditions: isolated migrated README baseline, fake LLM only, no active draft/reviewing/committed session. These blocks are bash CLI examples, not commands executed October 13. Capture response IDs with `--field`; wait on the exact attempt using `--until`. `$CC api` adds `/api/v1`. Use a fresh project for each independent journey. All writes are admin unless a review role is specified.
+
+### j-query-only-to-annotation
+
+Touches: `eval-session-create`, `eval-query-revisions`, `eval-query-activation`, `eval-keyword-only-run`, `ann-source-commit`, `ann-queue-lock`, `export-filters`.
+
+Invariants: draft save/preview does not change the active project query; include OR/exclude sentence NOT and default-true clinical-negation apply identically to sample/full; one surviving hit admits the note; full processing calls no LLM even with a configured provider/active predictor. All non-deleted patients get results, nonmatches are NO_MATCH, retained sentences become null-prediction reviewable annotations. Independent runs persist; same-run replay adds none.
+
+```bash
+P=/projects/{project}/evaluation/sessions
+S=$($CC api POST $P --as admin --body '{"search_queries":[]}' --expect 201 --field id)
+B=$P/$S/v2
+Q=$($CC api PUT $B/queries --as admin --body '{"search_queries":[{"query":"DVT","type":"include"},{"query":"thromb*","type":"include"},{"query":"suspected","type":"exclude"}],"exclude_negated":true}' --field id)
+$CC db query "select is_active from search_queries where id='$Q'"
+$CC api POST $B/preview --as admin --body "{\"query_id\":\"$Q\"}" --field id
+$CC llm calls
+F=$($CC api POST $B/run-all --as admin --body "{\"query_id\":\"$Q\"}" --field id)
+$CC api GET $B/attempts/$F --as viewer --until status=completed --save query-only-full
+$CC llm calls
+$CC api GET /projects/{project}/annotations --as viewer --save query-only-annotations
+$CC api GET /projects/{project}/annotations/patient/next --as annotator
+$CC db query "select attempt_id, predicted_label, predicted_score, count(*) from annotations where attempt_id='$F' group by 1,2,3"
+```
+
+Observe false before activation, exactly zero classify-call delta, correct run/session/attempt ownership, null predictions, no annotation for NO_MATCH, and successful annotator claim. Repeat cancel/resume/retry on a slow unfinished full attempt and inspect `GROUP BY attempt_id,note_id,sentence_start,sentence_end HAVING count(*)>1` (empty). Completed retry itself returns 409. Compare sample/full on unchanged inputs; include one synthetic note with an excluded sentence and another surviving hit. No PostgreSQL, full-stack or browser PASS is claimed.
+
+### j-versioned-attempt-selection
+
+Touches: `eval-query-revisions`, `eval-prompt-revisions`, `eval-attempt-history`, `eval-attempt-commit`, `eval-query-activation`, `nlp-queries`.
+
+Invariants: revision/query/prompt/attempt foreign-key ownership is session-scoped; project-model/template settings are immutable snapshots, not API-key snapshots; provider/endpoint credentials are guarded at runtime. Saving revision 2 retains attempt 1's matches/results/judgments/metrics and leaves the old active query alone. Explicitly selected attempt 1 commits its exact pair, not revision 2.
+
+Use a fresh session and `$B`, `$Q` as above, then:
+
+```bash
+PR=$($CC api PUT $B/prompt --as admin --body '{"event_name":"DVT","event_description":"Confirmed thrombosis","include_criteria":"Confirmed diagnosis","exclude_criteria":"Rule-out"}' --field id)
+A=$($CC api POST $B/run-llm --as admin --body "{\"query_id\":\"$Q\",\"prompt_revision_id\":\"$PR\"}" --field id)
+$CC api GET $B/attempts/$A --as viewer --until status=completed --save selected-old-before
+$CC api PUT $B/queries --as admin --body '{"search_queries":[{"query":"embol*","type":"include"}],"exclude_negated":false}'
+$CC api PUT $B/prompt --as admin --body '{"event_name":"PE","event_description":"Confirmed embolism","include_criteria":"Confirmed diagnosis","exclude_criteria":"Rule-out"}'
+F=$($CC api POST $B/commit --as admin --body "{\"attempt_id\":\"$A\"}" --field id)
+$CC api GET $B/attempts/$F --as viewer --until status=completed --save selected-old-full
+$CC api GET $B/attempts/$A --as viewer --save selected-old-after
+$CC db query "select id, revision, is_active from search_queries where evaluation_session_id='$S' order by revision"
+```
+
+Observe full source_attempt_id `$A`, query_id `$Q`, prompt_revision_id `$PR`, revision 1 active and revision 2 inactive, and unchanged source results/judgments. UI "Selected attempt" must display the old pair and drive "Commit selected attempt" even after new draft saves. Attempt caches/matches must not bleed. Repeat write/commit as viewer and annotator -> 403; annotator judgment -> 200, viewer -> 403. Wrong-session revision/result -> 404. PostgreSQL/browser proof pending; local `test_history_and_commit_selected_old_pair` and frontend attempt-selection tests passed.
+
+### j-evaluate-to-export (version 2)
+
+Follow the selected-attempt commit drive, then review a specific annotation ID and export CSV/JSON as viewer. Count sentence annotations, not patients: one patient can have several retained hits. Both formats/status filters should preserve independent rows across runs and agree with export stats. Use annotation_id to inspect lineage via annotation API; export itself has no attempt/run/session fields/filter. Sample judgments do not prefill annotation event date/review state. Full execution currently reclassifies instead of reusing sample results, so new calls are expected. JSON null sentence compatibility is source-verified, not a current live PASS.
+
+### j-llm-failure-recovery (version 2)
+
+Run `$CC llm mode empty` and start run-llm with explicit saved query/prompt IDs; wait on that attempt `--until status=failed`, inspect failed result statuses and sanitized errors, then commit its ID -> 409. Restore normal mode and `POST $B/attempts/$A/retry` to recover the same attempt, or start a new run-llm attempt to retain the failed history separately. Any remaining failed patient keeps the attempt failed; commit requires completed and at least one successful result. Read-only attempt GET must not renew execution heartbeat. Test evidence: zero-success/heartbeat, failed-attempt-retry and ownership/provider-guard tests in `test_query_first_evaluation.py`; live failure injection still pending.
+
+### j-repeat-commit (version 2)
+
+After a completed full run, clone its session (201, version 2, new owned revision IDs), then execute another keyword-only full run or successful LLM sample/selected commit. Read-only annotation grouping by attempt/run must show two independent sets; review one earlier row and confirm its decision remains. Resume/recovery/retry of the same unfinished attempt must not create another set. Export defaults include both; this is intentional, not a deduplication failure. Tests `test_distinct_full_runs_keep_separate_annotations` and replay/retry tests passed on SQLite; run-aware annotation browser/export filtering is absent and full-stack/PG proof pending.
+
+## Legacy October 5 journey transcripts
+
+All following session-level APIs/counts/results concern version-1 sessions. Current create/clone produces version 2 and legacy mutation routes reject it, so these blocks cannot be replayed from a fresh seed unchanged. The historical sequential preconditions at the top apply only to those transcripts; use independent current drives above. Unrelated role/deploy/Databricks findings are retained without claiming an October 13 re-drive.
 
 ## j-evaluate-to-export
 
@@ -127,7 +195,7 @@ Last live result (2026-10-05): FAIL (known security defect).
 
 Touches: `eval-session-clone`, `eval-commit`, `ann-source-commit`, `ann-patient-status`, `export-stats`.
 
-Invariant: re-evaluating a project replaces or reconciles the earlier annotations. It must not stack new ones on top.
+Historical invariant (superseded by the approved version-2 contract): this drive originally expected reconciliation across runs. The current invariant intentionally preserves independent records across different runs and forbids only same-run replay duplicates.
 
 ```bash
 S=$($CC api POST $P/$S/clone --expect 201 --field id); B=$P/$S                  # 409 while another session is draft, reviewing or committed
@@ -140,7 +208,7 @@ $CC db query "select patient_id, count(*) from annotations where project_id='{pr
 $CC db query "select count(*) annotations, count(distinct pipeline_run_id) runs from annotations where project_id='{project}'"
 ```
 
-Last live result (2026-10-05): FAIL. After the four commits these journeys make on one project, `annotations` held 20 rows for 5 patients from 4 pipeline runs: 4 per patient, one full set per commit, none dated (`journeys-from-md-2.log` on instance `journeys`; first seen with 15 rows from 3 runs on instance `live`). Patients already REVIEWED come back into the Annotations queue, because the queue picks any patient with an unreviewed label-1 annotation, but their status stays REVIEWED (`review_service.py:204-225`, `:249-250`; source only). `/export/stats.total` grows the same way. The worker does not deduplicate (`worker.py:278-292`). Only one draft, reviewing or committed session can exist per project (`evaluation/service.py:78-93`), so to re-evaluate you discard the current session (`DELETE`, 200, which sets `discarded`) or wait for it to complete. A completed session can also be committed again: `run-llm` has no status check and puts it back to `reviewing` (confirmed live, see `evaluation-run.md` Gotchas).
+Last live observation (2026-10-05, legacy): 20 annotation rows for 5 patients from 4 pipeline runs, one set per commit, none dated (`journeys-from-md-2.log`). This was reported FAIL under the old reconciliation expectation; cross-run growth is now intentional and is not a version-2 failure or PASS. The old queue left reviewed patients' status REVIEWED when re-claimed, and session-level run-llm could reopen completed sessions (see legacy Gotchas). Version 2 rejects locked draft mutations and uses explicit selected attempts; same-attempt replay has SQLite coverage but remains not live-driven.
 
 ## j-role-sweep
 

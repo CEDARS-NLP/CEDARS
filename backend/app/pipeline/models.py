@@ -120,6 +120,10 @@ class PipelineRun(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
     event_config_id: str = Field(foreign_key="event_configs.id", index=True)
+    attempt_id: str | None = Field(default=None, foreign_key="evaluation_attempts.id", index=True)
+    evaluation_session_id: str | None = Field(
+        default=None, foreign_key="evaluation_sessions_v2.id", index=True
+    )
 
     run_type: str = Field(max_length=20)  # "sample" or "full"
     status: PipelineRunStatus = Field(

@@ -1,14 +1,14 @@
 # Annotations
 
-Last verified: cef611321063 on 2026-10-05 (source + live)
+Last verified: db8175b73584 on 2026-10-13 (source + targeted local tests; uncommitted implementation, not a deployment)
 
-Annotations is step 3 of the project workflow ("Step 3 of 4: Annotations"). Annotators and admins review LLM findings one patient at a time. The page claims and locks the next patient. The reviewer then answers each annotation with "No Event" or "Set Event Date". In v2 the only UI path that creates annotations is committing an evaluation session, whose full pipeline writes one patient-level annotation per matched patient. A separate API-only path, "bulk predictions", runs the active predictor config over spaCy target sentences. The routes are in `backend/app/annotations/router.py`, the page is `frontend/src/projects/AnnotationsPage.tsx`, and patient status lives on `patients.status`. Overall: the patient-first review loop works once a commit has run. It has several data-integrity defects: reopen wipes decisions, label-0 annotations block completion, and locks never expire. Bulk predictions are API-only, and they find 0 sentences once any commit has run.
+Annotations is the patient-first review surface for admins/annotators. New query-first sessions create annotations through keyword-only "Run on all patients" or a selected LLM attempt commit: one row per retained sentence, with session/attempt/run lineage. Keyword-only rows have null predictions and are reviewable. Distinct full runs intentionally retain independent annotations/decisions; same-run replay is guarded. The page/queue remains project/patient-wide, not attempt-filtered. Legacy version-1 full runs and bulk predictions remain separate paths. Overall: beta; local lineage/replay tests passed, but PostgreSQL and live review/browser proof are pending. Historical October 5 findings below are not a current re-drive of every review behavior.
 
 ## Sub-features
 
 | ID | What it does | Maturity | Surface | Since | Live | Evidence |
 |---|---|---|---|---|---|---|
-| ann-source-commit | Committing an evaluation session runs `run_eval_pipeline_job`. It writes one annotation per patient with matched notes: `sentence_id` NULL, `predicted_label` 1 when the LLM said positive, else 0 | beta | UI (via Evaluation) | eb306712 | 2026-10-05 | `backend/app/worker.py:90-381`, `:278-292`, `:315-366`; `evaluation/service.py:1159-1240`. No test runs the job. Live: 5 annotations for 5 patients, all `event_date` NULL although the LLM set one |
+| ann-source-commit | Version-2 keyword-only/full LLM attempts emit retained sentence rows with evaluation_session_id, attempt_id and pipeline_run_id; cross-run records independent, same-attempt offsets unique | beta | UI+API via Evaluation | uncommitted | not driven (legacy commit: 2026-10-05) | `backend/app/evaluation/query_first.py:630`, `backend/app/annotations/models.py:32`, `schemas.py:14`, `tests/test_query_first_evaluation.py::test_distinct_full_runs_keep_separate_annotations` |
 | ann-queue-lock | Opening "Annotations" calls `GET /patient/next`. It picks the oldest unlocked patient that has an unreviewed label-1 annotation, locks it to the caller and sets REVIEWING | beta | UI+API | 3c83f16b | 2026-10-05 | `annotations/review_service.py:195-288`, `AnnotationsPage.tsx:508-518`, `tests/test_annotations_api.py::TestPatientReview::test_get_next_patient`, `::test_next_patient_all_complete`. Live: annotator claimed patient A; admin's `patient/next` then returned patient B |
 | ann-unlock | Leaving the page, or moving to the next patient, sends `POST /patient/{id}/unlock` through `navigator.sendBeacon` | beta | UI+API | 8a1e3022 | not driven | `AnnotationsPage.tsx:835-845`, `review_service.py:358-387`, `::TestPatientReview::test_unlock_patient` |
 | ann-review-no-event | "No Event" (key A) posts `/{id}/review` with `event_date: null`. The annotation becomes reviewed | beta | UI+API | 3c83f16b | not driven | `router.py:330-348`, `review_service.py:51-162`, `AnnotationsPage.tsx:1177-1193`, `::TestAnnotationReview::test_review_annotation`, `::TestPatientReview::test_full_patient_review_flow` |
@@ -21,7 +21,7 @@ Annotations is step 3 of the project workflow ("Step 3 of 4: Annotations"). Anno
 | ann-stats | `GET /stats` drives the header "N/M reviewed \| K remaining". `GET /patient/{id}/stats` drives "Review progress" and the Pending/Done/Skipped tiles | beta | UI+API | 3c83f16b | 2026-10-05 | `query_service.py:68-111`, `review_service.py:440-489`, `AnnotationsPage.tsx:1044-1081`, `:1500-1527`, `::TestAnnotationReview::test_get_stats`, `::TestPatientReview::test_patient_stats`. Live: `events_found` 0 → 1 after one dated review |
 | ann-patient-status | Patient status moves NEW → REVIEWING (claimed) → REVIEWED (no unreviewed annotations left). It moves back to REVIEWING on delete-event-date or reopen | beta | UI+API | 3c83f16b | not driven | `connectors/models.py:29-36`, `review_service.py:39-48`, `:247-250`, `:424-428`, `:511` |
 | ann-reopen | Admin "Re-open for review" on Patient detail. A REVIEWED patient goes back to REVIEWING and into the queue | beta | UI+API | 4e484c93 | not driven | `router.py:254-265`, `review_service.py:492-531`, `PatientDetailPage.tsx:183-241`. Only `TestReopenPatient::test_reopen_nonexistent_patient` |
-| ann-list-api | `GET /annotations` (`status`, `patient_id`, `limit`, `offset`), `GET /{id}`, `GET /next` | api-only | API | 3c83f16b | 2026-10-05 (`[]`) | `router.py:167-205`, `:271-281`, `query_service.py:30-65`, `::TestAnnotationReview::test_list_annotations`, `::test_get_next_unreviewed` |
+| ann-list-api | Project-wide list with status/patient/limit/offset; annotation responses expose run/session/attempt IDs; no new attempt filter or UI selector | api-only | API | uncommitted | not driven (legacy empty list: 2026-10-05) | `backend/app/annotations/router.py`, `schemas.py:14`, `query_service.py` |
 | ann-estimate | `GET /estimate` gives a token estimate for target sentences that have no annotation. Admin only | api-only | API | 3c83f16b | 2026-10-05 (0 sentences) | `router.py:97-107`, `prediction_service.py:109-154`. No test |
 | ann-predictions-run | `POST /predictions/run` queues `run_prediction_job` on ARQ (or runs in-process when no worker answers). It runs the active predictor over every unannotated target sentence | api-only | API | d97d1890 | not driven | `prediction_service.py:157-236`, `jobs/prediction.py:64-160`, `tests/test_prediction_dispatch_api.py::TestPredictionJobDispatch::test_run_dispatches_job`, `tests/test_prediction_job.py::test_processes_all_sentences_per_patient` |
 | ann-bulk-run-sync | `POST /run` does the same work synchronously, inside the request | api-only | API | 3c83f16b | not driven | `router.py:110-124`, `prediction_service.py:22-106`, `::TestBulkRun::test_run_predictions`, `::test_run_without_predictor` |
@@ -30,6 +30,7 @@ Annotations is step 3 of the project workflow ("Step 3 of 4: Annotations"). Anno
 | ann-role-gating | Admin and annotator can claim and review. Viewers can read stats and lists. Anonymous callers get 401. Estimate, bulk runs, cancel and reopen are admin only | beta | UI+API | 3c83f16b | 2026-10-05 | `router.py:97-386`, `dependencies.py:33-58`, `components/AppSidebar.tsx:24` |
 
 Why the grades:
+- **October 13 source/test delta:** `test_keyword_full_run_no_llm_and_same_run_replay`, `test_failed_attempt_retries_without_duplicates`, `test_distinct_full_runs_keep_separate_annotations` and worker replay tests passed in the 102-test combined SQLite slice. The unchanged annotation browser/queue was not live-driven; no stable promotion. `filters.py::reviewable_filter` admits null-prediction keyword rows. Old label-1-only/no-worker-tests claims below are historical, not current guarantees.
 - **Review loop rows** (`ann-queue-lock` through `ann-delete-event-date`, `ann-stats`, `ann-patient-status`) are capped at beta by the defects in Gotchas: label-0 annotations block completion, locks never expire, and keyboard A re-reviews items. None can be driven live until a commit has run. `test_delete_event_date` also fails intermittently on Postgres CI (IndexError at `tests/test_annotations_api.py:421`: the list is empty after `/patient/next`).
 - **ann-source-commit**: the commit-time `confidence_threshold` is ignored, sample-copied annotations point at the wrong note, and no test runs the job.
 - **ann-reopen**: wipes every decision, although the UI and the docstring say decisions are kept.
@@ -39,7 +40,7 @@ Why the grades:
 ## How to get to it (user POV)
 
 1. Log in as an annotator or admin. On "Projects", open the project.
-2. Annotations exist only after an admin commits an evaluation session and its full pipeline finishes (see [evaluation-run.md](evaluation-run.md)). Before that the page shows "No annotations yet". It suggests "Validate and activate a predictor in Evaluation", which is stale wording.
+2. Annotations exist after keyword-only full processing or selected LLM attempt commit finishes (see [evaluation-run.md](evaluation-run.md)); preview/sample classification alone creates none. "Review annotations" opens the project-wide page, not an attempt-specific queue.
 3. Open the page one of three ways:
    - the sidebar link "Annotations";
    - the "Annotations" card ("Review predictions") on Overview;
@@ -53,6 +54,14 @@ Why the grades:
 7. Admins can reopen a reviewed patient from Patients → patient → "Re-open for review".
 
 ## Driving it with control-cedars
+
+### Version-2 lineage/replay drives (not driven)
+
+Preconditions: finish a version-2 full attempt `$F` with `$RUN` taken from its `pipeline_run_id`, as in [evaluation-run.md](evaluation-run.md). **ann-source-commit / ann-list-api**: `$CC api GET /projects/{project}/annotations --as viewer` and `GET /annotations/<id>` expose `attempt_id:$F`, `evaluation_session_id:$SID`, `pipeline_run_id:$RUN`; keyword-only `predicted_label`/`predicted_score` are null. Read-only `$CC db query "select attempt_id, note_id, sentence_start, sentence_end, count(*) from annotations where attempt_id='$F' group by 1,2,3,4 having count(*)>1"` must return no rows after same-run retry/resume/recovery. Repeat via a distinct full attempt: both sets remain with distinct IDs; earlier reviews stay attached to earlier records. **ann-queue-lock / ann-review-no-event**: `$CC api GET /projects/{project}/annotations/patient/next --as annotator` must claim a patient with retained keyword-only rows; review one annotation by its own ID, then confirm the other run's row is unchanged. Viewer claim/review gives 403. Browser and full-stack proof of these steps remains pending.
+
+### Legacy October 5 drives
+
+The following one-row-per-patient counts and event-date observations describe version-1 commits, not version-2 sentence annotations. Unrelated review/API drives remain reference probes and need rechecking on current source.
 
 Preconditions: the baseline, **plus the evaluation-run journey committed first**: drive `eval-commit` in [evaluation-run.md](evaluation-run.md) and wait until its full pipeline run is COMPLETED. A fresh seed has 0 annotations, all 5 patients NEW and 0 sentences (checked live 2026-10-05). Only the empty-state, stats and gating checks run before a commit. The review steps change data, so run them only in the mutation pass. Shorthand used below: `PROJ="(select id from projects order by created_at desc limit 1)"`.
 
@@ -137,12 +146,17 @@ Preconditions: the baseline, **plus the evaluation-run journey committed first**
 
 ## Gotchas
 
+- **Current lineage is not a run-scoped review UI.** New annotation responses carry session/attempt/run IDs, but list filters and patient review remain project-wide. `query_service.py::get_patient_matched_notes` resolves a session from the run and selects SearchMatch by session/patient, not attempt: earlier attempts in that session can mix into the annotation note display. Use attempt-scoped Evaluation matches to inspect a specific attempt; live/browser proof and isolation follow-up remain pending.
+- **Independent runs are intentional.** Do not reconcile/delete earlier annotations on a second full run. `uq_annotation_attempt_sentence` and existence checks protect only same-attempt note/sentence offsets (`models.py:32`, `query_first.py::execute_attempt`). PostgreSQL concurrency proof is still pending. New LLM annotations still leave annotation event_date/review_status unset, so sample judgments do not prefill annotation review.
+
+### Historical review findings (October 5; not all reverified)
+
 - **A second commit re-queues reviewed patients.** The queue picks any patient with an unreviewed label-1 annotation, whatever its status (`review_service.py:204-225`). Claiming leaves REVIEWED as it is (`:249-250`). After a second commit, a REVIEWED patient returns to the queue with the new run's annotations, while Patients still shows it "Reviewed". Source only (see `j-repeat-commit`).
 - **Skip ignores the claim and the lock.** `skip_annotation` loads the annotation by project and id and never checks `locked_by` (`review_service.py:165-192`). Any admin or annotator can skip annotations on a patient that someone else has locked, or that nobody has claimed. With no unreviewed annotations left, `_check_patient_completion` (`:21-48`) moves the patient to REVIEWED. Live 2026-10-05: a NEW, unlocked patient went straight to REVIEWED, without ever being REVIEWING.
-- **Annotations come only from a commit.** On a fresh seed the page shows "No annotations yet", and its hint ("Validate and activate a predictor in Evaluation") points at a flow that no longer exists (`AnnotationsPage.tsx:1550-1557`; predictor pages removed in 27320f5f). The real source is `run_eval_pipeline_job` (`worker.py:90-381`), whose only entry point is the evaluation commit (`evaluation/service.py:1159-1240`).
+- **Historical commit-only entry is superseded.** Version 2 also creates reviewable keyword-only annotations without a prompt/model or commit of an LLM sample (`query_first.py::execute_attempt`). Old one-row-per-patient drives/counts below are legacy only.
 - **Label-0 annotations block completion.** The review page and queue show only `predicted_label == 1` (`review_service.py:209`, `:309`), but completion counts unreviewed annotations of every label (`review_service.py:27-37`):
   - a patient with a label-0 annotation therefore never reaches REVIEWED;
-  - committing twice gives each patient a second annotation, because the worker does not deduplicate (`worker.py:278-292`), so a positive-then-negative patient is stuck in REVIEWING;
+  - distinct commits intentionally keep separate annotations; any completion blockage is a queue/filter issue, not a reason to deduplicate across runs;
   - a failed bulk prediction is saved with `predicted_label` NULL (`jobs/prediction.py:131-143`), with the same effect;
   - `/stats` counts label 1 only (`query_service.py:79`), so a project whose annotations are all label 0 shows "No annotations yet";
   - per-patient stats count every label (`review_service.py:446-453`).

@@ -56,6 +56,8 @@ class RunSampleRequest(BaseModel):
 
 class PipelineRunResponse(BaseModel):
     id: str
+    attempt_id: str | None = None
+    evaluation_session_id: str | None = None
     project_id: str
     event_config_id: str
     run_type: str

@@ -14,6 +14,7 @@ import MetricsPanel from "./MetricsPanel";
 import CommitSection from "./CommitSection";
 import PipelineSection from "./PipelineSection";
 import EvalReviewPanel from "./EvalReviewPanel";
+import QueryFirstSessionPage from "./QueryFirstSessionPage";
 
 import { STATUS_STYLES, statusLabel } from "./sessionStatus";
 
@@ -30,6 +31,20 @@ const NO_STEP = 0;
  * states what it holds, opens one at a time, and says why it is not ready yet.
  */
 export default function EvaluationSessionPage() {
+  const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
+  const { data: session, error } = useQuery({
+    queryKey: ["eval-session", projectId, sessionId],
+    queryFn: () =>
+      api.get<UnifiedSession>(`/projects/${projectId}/evaluation/sessions/${sessionId}`),
+  });
+  if (error) return <p role="alert" className="p-6 text-destructive">{error.message}</p>;
+  if (!session) return <p className="p-6 text-muted-foreground">Loading session</p>;
+  return session.workflow_version === 2
+    ? <QueryFirstSessionPage key={session.id} projectId={projectId!} session={session} />
+    : <LegacyEvaluationSessionPage />;
+}
+
+function LegacyEvaluationSessionPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const qc = useQueryClient();
 

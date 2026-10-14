@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import create_legacy_eval_session
+
 
 async def register_and_login(client, email="reviewer@test.com"):
     """Register and login a user."""
@@ -25,12 +27,7 @@ async def create_project(client, name="Review Test"):
 
 async def create_eval_session(client, project_id):
     """Create an evaluation session, return the response data."""
-    resp = await client.post(
-        f"/api/v1/projects/{project_id}/evaluation/sessions",
-        json={"search_queries": [{"query": "stroke", "type": "include"}]},
-    )
-    assert resp.status_code == 201
-    return resp.json()
+    return await create_legacy_eval_session(client, project_id, "stroke")
 
 
 @pytest.mark.asyncio
@@ -112,11 +109,7 @@ async def test_result_notes_returns_full_context(client, app):
     await _register_and_login(client)
     project_id = await _create_project(client)
 
-    resp = await client.post(
-        f"/api/v1/projects/{project_id}/evaluation/sessions",
-        json={"search_queries": [{"query": "stroke", "type": "include"}]},
-    )
-    session_id = resp.json()["id"]
+    session_id = (await create_eval_session(client, project_id))["id"]
 
     from datetime import UTC, datetime
 
