@@ -172,7 +172,8 @@ class TestQueries:
                 "search_queries": [
                     {"query": "MI OR myocardial", "type": "include"},
                     {"query": "ruled out", "type": "exclude"},
-                ]
+                ],
+                "exclude_negated": False,
             },
         )
         assert resp.status_code == 200
@@ -180,6 +181,7 @@ class TestQueries:
         assert data["search_queries"] == [
             {"query": "(MI OR myocardial) AND !((ruled out))", "type": "include"}
         ]
+        assert data["exclude_negated"] is False
 
     async def test_execute_queries(self, client):
         await register_and_login(client)

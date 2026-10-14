@@ -32,6 +32,7 @@ class CreateSessionRequest(BaseModel):
 
 class UpdateQueriesRequest(BaseModel):
     search_queries: list[SearchQueryItem] = Field(max_length=_MAX_SEARCH_QUERIES)
+    exclude_negated: bool = True
 
 
 class EventConfigRequest(BaseModel):
@@ -46,6 +47,7 @@ class SessionResponse(BaseModel):
     project_id: str
     status: str
     search_queries: list[dict]
+    exclude_negated: bool
     event_name: str | None
     event_description: str | None
     include_criteria: str | None
@@ -65,6 +67,7 @@ class SessionListResponse(BaseModel):
     project_id: str
     status: str
     search_queries: list[dict]
+    exclude_negated: bool
     event_name: str | None
     sample_size: int
     metrics: dict | None

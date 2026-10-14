@@ -179,7 +179,9 @@ async def update_queries_endpoint(
     await _get_session_or_404(db, project_id, session_id)
     search_queries = [q.model_dump() for q in body.search_queries]
     try:
-        return await update_queries(db, session_id, search_queries)
+        return await update_queries(
+            db, session_id, search_queries, exclude_negated=body.exclude_negated
+        )
     except SessionLockedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:

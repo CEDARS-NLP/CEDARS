@@ -105,6 +105,7 @@ async def create_session(
     event_description = None
     include_criteria = None
     exclude_criteria = None
+    exclude_negated = True
 
     if cloned_from_id:
         clone_source = (
@@ -118,6 +119,7 @@ async def create_session(
             event_description = clone_source.event_description
             include_criteria = clone_source.include_criteria
             exclude_criteria = clone_source.exclude_criteria
+            exclude_negated = clone_source.exclude_negated
 
     queries = normalize_queries(queries, allow_empty=True)
 
@@ -137,6 +139,7 @@ async def create_session(
         sample_patient_ids=sampled_ids,
         sample_size=sample_size,
         cloned_from_id=cloned_from_id,
+        exclude_negated=exclude_negated,
         event_name=event_name,
         event_description=event_description,
         include_criteria=include_criteria,
@@ -203,8 +206,9 @@ async def update_queries(
     db: AsyncSession,
     session_id: str,
     search_queries: list[dict],
+    exclude_negated: bool = True,
 ) -> EvaluationSession:
-    """Update the query list and clear old SearchMatch records."""
+    """Update the query list and negation option, and clear old SearchMatch records."""
     session = (
         await db.execute(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
@@ -213,6 +217,7 @@ async def update_queries(
 
     ensure_editable_session(session)
     session.search_queries = normalize_queries(search_queries)
+    session.exclude_negated = exclude_negated
     session.updated_at = now_utc()
     db.add(session)
 
@@ -302,7 +307,8 @@ async def run_session_queries(
     session.search_queries = queries
     db.add(session)
     await nlp_service.create_search_query(
-        db, project_id, queries[0]["query"], created_by=user_id, nlp_apply=False
+        db, project_id, queries[0]["query"], created_by=user_id, nlp_apply=False,
+        exclude_negated=session.exclude_negated,
     )
     if requires_deletion:
         await nlp_service.clear_sentences(db, project_id)
@@ -363,7 +369,12 @@ async def execute_search_queries(
         for note in notes:
             sentences = process_note(note.text, query_groups)
             for sent in sentences:
-                if sent.get("is_target") and not sent.get("is_negated"):
+                # Negated matches are dropped unless the session asks to keep
+                # them; kept ones are stored with is_negated=True so previews
+                # can strike them through and downstream counts stay honest.
+                if sent.get("is_target") and (
+                    not sent.get("is_negated") or not session.exclude_negated
+                ):
                     match = SearchMatch(
                         session_id=session_id,
                         query_index=query_index,
@@ -741,10 +752,16 @@ async def run_llm_on_sample(
         )
     )
 
-    # Count matched patients for progress tracking
+    # Count matched patients for progress tracking. Sessions that keep negated
+    # matches classify them too, so the is_negated filter only applies when
+    # the session excludes them.
     matched_stmt = select(func.count(func.distinct(SearchMatch.patient_id))).where(
         SearchMatch.session_id == session_id,
-        SearchMatch.is_negated.is_(False),
+        *(
+            []
+            if not session.exclude_negated
+            else [SearchMatch.is_negated.is_(False)]
+        ),
     )
     matched_count = (await db.execute(matched_stmt)).scalar() or 0
 
@@ -820,10 +837,16 @@ async def _execute_sample_llm_impl(
 
     sample_patient_ids = set(session.sample_patient_ids or [])
 
-    # Find matched patient IDs from non-negated SearchMatch records
+    # Find matched patient IDs from SearchMatch records. Sessions that keep
+    # negated matches classify them too, so the is_negated filter only applies
+    # when the session excludes them.
     matched_stmt = select(func.distinct(SearchMatch.patient_id)).where(
         SearchMatch.session_id == session_id,
-        SearchMatch.is_negated.is_(False),
+        *(
+            []
+            if not session.exclude_negated
+            else [SearchMatch.is_negated.is_(False)]
+        ),
     )
     result = await db.execute(matched_stmt)
     matched_patient_ids = {r[0] for r in result.all()}
@@ -862,7 +885,11 @@ async def _execute_sample_llm_impl(
                     select(SearchMatch.note_id).where(
                         SearchMatch.session_id == session_id,
                         SearchMatch.patient_id.in_(batch_ids),
-                        SearchMatch.is_negated.is_(False),
+                        *(
+                            []
+                            if not session.exclude_negated
+                            else [SearchMatch.is_negated.is_(False)]
+                        ),
                     )
                 ),
             )
@@ -1316,6 +1343,7 @@ async def commit_session(
     session.search_queries = queries
     committed_config = {
         "search_queries": session.search_queries,
+        "exclude_negated": session.exclude_negated,
         "event_name": session.event_name,
         "event_description": session.event_description,
         "include_criteria": session.include_criteria,

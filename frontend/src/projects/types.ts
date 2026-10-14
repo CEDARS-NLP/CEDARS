@@ -169,6 +169,7 @@ export interface UnifiedSession {
   project_id: string;
   status: UnifiedSessionStatus;
   search_queries: SearchQueryItem[];
+  exclude_negated: boolean;
   event_name: string | null;
   event_description: string | null;
   include_criteria: string | null;
@@ -188,6 +189,7 @@ export interface UnifiedSessionListItem {
   project_id: string;
   status: UnifiedSessionStatus;
   search_queries: SearchQueryItem[];
+  exclude_negated: boolean;
   event_name: string | null;
   sample_size: number;
   metrics: UnifiedMetrics | null;

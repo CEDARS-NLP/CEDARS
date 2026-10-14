@@ -26,6 +26,7 @@ function makeSession(): UnifiedSession {
     project_id: "project",
     status: "draft",
     search_queries: [{ query: "DVT", type: "include" }],
+    exclude_negated: true,
     event_name: null,
     event_description: null,
     include_criteria: null,
@@ -127,7 +128,10 @@ describe("SearchQueriesSection", () => {
     editSubqueries();
     fireEvent.click(screen.getByRole("button", { name: "Continue to event definition" }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith(sessionPath, { search_queries: cleanedQueries }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(sessionPath, {
+      search_queries: cleanedQueries,
+      exclude_negated: true,
+    }));
     expect(callbacks.onContinue).not.toHaveBeenCalled();
     expect(api.post).not.toHaveBeenCalled();
     await act(async () => save.resolve({ ...makeSession(), search_queries: cleanedQueries }));
@@ -142,7 +146,10 @@ describe("SearchQueriesSection", () => {
     editSubqueries();
     fireEvent.click(screen.getByRole("button", { name: "Run on all patients" }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith(sessionPath, { search_queries: cleanedQueries }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(sessionPath, {
+      search_queries: cleanedQueries,
+      exclude_negated: true,
+    }));
     expect(api.get).not.toHaveBeenCalled();
     expect(api.post).not.toHaveBeenCalled();
     await act(async () => save.resolve({ ...makeSession(), search_queries: cleanedQueries }));
@@ -161,6 +168,33 @@ describe("SearchQueriesSection", () => {
     expect(screen.getByRole("textbox", { name: "Query 1" })).toHaveValue("DVT OR PE");
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
     expect(client.getQueryData(["eval-session", "project", "session"])).toEqual(normalized);
+  });
+
+  it("shows the negation checkbox checked by default", () => {
+    showSession();
+    expect(screen.getByRole("checkbox", { name: /Remove negated matches/ })).toBeChecked();
+  });
+
+  it("saves exclude_negated false when the checkbox is unchecked", async () => {
+    const save = deferred<UnifiedSession>();
+    vi.mocked(api.put).mockReturnValueOnce(save.promise);
+    showSession();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Remove negated matches/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to event definition" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(sessionPath, {
+      search_queries: [{ query: "DVT", type: "include" }],
+      exclude_negated: false,
+    }));
+    await act(async () => save.resolve({ ...makeSession(), exclude_negated: false }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Remove negated matches/ })).not.toBeChecked());
+  });
+
+  it("marks the session dirty when only the negation checkbox changes", () => {
+    showSession();
+    expect(screen.getByRole("button", { name: "Run search" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Remove negated matches/ }));
+    expect(screen.getByRole("button", { name: "Save and run search" })).toBeInTheDocument();
   });
 
   it("runs a zero-impact search with an empty body and no event or provider", async () => {

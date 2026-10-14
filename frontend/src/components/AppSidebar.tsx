@@ -17,12 +17,12 @@ import { useEffect, useState } from "react";
 
 const projectNavSections = [
   { label: "Overview", suffix: "", icon: LayoutDashboard, end: true },
-  { label: "Data", suffix: "/data", icon: Database },
   { label: "Patients", suffix: "/patients", icon: Users },
+  { label: "Data", suffix: "/data", icon: Database },
   { label: "Evaluation", suffix: "/evaluation", icon: BarChart3 },
-  { label: "Jobs", suffix: "/jobs", icon: Activity },
   { label: "Annotations", suffix: "/annotations", icon: MessageSquareText },
   { label: "Export", suffix: "/export", icon: Download },
+  { label: "Jobs", suffix: "/jobs", icon: Activity },
 ];
 
 function useDarkMode() {

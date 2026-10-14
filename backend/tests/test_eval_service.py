@@ -224,6 +224,12 @@ class TestCreateSession:
             source.id,
             event_name="MI",
         )
+        await eval_service.update_queries(
+            seeded_db,
+            source.id,
+            search_queries=[{"query": "troponin", "type": "include"}],
+            exclude_negated=False,
+        )
         # Discard so we can create a new one
         await eval_service.discard_session(seeded_db, source.id)
 
@@ -237,6 +243,7 @@ class TestCreateSession:
         assert cloned.cloned_from_id == source.id
         assert cloned.search_queries == [{"query": "troponin", "type": "include"}]
         assert cloned.event_name == "MI"
+        assert cloned.exclude_negated is False
 
 
 class TestDiscardSession:
@@ -423,6 +430,115 @@ class TestExecuteSearchQueries:
             sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
         )
         assert len(result.scalars().all()) == 0
+
+    async def test_execute_search_drops_negated_by_default(self, seeded_db):
+        """Default sessions drop negated matches — the pre-existing behavior."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        assert session.exclude_negated is True
+
+        def negated_process_note(note_text, query_groups):
+            if "troponin" in note_text.lower():
+                return [{
+                    "sentence_number": 0,
+                    "text": note_text,
+                    "start_pos": 0,
+                    "end_pos": len(note_text),
+                    "is_target": True,
+                    "is_negated": True,
+                    "matched_tokens": ["troponin"],
+                }]
+            return [{
+                "sentence_number": 0,
+                "text": note_text,
+                "start_pos": 0,
+                "end_pos": len(note_text),
+                "is_target": False,
+                "is_negated": False,
+                "matched_tokens": [],
+            }]
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=negated_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        assert len(result.scalars().all()) == 0
+
+    async def test_update_queries_persists_exclude_negated(self, seeded_db):
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        assert session.exclude_negated is True
+
+        updated = await eval_service.update_queries(
+            seeded_db,
+            session.id,
+            search_queries=[{"query": "troponin", "type": "include"}],
+            exclude_negated=False,
+        )
+        assert updated.exclude_negated is False
+
+        refetched = await eval_service.get_session(seeded_db, session.id)
+        assert refetched.exclude_negated is False
+
+    async def test_execute_search_stores_negated_when_kept(self, seeded_db):
+        """exclude_negated=False stores negated matches with is_negated=True."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        await eval_service.update_queries(
+            seeded_db,
+            session.id,
+            search_queries=[{"query": "troponin", "type": "include"}],
+            exclude_negated=False,
+        )
+
+        def negated_process_note(note_text, query_groups):
+            if "troponin" in note_text.lower():
+                return [{
+                    "sentence_number": 0,
+                    "text": note_text,
+                    "start_pos": 0,
+                    "end_pos": len(note_text),
+                    "is_target": True,
+                    "is_negated": True,
+                    "matched_tokens": ["troponin"],
+                }]
+            return [{
+                "sentence_number": 0,
+                "text": note_text,
+                "start_pos": 0,
+                "end_pos": len(note_text),
+                "is_target": False,
+                "is_negated": False,
+                "matched_tokens": [],
+            }]
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=negated_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        matches = result.scalars().all()
+        assert len(matches) == 5
+        assert all(match.is_negated is True for match in matches)
 
 
 class TestFunnelStats:

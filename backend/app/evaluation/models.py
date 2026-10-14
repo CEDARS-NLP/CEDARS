@@ -60,6 +60,9 @@ class EvaluationSession(SQLModel, table=True):
 
     # Search queries
     search_queries: list = Field(default=[], sa_column=Column(JSON, default=[]))
+    # When True (default), negated matches are dropped from search results.
+    # When False, they are stored, counted, classified, and annotated.
+    exclude_negated: bool = Field(default=True)
 
     # Event definition (what to look for)
     event_name: str | None = Field(default=None, max_length=200)

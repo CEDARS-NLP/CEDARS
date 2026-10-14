@@ -74,6 +74,7 @@ export default function SearchQueriesSection({
   const isEditable = ["draft", "reviewing"].includes(session.status);
 
   const [draft, setDraft] = useState<SearchQueryItem[]>(session.search_queries);
+  const [excludeNegated, setExcludeNegated] = useState(session.exclude_negated);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestedQuery[]>([]);
   const [reprocessOpen, setReprocessOpen] = useState(false);
@@ -125,12 +126,22 @@ export default function SearchQueriesSection({
     setDraft(session.search_queries);
   }
 
-  const dirty = signature(draft) !== saved;
+  // Same render-time sync for the negation option, so a refetch never lands a
+  // stale checkbox next to a fresh query list.
+  const savedNegated = session.exclude_negated;
+  const [syncedNegated, setSyncedNegated] = useState(savedNegated);
+  if (savedNegated !== syncedNegated) {
+    setSyncedNegated(savedNegated);
+    setExcludeNegated(savedNegated);
+  }
+
+  const dirty = signature(draft) !== saved || excludeNegated !== savedNegated;
 
   const saveMutation = useMutation({
-    mutationFn: (queries: SearchQueryItem[]) =>
+    mutationFn: (payload: { queries: SearchQueryItem[]; excludeNegated: boolean }) =>
       api.put<UnifiedSession>(`/projects/${projectId}/evaluation/sessions/${session.id}/queries`, {
-        search_queries: queries,
+        search_queries: payload.queries,
+        exclude_negated: payload.excludeNegated,
       }),
     onSuccess: (data) => {
       setDraft(data.search_queries);
@@ -182,8 +193,8 @@ export default function SearchQueriesSection({
 
   async function saveDraft() {
     const cleaned = draft.map((q) => ({ ...q, query: q.query.trim() })).filter((q) => q.query);
-    if (signature(cleaned) !== saved) {
-      await saveMutation.mutateAsync(cleaned);
+    if (signature(cleaned) !== saved || excludeNegated !== savedNegated) {
+      await saveMutation.mutateAsync({ queries: cleaned, excludeNegated });
     }
   }
 
@@ -386,7 +397,23 @@ export default function SearchQueriesSection({
 
       {/* Run */}
       {isEditable && (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+        <div className="space-y-3 border-t border-border pt-4">
+          <label className="flex items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary"
+              checked={excludeNegated}
+              onChange={(e) => setExcludeNegated(e.target.checked)}
+            />
+            <span>
+              Remove negated matches
+              <span className="block text-xs text-muted-foreground">
+                Unchecked keeps sentences like &ldquo;no evidence of&rdquo; matches, shown struck through in previews.
+              </span>
+            </span>
+          </label>
+
+          <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" onClick={saveAndRun} disabled={!hasIncludes || busy || jobRunning}>
             {busy ? (
               <>
@@ -422,6 +449,7 @@ export default function SearchQueriesSection({
                 : "Queries changed since the last search. Run it again before testing."}
             </span>
           )}
+          </div>
         </div>
       )}
 
