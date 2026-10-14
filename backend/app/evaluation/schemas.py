@@ -86,6 +86,32 @@ class FunnelResponse(BaseModel):
     estimated_cost: float | None = None
 
 
+# --- Cost ---
+
+class CostProjection(BaseModel):
+    """Extrapolation of the sample's measured usage to the whole project."""
+
+    basis: str  # "sample" (measured tokens) or "heuristic" (no sample run yet)
+    sample_patients_classified: int
+    total_patients: int
+    projected_matched_patients: int
+    tokens_per_patient: int  # measured (or guessed) average for one classified patient
+    patients_to_classify: int  # projected matches minus those the sample already classified
+    prompt_tokens: int
+    completion_tokens: int
+    estimated_cost: float | None = None
+
+
+class CostResponse(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    # Actual usage to date, summed from stored per-patient token usage.
+    spent_prompt_tokens: int = 0
+    spent_completion_tokens: int = 0
+    spent_cost: float | None = None
+    projection: CostProjection | None = None
+
+
 # --- Search Matches ---
 
 class MatchPosition(BaseModel):
@@ -207,6 +233,7 @@ class CommitResponse(BaseModel):
     pipeline_run_id: str
     total_patients: int
     estimated_cost: float | None = None
+    cost_basis: str | None = None
 
 
 # --- Pipeline ---

@@ -57,6 +57,7 @@ class BulkEstimateResponse(BaseModel):
     estimated_prompt_tokens: int
     estimated_completion_tokens: int
     estimated_total_tokens: int
+    estimated_cost: float | None = None
 
 
 class PredictionJobResponse(BaseModel):

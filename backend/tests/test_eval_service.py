@@ -24,6 +24,7 @@ from app.evaluation.models import (
 )
 from app.evaluation.query_expression import normalize_queries
 from app.jobs.models import BackgroundJob  # noqa: F401
+from app.llm.usage import add_usage
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
 from app.pipeline.models import EventConfig as _EC  # noqa: F401
 from app.pipeline.models import Evidence as _Ev
@@ -1180,3 +1181,91 @@ class TestCommit:
         )
         with pytest.raises(ValueError, match="Cannot commit session"):
             await eval_service.commit_session(seeded_db, session.id, user_id="user-1")
+
+
+class TestCostSummary:
+    USAGE = {"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+
+    async def _session_with_matches(self, db):
+        session = await eval_service.create_session(
+            db, project_id="proj-1", user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        for i in range(1, 6):
+            db.add(SearchMatch(
+                session_id=session.id, patient_id=f"pat-{i}", note_id=f"note-{i}-1",
+                matched_tokens=["troponin"], match_positions=[], is_negated=False,
+            ))
+        await db.commit()
+        return session
+
+    def _classified(self, db, session, patient, *, run_id=None, usage=None, source=None):
+        """A classified patient plus (optionally) the ledger row its call produced."""
+        db.add(PatientResult(
+            session_id=session.id, patient_id=patient, pipeline_run_id=run_id,
+            status=PatientResultStatus.COMPLETED,
+            token_usage=self.USAGE if usage is None else usage,
+        ))
+        if source:
+            add_usage(db, project_id="proj-1", source=source, provider="openai",
+                      model="gpt-4o", usage=self.USAGE, ref_id=run_id or session.id)
+
+    async def test_projection_uses_measured_sample_tokens(self, seeded_db):
+        session = await self._session_with_matches(seeded_db)
+        for i in (1, 2):  # two sample patients classified, 1000 in / 100 out each
+            self._classified(seeded_db, session, f"pat-{i}", source="evaluation_sample")
+        await seeded_db.commit()
+
+        cost = await eval_service.get_cost_summary(seeded_db, session.id)
+
+        assert cost["spent_prompt_tokens"] == 2000
+        assert cost["spent_completion_tokens"] == 200
+        assert cost["spent_cost"] == pytest.approx(0.007)  # gpt-4o: $2.50 in / $10 out per 1M
+        proj = cost["projection"]
+        assert proj["basis"] == "sample"
+        assert proj["sample_patients_classified"] == 2
+        # 5 of 5 sample patients matched and the project has 5 patients, so 5 will be
+        # classified; the 2 already done are reused, leaving 3 to pay for.
+        assert proj["projected_matched_patients"] == 5
+        assert proj["patients_to_classify"] == 3
+        assert proj["tokens_per_patient"] == 1100  # 1000 in + 100 out, measured
+        assert (proj["prompt_tokens"], proj["completion_tokens"]) == (3000, 300)
+        assert proj["estimated_cost"] == pytest.approx(0.0105)
+
+    async def test_projection_falls_back_to_heuristic_before_sample_run(self, seeded_db):
+        session = await self._session_with_matches(seeded_db)
+
+        cost = await eval_service.get_cost_summary(seeded_db, session.id)
+
+        assert cost["spent_cost"] == 0
+        assert cost["projection"]["basis"] == "heuristic"
+        assert cost["projection"]["estimated_cost"] > 0
+
+    async def test_commit_copies_do_not_double_count_spend(self, seeded_db):
+        session = await self._session_with_matches(seeded_db)
+        # One sample call, one real full-run call; commit also copies the sample row
+        # (token_usage and all) into the run, which made no call.
+        self._classified(seeded_db, session, "pat-1", source="evaluation_sample")
+        self._classified(seeded_db, session, "pat-1", run_id="run-1")  # the copy
+        self._classified(seeded_db, session, "pat-2", run_id="run-1", source="pipeline_run")
+        await seeded_db.commit()
+
+        cost = await eval_service.get_cost_summary(seeded_db, session.id)
+
+        assert cost["spent_prompt_tokens"] == 2000  # two calls, not three rows
+        assert cost["projection"]["sample_patients_classified"] == 1  # copies aren't the sample
+
+    async def test_failed_patients_do_not_dilute_the_sample_average(self, seeded_db):
+        session = await self._session_with_matches(seeded_db)
+        self._classified(seeded_db, session, "pat-1", source="evaluation_sample")
+        seeded_db.add(PatientResult(  # failed: no call made, token_usage stored as JSON null
+            session_id=session.id, patient_id="pat-2",
+            status=PatientResultStatus.FAILED, token_usage=None,
+        ))
+        await seeded_db.commit()
+
+        cost = await eval_service.get_cost_summary(seeded_db, session.id)
+
+        assert cost["projection"]["sample_patients_classified"] == 1
+        # 1000 tokens per patient x (5 projected - 1 already classified), not diluted by the failure.
+        assert cost["projection"]["prompt_tokens"] == 4000
