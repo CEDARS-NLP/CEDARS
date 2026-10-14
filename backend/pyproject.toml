@@ -33,7 +33,6 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0",
     "python-multipart>=0.0.9",
     "spacy>=3.7",
-    "lark>=1.2.2,<2",
     "google-re2>=1.1",
 ]
 

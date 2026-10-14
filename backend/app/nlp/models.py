@@ -46,7 +46,6 @@ class SearchQuery(SQLModel, table=True):
 
     __tablename__ = "search_queries"
     __table_args__ = (
-        UniqueConstraint("evaluation_session_id", "revision", name="uq_query_session_revision"),
         Index(
             "uq_search_queries_project_active",
             "project_id",
@@ -60,12 +59,6 @@ class SearchQuery(SQLModel, table=True):
     project_id: str = Field(foreign_key="projects.id", index=True)
     name: str = Field(default="")
     query: str  # CEDARS query syntax
-    evaluation_session_id: str | None = Field(
-        default=None, foreign_key="evaluation_sessions_v2.id", index=True
-    )
-    revision: int | None = None
-    syntax_version: int = 1
-    source_queries: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     is_active: bool = Field(default=True)
     nlp_apply: bool = Field(default=True)  # apply predictor after NLP
     hide_duplicates: bool = Field(default=True)  # filter duplicate sentences

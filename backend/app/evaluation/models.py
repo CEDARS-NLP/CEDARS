@@ -10,7 +10,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Index, String, Text
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -51,7 +51,6 @@ class EvaluationSession(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
-    workflow_version: int = Field(default=1)
 
     # Status — stored as VARCHAR to avoid PG enum conflicts with old migrations
     status: SessionStatus = Field(
@@ -106,8 +105,6 @@ class SearchMatch(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="evaluation_sessions_v2.id", index=True)
-    attempt_id: str | None = Field(default=None, foreign_key="evaluation_attempts.id", index=True)
-    query_id: str | None = Field(default=None, foreign_key="search_queries.id")
     query_index: int = Field(default=0)
     patient_id: str = Field(index=True)
     note_id: str = Field(foreign_key="notes.id", index=True)
@@ -125,19 +122,16 @@ class PatientResult(SQLModel, table=True):
     __table_args__ = (
         Index("ix_patient_results_session_status", "session_id", "status"),
         Index("ix_patient_results_run_status", "pipeline_run_id", "status"),
-        UniqueConstraint("attempt_id", "patient_id", name="uq_result_attempt_patient"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="evaluation_sessions_v2.id", index=True)
-    attempt_id: str | None = Field(default=None, foreign_key="evaluation_attempts.id", index=True)
     pipeline_run_id: str | None = Field(default=None, foreign_key="pipeline_runs.id", index=True)
     patient_id: str = Field(index=True)
 
     # Search results
     notes_searched: int = Field(default=0)
     notes_matched: int = Field(default=0)
-    input_snapshot: list | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
     # LLM classification
     finding_label: str | None = Field(default=None, max_length=20)
@@ -179,48 +173,3 @@ class PatientResult(SQLModel, table=True):
                 f"Cannot transition PatientResult from {self.status} to {new_status}"
             )
         self.status = new_status
-
-
-class LLMPromptRevision(SQLModel, table=True):
-    __tablename__ = "llm_prompt_revisions"
-    __table_args__ = (UniqueConstraint("session_id", "revision", name="uq_prompt_session_revision"),)
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    session_id: str = Field(foreign_key="evaluation_sessions_v2.id", index=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
-    revision: int
-    event_name: str
-    event_description: str
-    include_criteria: str
-    exclude_criteria: str = ""
-    llm_provider: str
-    llm_model: str
-    llm_api_base: str | None = None
-    template: str = Field(sa_column=Column(Text, nullable=False))
-    template_version: int = 1
-    generation_settings: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    created_by: str = Field(foreign_key="users.id")
-    created_at: datetime = Field(default_factory=now_utc, sa_column=Column(DateTime(timezone=True)))
-
-
-class EvaluationAttempt(SQLModel, table=True):
-    __tablename__ = "evaluation_attempts"
-    __table_args__ = (UniqueConstraint("session_id", "sequence", name="uq_attempt_session_sequence"),)
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    session_id: str = Field(foreign_key="evaluation_sessions_v2.id", index=True)
-    query_id: str = Field(foreign_key="search_queries.id")
-    prompt_revision_id: str | None = Field(default=None, foreign_key="llm_prompt_revisions.id")
-    source_attempt_id: str | None = Field(default=None, foreign_key="evaluation_attempts.id")
-    sequence: int
-    mode: str
-    scope: str
-    status: str = "queued"
-    sample_patient_ids: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    metrics: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    progress: int = 0
-    error_message: str | None = None
-    claim_token: str | None = None
-    created_by: str = Field(foreign_key="users.id")
-    created_at: datetime = Field(default_factory=now_utc, sa_column=Column(DateTime(timezone=True)))
-    updated_at: datetime = Field(default_factory=now_utc, sa_column=Column(DateTime(timezone=True)))

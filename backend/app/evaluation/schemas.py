@@ -36,7 +36,6 @@ class EventConfigRequest(BaseModel):
 
 class SessionResponse(BaseModel):
     id: str
-    workflow_version: int = 1
     project_id: str
     status: str
     search_queries: list[dict]
@@ -56,7 +55,6 @@ class SessionResponse(BaseModel):
 
 class SessionListResponse(BaseModel):
     id: str
-    workflow_version: int = 1
     project_id: str
     status: str
     search_queries: list[dict]

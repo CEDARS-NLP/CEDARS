@@ -1,8 +1,8 @@
 # Export
 
-Last verified: db8175b73584 on 2026-10-13 (source; query-first implementation uncommitted, not a deployment)
+Last verified: cef611321063 on 2026-10-05 (source + live)
 
-Export downloads project-wide annotation CSV/JSON for admins/viewers, filtered by review status or event date. Query-first full runs intentionally add independent rows per run; defaults remain project-wide, not deduplicated or restricted to the selected Evaluation attempt. The source emits annotation_id but no session/attempt/run fields or filters. Overall: beta for CSV/JSON pending current live proof; the old nullable-sentence JSON failure is no longer implied by the schema. Databricks remains API-only with unrelated historical findings below. No October 13 export/live/AWS verification was performed.
+Export is the last step of the project workflow ("Step 4 of 4: Export"). Admins and viewers download a project's annotations as CSV or JSON from the Export page. They can filter to reviewed rows or to rows that have an event date. A separate API-only endpoint writes annotations, predictions or evaluation rows into a Databricks table. Overall: CSV export and the stats work. JSON export returns 500 as soon as the project has any annotation created through the UI. The Databricks export has no UI, and two of its three types crash. No test covers the CSV, JSON or stats endpoints. DEV runs `cef61132` (`aws status`, 2026-10-05), so every defect below is live on DEV.
 
 ## Sub-features
 
@@ -11,8 +11,8 @@ Export downloads project-wide annotation CSV/JSON for admins/viewers, filtered b
 | export-page | Export page: breadcrumb, stat cards, "Export format" and "Annotation filter" radio groups, "Download N annotations" button | beta | UI | 8197dee8 | 2026-10-05 | `frontend/src/projects/ExportPage.tsx:89-244`, `App.tsx:128`, `AppSidebar.tsx:25`. No frontend tests |
 | export-stats | `GET /export/stats` returns `total`, `reviewed`, `events`, `total_eval_tokens` | beta | UI+API | 3c83f16b | 2026-10-05 | `backend/app/export/router.py:30-37`, `export/service.py:13-45`. No tests |
 | export-csv | `GET /export/annotations/csv` returns `text/csv`. The page saves it as `annotations-<pid8>.csv` | beta | UI+API | 3c83f16b | 2026-10-05 | `router.py:51-65`, `service.py:66-103`, `ExportPage.tsx:48-60`. No tests |
-| export-json | Current ExportAnnotationRow accepts null sentence_id and predictions for query-first rows; full response/browser proof pending | beta | UI+API | source at db8175b73584 | not driven (legacy FAIL: 2026-10-05) | `backend/app/export/schemas.py:13`, `service.py:87`, `frontend/src/projects/ExportPage.tsx` |
-| export-filters | Review/event status only; default includes independent annotations from every full run, no attempt/run selector or lineage filter | beta | UI+API | source at db8175b73584 | not driven (legacy status filters: 2026-10-05) | `backend/app/export/service.py:48`, `:80`, `frontend/src/projects/ExportPage.tsx` |
+| export-json | `GET /export/annotations` returns `list[ExportAnnotationRow]`. The page pretty-prints it to `annotations-<pid8>.json` | stub | UI+API | 3c83f16b | 2026-10-05 FAIL | `export/schemas.py:11` vs `backend/app/worker.py:278-291`, `:352-365`. No tests |
+| export-filters | `status=reviewed` keeps `review_status == reviewed`. `status=events` keeps rows with `event_date` set. The button count switches to match | beta | UI+API | 3c83f16b | 2026-10-05 (API) | `service.py:56-59`, `ExportPage.tsx:36-47`. Live: `reviewed` 1, `events` 1, `all` 5 rows; an unknown `status` returns 200 with all rows |
 | export-role-gating | Admin and viewer can read. Annotator gets 403 and anon gets 401, but the sidebar still shows Export to annotators | beta | UI+API | 3c83f16b | 2026-10-05 | `router.py:34`, `:45`, `:56`, `AppSidebar.tsx:25` |
 | export-dbx-annotations | `POST /export/databricks` with `export_type=annotations` writes every non-unreviewed annotation to `catalog.schema.target_table` | stub | API | 9a85ad8b | not driven | `export/databricks.py:131`, `:141`, `annotations/models.py:51-54` |
 | export-dbx-predictions | Same endpoint, `export_type=predictions`: every annotation with a predicted label | api-only | API | 9a85ad8b | not driven | `databricks.py:149-172`, `tests/test_export_databricks.py::TestExportToDatabricks::test_exports_rows_to_databricks` (mocked) |
@@ -20,7 +20,7 @@ Export downloads project-wide annotation CSV/JSON for admins/viewers, filtered b
 
 Why the grades:
 - **export-csv and export-stats** work, but no test covers them, so they cannot be `stable`.
-- **export-json** now permits null `sentence_id`; the October 5 failure is historical. Source compatibility is not live proof of a complete export, so beta, not stable.
+- **export-json** crashes. The only UI path that creates annotations is the evaluation full pipeline, and it never sets `sentence_id`. The response model requires that field (see Gotchas).
 - **export-role-gating** has a defect: the UI shows Export to annotators, whom the API rejects.
 - **Tests.** The only export tests are the 10 in `backend/tests/test_export_databricks.py`, all mocked. They pass locally on SQLite and Postgres at cef611321063 (382/382 on each suite). CI has never run them green, because the SQLite job stops at lint (see README "Test evidence").
 
@@ -36,10 +36,6 @@ Why the grades:
 5. Click "Download N annotations". The button is disabled when N is 0. On success the page shows "Downloaded N annotations as CSV" (or JSON). On failure it shows a red `role=alert` line.
 
 ## Driving it with control-cedars
-
-Current query-first checks (not driven): complete two distinct full attempts, review a specific annotation, then **export-stats / export-csv / export-json / export-filters**: `$CC api GET /projects/{project}/export/stats --as viewer`, `GET /export/annotations/csv`, `GET /export/annotations` (expect 200), and CSV with `?status=reviewed` / `?status=events`. Parse CSV, compare annotation_id sets to JSON and read-only annotation rows; preserve both runs' records and nullable keyword-only predictions. Source has no attempt/session/run export filter or fields: join exported annotation_id to annotation API lineage only for inspection, not as a claimed export feature. Viewer/admin can export; annotator gives 403. This workflow's count/lineage proof remains pending; no new export tests were run.
-
-Historical October 5 drives below are retained as evidence, not current assertions that JSON still fails or that the CSV has the old short header. Current `_CSV_HEADERS` in `export/service.py` includes annotation_id, match offsets and patient-review fields; it still omits attempt/run/session IDs.
 
 Preconditions: the baseline. The seeded project has **0 annotations**, so only the empty-project checks run on a fresh seed. For row-level checks, first finish a committed evaluation session's full pipeline (see `evaluation-run.md`). Then review at least one annotation with an event date (see `annotations.md`).
 
@@ -89,7 +85,7 @@ Preconditions: the baseline. The seeded project has **0 annotations**, so only t
 
 ## Gotchas
 
-- **No lineage-aware export yet.** Annotation models/responses have session/attempt/run IDs; export service/schema/CSV do not expose them or filter by them. Totals include independent rows across runs, and null predictions are valid for keyword-only rows. Do not call repeated sentences across different runs duplicates to remove. Current JSON schema allows null `sentence_id` (`export/schemas.py:13`); the October 5 validation-500 transcript above is historical, not a current reproduced defect. Full-stack JSON/CSV parity proof is pending.
+- **JSON export returns 500 for UI-created annotations.** `ExportAnnotationRow.sentence_id: str` is required (`export/schemas.py:11`), but `Annotation.sentence_id` is nullable (`annotations/models.py:37`). The evaluation pipeline creates every annotation the UI can produce, and it never sets `sentence_id` (`worker.py:278-291`, `:352-365`; also `jobs/pipeline.py:178-191`). Response validation fails, and FastAPI returns a plain-text 500 because no handler is registered. The client cannot parse that body and shows "Request failed" (`api/client.ts:51-52`). This was reproduced at model level in-process today. Only the API-only bulk-prediction paths set `sentence_id` (`annotations/prediction_service.py:93`, `jobs/prediction.py:135`).
 - **Databricks annotations export crashes on any row.** `review_status` is a VARCHAR column (`annotations/models.py:51-54`, changed in a5b72355), so a loaded row holds a plain `str`. `databricks.py:141` calls `ann.review_status.value`, which raises AttributeError, and that becomes 500 "Export to Databricks failed" (`router.py:95-97`). The CSV path guards this with `hasattr` (`service.py:97`). The tests patch `_fetch_export_rows` (`tests/test_export_databricks.py:88`, `:129`), so they never see it. With zero non-unreviewed rows it returns `rows_exported: 0` instead.
 - **Databricks evaluation export always fails.** It imports `EvaluationJudgment` and reads `EvaluationSession.predictor_config_id` (`databricks.py:178-181`). Neither exists any more (`evaluation/models.py:3`). The ImportError is raised before the empty-rows check, so the result is 500 every time.
 - **Databricks error mapping.** Any `ValueError` returns 404 (`router.py:93-94`). That covers a missing data source and an invalid catalog, schema or table name from `_fqn` (`connectors/databricks.py:36-44`). A file-upload data source has no `token`, `host` or `schema` keys, so it raises KeyError and returns 500, not 400. The connection opens before the name is validated (`databricks.py:83-88`).

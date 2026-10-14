@@ -5,7 +5,6 @@ from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -214,18 +213,6 @@ async def cancel_run(
     run.status = PipelineRunStatus.CANCELLED
     run.updated_at = now_utc()
     session.add(run)
-    if run.attempt_id:
-        from app.evaluation.models import EvaluationAttempt
-
-        attempt = await session.get(EvaluationAttempt, run.attempt_id)
-        assert attempt is not None
-        attempt.status = "cancelled"
-        attempt.claim_token = None
-        attempt.updated_at = now_utc()
-        session.add(attempt)
-        await session.commit()
-        await session.refresh(run)
-        return run
     await session.commit()
 
     # Sync evaluation session status if this run is linked to one
@@ -262,22 +249,6 @@ async def rerun(
         raise ValueError("Pipeline run not found")
     if old_run.status in (PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING):
         raise ValueError("Cannot rerun an active pipeline run")
-    if old_run.attempt_id:
-        from app.evaluation.models import EvaluationAttempt
-        from app.evaluation.query_first import create_attempt, dispatch, owned_session
-
-        previous = await session.get(EvaluationAttempt, old_run.attempt_id)
-        assert previous is not None
-        owner = await owned_session(session, project_id, previous.session_id)
-        if owner.status == SessionStatus.DISCARDED:
-            raise ValueError("Cannot rerun a discarded evaluation session")
-        new_attempt = await create_attempt(session, owner, previous.query_id, user_id,
-                                            prompt_id=previous.prompt_revision_id,
-                                            scope="full", source_id=previous.id)
-        await session.commit()
-        await dispatch(session, new_attempt)
-        return (await session.execute(select(PipelineRun).where(
-            col(PipelineRun.attempt_id) == new_attempt.id))).scalar_one()
 
     await _check_no_active_run(session, old_run.event_config_id)
 
@@ -343,18 +314,6 @@ async def retry_failed(
     run = await session.get(PipelineRun, run_id)
     if not run or run.project_id != project_id:
         return None
-    if run.attempt_id:
-        from app.evaluation.models import EvaluationAttempt
-        from app.evaluation.query_first import dispatch
-
-        attempt = await session.get(EvaluationAttempt, run.attempt_id)
-        assert attempt is not None
-        if attempt.status != "failed":
-            raise ValueError("No failed attempt to retry")
-        await session.commit()
-        await dispatch(session, attempt)
-        await session.refresh(run)
-        return run
 
     stmt = select(PatientTask).where(
         PatientTask.pipeline_run_id == run_id,
@@ -457,15 +416,6 @@ async def retry_stalled(
     run = await session.get(PipelineRun, run_id)
     if not run or run.project_id != project_id:
         raise ValueError("Pipeline run not found")
-    if run.attempt_id:
-        from app.evaluation.models import EvaluationAttempt
-        from app.evaluation.query_first import dispatch
-
-        attempt = await session.get(EvaluationAttempt, run.attempt_id)
-        assert attempt is not None
-        await session.commit()
-        await dispatch(session, attempt)
-        return 0
 
     cutoff = now_utc() - timedelta(minutes=stale_minutes)
     stmt = select(PatientTask).where(

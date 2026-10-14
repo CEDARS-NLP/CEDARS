@@ -29,10 +29,6 @@ class Annotation(SQLModel, table=True):
     """
 
     __tablename__ = "annotations"
-    __table_args__ = (
-        UniqueConstraint("attempt_id", "note_id", "sentence_start", "sentence_end",
-                         name="uq_annotation_attempt_sentence"),
-    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
@@ -88,10 +84,6 @@ class Annotation(SQLModel, table=True):
 
     # Pipeline linkage (optional — set when created by pipeline runs)
     pipeline_run_id: str | None = Field(default=None, foreign_key="pipeline_runs.id", index=True)
-    attempt_id: str | None = Field(default=None, foreign_key="evaluation_attempts.id", index=True)
-    evaluation_session_id: str | None = Field(
-        default=None, foreign_key="evaluation_sessions_v2.id", index=True
-    )
     patient_task_id: int | None = Field(default=None, foreign_key="patient_tasks.id", index=True)
     predicted_reasoning: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     reviewer_label: str | None = Field(default=None, max_length=20)

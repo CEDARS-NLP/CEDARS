@@ -87,7 +87,7 @@ def get_pipeline_info() -> dict:
 # ── Query parser ─────────────────────────────────────────────────
 
 
-def parse_query(query_str: str, *, syntax_version: int = 1):
+def parse_query(query_str: str) -> list[list[dict]]:
     """Parse CEDARS query syntax into spaCy Matcher-compatible patterns.
 
     Query syntax:
@@ -103,12 +103,6 @@ def parse_query(query_str: str, *, syntax_version: int = 1):
         - ``pattern``: spaCy Matcher pattern (list of dicts)
         - ``negated``: bool (if prefixed with !)
     """
-    from app.nlp.query_expression import EXPRESSION_PREFIX, parse_expression
-
-    if syntax_version == 2 or query_str.startswith(EXPRESSION_PREFIX):
-        return parse_expression(query_str)
-    if syntax_version != 1:
-        raise ValueError("Unsupported query syntax version")
     query_str = query_str.strip()
     if not query_str:
         return []
@@ -166,7 +160,7 @@ def _term_to_pattern(term: str) -> list[dict]:
 # ── Sentence processing ─────────────────────────────────────────
 
 
-def process_note(note_text: str, query_groups, *, exclude_negated: bool = True) -> list[dict]:
+def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
     """Split a note into sentences, match against query, detect negation.
 
     Returns a list of sentence dicts:
@@ -181,10 +175,6 @@ def process_note(note_text: str, query_groups, *, exclude_negated: bool = True) 
             "matches": [{"token": str, "note_start_index": int, "note_end_index": int}, ...],
         }
     """
-    from app.nlp.query_expression import Expression, process_expression_note
-
-    if isinstance(query_groups, Expression):
-        return process_expression_note(note_text, query_groups, exclude_negated)
     nlp = get_nlp()
     doc = nlp(note_text)
 

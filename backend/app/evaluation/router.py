@@ -56,14 +56,12 @@ router = APIRouter(
 
 
 async def _get_session_or_404(
-    db: AsyncSession, project_id: str, session_id: str, *, allow_v2: bool = False
+    db: AsyncSession, project_id: str, session_id: str
 ):
     """Fetch an evaluation session, raising 404 if not found or wrong project."""
     eval_session = await get_eval_session(db, session_id)
     if not eval_session or eval_session.project_id != project_id:
         raise_not_found("Session not found")
-    if eval_session.workflow_version == 2 and not allow_v2:
-        raise HTTPException(409, "Use attempt-scoped /v2 endpoints for this session")
     return eval_session
 
 
@@ -90,7 +88,6 @@ async def create_session_endpoint(
             user_id=current_user.id,
             search_queries=search_queries,
             cloned_from_id=body.cloned_from_id,
-            workflow_version=2,
         )
         return session
     except ValueError as e:
@@ -115,7 +112,7 @@ async def get_session_endpoint(
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get a single evaluation session."""
-    return await _get_session_or_404(db, project_id, session_id, allow_v2=True)
+    return await _get_session_or_404(db, project_id, session_id)
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionResponse)
@@ -126,7 +123,7 @@ async def discard_session_endpoint(
     _user: User = Depends(require_project_role("admin")),
 ):
     """Discard an evaluation session."""
-    await _get_session_or_404(db, project_id, session_id, allow_v2=True)
+    await _get_session_or_404(db, project_id, session_id)
     try:
         return await discard_session(db, session_id)
     except ValueError as e:
@@ -145,14 +142,13 @@ async def clone_session_endpoint(
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Clone a new session from a previous one, copying queries and LLM config."""
-    await _get_session_or_404(db, project_id, session_id, allow_v2=True)
+    await _get_session_or_404(db, project_id, session_id)
     try:
         session = await create_session(
             db,
             project_id,
             user_id=current_user.id,
             cloned_from_id=session_id,
-            workflow_version=2,
         )
         return session
     except ValueError as e:

@@ -39,22 +39,6 @@ Snapshot (`aws status`, 2026-10-05):
 
 "Tests pass" in this map means a local `control-cedars test all` (backend SQLite and Postgres, frontend) run at the file's `Last verified` commit. It does not mean GitHub CI is green: the new `ci.yml` has not run on GitHub yet (branch `chore/watertight-ci`, unpushed). It runs on every PR behind one required-style `CI gate` job. Existing debt is held by ratchets that may only shrink: mypy errors (`backend/.mypy-baseline`), eslint warnings, model/migration drift (`backend/.alembic-drift-baseline`), known vulnerabilities (`scripts/audit-baseline.json`) and the coverage floor. `control-cedars ci status` shows the real GitHub picture; `scripts/check` runs the static lane locally.
 
-### October 13 query-first evidence and limits
-
-The affected setup/run/NLP/annotation/journey rows are implemented-source beta, not plans or stable grades. This update uses the dirty working tree on HEAD `db8175b73584`, not a committed/deployed SHA. Source anchors: `backend/app/evaluation/query_first.py`, `query_first_router.py`, evaluation/NLP/annotation models, `frontend/src/projects/evaluation/QueryFirstSessionPage.tsx` and `AttemptReview.tsx`; additive migration `7c91d2e8f640_query_first_evaluation.py`. Existing sessions default to workflow version 1; new/cloned API sessions use version 2; unknown legacy query ownership is not fabricated.
-
-Final local evidence for the October 13 user session (some logs dated October 14):
-- Actual main backend environment, native Windows: from `backend/`, `uv run pytest tests/ --cov=app --cov-report=term:skip-covered -q` -> **500 passed**, **65.82% coverage** (meets the **60%** floor), and **17 legacy enum serializer warnings**. This proves the native full backend test suite, not completion of the prescribed skill CLI lane.
-- Query migration tests: **13 passed**, on scratch SQLite only; not PostgreSQL or full migrated-stack parity proof.
-- Native main backend static checks: `uv run ruff check app` passed; `uv run python ../scripts/mypy_ratchet.py` reported **422 existing errors vs baseline 497**, baseline unchanged, **0 new type errors**. These manually equivalent remaining checks completed despite the CLI launcher blocker below.
-- Combined backend SQLite slice: **102 passed**, using `Push-Location backend; $env:UV_PROJECT_ENVIRONMENT = "$PWD\.venv-test"; uv run --extra dev pytest tests/test_query_expression.py tests/test_query_first_evaluation.py tests/test_eval_models.py tests/test_eval_router.py tests/test_eval_review.py tests/test_eval_integration.py tests/test_nlp_api.py -q; Pop-Location`.
-- Query-first + expression subset: **58 passed**. Named coverage includes selected old-pair commit, immutable standalone endpoints, ownership/provider guard, zero-LLM full run, independent cross-run annotations, same-run replay/retry, permissions/cancel/resume/clone, legacy fixtures, additive migration roundtrip, stale claim and worker startup recovery. These are local tests, not PostgreSQL/live migration proof.
-- Skill CLI `test frontend`: **PASS**, all **4 npm checks** (typecheck, lint, tests, build), **57 tests passed**, **10 prior warnings** and a bundle advisory. Evidence: `C:/tmp/cedars-verify/query-first-20261013/evidence/test-frontend-wt-db8175b73584-dirty9417e4ba-20261014-002038.log`. This is not live desktop/mobile browser proof.
-- Feature-map renderer is the documentation contract check, not application/full-stack verification.
- - Final judgment lifecycle regression: `uv run --extra dev pytest tests/test_query_first_evaluation.py -q` passed all **33 tests**, including 16 new API cases after the full-suite run. Locked sessions and search/full attempts reject judgments; prior completed sample LLM attempts remain reviewable in an editable session. The full suite was not rerun after this final guard.
-
-Not proved: complete prescribed backend CLI lane, PostgreSQL lane/concurrency/migration rehearsal, full migrated-stack parity, live browser/API drives, parity/infra checks or AWS/DEV deployment. The native full backend suite and manually equivalent static checks passed as recorded above, but the skill backend lane remains blocked on Windows by missing `python3` (`WinError 2` launching `python3 ../scripts/mypy_ratchet.py`); no full CLI backend or `test all` PASS is claimed. `doctor` and `parity check` were blocked by missing `docker`; `infra validate` was blocked by missing `terraform`. Browser attempts encountered a local API HTTP 500 and a mocked page stuck loading; they provide no successful live drive or screenshot proof. PostgreSQL and full migrated parity/live verification remain blocked/unverified. These local results do not establish GitHub CI green. All October 5 live dates retained below refer only to their legacy behavior. Pending proof should run on an isolated migrated stack with synthetic data/fake LLM, including exact revision selection, role 403s, zero classifier-call delta, same-run replay, and annotation/export lineage gaps.
-
 ## Baseline preconditions for driving
 
 Every "Driving it" section assumes this, unless its own `Preconditions:` line says otherwise:
@@ -129,21 +113,21 @@ IDs are kebab-case, prefixed with the area (`data-`, `eval-`, ...), and stable. 
 
 ## Index
 
-| File | Area | Roles | Overall (affected rows 2026-10-13; others 2026-10-05) |
+| File | Area | Roles | Overall (2026-10-05) |
 |---|---|---|---|
 | [auth.md](auth.md) | Register, login, cookies, refresh, platform admin | all | beta |
 | [projects.md](projects.md) | Project CRUD, membership, LLM settings, stats | admin, all | beta |
 | [data.md](data.md) | File upload, sample dataset, Databricks, ingestion | admin | beta |
 | [patients.md](patients.md) | Patient browser, patient detail, notes, reopen | all | beta |
-| [evaluation-setup.md](evaluation-setup.md) | Query-first sessions, inactive query/prompt revisions, attempt history; version-1 flow retained | admin, annotator review, viewer read | beta (v2 not live-driven) |
-| [evaluation-run.md](evaluation-run.md) | Keyword-only full run, pinned LLM attempts, selected prior commit, attempt recovery | admin, annotator review, viewer read | beta (v2 not live-driven) |
-| [annotations.md](annotations.md) | Sentence/run/attempt lineage, independent per-run records; project-wide patient review | admin, annotator | beta (lineage UI/filter gap; bulk predictions api-only) |
+| [evaluation-setup.md](evaluation-setup.md) | Session list, steps 1-2: define event, search queries | admin | beta |
+| [evaluation-run.md](evaluation-run.md) | Steps 3-5: sample run, review, metrics, commit, full pipeline | admin, annotator | beta |
+| [annotations.md](annotations.md) | Patient-first annotation review, locks, bulk predictions | annotator | beta (bulk predictions api-only) |
 | [jobs.md](jobs.md) | Job dashboard, worker status, retries, WebSockets | admin | beta |
-| [export.md](export.md) | Project-wide CSV/JSON, no attempt/run export filter; Databricks | admin, viewer | beta (current JSON not driven; Databricks api-only/stub) |
+| [export.md](export.md) | CSV/JSON export, Databricks export | all | beta (JSON stub, Databricks api-only) |
 | [admin-audit.md](admin-audit.md) | Platform admin endpoints, audit log | platform admin | api-only |
-| [predictors-nlp.md](predictors-nlp.md) | Version-2 Boolean sentence queries, negation, frozen project-model inputs; legacy NLP/predictors | admin, members read | beta query engine; standalone api-only, PINES stub |
+| [predictors-nlp.md](predictors-nlp.md) | Predictor configs, PINES, LLM client, spaCy NLP | admin | api-only (PINES stub, LLM client beta) |
 | [platform-ops.md](platform-ops.md) | Health, config, deploy, migrations, S3, CI | operators | beta |
-| [multi-surface-journeys.md](multi-surface-journeys.md) | Query-only and selected historical attempt journeys; legacy transcripts retained | all | v2 beta/not driven; October 5 outcomes are legacy only |
+| [multi-surface-journeys.md](multi-surface-journeys.md) | End-to-end journeys that cross areas | all | 3 PASS, 2 PARTIAL, 3 FAIL, 2 not driven (2026-10-05) |
 
 ## Sweep order
 

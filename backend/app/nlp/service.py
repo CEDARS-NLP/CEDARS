@@ -3,7 +3,6 @@
 import logging
 from datetime import timedelta
 
-from fastapi import HTTPException
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,9 +69,6 @@ async def activate_search_query(
     if not sq:
         return None
 
-    if sq.evaluation_session_id is not None:
-        raise HTTPException(409, "Activate session revisions through an evaluation full run")
-
     # Deactivate all others via an immediate UPDATE so it executes before
     # the flush-time UPDATE below (the partial unique index is checked per
     # statement; deactivating first avoids a spurious violation).
@@ -121,8 +117,6 @@ async def update_search_query(
     sq = await get_search_query(session, project_id, query_id)
     if not sq:
         return None
-    if sq.evaluation_session_id is not None:
-        raise HTTPException(409, "Session query revisions are immutable")
     for key, value in updates.items():
         if key in _QUERY_UPDATE_FIELDS and value is not None:
             setattr(sq, key, value)
@@ -138,8 +132,6 @@ async def delete_search_query(
     sq = await get_search_query(session, project_id, query_id)
     if not sq:
         return False
-    if sq.evaluation_session_id is not None:
-        raise HTTPException(409, "Session query revisions cannot be deleted")
     await soft_delete(session, sq)
     return True
 
@@ -292,8 +284,6 @@ async def _process_notes_into_sentences(
 
     all_query_groups = []
     for q in active_queries:
-        if q.syntax_version == 2:
-            continue
         groups = parse_query(q.query)
         all_query_groups.extend(groups)
     # Single active query per project is enforced at the DB level; negation
@@ -328,17 +318,7 @@ async def _process_notes_into_sentences(
     match_counts: dict[str, int] = {}
 
     for i, note in enumerate(notes):
-        if active_queries and active_queries[0].syntax_version == 2:
-            from app.evaluation.query_first import helper_rows
-            from app.nlp.query_expression import select_note_sentences
-
-            sentences = select_note_sentences(
-                note.text, helper_rows(active_queries[0].source_queries),
-                exclude_negated=active_queries[0].exclude_negated,
-            )
-            sentences = [{**sentence, "is_target": True} for sentence in sentences]
-        else:
-            sentences = process_note(note.text, all_query_groups)
+        sentences = process_note(note.text, all_query_groups)
         match_counts.setdefault(note.patient_id, 0)
         sentence_rows = []
 

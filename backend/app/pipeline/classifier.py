@@ -66,9 +66,6 @@ def _build_user_prompt(excerpts: list[dict], event_config) -> str:
                                                              'unknown')}) ---\n{e['text']}"
         for e in excerpts
     )
-    template = getattr(event_config, "prompt_template", None)
-    if isinstance(template, str):
-        return template.replace("{count}", str(len(excerpts))).replace("{excerpts}", excerpt_text)
     return f"""Event to detect: {event_config.name}
 Description: {event_config.description}
 Include criteria: {event_config.include_criteria}
@@ -104,11 +101,8 @@ async def classify_patient(
                                     reasoning="No matched excerpts")
 
     user_prompt = _build_user_prompt(excerpts, event_config)
-    generation = getattr(event_config, "generation_settings", {})
-    if not isinstance(generation, dict):
-        generation = {}
     messages = [
-        {"role": "system", "content": generation.get("system_prompt", SYSTEM_PROMPT)},
+        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -119,8 +113,8 @@ async def classify_patient(
             messages=messages,
             api_base=event_config.llm_api_base,
             api_key=getattr(event_config, "llm_api_key", None),
-            timeout=generation.get("timeout", 120),
-            num_retries=generation.get("num_retries", 3),
+            timeout=120,
+            num_retries=3,  # litellm retries transient errors (429, 503, timeout)
             response_format={"type": "json_object"},
         )
     except ValueError:

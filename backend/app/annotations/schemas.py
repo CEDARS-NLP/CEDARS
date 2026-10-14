@@ -11,9 +11,6 @@ class AnnotationResponse(BaseModel):
     patient_id: str
     note_id: str
     sentence_id: str | None = None
-    pipeline_run_id: str | None = None
-    attempt_id: str | None = None
-    evaluation_session_id: str | None = None
     sentence_text: str
     matched_tokens: str | None = None
     is_negated: bool = False
