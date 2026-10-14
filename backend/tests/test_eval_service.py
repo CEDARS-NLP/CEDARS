@@ -387,13 +387,8 @@ class TestExecuteSearchQueries:
             assert match.is_negated is False
             assert match.query_index == 0
 
-    async def test_query_index_counts_excluded_queries(self, seeded_db):
-        """query_index must be the position in the saved list, not among includes.
-
-        The note preview panel asks for matches by the index of the row the user
-        expanded. When an exclude query sits above an include query, numbering
-        only the includes attributed matches to the wrong row.
-        """
+    async def test_query_index_references_saved_expression(self, seeded_db):
+        """Matches reference the merged saved expression, not the draft row index."""
         session = await eval_service.create_session(
             seeded_db,
             project_id="proj-1",
@@ -414,7 +409,10 @@ class TestExecuteSearchQueries:
         )
         matches = result.scalars().all()
         assert len(matches) == 5
-        assert {m.query_index for m in matches} == {1}
+        assert session.search_queries == [
+            {"query": "(troponin) AND !((aspirin))", "type": "include"}
+        ]
+        assert {match.query_index for match in matches} == {0}
 
     async def test_query_index_is_zero_after_exclude_normalization(self, seeded_db):
         """An exclude-first draft becomes one include expression at index zero."""
