@@ -2,14 +2,21 @@
 """Request/response schemas for unified evaluation sessions."""
 
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+from app.nlp.schemas import ReprocessRequest
+
+RunAllRequest = Annotated[
+    ReprocessRequest | None, BeforeValidator(lambda value: None if value == {} else value)
+]
 
 # --- Session ---
 
 class SearchQueryItem(BaseModel):
     query: str
-    type: str = "include"  # "include" or "exclude"
+    type: Literal["include", "exclude"] = "include"
 
 
 # A session runs every query against every note of every sampled patient, so an

@@ -214,7 +214,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                         query_groups = parse_query(query_str)
                         sentences = process_note(note.text, query_groups)
                         for s in sentences:
-                            if s.get("is_target") or s.get("matched_tokens"):
+                            if s.get("is_target") and not s.get("is_negated"):
                                 is_matched = True
                                 note_matched_sents.append(
                                     (s.get("text", ""), s.get("matched_tokens", []))
@@ -339,7 +339,7 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
                     query_groups = parse_query(query_str)
                     sentences = process_note(note.text, query_groups)
                     for s in sentences:
-                        if s.get("is_target") or s.get("matched_tokens"):
+                        if s.get("is_target") and not s.get("is_negated"):
                             if not note_id:
                                 note_id = note.id
                             sent = s.get("text", "")

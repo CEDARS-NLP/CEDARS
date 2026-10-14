@@ -20,7 +20,9 @@ from app.evaluation.models import (
     SearchMatch,
     SessionStatus,
 )
+from app.evaluation.query_expression import normalize_queries
 from app.nlp.engine import parse_query, process_note
+from app.nlp.schemas import ReprocessRequest
 from app.pipeline.classifier import classify_patient
 from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
 
@@ -115,6 +117,8 @@ async def create_session(
             include_criteria = clone_source.include_criteria
             exclude_criteria = clone_source.exclude_criteria
 
+    queries = normalize_queries(queries, allow_empty=True)
+
     # Sample patients
     patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
     result = await db.execute(patient_stmt)
@@ -205,7 +209,8 @@ async def update_queries(
         )
     ).scalar_one()
 
-    session.search_queries = search_queries
+    ensure_editable_session(session)
+    session.search_queries = normalize_queries(search_queries)
     session.updated_at = now_utc()
     db.add(session)
 
@@ -231,6 +236,7 @@ async def update_llm_config(
         )
     ).scalar_one()
 
+    ensure_editable_session(session)
     allowed_fields = {
         "event_name", "event_description", "include_criteria", "exclude_criteria",
     }
@@ -248,6 +254,60 @@ async def update_llm_config(
 # ── Search execution ─────────────────────────────────────────────
 
 
+class SessionLockedError(ValueError):
+    pass
+
+
+def ensure_editable_session(session: EvaluationSession) -> None:
+    if session.status not in (SessionStatus.DRAFT, SessionStatus.REVIEWING):
+        raise SessionLockedError("Only draft or reviewing sessions can be edited or searched")
+    if (session.metrics or {}).get("llm_status") == "running":
+        raise SessionLockedError("Wait for sample classification to finish before editing or searching")
+
+
+async def run_session_queries(
+    db: AsyncSession,
+    session: EvaluationSession,
+    user_id: str,
+    confirmation: ReprocessRequest | None = None,
+):
+    """Activate one keyword-only query after all destructive guards have passed."""
+    from app.nlp import service as nlp_service
+
+    ensure_editable_session(session)
+    queries = normalize_queries(session.search_queries or [])
+    project_id = session.project_id
+    if await nlp_service.reprocess_is_busy(db, project_id):
+        raise SessionLockedError(
+            "Finish active processing and wait for open patient reviews "
+            "(locked in the last hour) before reprocessing."
+        )
+    impact = await nlp_service.get_reprocess_impact(db, project_id)
+    requires_deletion = any(impact.values())
+    if requires_deletion or confirmation is not None:
+        if confirmation is None or not confirmation.confirmed:
+            raise ValueError("Confirm deletion before reprocessing.")
+        expected = {
+            "annotations": confirmation.expected_annotations,
+            "predictions": confirmation.expected_predictions,
+            "sentences": confirmation.expected_sentences,
+        }
+        if impact != expected:
+            raise SessionLockedError(
+                "Deletion counts changed. Review the updated counts and confirm again."
+            )
+
+    session.search_queries = queries
+    db.add(session)
+    await nlp_service.create_search_query(
+        db, project_id, queries[0]["query"], created_by=user_id, nlp_apply=False
+    )
+    if requires_deletion:
+        await nlp_service.clear_sentences(db, project_id)
+        return await nlp_service.run_nlp_pipeline(db, project_id)
+    return await nlp_service.dispatch_nlp_job(db, project_id, user_id)
+
+
 async def execute_search_queries(
     db: AsyncSession,
     session_id: str,
@@ -262,6 +322,10 @@ async def execute_search_queries(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
         )
     ).scalar_one()
+
+    ensure_editable_session(session)
+    queries = normalize_queries(session.search_queries or [])
+    session.search_queries = queries
 
     # Clear existing matches
     await db.execute(
@@ -278,8 +342,6 @@ async def execute_search_queries(
     notes_stmt = select(Note).where(Note.patient_id.in_(sample_patient_ids))
     result = await db.execute(notes_stmt)
     notes = result.scalars().all()
-
-    queries = session.search_queries or []
 
     # query_index must be the position in the full query list: the UI asks for
     # matches by the index it displays (queries/{index}/matches). Numbering only
@@ -1100,6 +1162,14 @@ async def commit_session(
             \nSet the LLM provider and model in project settings before committing."""
         )
 
+    queries = normalize_queries(session.search_queries or [])
+    from app.nlp.service import create_search_query
+
+    await create_search_query(
+        db, session.project_id, queries[0]["query"], created_by=user_id,
+        nlp_apply=False, commit=False,
+    )
+    session.search_queries = queries
     committed_config = {
         "search_queries": session.search_queries,
         "event_name": session.event_name,

@@ -33,6 +33,7 @@ async def create_search_query(
     hide_duplicates: bool = True,
     skip_after_event: bool = True,
     exclude_negated: bool = True,
+    commit: bool = True,
 ) -> SearchQuery:
     # Enforce one active query per project: deactivate the current active
     # query (if any) before inserting the new active row.
@@ -56,8 +57,11 @@ async def create_search_query(
         exclude_negated=exclude_negated,
     )
     session.add(sq)
-    await session.commit()
-    await session.refresh(sq)
+    if commit:
+        await session.commit()
+        await session.refresh(sq)
+    else:
+        await session.flush()
     return sq
 
 
