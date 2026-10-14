@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import EvaluationSessionPage from "./EvaluationSessionPage";
 import { api } from "@/api/client";
+import type { FunnelStats } from "@/projects/types";
 
 vi.mock("@/api/client", () => ({ api: { get: vi.fn() } }));
 vi.mock("./SearchQueriesSection", () => ({ default: ({ onQueriesSaved }: { onQueriesSaved: () => void }) =>
@@ -14,8 +15,19 @@ vi.mock("./SampleRunSection", () => ({ default: () => <div>Model runner</div> })
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function showSession(queries: { query: string; type: string }[] = [], event: string | null = null) {
+  const funnel: FunnelStats = {
+    sample_patients: 5,
+    sample_notes: 10,
+    matched_patients: 0,
+    matched_notes: 0,
+    filter_percent: 100,
+    llm_positive: null,
+    llm_negative: null,
+    llm_inconclusive: null,
+    estimated_cost: null,
+  };
   vi.mocked(api.get).mockImplementation(async (path) => path.endsWith("/funnel")
-    ? { sample_patients: 5, matched_patients: 0, matched_notes: 0, llm_positive: null, estimated_cost: null }
+    ? funnel
     : { id: "session", status: "draft", search_queries: queries, event_name: event, metrics: null });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/projects/project/evaluation/session"]}>
