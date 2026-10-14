@@ -387,6 +387,35 @@ class TestExecuteSearchQueries:
             assert match.is_negated is False
             assert match.query_index == 0
 
+    async def test_query_index_counts_excluded_queries(self, seeded_db):
+        """query_index must be the position in the saved list, not among includes.
+
+        The note preview panel asks for matches by the index of the row the user
+        expanded. When an exclude query sits above an include query, numbering
+        only the includes attributed matches to the wrong row.
+        """
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[
+                {"query": "aspirin", "type": "exclude"},
+                {"query": "troponin", "type": "include"},
+            ],
+        )
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=_mock_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        matches = result.scalars().all()
+        assert len(matches) == 5
+        assert {m.query_index for m in matches} == {1}
+
     async def test_query_index_is_zero_after_exclude_normalization(self, seeded_db):
         """An exclude-first draft becomes one include expression at index zero."""
         session = await eval_service.create_session(
