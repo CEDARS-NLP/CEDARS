@@ -387,7 +387,7 @@ class TestExecuteSearchQueries:
             assert match.is_negated is False
             assert match.query_index == 0
 
-    async def test_query_index_references_saved_expression(self, seeded_db):
+    async def test_query_index_counts_excluded_queries(self, seeded_db):
         """Matches reference the merged saved expression, not the draft row index."""
         session = await eval_service.create_session(
             seeded_db,
