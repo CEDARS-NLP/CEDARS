@@ -169,6 +169,7 @@ export interface UnifiedSession {
   project_id: string;
   status: UnifiedSessionStatus;
   search_queries: SearchQueryItem[];
+  query_sections: SearchQueryItem[];
   exclude_negated: boolean;
   event_name: string | null;
   event_description: string | null;

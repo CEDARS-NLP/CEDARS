@@ -23,7 +23,12 @@ from app.audit.models import AuditEntry  # noqa: E402, F401
 # Import all models so their tables are registered in SQLModel.metadata
 from app.auth.models import User  # noqa: E402, F401
 from app.connectors.models import DataSource, Note, Patient  # noqa: E402, F401
-from app.evaluation.models import EvaluationSession, PatientResult, SearchMatch  # noqa: E402, F401
+from app.evaluation.models import (  # noqa: E402, F401
+    EvaluationSession,
+    EvaluationSessionQuerySection,
+    PatientResult,
+    SearchMatch,
+)
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
 from app.llm.usage import LlmUsage  # noqa: E402, F401
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: E402, F401
@@ -34,7 +39,7 @@ from app.predictors.models import PredictorConfig  # noqa: E402, F401
 from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
 from app.annotations.models import Annotation  # noqa: E402, F401
 from app.evaluation.models import (  # noqa: E402, F401
-    EvaluationSession, SearchMatch, PatientResult
+    EvaluationSession, EvaluationSessionQuerySection, SearchMatch, PatientResult
 )
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
 from app.pipeline.models import EventConfig, PipelineRun, PatientTask, Evidence  # noqa: E402, F401

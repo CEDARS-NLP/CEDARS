@@ -26,6 +26,7 @@ function makeSession(): UnifiedSession {
     project_id: "project",
     status: "draft",
     search_queries: [{ query: "DVT", type: "include" }],
+    query_sections: [{ query: "DVT", type: "include" }],
     exclude_negated: true,
     event_name: null,
     event_description: null,
@@ -134,7 +135,11 @@ describe("SearchQueriesSection", () => {
     }));
     expect(callbacks.onContinue).not.toHaveBeenCalled();
     expect(api.post).not.toHaveBeenCalled();
-    await act(async () => save.resolve({ ...makeSession(), search_queries: cleanedQueries }));
+    await act(async () => save.resolve({
+      ...makeSession(),
+      search_queries: [{ query: "(DVT OR embol*) AND !(suspected)", type: "include" }],
+      query_sections: cleanedQueries,
+    }));
     await waitFor(() => expect(callbacks.onContinue).toHaveBeenCalledExactlyOnceWith());
     expect(callbacks.onQueriesSaved).toHaveBeenCalledOnce();
   });
@@ -152,22 +157,62 @@ describe("SearchQueriesSection", () => {
     }));
     expect(api.get).not.toHaveBeenCalled();
     expect(api.post).not.toHaveBeenCalled();
-    await act(async () => save.resolve({ ...makeSession(), search_queries: cleanedQueries }));
+    await act(async () => save.resolve({
+      ...makeSession(),
+      search_queries: [{ query: "(DVT OR embol*) AND !(suspected)", type: "include" }],
+      query_sections: cleanedQueries,
+    }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(`${sessionPath}/run-all`, {}));
     expect(api.get).toHaveBeenCalledWith(impactPath);
   });
 
-  it("replaces the row draft with the normalized single query returned by saving", async () => {
-    const normalized = { ...makeSession(), search_queries: [{ query: "DVT OR PE", type: "include" as const }] };
+  it("keeps source sections visible while saving the normalized execution query", async () => {
+    const normalized = {
+      ...makeSession(),
+      search_queries: [{ query: "(DVT OR embol*) AND !(suspected)", type: "include" as const }],
+      query_sections: cleanedQueries,
+    };
     vi.mocked(api.put).mockResolvedValueOnce(normalized);
     const { client, onContinue } = showSession();
     editSubqueries();
     fireEvent.click(screen.getByRole("button", { name: "Continue to event definition" }));
 
     await waitFor(() => expect(onContinue).toHaveBeenCalledOnce());
-    expect(screen.getByRole("textbox", { name: "Query 1" })).toHaveValue("DVT OR PE");
-    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getByRole("textbox", { name: "Query 1" })).toHaveValue("DVT OR embol*");
+    expect(screen.getByRole("textbox", { name: "Query 2" })).toHaveValue("suspected");
+    expect(screen.getByRole("combobox", { name: "Query 2 type" })).toHaveValue("exclude");
+    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(api.put).toHaveBeenCalledWith(sessionPath, {
+      search_queries: cleanedQueries,
+      exclude_negated: true,
+    });
     expect(client.getQueryData(["eval-session", "project", "session"])).toEqual(normalized);
+  });
+
+  it("loads saved source sections separately from the merged execution query", () => {
+    const saved = {
+      ...makeSession(),
+      search_queries: [{ query: "(DVT OR embol*) AND !((suspected))", type: "include" as const }],
+      query_sections: cleanedQueries,
+    };
+    showSession(saved);
+
+    expect(screen.getByRole("textbox", { name: "Query 1" })).toHaveValue("DVT OR embol*");
+    expect(screen.getByRole("textbox", { name: "Query 2" })).toHaveValue("suspected");
+    expect(screen.getByRole("combobox", { name: "Query 2 type" })).toHaveValue("exclude");
+  });
+
+  it("shows one matched-notes preview for the saved query sections", () => {
+    showSession({
+      ...makeSession(),
+      search_queries: [{ query: "(DVT OR embol*) AND !((suspected))", type: "include" }],
+      query_sections: cleanedQueries,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show matched notes" }));
+
+    expect(screen.getByText("Matched notes")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Show matched notes" })).toHaveLength(1);
   });
 
   it("shows the negation checkbox checked by default", () => {

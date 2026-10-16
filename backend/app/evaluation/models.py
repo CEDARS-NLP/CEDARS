@@ -10,7 +10,7 @@ import enum
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Index, String, Text
+from sqlalchemy import JSON, Column, DateTime, Index, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -97,6 +97,19 @@ class EvaluationSession(SQLModel, table=True):
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
     )
+
+
+class EvaluationSessionQuerySection(SQLModel, table=True):
+    __tablename__ = "evaluation_session_query_sections"
+    __table_args__ = (
+        UniqueConstraint("session_id", "position", name="uq_eval_query_section_position"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    session_id: str = Field(foreign_key="evaluation_sessions_v2.id", index=True)
+    position: int
+    query: str = Field(sa_column=Column(Text, nullable=False))
+    type: str = Field(sa_column=Column(String(10), nullable=False))
 
 
 class SearchMatch(SQLModel, table=True):

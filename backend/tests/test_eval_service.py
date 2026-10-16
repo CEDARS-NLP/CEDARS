@@ -17,6 +17,7 @@ from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation import service as eval_service
 from app.evaluation.models import (
     EvaluationSession,
+    EvaluationSessionQuerySection,
     PatientResult,
     PatientResultStatus,
     SearchMatch,
@@ -227,7 +228,10 @@ class TestCreateSession:
         await eval_service.update_queries(
             seeded_db,
             source.id,
-            search_queries=[{"query": "troponin", "type": "include"}],
+            search_queries=[
+                {"query": "troponin", "type": "include"},
+                {"query": "history", "type": "exclude"},
+            ],
             exclude_negated=False,
         )
         # Discard so we can create a new one
@@ -241,7 +245,13 @@ class TestCreateSession:
             cloned_from_id=source.id,
         )
         assert cloned.cloned_from_id == source.id
-        assert cloned.search_queries == [{"query": "troponin", "type": "include"}]
+        assert cloned.search_queries == [
+            {"query": "(troponin) AND !((history))", "type": "include"}
+        ]
+        assert await eval_service.get_query_sections(seeded_db, cloned.id) == [
+            {"query": "troponin", "type": "include"},
+            {"query": "history", "type": "exclude"},
+        ]
         assert cloned.event_name == "MI"
         assert cloned.exclude_negated is False
 
@@ -387,7 +397,7 @@ class TestExecuteSearchQueries:
             assert match.is_negated is False
             assert match.query_index == 0
 
-    async def test_query_index_counts_excluded_queries(self, seeded_db):
+    async def test_query_index_references_saved_expression(self, seeded_db):
         """Matches reference the merged saved expression, not the draft row index."""
         session = await eval_service.create_session(
             seeded_db,
@@ -716,6 +726,34 @@ class TestGetQueryMatches:
 
 
 class TestUpdateQueries:
+    async def test_get_query_sections_falls_back_for_legacy_session(self, seeded_db):
+        session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
+        session.search_queries = [{"query": "DVT OR PE", "type": "include"}]
+        seeded_db.add(session)
+        await seeded_db.commit()
+
+        assert await eval_service.get_query_sections(seeded_db, session.id) == [
+            {"query": "DVT OR PE", "type": "include"}
+        ]
+
+    async def test_update_queries_persists_display_sections_separately(self, seeded_db):
+        sections = [
+            {"query": "DVT OR embol*", "type": "include"},
+            {"query": "suspected", "type": "exclude"},
+        ]
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+        )
+
+        updated = await eval_service.update_queries(seeded_db, session.id, sections)
+
+        assert updated.search_queries == [
+            {"query": "(DVT OR embol*) AND !((suspected))", "type": "include"}
+        ]
+        assert await eval_service.get_query_sections(seeded_db, session.id) == sections
+
     async def test_update_queries_clears_matches(self, seeded_db):
         session = await eval_service.create_session(
             seeded_db,

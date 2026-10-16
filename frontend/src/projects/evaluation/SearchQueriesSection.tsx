@@ -40,6 +40,12 @@ function signature(queries: SearchQueryItem[]): string {
   return JSON.stringify(queries.map((q) => [q.type, q.query.trim()]));
 }
 
+function displaySections(session: UnifiedSession): SearchQueryItem[] {
+  return session.query_sections.length > 0
+    ? session.query_sections
+    : session.search_queries;
+}
+
 /** Compose the plain-English event definition the suggester reads. */
 function eventBrief(session: UnifiedSession): string {
   return [
@@ -73,9 +79,10 @@ export default function SearchQueriesSection({
   const qc = useQueryClient();
   const isEditable = ["draft", "reviewing"].includes(session.status);
 
-  const [draft, setDraft] = useState<SearchQueryItem[]>(session.search_queries);
+  const initialSections = displaySections(session);
+  const [draft, setDraft] = useState<SearchQueryItem[]>(initialSections);
   const [excludeNegated, setExcludeNegated] = useState(session.exclude_negated);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState<SuggestedQuery[]>([]);
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [jobStarted, setJobStarted] = useState(false);
@@ -116,14 +123,16 @@ export default function SearchQueriesSection({
     },
   });
 
-  const saved = signature(session.search_queries);
+  const saved = signature(displaySections(session));
   const [syncedKey, setSyncedKey] = useState(saved);
+  const [savedSectionsKey, setSavedSectionsKey] = useState(saved);
 
   // Adopt the server's queries when they change, during render rather than in an
   // effect, so a refetch never lands a stale draft in the inputs.
   if (saved !== syncedKey) {
     setSyncedKey(saved);
-    setDraft(session.search_queries);
+    setSavedSectionsKey(saved);
+    setDraft(displaySections(session));
   }
 
   // Same render-time sync for the negation option, so a refetch never lands a
@@ -135,7 +144,7 @@ export default function SearchQueriesSection({
     setExcludeNegated(savedNegated);
   }
 
-  const dirty = signature(draft) !== saved || excludeNegated !== savedNegated;
+  const dirty = signature(draft) !== savedSectionsKey || excludeNegated !== savedNegated;
 
   const saveMutation = useMutation({
     mutationFn: (payload: { queries: SearchQueryItem[]; excludeNegated: boolean }) =>
@@ -144,7 +153,10 @@ export default function SearchQueriesSection({
         exclude_negated: payload.excludeNegated,
       }),
     onSuccess: (data) => {
-      setDraft(data.search_queries);
+      const sections = displaySections(data);
+      const sectionsKey = signature(sections);
+      setDraft(sections);
+      setSavedSectionsKey(sectionsKey);
       qc.setQueryData(["eval-session", projectId, session.id], data);
       qc.invalidateQueries({ queryKey: ["eval-session", projectId, session.id] });
       onQueriesSaved();
@@ -184,7 +196,7 @@ export default function SearchQueriesSection({
 
   function remove(index: number) {
     setDraft((prev) => prev.filter((_, i) => i !== index));
-    setExpanded(null);
+    setExpanded(false);
   }
 
   function add(item: SearchQueryItem = { query: "", type: "include" }) {
@@ -193,7 +205,7 @@ export default function SearchQueriesSection({
 
   async function saveDraft() {
     const cleaned = draft.map((q) => ({ ...q, query: q.query.trim() })).filter((q) => q.query);
-    if (signature(cleaned) !== saved || excludeNegated !== savedNegated) {
+    if (signature(cleaned) !== savedSectionsKey || excludeNegated !== savedNegated) {
       await saveMutation.mutateAsync({ queries: cleaned, excludeNegated });
     }
   }
@@ -254,25 +266,6 @@ export default function SearchQueriesSection({
                 className="h-8 flex-1 font-mono text-sm"
               />
 
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-                onClick={() => setExpanded(expanded === i ? null : i)}
-                disabled={dirty || !q.query.trim()}
-                title={
-                  dirty
-                    ? "Run the search to see what this matches"
-                    : "Show matched notes"
-                }
-              >
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${
-                    expanded === i ? "" : "-rotate-90"
-                  }`}
-                />
-              </Button>
-
               {isEditable && (
                 <Button
                   variant="ghost"
@@ -286,15 +279,6 @@ export default function SearchQueriesSection({
               )}
             </div>
 
-            {expanded === i && !dirty && (
-              <div className="border-t border-border p-3">
-                <NotePreviewList
-                  projectId={projectId}
-                  sessionId={session.id}
-                  queryIndex={i}
-                />
-              </div>
-            )}
           </div>
         ))}
 
@@ -305,6 +289,33 @@ export default function SearchQueriesSection({
           </p>
         )}
       </div>
+
+      {usable.length > 0 && (
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2"
+            onClick={() => setExpanded((value) => !value)}
+            disabled={dirty}
+            title={dirty ? "Run the search to see matched notes" : "Show matched notes"}
+          >
+            <ChevronDown
+              className={`mr-1 h-4 w-4 transition-transform ${expanded ? "" : "-rotate-90"}`}
+            />
+            Show matched notes
+          </Button>
+          {expanded && !dirty && (
+            <div className="border-t border-border p-3">
+              <NotePreviewList
+                projectId={projectId}
+                sessionId={session.id}
+                queryIndex={0}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {isEditable && (
         <div className="flex flex-wrap items-center gap-2">

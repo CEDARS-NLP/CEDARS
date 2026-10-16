@@ -39,6 +39,7 @@ from app.evaluation.service import (
     get_funnel_stats,
     get_next_unreviewed_result,
     get_query_matches,
+    get_query_sections,
     get_result_note_context,
     list_patient_results,
     list_sessions,
@@ -74,6 +75,13 @@ async def _get_session_or_404(
     return eval_session
 
 
+async def _session_response(db: AsyncSession, eval_session):
+    return {
+        **eval_session.model_dump(),
+        "query_sections": await get_query_sections(db, eval_session.id),
+    }
+
+
 # ── Sessions CRUD ────────────────────────────────────────────────
 
 
@@ -98,7 +106,7 @@ async def create_session_endpoint(
             search_queries=search_queries,
             cloned_from_id=body.cloned_from_id,
         )
-        return session
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -121,7 +129,8 @@ async def get_session_endpoint(
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get a single evaluation session."""
-    return await _get_session_or_404(db, project_id, session_id)
+    session = await _get_session_or_404(db, project_id, session_id)
+    return await _session_response(db, session)
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionResponse)
@@ -134,7 +143,8 @@ async def discard_session_endpoint(
     """Discard an evaluation session."""
     await _get_session_or_404(db, project_id, session_id)
     try:
-        return await discard_session(db, session_id)
+        session = await discard_session(db, session_id)
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -159,7 +169,7 @@ async def clone_session_endpoint(
             user_id=current_user.id,
             cloned_from_id=session_id,
         )
-        return session
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -179,9 +189,10 @@ async def update_queries_endpoint(
     await _get_session_or_404(db, project_id, session_id)
     search_queries = [q.model_dump() for q in body.search_queries]
     try:
-        return await update_queries(
+        session = await update_queries(
             db, session_id, search_queries, exclude_negated=body.exclude_negated
         )
+        return await _session_response(db, session)
     except SessionLockedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
@@ -346,7 +357,7 @@ async def update_event_config_endpoint(
     """Update event definition on a session."""
     await _get_session_or_404(db, project_id, session_id)
     try:
-        return await update_llm_config(
+        session = await update_llm_config(
             db,
             session_id,
             event_name=body.event_name,
@@ -354,6 +365,7 @@ async def update_event_config_endpoint(
             include_criteria=body.include_criteria,
             exclude_criteria=body.exclude_criteria,
         )
+        return await _session_response(db, session)
     except SessionLockedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 

@@ -47,6 +47,7 @@ class SessionResponse(BaseModel):
     project_id: str
     status: str
     search_queries: list[dict]
+    query_sections: list[SearchQueryItem] = Field(default_factory=list)
     exclude_negated: bool
     event_name: str | None
     event_description: str | None

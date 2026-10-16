@@ -15,6 +15,7 @@ from app.config import settings
 from app.connectors.models import Note, Patient
 from app.evaluation.models import (
     EvaluationSession,
+    EvaluationSessionQuerySection,
     PatientResult,
     PatientResultStatus,
     SearchMatch,
@@ -101,6 +102,7 @@ async def create_session(
 
     # Handle cloning
     queries = search_queries or []
+    query_sections = list(queries)
     event_name = None
     event_description = None
     include_criteria = None
@@ -115,6 +117,17 @@ async def create_session(
         ).scalar_one_or_none()
         if clone_source:
             queries = queries or clone_source.search_queries or []
+            stored_sections = (
+                await db.execute(
+                    select(EvaluationSessionQuerySection)
+                    .where(EvaluationSessionQuerySection.session_id == cloned_from_id)
+                    .order_by(EvaluationSessionQuerySection.position)
+                )
+            ).scalars().all()
+            query_sections = [
+                {"query": section.query, "type": section.type}
+                for section in stored_sections
+            ] or list(clone_source.search_queries or [])
             event_name = clone_source.event_name
             event_description = clone_source.event_description
             include_criteria = clone_source.include_criteria
@@ -147,6 +160,15 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+    for position, section in enumerate(_clean_query_sections(query_sections)):
+        db.add(
+            EvaluationSessionQuerySection(
+                session_id=session.id,
+                position=position,
+                query=section["query"],
+                type=section["type"],
+            )
+        )
     await db.commit()
     await db.refresh(session)
     return session
@@ -161,6 +183,31 @@ async def get_session(
         select(EvaluationSession).where(EvaluationSession.id == session_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_query_sections(
+    db: AsyncSession,
+    session_id: str,
+) -> list[dict[str, str]]:
+    result = await db.execute(
+        select(EvaluationSessionQuerySection)
+        .where(EvaluationSessionQuerySection.session_id == session_id)
+        .order_by(EvaluationSessionQuerySection.position)
+    )
+    sections = result.scalars().all()
+    if sections:
+        return [{"query": section.query, "type": section.type} for section in sections]
+
+    session = await get_session(db, session_id)
+    return _clean_query_sections(session.search_queries or []) if session else []
+
+
+def _clean_query_sections(search_queries: list[dict]) -> list[dict[str, str]]:
+    return [
+        {"query": query["query"].strip(), "type": query.get("type", "include")}
+        for query in search_queries
+        if query.get("query", "").strip()
+    ]
 
 
 async def list_sessions(
@@ -216,10 +263,27 @@ async def update_queries(
     ).scalar_one()
 
     ensure_editable_session(session)
-    session.search_queries = normalize_queries(search_queries)
+    normalized_queries = normalize_queries(search_queries)
+    query_sections = _clean_query_sections(search_queries)
+    session.search_queries = normalized_queries
     session.exclude_negated = exclude_negated
     session.updated_at = now_utc()
     db.add(session)
+
+    await db.execute(
+        delete(EvaluationSessionQuerySection).where(
+            EvaluationSessionQuerySection.session_id == session_id
+        )
+    )
+    for position, section in enumerate(query_sections):
+        db.add(
+            EvaluationSessionQuerySection(
+                session_id=session_id,
+                position=position,
+                query=section["query"],
+                type=section["type"],
+            )
+        )
 
     # Clear old search matches
     await db.execute(

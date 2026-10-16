@@ -181,7 +181,28 @@ class TestQueries:
         assert data["search_queries"] == [
             {"query": "(MI OR myocardial) AND !((ruled out))", "type": "include"}
         ]
+        assert data["query_sections"] == [
+            {"query": "MI OR myocardial", "type": "include"},
+            {"query": "ruled out", "type": "exclude"},
+        ]
         assert data["exclude_negated"] is False
+
+        event = await client.put(
+            f"/api/v1/projects/{pid}/evaluation/sessions/{session['id']}/event-config",
+            json={
+                "event_name": "Event",
+                "event_description": "Description",
+                "include_criteria": "MI",
+            },
+        )
+        assert event.status_code == 200
+        assert event.json()["query_sections"] == data["query_sections"]
+
+        reloaded = await client.get(
+            f"/api/v1/projects/{pid}/evaluation/sessions/{session['id']}"
+        )
+        assert reloaded.status_code == 200
+        assert reloaded.json()["query_sections"] == data["query_sections"]
 
     async def test_execute_queries(self, client):
         await register_and_login(client)
