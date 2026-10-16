@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { api, ApiError } from "@/api/client";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { UnifiedSession, SearchQueryItem, SuggestedQuery } from "@/projects/types";
+import type { UnifiedSession, SearchQueryItem, SuggestedQuery, BackgroundJobStatus } from "@/projects/types";
 import NotePreviewList from "./NotePreviewList";
 import {
   ChevronDown,
@@ -12,7 +14,15 @@ import {
   Search,
   Sparkles,
   Trash2,
+  Play,
+  ArrowRight,
 } from "lucide-react";
+
+interface ReprocessImpact {
+  annotations: number;
+  predictions: number;
+  sentences: number;
+}
 
 interface SearchQueriesSectionProps {
   projectId: string;
@@ -23,10 +33,17 @@ interface SearchQueriesSectionProps {
   onQueriesSaved: () => void;
   onSearchRun: () => void;
   matchedPatients: number | null;
+  onContinue: () => void;
 }
 
 function signature(queries: SearchQueryItem[]): string {
   return JSON.stringify(queries.map((q) => [q.type, q.query.trim()]));
+}
+
+function displaySections(session: UnifiedSession): SearchQueryItem[] {
+  return session.query_sections.length > 0
+    ? session.query_sections
+    : session.search_queries;
 }
 
 /** Compose the plain-English event definition the suggester reads. */
@@ -57,32 +74,90 @@ export default function SearchQueriesSection({
   onQueriesSaved,
   onSearchRun,
   matchedPatients,
+  onContinue,
 }: SearchQueriesSectionProps) {
   const qc = useQueryClient();
   const isEditable = ["draft", "reviewing"].includes(session.status);
 
-  const [draft, setDraft] = useState<SearchQueryItem[]>(session.search_queries);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const initialSections = displaySections(session);
+  const [draft, setDraft] = useState<SearchQueryItem[]>(initialSections);
+  const [excludeNegated, setExcludeNegated] = useState(session.exclude_negated);
+  const [expanded, setExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState<SuggestedQuery[]>([]);
+  const [reprocessOpen, setReprocessOpen] = useState(false);
+  const [jobStarted, setJobStarted] = useState(false);
 
-  const saved = signature(session.search_queries);
+  const { data: backgroundJob } = useQuery({
+    queryKey: ["nlp-background-job", projectId],
+    queryFn: () => api.get<BackgroundJobStatus | null>(`/projects/${projectId}/nlp/job/status`),
+    enabled: jobStarted,
+    refetchInterval: (query) => ["pending", "running"].includes(query.state.data?.status ?? "") ? 2000 : false,
+  });
+
+  const impactPreview = useMutation({
+    mutationFn: () => api.get<ReprocessImpact>(`/projects/${projectId}/nlp/reprocess-impact`),
+  });
+
+  const runAllMutation = useMutation({
+    mutationFn: (impact: ReprocessImpact | undefined) => api.post<{ status: string }>(
+      `/projects/${projectId}/evaluation/sessions/${session.id}/queries/run-all`,
+      impact ? {
+        confirmed: true,
+        expected_annotations: impact.annotations,
+        expected_predictions: impact.predictions,
+        expected_sentences: impact.sentences,
+      } : {},
+    ),
+    onSuccess: () => {
+      setReprocessOpen(false);
+      setJobStarted(true);
+      for (const key of ["nlp-queries", "nlp-stats", "nlp-background-job", "annotation-stats", "project-stats"]) {
+        qc.invalidateQueries({ queryKey: [key, projectId] });
+      }
+      onRefresh();
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409 && reprocessOpen) {
+        impactPreview.mutate();
+      }
+    },
+  });
+
+  const saved = signature(displaySections(session));
   const [syncedKey, setSyncedKey] = useState(saved);
+  const [savedSectionsKey, setSavedSectionsKey] = useState(saved);
 
   // Adopt the server's queries when they change, during render rather than in an
   // effect, so a refetch never lands a stale draft in the inputs.
   if (saved !== syncedKey) {
     setSyncedKey(saved);
-    setDraft(session.search_queries);
+    setSavedSectionsKey(saved);
+    setDraft(displaySections(session));
   }
 
-  const dirty = signature(draft) !== saved;
+  // Same render-time sync for the negation option, so a refetch never lands a
+  // stale checkbox next to a fresh query list.
+  const savedNegated = session.exclude_negated;
+  const [syncedNegated, setSyncedNegated] = useState(savedNegated);
+  if (savedNegated !== syncedNegated) {
+    setSyncedNegated(savedNegated);
+    setExcludeNegated(savedNegated);
+  }
+
+  const dirty = signature(draft) !== savedSectionsKey || excludeNegated !== savedNegated;
 
   const saveMutation = useMutation({
-    mutationFn: (queries: SearchQueryItem[]) =>
-      api.put(`/projects/${projectId}/evaluation/sessions/${session.id}/queries`, {
-        search_queries: queries,
+    mutationFn: (payload: { queries: SearchQueryItem[]; excludeNegated: boolean }) =>
+      api.put<UnifiedSession>(`/projects/${projectId}/evaluation/sessions/${session.id}/queries`, {
+        search_queries: payload.queries,
+        exclude_negated: payload.excludeNegated,
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const sections = displaySections(data);
+      const sectionsKey = signature(sections);
+      setDraft(sections);
+      setSavedSectionsKey(sectionsKey);
+      qc.setQueryData(["eval-session", projectId, session.id], data);
       qc.invalidateQueries({ queryKey: ["eval-session", projectId, session.id] });
       onQueriesSaved();
       onRefresh();
@@ -111,7 +186,9 @@ export default function SearchQueriesSection({
 
   const brief = eventBrief(session);
   const usable = draft.filter((q) => q.query.trim());
-  const busy = saveMutation.isPending || executeMutation.isPending;
+  const busy = saveMutation.isPending || executeMutation.isPending || runAllMutation.isPending || impactPreview.isPending;
+  const hasIncludes = usable.some((query) => query.type === "include");
+  const jobRunning = jobStarted && ["pending", "running"].includes(backgroundJob?.status ?? "");
 
   function update(index: number, patch: Partial<SearchQueryItem>) {
     setDraft((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
@@ -119,33 +196,49 @@ export default function SearchQueriesSection({
 
   function remove(index: number) {
     setDraft((prev) => prev.filter((_, i) => i !== index));
-    setExpanded(null);
+    setExpanded(false);
   }
 
   function add(item: SearchQueryItem = { query: "", type: "include" }) {
     setDraft((prev) => [...prev, item]);
   }
 
-  /** Save if needed, then search — the two halves of one intention. */
-  async function saveAndRun() {
+  async function saveDraft() {
     const cleaned = draft.map((q) => ({ ...q, query: q.query.trim() })).filter((q) => q.query);
-    if (signature(cleaned) !== saved) {
-      await saveMutation.mutateAsync(cleaned);
-      setDraft(cleaned);
+    if (signature(cleaned) !== savedSectionsKey || excludeNegated !== savedNegated) {
+      await saveMutation.mutateAsync({ queries: cleaned, excludeNegated });
     }
-    executeMutation.mutate();
   }
 
-  const hasExcludes = usable.some((q) => q.type === "exclude");
+  async function saveAndRun() {
+    try {
+      await saveDraft();
+      executeMutation.mutate();
+    } catch { return; }
+  }
+
+  async function continueToEvent() {
+    try {
+      await saveDraft();
+      onContinue();
+    } catch { return; }
+  }
+
+  async function runAll() {
+    runAllMutation.reset();
+    try {
+      await saveDraft();
+      const impact = await impactPreview.mutateAsync();
+      if (Object.values(impact).some((count) => count > 0)) {
+        setReprocessOpen(true);
+      } else {
+        runAllMutation.mutate(undefined);
+      }
+    } catch { return; }
+  }
 
   return (
     <div className="space-y-4">
-      <p className="max-w-prose text-sm text-muted-foreground">
-        Only notes matching one of these queries reach the model, so this is what
-        keeps a full run affordable. Cast a wide net — the model does the precise
-        work in step 3.
-      </p>
-
       {/* Queries */}
       <div className="space-y-2">
         {draft.map((q, i) => (
@@ -173,25 +266,6 @@ export default function SearchQueriesSection({
                 className="h-8 flex-1 font-mono text-sm"
               />
 
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-                onClick={() => setExpanded(expanded === i ? null : i)}
-                disabled={dirty || !q.query.trim()}
-                title={
-                  dirty
-                    ? "Run the search to see what this matches"
-                    : "Show matched notes"
-                }
-              >
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${
-                    expanded === i ? "" : "-rotate-90"
-                  }`}
-                />
-              </Button>
-
               {isEditable && (
                 <Button
                   variant="ghost"
@@ -205,15 +279,6 @@ export default function SearchQueriesSection({
               )}
             </div>
 
-            {expanded === i && !dirty && (
-              <div className="border-t border-border p-3">
-                <NotePreviewList
-                  projectId={projectId}
-                  sessionId={session.id}
-                  queryIndex={i}
-                />
-              </div>
-            )}
           </div>
         ))}
 
@@ -224,6 +289,33 @@ export default function SearchQueriesSection({
           </p>
         )}
       </div>
+
+      {usable.length > 0 && (
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2"
+            onClick={() => setExpanded((value) => !value)}
+            disabled={dirty}
+            title={dirty ? "Run the search to see matched notes" : "Show matched notes"}
+          >
+            <ChevronDown
+              className={`mr-1 h-4 w-4 transition-transform ${expanded ? "" : "-rotate-90"}`}
+            />
+            Show matched notes
+          </Button>
+          {expanded && !dirty && (
+            <div className="border-t border-border p-3">
+              <NotePreviewList
+                projectId={projectId}
+                sessionId={session.id}
+                queryIndex={0}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {isEditable && (
         <div className="flex flex-wrap items-center gap-2">
@@ -239,7 +331,7 @@ export default function SearchQueriesSection({
             title={
               brief.trim()
                 ? undefined
-                : "Fill in the event definition in step 1 first"
+                : "Define the event in step 2 first"
             }
           >
             {suggestMutation.isPending ? (
@@ -257,7 +349,7 @@ export default function SearchQueriesSection({
               <div>troponin OR MI</div>
               <div>(ECG OR EKG) AND elevation</div>
               <div>embol* — matches embolism, embolic</div>
-              <div>!suspected — drops negated mentions</div>
+              <div>!suspected - excludes sentences mentioning suspected</div>
             </div>
           </details>
         </div>
@@ -314,18 +406,26 @@ export default function SearchQueriesSection({
         </div>
       )}
 
-      {hasExcludes && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">
-          Exclude queries are saved with the session but do not yet narrow the
-          search. To drop negated mentions, put <code>!suspected</code> inside an
-          include query.
-        </p>
-      )}
-
       {/* Run */}
       {isEditable && (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-          <Button onClick={saveAndRun} disabled={usable.length === 0 || busy}>
+        <div className="space-y-3 border-t border-border pt-4">
+          <label className="flex items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary"
+              checked={excludeNegated}
+              onChange={(e) => setExcludeNegated(e.target.checked)}
+            />
+            <span>
+              Remove negated matches
+              <span className="block text-xs text-muted-foreground">
+                Unchecked keeps sentences like &ldquo;no evidence of&rdquo; matches, shown struck through in previews.
+              </span>
+            </span>
+          </label>
+
+          <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" onClick={saveAndRun} disabled={!hasIncludes || busy || jobRunning}>
             {busy ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -337,6 +437,15 @@ export default function SearchQueriesSection({
                 {dirty ? "Save and run search" : "Run search"}
               </>
             )}
+          </Button>
+
+          <Button onClick={runAll} disabled={!hasIncludes || busy || jobRunning}>
+            <Play className="mr-2 h-4 w-4" />
+            Run on all patients
+          </Button>
+          <Button variant="outline" onClick={continueToEvent} disabled={!hasIncludes || busy || jobRunning}>
+            Continue to event definition
+            <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
 
           {matchedPatients !== null && !dirty && !searchStale && (
@@ -351,14 +460,43 @@ export default function SearchQueriesSection({
                 : "Queries changed since the last search. Run it again before testing."}
             </span>
           )}
+          </div>
         </div>
       )}
 
-      {(saveMutation.isError || executeMutation.isError) && (
+      {jobStarted && (
+        <div className="flex flex-wrap items-center gap-3 text-sm" role="status">
+          <span>{runAllMutation.data?.status === "completed" || backgroundJob?.status === "completed"
+            ? "Search complete"
+            : backgroundJob?.status === "failed" ? "Search failed" : "Searching all patients"}</span>
+          {backgroundJob?.error_message && <span className="text-destructive">{backgroundJob.error_message}</span>}
+          <Button asChild variant="outline" size="sm"><Link to={`/projects/${projectId}/annotations`}>Review annotations</Link></Button>
+        </div>
+      )}
+
+      {(saveMutation.isError || executeMutation.isError || impactPreview.isError || runAllMutation.isError) && (
         <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {((saveMutation.error || executeMutation.error) as Error).message}
+          {((saveMutation.error || executeMutation.error || impactPreview.error || runAllMutation.error) as Error).message}
         </p>
       )}
+
+      <Dialog open={reprocessOpen} onOpenChange={(open) => { if (!runAllMutation.isPending) setReprocessOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Replace existing search results?</DialogTitle>
+            <DialogDescription>
+              This removes {impactPreview.data?.annotations ?? 0} annotations, {impactPreview.data?.predictions ?? 0} predictions,
+              and {impactPreview.data?.sentences ?? 0} sentences, including review decisions. It then searches all notes again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={runAllMutation.isPending} onClick={() => setReprocessOpen(false)}>Keep existing results</Button>
+            <Button variant="destructive" disabled={busy || impactPreview.isError || !impactPreview.data} onClick={() => runAllMutation.mutate(impactPreview.data)}>
+              {runAllMutation.isPending ? "Searching" : "Replace and run"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

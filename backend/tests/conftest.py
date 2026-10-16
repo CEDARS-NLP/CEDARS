@@ -15,6 +15,7 @@ from app.common.database import get_session
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
+    EvaluationSessionQuerySection,
     PatientResult,
     SearchMatch,
 )

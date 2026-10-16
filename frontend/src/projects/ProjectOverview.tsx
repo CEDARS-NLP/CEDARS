@@ -491,7 +491,7 @@ export default function ProjectOverview() {
         if (hasCommitted && committedSession?.metrics?.f1 !== undefined)
           return `Committed, F1: ${(committedSession.metrics.f1 * 100).toFixed(1)}%`;
         if (hasAnnotations) return `${totalAnnotations} matched sentences found`;
-        return "Run a search query, or test an LLM filter first";
+        return "Start an evaluation session to find matching notes";
       case 2:
         if (state === "locked") return "Waiting for a search run";
         if (hasAnnotations)

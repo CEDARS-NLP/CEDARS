@@ -1,6 +1,7 @@
 """Unified evaluation session API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -19,6 +20,7 @@ from app.evaluation.schemas import (
     PipelineStatsResponse,
     QueryMatchesResponse,
     ResultNotesResponse,
+    RunAllRequest,
     SessionListResponse,
     SessionResponse,
     SubmitJudgmentRequest,
@@ -27,6 +29,7 @@ from app.evaluation.schemas import (
     UpdateQueriesRequest,
 )
 from app.evaluation.service import (
+    SessionLockedError,
     commit_session,
     compute_metrics,
     create_session,
@@ -36,10 +39,12 @@ from app.evaluation.service import (
     get_funnel_stats,
     get_next_unreviewed_result,
     get_query_matches,
+    get_query_sections,
     get_result_note_context,
     list_patient_results,
     list_sessions,
     run_llm_on_sample,
+    run_session_queries,
     submit_judgment,
     update_llm_config,
     update_queries,
@@ -47,7 +52,9 @@ from app.evaluation.service import (
 from app.evaluation.service import (
     get_session as get_eval_session,
 )
+from app.jobs.schemas import BackgroundJobResponse
 from app.llm.usage import UsageScope
+from app.nlp.schemas import NlpJobResponse
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/evaluation",
@@ -66,6 +73,13 @@ async def _get_session_or_404(
     if not eval_session or eval_session.project_id != project_id:
         raise_not_found("Session not found")
     return eval_session
+
+
+async def _session_response(db: AsyncSession, eval_session):
+    return {
+        **eval_session.model_dump(),
+        "query_sections": await get_query_sections(db, eval_session.id),
+    }
 
 
 # ── Sessions CRUD ────────────────────────────────────────────────
@@ -92,7 +106,7 @@ async def create_session_endpoint(
             search_queries=search_queries,
             cloned_from_id=body.cloned_from_id,
         )
-        return session
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -115,7 +129,8 @@ async def get_session_endpoint(
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get a single evaluation session."""
-    return await _get_session_or_404(db, project_id, session_id)
+    session = await _get_session_or_404(db, project_id, session_id)
+    return await _session_response(db, session)
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionResponse)
@@ -128,7 +143,8 @@ async def discard_session_endpoint(
     """Discard an evaluation session."""
     await _get_session_or_404(db, project_id, session_id)
     try:
-        return await discard_session(db, session_id)
+        session = await discard_session(db, session_id)
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -153,7 +169,7 @@ async def clone_session_endpoint(
             user_id=current_user.id,
             cloned_from_id=session_id,
         )
-        return session
+        return await _session_response(db, session)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -172,7 +188,38 @@ async def update_queries_endpoint(
     """Update search queries on a session."""
     await _get_session_or_404(db, project_id, session_id)
     search_queries = [q.model_dump() for q in body.search_queries]
-    return await update_queries(db, session_id, search_queries)
+    try:
+        session = await update_queries(
+            db, session_id, search_queries, exclude_negated=body.exclude_negated
+        )
+        return await _session_response(db, session)
+    except SessionLockedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post(
+    "/sessions/{session_id}/queries/run-all",
+    response_model=BackgroundJobResponse | NlpJobResponse,
+)
+async def run_all_queries_endpoint(
+    project_id: str,
+    session_id: str,
+    body: RunAllRequest = None,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin")),
+):
+    eval_session = await _get_session_or_404(db, project_id, session_id)
+    try:
+        return await run_session_queries(db, eval_session, current_user.id, body)
+    except SessionLockedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Another query was activated concurrently. Retry.") from error
 
 
 @router.post("/sessions/{session_id}/queries/suggest", response_model=SuggestQueriesResponse)
@@ -224,7 +271,12 @@ async def execute_queries_endpoint(
 ):
     """Execute search queries against sample notes."""
     await _get_session_or_404(db, project_id, session_id)
-    await execute_search_queries(db, session_id)
+    try:
+        await execute_search_queries(db, session_id)
+    except SessionLockedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     stats = await get_funnel_stats(db, session_id)
     return FunnelResponse(**stats)
 
@@ -304,14 +356,18 @@ async def update_event_config_endpoint(
 ):
     """Update event definition on a session."""
     await _get_session_or_404(db, project_id, session_id)
-    return await update_llm_config(
-        db,
-        session_id,
-        event_name=body.event_name,
-        event_description=body.event_description,
-        include_criteria=body.include_criteria,
-        exclude_criteria=body.exclude_criteria,
-    )
+    try:
+        session = await update_llm_config(
+            db,
+            session_id,
+            event_name=body.event_name,
+            event_description=body.event_description,
+            include_criteria=body.include_criteria,
+            exclude_criteria=body.exclude_criteria,
+        )
+        return await _session_response(db, session)
+    except SessionLockedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post("/sessions/{session_id}/run-llm", status_code=status.HTTP_202_ACCEPTED)
