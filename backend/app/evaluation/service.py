@@ -103,6 +103,7 @@ async def create_session(
     # Handle cloning
     queries = search_queries or []
     query_sections = list(queries)
+    raw_input = True
     event_name = None
     event_description = None
     include_criteria = None
@@ -116,7 +117,6 @@ async def create_session(
             )
         ).scalar_one_or_none()
         if clone_source:
-            queries = queries or clone_source.search_queries or []
             stored_sections = (
                 await db.execute(
                     select(EvaluationSessionQuerySection)
@@ -124,17 +124,20 @@ async def create_session(
                     .order_by(EvaluationSessionQuerySection.position)
                 )
             ).scalars().all()
-            query_sections = [
-                {"query": section.query, "type": section.type}
-                for section in stored_sections
-            ] or list(clone_source.search_queries or [])
+            if not search_queries:
+                query_sections = [
+                    {"query": section.query, "type": section.type}
+                    for section in stored_sections
+                ] or list(clone_source.search_queries or [])
+                queries = query_sections
+                raw_input = bool(stored_sections)
             event_name = clone_source.event_name
             event_description = clone_source.event_description
             include_criteria = clone_source.include_criteria
             exclude_criteria = clone_source.exclude_criteria
             exclude_negated = clone_source.exclude_negated
 
-    queries = normalize_queries(queries, allow_empty=True)
+    queries = normalize_queries(queries, allow_empty=True, raw_input=raw_input)
 
     # Sample patients
     patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
@@ -263,7 +266,19 @@ async def update_queries(
     ).scalar_one()
 
     ensure_editable_session(session)
-    normalized_queries = normalize_queries(search_queries)
+    canonical_echo = search_queries == session.search_queries
+    normalized_queries = normalize_queries(search_queries, raw_input=not canonical_echo)
+    if canonical_echo:
+        stored_sections = (
+            await db.execute(
+                select(EvaluationSessionQuerySection)
+                .where(EvaluationSessionQuerySection.session_id == session_id)
+                .order_by(EvaluationSessionQuerySection.position)
+            )
+        ).scalars().all()
+        search_queries = [
+            {"query": section.query, "type": section.type} for section in stored_sections
+        ] or search_queries
     query_sections = _clean_query_sections(search_queries)
     session.search_queries = normalized_queries
     session.exclude_negated = exclude_negated
@@ -336,13 +351,13 @@ def ensure_editable_session(session: EvaluationSession) -> None:
         raise SessionLockedError("Wait for sample classification to finish before editing or searching")
 
 
-async def run_session_queries(
+async def _activate_session_query(
     db: AsyncSession,
     session: EvaluationSession,
     user_id: str,
     confirmation: ReprocessRequest | None = None,
 ):
-    """Activate one keyword-only query after all destructive guards have passed."""
+    """Activate the session query only after validating destructive replacement."""
     from app.nlp import service as nlp_service
 
     ensure_editable_session(session)
@@ -373,9 +388,25 @@ async def run_session_queries(
     await nlp_service.create_search_query(
         db, project_id, queries[0]["query"], created_by=user_id, nlp_apply=False,
         exclude_negated=session.exclude_negated,
+        commit=False,
     )
     if requires_deletion:
-        await nlp_service.clear_sentences(db, project_id)
+        await nlp_service.clear_sentences(db, project_id, commit=False)
+    return requires_deletion
+
+
+async def run_session_queries(
+    db: AsyncSession,
+    session: EvaluationSession,
+    user_id: str,
+    confirmation: ReprocessRequest | None = None,
+):
+    """Activate and run a keyword query while keeping the session editable."""
+    from app.nlp import service as nlp_service
+
+    requires_deletion = await _activate_session_query(db, session, user_id, confirmation)
+    project_id = session.project_id
+    if requires_deletion:
         return await nlp_service.run_nlp_pipeline(db, project_id)
     return await nlp_service.dispatch_nlp_job(db, project_id, user_id)
 
@@ -1359,6 +1390,7 @@ async def commit_session(
     session_id: str,
     user_id: str,
     confidence_threshold: float | None = None,
+    confirmation: ReprocessRequest | None = None,
 ) -> EvaluationSession:
     """Lock the session configuration and mark as COMMITTED.
 
@@ -1397,14 +1429,15 @@ async def commit_session(
             \nSet the LLM provider and model in project settings before committing."""
         )
 
-    queries = normalize_queries(session.search_queries or [])
-    from app.nlp.service import create_search_query
+    from app.nlp.models import NlpJobStatus
+    from app.nlp.service import run_nlp_pipeline
 
-    await create_search_query(
-        db, session.project_id, queries[0]["query"], created_by=user_id,
-        nlp_apply=False, commit=False,
+    await _activate_session_query(db, session, user_id, confirmation)
+    job = await run_nlp_pipeline(
+        db, session.project_id, create_annotations=False,
     )
-    session.search_queries = queries
+    if job.status != NlpJobStatus.COMPLETED:
+        raise ValueError("Sentence rebuild failed. Retry before committing the session.")
     committed_config = {
         "search_queries": session.search_queries,
         "exclude_negated": session.exclude_negated,

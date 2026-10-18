@@ -532,6 +532,7 @@ async def commit_endpoint(
             session_id,
             user_id=current_user.id,
             confidence_threshold=body.confidence_threshold,
+            confirmation=body.reprocess,
         )
 
         from app.evaluation.service import dispatch_full_pipeline_run

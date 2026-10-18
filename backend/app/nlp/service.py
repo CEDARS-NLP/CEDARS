@@ -274,6 +274,8 @@ async def _process_notes_into_sentences(
     session: AsyncSession,
     project_id: str,
     progress_callback=None,
+    *,
+    create_annotations: bool = True,
 ) -> dict:
     """Core NLP pipeline: fetch queries, find unprocessed notes, create sentences.
 
@@ -343,7 +345,7 @@ async def _process_notes_into_sentences(
 
         await session.flush()
 
-        for sentence, sent_data in sentence_rows:
+        for sentence, sent_data in sentence_rows if create_annotations else []:
             for match in sent_data.get("matches", []):
                 auto_excluded = exclude_negated and sent_data["is_negated"]
                 session.add(
@@ -377,6 +379,16 @@ async def _process_notes_into_sentences(
         if (i + 1) % 50 == 0 or i == total - 1:
             if progress_callback:
                 await progress_callback(i + 1, total)
+
+    if not create_annotations:
+        await session.commit()
+        return {
+            "total_notes": total,
+            "processed_notes": total,
+            "annotations_created": 0,
+            "patients_with_matches": 0,
+            "patients_auto_completed": 0,
+        }
 
     matched_patients = [pid for pid, count in match_counts.items() if count > 0]
     patients_with_unreviewed = set()
@@ -458,7 +470,7 @@ async def _process_notes_into_sentences(
 
 
 async def run_nlp_pipeline(
-    session: AsyncSession, project_id: str
+    session: AsyncSession, project_id: str, *, create_annotations: bool = True,
 ) -> NlpJob:
     """Run the NLP pipeline for a project: split notes into sentences,
     match search queries, detect negation.
@@ -483,7 +495,9 @@ async def run_nlp_pipeline(
             session.add(job)
             await session.commit()
 
-        stats = await _process_notes_into_sentences(session, project_id, _progress)
+        stats = await _process_notes_into_sentences(
+            session, project_id, _progress, create_annotations=create_annotations,
+        )
 
         job.status = NlpJobStatus.COMPLETED
         job.total_notes = stats["total_notes"]
@@ -629,7 +643,9 @@ async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
     return False
 
 
-async def clear_sentences(session: AsyncSession, project_id: str) -> int:
+async def clear_sentences(
+    session: AsyncSession, project_id: str, *, commit: bool = True,
+) -> int:
     """Delete all sentences (and their annotations) for a project to allow re-processing."""
     # Delete predictions first (FK dependency on annotations)
     await session.execute(
@@ -653,5 +669,6 @@ async def clear_sentences(session: AsyncSession, project_id: str) -> int:
         text("DELETE FROM sentences WHERE project_id = :pid"),
         {"pid": project_id},
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return result.rowcount

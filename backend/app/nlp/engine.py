@@ -94,6 +94,7 @@ def parse_query(query_str: str) -> list[list[dict]]:
         OR groups separated by OR
         AND conditions within a group
         ! prefix for negation
+        Backslash escapes literal ! and backslash characters
         * and ? wildcards
 
     Example: ``(DVT OR embolus) AND !suspected``
@@ -109,10 +110,22 @@ def parse_query(query_str: str) -> list[list[dict]]:
 
     if len(query_str) > 10000:
         raise ValueError("Search query is too long")
-    tokens = [
-        token.strip() for token in re.split(r"(\bOR\b|\bAND\b|[()!])", query_str,
-                                          flags=re.IGNORECASE) if token.strip()
-    ]
+    tokens = []
+    term_parts = []
+    for match in re.finditer(
+        r"\\[\\!]|(\bOR\b|\bAND\b|[()!])|.", query_str, flags=re.IGNORECASE | re.DOTALL
+    ):
+        if match.group(1) is None:
+            term_parts.append(match.group())
+        else:
+            term = "".join(term_parts).strip()
+            if term:
+                tokens.append(term)
+            term_parts = []
+            tokens.append(match.group())
+    term = "".join(term_parts).strip()
+    if term:
+        tokens.append(term)
     if len(tokens) > 512:
         raise ValueError("Search query is too complex")
     position = 0
@@ -148,7 +161,7 @@ def parse_query(query_str: str) -> list[list[dict]]:
     def expand(node, negated=False):
         operator = node[0]
         if operator == "term":
-            term = node[1]
+            term = re.sub(r"\\([\\!])", r"\1", node[1])
             return [[{"pattern": _term_to_pattern(term), "negated": negated, "text": term}]]
         if operator == "not":
             return expand(node[1], not negated)

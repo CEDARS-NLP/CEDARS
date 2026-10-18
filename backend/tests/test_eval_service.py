@@ -1296,11 +1296,81 @@ class TestReview:
 
 
 class TestCommit:
-    async def test_commit_activates_one_merged_legacy_expression(self, seeded_db):
+    @pytest.mark.parametrize("artifact", ["sentences", "annotations", "predictions"])
+    @pytest.mark.parametrize("confirmation_kind", ["missing", "unconfirmed", "stale"])
+    async def test_each_processed_artifact_requires_exact_confirmation(
+        self, seeded_db, artifact, confirmation_kind,
+    ):
+        from sqlalchemy import select
+
+        from app.annotations.models import AnnotationPrediction
+        from app.nlp.schemas import ReprocessRequest
+        from app.nlp.service import get_reprocess_impact
+
+        session = await eval_service.create_session(
+            seeded_db, "proj-1", "user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        session.status = SessionStatus.REVIEWING
+        old_query = SearchQuery(project_id="proj-1", query="aspirin")
+        seeded_db.add(old_query)
+        if artifact == "sentences":
+            seeded_db.add(Sentence(
+                project_id="proj-1", note_id="note-1-1", sentence_number=0,
+                text="Old sentence", start_pos=0, end_pos=12,
+            ))
+        else:
+            annotation = Annotation(
+                project_id="proj-1", patient_id="pat-1", note_id="note-1-1",
+                sentence_text="Old annotation",
+            )
+            seeded_db.add(annotation)
+            if artifact == "predictions":
+                await seeded_db.flush()
+                seeded_db.add(AnnotationPrediction(
+                    project_id="proj-1", annotation_id=annotation.id,
+                ))
+        await seeded_db.commit()
+        impact = await get_reprocess_impact(seeded_db, "proj-1")
+        assert impact == {
+            "sentences": int(artifact == "sentences"),
+            "annotations": int(artifact != "sentences"),
+            "predictions": int(artifact == "predictions"),
+        }
+        confirmation = None
+        if confirmation_kind != "missing":
+            expected = dict(impact)
+            if confirmation_kind == "stale":
+                expected[artifact] += 1
+            confirmation = ReprocessRequest(
+                confirmed=confirmation_kind != "unconfirmed",
+                **{f"expected_{key}": value for key, value in expected.items()},
+            )
+        with patch("app.nlp.service.run_nlp_pipeline", new_callable=AsyncMock) as rebuild:
+            with pytest.raises(ValueError, match=(
+                "counts changed" if confirmation_kind == "stale" else "Confirm deletion"
+            )):
+                await eval_service.commit_session(
+                    seeded_db, session.id, "user-1", confirmation=confirmation,
+                )
+            rebuild.assert_not_awaited()
+        await seeded_db.refresh(session)
+        await seeded_db.refresh(old_query)
+        assert session.status == SessionStatus.REVIEWING
+        assert session.committed_config is None
+        assert session.committed_at is None
+        assert session.committed_by is None
+        assert old_query.is_active
+        assert (await seeded_db.execute(select(SearchQuery))).scalars().all() == [old_query]
+        assert await get_reprocess_impact(seeded_db, "proj-1") == impact
+
+    @pytest.mark.parametrize("exclude_negated", [True, False])
+    async def test_commit_activates_one_merged_legacy_expression(self, seeded_db, exclude_negated):
         from sqlalchemy import select
 
         session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
         session.status = SessionStatus.REVIEWING
+        session.exclude_negated = exclude_negated
         session.search_queries = [
             {"query": "DVT", "type": "include"},
             {"query": "troponin", "type": "include"},
@@ -1315,6 +1385,8 @@ class TestCommit:
         active = [query for query in queries if query.is_active]
         assert len(active) == 1
         assert active[0].query == "((DVT) OR (troponin)) AND !((suspected))"
+        assert active[0].exclude_negated is exclude_negated
+        assert committed.committed_config["exclude_negated"] is exclude_negated
         assert committed.search_queries == committed.committed_config["search_queries"]
         assert len(committed.search_queries) == 1
         assert old.is_active is False

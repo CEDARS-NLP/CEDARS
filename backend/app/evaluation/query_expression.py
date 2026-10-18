@@ -3,7 +3,10 @@
 from app.nlp.engine import parse_query
 
 
-def normalize_queries(rows: list[dict], *, allow_empty: bool = False) -> list[dict]:
+def normalize_queries(
+    rows: list[dict], *, allow_empty: bool = False, raw_input: bool = False
+) -> list[dict]:
+    """Compile rows, escaping literal backslashes and ! only for user-entered input."""
     if not isinstance(rows, list) or len(rows) > 50:
         raise ValueError("Search queries must be a list of at most 50 items")
     includes = []
@@ -17,6 +20,8 @@ def normalize_queries(rows: list[dict], *, allow_empty: bool = False) -> list[di
         query = query.strip()
         if not query:
             continue
+        if raw_input:
+            query = query.replace("\\", "\\\\").replace("!", r"\!")
         parse_query(query)
         (includes if row.get("type", "include") == "include" else excludes).append(query)
     if not includes:

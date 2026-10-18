@@ -230,6 +230,7 @@ class MetricsResponse(BaseModel):
 
 class CommitRequest(BaseModel):
     confidence_threshold: float | None = None
+    reprocess: ReprocessRequest | None = None
 
 
 class CommitResponse(BaseModel):

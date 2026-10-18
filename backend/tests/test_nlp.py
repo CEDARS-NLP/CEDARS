@@ -12,6 +12,51 @@ from app.nlp.models import NlpJobStatus, SearchQuery, Sentence
 
 
 class TestQueryParser:
+    @pytest.mark.parametrize(
+        ("query", "text"),
+        [
+            (r"\!DVT", "!DVT"),
+            (r"DVT\!", "DVT!"),
+            (r"DVT\!\!", "DVT!!"),
+            (r"DVT\!PE", "DVT!PE"),
+            (r"path\\name", r"path\name"),
+            (r"path\name", r"path\name"),
+            ("path\\", "path\\"),
+            (r"path\\\!", "path\\!"),
+        ],
+    )
+    def test_literal_escapes(self, query, text):
+        condition = parse_query(query)[0][0]
+        assert condition["text"] == text
+        assert condition["negated"] is False
+
+    def test_even_backslashes_leave_exclusion_operator(self):
+        groups = parse_query(r"DVT\\ AND !suspected")
+        assert groups[0][0]["text"] == "DVT\\"
+        assert groups[0][1]["negated"] is True
+        with pytest.raises(ValueError):
+            parse_query(r"DVT\\!suspected")
+
+    def test_escaped_punctuation_with_boolean_and_wildcard(self):
+        groups = parse_query(r"(DVT\! OR embol*) AND !suspected")
+        assert len(groups) == 2
+        assert groups[0][0]["text"] == "DVT!"
+        assert "REGEX" in str(groups[1][0]["pattern"])
+        assert all(group[1]["negated"] for group in groups)
+
+    @pytest.mark.parametrize(
+        ("query", "message"),
+        [
+            ("x" * 10001, "too long"),
+            (" OR ".join("DVT" for _ in range(257)), "too complex"),
+            ("(" * 34 + "DVT" + ")" * 34, "too deep"),
+        ],
+        ids=["length", "tokens", "nesting"],
+    )
+    def test_parser_limits_remain_bounded(self, query, message):
+        with pytest.raises(ValueError, match=message):
+            parse_query(query)
+
     @pytest.mark.parametrize("query", ["DVT AND", "(DVT", "DVT)", "()", "DVT OR OR PE"])
     def test_invalid_syntax_rejected(self, query):
         with pytest.raises(ValueError):
@@ -66,6 +111,21 @@ class TestQueryParser:
 
 
 class TestProcessNote:
+    @pytest.mark.parametrize(
+        ("query", "text", "matched"),
+        [
+            (r"DVT\!", "Confirmed DVT!", "DVT!"),
+            (r"DVT\!\!", "Confirmed DVT!!", "DVT!!"),
+            (r"path\\name", r"Confirmed path\name.", r"path\name"),
+        ],
+    )
+    def test_literal_punctuation_matches(self, query, text, matched):
+        sentences = process_note(text, parse_query(query))
+        assert sentences[0]["is_target"] is True
+        assert sentences[0]["matched_tokens"] == [matched]
+        match = sentences[0]["matches"][0]
+        assert text[match["note_start_index"]:match["note_end_index"]] == matched
+
     def test_negated_conjunction_preserves_group_truth(self):
         query = "DVT AND !(suspected AND family history)"
         sentences = process_note(
