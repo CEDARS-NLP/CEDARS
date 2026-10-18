@@ -1,14 +1,13 @@
 # Evaluation run
 
-Last verified: working tree on 2026-10-15 (source; working tree/not committed; local tests only)
+Last verified: cef611321063 on 2026-10-05 (source + live)
 
-An admin can optionally select "Run on all patients" in query-first step 1 to run existing keyword-only NLP across project notes, without an event, provider or model. This is not an LLM commit: the session stays editable and no evaluation PipelineRun or committed config is created. Step 1's "Remove negated matches" checkbox (default on) controls NegEx end to end: unchecked, negated matches are stored with `is_negated=true`, counted in the funnel, sent to the LLM, annotated, and struck through in previews. The retained LLM path uses step 2 event definition, step 3 "Test the model on a sample", step 4 "Check the model against yourself", and step 5 "Run it on everyone". Final LLM commit activates one combined SearchQuery and dispatches the full pipeline. Overall: beta; all-failed sample, duplicate annotation and privately tracked security defects remain. Source reviewed on 2026-10-15 in the working tree/not committed; changed behavior is not deployed/live verified. Live 2026-10-05 evidence is historical only.
+Steps 3 to 5 of an evaluation session. Step 3 "Test the model on a sample" runs the project LLM on the sample patients the search matched. Step 4 "Check the model against yourself" is where admins and annotators judge each result and see accuracy, precision, recall and F1. Step 5 "Run it on everyone" commits the session and runs the full pipeline over every patient, with stats, cancel, resume and re-run. Two ARQ jobs do the work (`run_sample_llm_job`, `run_eval_pipeline_job`), and worker startup recovers orphaned full runs. Steps 1 and 2 are in `evaluation-setup.md`. Overall: beta. The happy path works on the fake LLM, and since `cef61132` an empty `{}` reply marks the patient failed instead of a fake negative. But a sample where every patient failed is shown as finished and can be committed. Re-run duplicates annotations. There are also known security defects, tracked privately (not in this public repo). DEV runs `cef61132` (`aws status`, 2026-10-05), so all of this is live on DEV.
 
 ## Sub-features
 
 | ID | What it does | Maturity | Surface | Since | Live | Evidence |
 |---|---|---|---|---|---|---|
-| eval-keyword-only-run | Step 1 "Run on all patients" saves one expression, checks busy state and deletion impact before activating one keyword-only SearchQuery, then dispatches existing NLP or destructively reprocesses after confirmation; no event/provider/model or LLM calls. The session's "Remove negated matches" flag rides along into the activated query and the full run | beta | UI+API | working tree/not committed | not driven (Docker unavailable) | `SearchQueriesSection.tsx`, `evaluation/service.py:268-307`, `router.py:185-205`, `tests/test_eval_router.py::TestRunAllQueries::test_fresh_keyword_run_without_event_or_provider`, `::test_rejected_run_has_no_side_effects`, `::test_confirmed_rerun_returns_existing_nlp_job_contract`, `SearchQueriesSection.test.tsx` (18 cases) |
 | eval-sample-run | "Run on N patients" → `POST run-llm` (202). Clears old sample results, classifies each matched sample patient, writes NO_MATCH for the rest, sets the session REVIEWING | beta | UI+API | cef61132 | 2026-10-05 (UI + API) | `backend/app/evaluation/service.py:496-585`, `:607-779`, `frontend/src/projects/evaluation/SampleRunSection.tsx:66-183`, `tests/test_eval_service.py::TestLlmRun::test_run_llm_creates_patient_results`, `::test_run_llm_creates_no_match_results` |
 | eval-sample-progress | Session polls every 3 s while `llm_status` is running. "N of M patients classified", then "Classified N patients, M failed, K had no matching notes." A run idle for 15 min may be restarted | beta | UI+API | 8f2676b6 | 2026-10-05 (UI) | `EvaluationSessionPage.tsx:41-74`, `service.py:39`, `:512-524`, `tests/test_eval_service.py::TestLlmRun::test_run_llm_rejects_concurrent_run`, `::test_run_llm_restarts_stalled_run` |
 | eval-llm-failure-handling | A `{}` reply, an HTTP error or non-JSON text makes that patient FAILED with `error_message`. Native JSON mode is sent only to providers that support it | beta | API | cef61132 | 2026-10-05 (UI + API) | `backend/app/pipeline/classifier.py:104-145`, `backend/app/llm/client.py:58`, `:215-217`, `tests/test_pipeline_classifier.py::TestClassifyPatient::test_empty_object_raises_instead_of_defaulting`, `tests/test_llm_client.py::TestJsonModeParam::test_dropped_for_emulating_providers`, `tests/test_eval_service.py::TestLlmRun::test_run_llm_handles_failures` |
@@ -16,7 +15,7 @@ An admin can optionally select "Run on all patients" in query-first step 1 to ru
 | eval-judgment | `POST results/{id}/judge` with `correct`, `wrong` or `skipped`, plus an optional date override | beta | UI+API | a5b72355 | 2026-10-05 (UI + API) | `service.py:850-883`, `router.py:376-398`, `tests/test_eval_service.py::TestReview::test_submit_judgment`, `::test_submit_judgment_with_date_override` |
 | eval-results-browser | Collapsed "Browse every patient in the sample": tabs all, positive, negative, inconclusive, unreviewed. Each card has "Model was right", "Model was wrong", "Skip" | beta | UI+API | cef61132 | 2026-10-05 (UI + API) | `ResultsSection.tsx:27-273`, `service.py:785-847`, `tests/test_eval_service.py::TestListPatientResults::test_list_patient_results_filter_by_label` |
 | eval-metrics | Accuracy, Precision, Recall, F1 and "Across N judged patients: …" over judged COMPLETED sample rows. Skips excluded | beta | UI+API | 5329ec92 | 2026-10-05 (UI + API) | `MetricsPanel.tsx:24-70`, `service.py:971-1049`, `tests/test_eval_service.py::TestReview::test_compute_metrics_mixed`, `::test_compute_metrics_preserves_llm_progress` |
-| eval-commit | "Commit and run on all patients": REVIEWING → COMMITTED, validate/normalize and activate one combined SearchQuery, snapshot `committed_config`, then dispatch the retained LLM full run (provider/model required) | beta | UI+API | working tree/not committed | not driven (Docker unavailable) | `CommitSection.tsx:42-108`, `service.py:1145-1198`, `tests/test_eval_service.py::TestCommit::test_commit_session`, `::test_commit_activates_one_merged_legacy_expression`, `tests/test_eval_router.py::TestCommit::test_commit_requires_reviewing_status` |
+| eval-commit | "Commit and run on all patients": REVIEWING → COMMITTED, snapshot to `committed_config`, then dispatch the full run | beta | UI+API | 8f2676b6 | 2026-10-05 (UI + API) | `CommitSection.tsx:42-108`, `service.py:1055-1121`, `:1159-1240`, `router.py:436-463`, `tests/test_eval_service.py::TestCommit::test_commit_session`, `tests/test_eval_router.py::TestCommit::test_commit_requires_reviewing_status` |
 | eval-pipeline-stats | Step 5 grid Total, Matched, No match, Failed, Pending. Polls every 3 s while rows are queued or processing | beta | UI+API | 8f2676b6 | 2026-10-05 (UI + API) | `PipelineSection.tsx:34-188`, `service.py:1243-1284`, `router.py:466-479`. No tests |
 | eval-pipeline-cancel | "Cancel" while running: run CANCELLED, session DISCARDED | beta | UI+API | f88d0b99 | not driven | `service.py:1287-1315`, `backend/app/pipeline/orchestrator.py:203-237`, `PipelineSection.tsx:115-128`. No tests |
 | eval-pipeline-resume | "Resume" while running: PROCESSING rows back to QUEUED, enqueue another job | beta | UI+API | a5b72355 | not driven | `service.py:1355-1397`, `PipelineSection.tsx:101-114`. No tests |
@@ -28,7 +27,6 @@ An admin can optionally select "Run on all patients" in query-first step 1 to ru
 | eval-pipeline-ws | `/ws/projects/{id}/evaluation/{sid}` pushes pipeline stats | stub | WS | f88d0b99 | 2026-10-05 FAIL | `backend/app/evaluation/ws.py:14-60`, `backend/app/main.py:136`. No frontend caller |
 
 Why the grades:
-- **Current local evidence (2026-10-14).** Full backend SQLite suite via uv with the configured `.venv-test` interpreter PASS: 473 tests, 66.19% coverage, two pre-existing enum serialization warnings. Frontend verifier PASS in all lanes; the subsequent focused rerun PASS includes 3 query-first page and 15 query editor cases. Standalone uv Playwright with a synthetic API captured 1440x960 desktop and 390x844 mobile screenshots in `C:/tmp/cedars-verify/query-first-20261014/evidence/`: `query-first-desktop.png`, `query-first-mobile.png`, `query-confirmation-desktop.png`, and `query-confirmation-mobile.png`. Desktop query actions, confirmation dialog and cancellation visually PASS. Query save auto-unmounted step 1 before the dialog; `onQueriesSaved` now pins step 1 (`EvaluationSessionPage.tsx:155`), and the page regression exercises the actual cache update. Mobile has no document overflow, but screenshot inspection found pre-existing sidebar crowding/clipping, not a mobile visual PASS (see `evaluation-setup.md`, Gotchas). Synthetic browser evidence does not verify a live backend, LLM or DEV. Mypy ratchet PASS: 425 <= 497; dependency audit PASS against unchanged baseline (106 Python / 2 npm high-critical findings); test-removal guard PASS with no removals or skips. The native backend verifier stopped at missing Windows `python3`; the uv fallback suite and ratchet executed. CI status is blocked by missing `gh`; Docker blocks doctor/parity/Postgres/live, and Terraform blocks infra validation. No current Postgres, complete CI, live or deployed promotion is claimed.
 - **Driven live on 2026-10-05** on an isolated instance (`CEDARS_VERIFY_INSTANCE=live`, fake LLM, amd64).
   - The browser drives below ran as written: happy path, empty mode and viewer, each exit 0. Their follow-up checks matched.
   - Over the API: the fail-mode reply, orphan recovery, and repeat commits.
@@ -39,79 +37,20 @@ Why the grades:
 - **eval-pipeline-*** and the worker jobs have no tests at all. `test_full_workflow` mocks the dispatch.
 - **eval-pipeline-retry-failed** has no UI. The Jobs page "Retry failed" targets PatientTask rows, not eval rows (`orchestrator.py:310-342`, see `jobs.md`).
 - **eval-pipeline-ws** has a known security defect, and nothing calls it. Live, it closed with 0 messages for a real session: the status read after `db.expire` (`ws.py:32-34`) raises MissingGreenlet (see `jobs.md`, `jobs-ws-eval-progress`).
-- **Historical tests.** Then-existing tests passed locally on SQLite and Postgres at cef611321063 (382/382 each, 2026-10-05). New keyword-only/activation cases have local focused evidence only.
+- **Tests.** Named tests pass locally on SQLite and on Postgres at cef611321063 (382/382 each). CI has never run them green; see README "Test evidence".
 
 ## How to get to it (user POV)
 
-1. Start at query-first step 1 (`evaluation-setup.md`). Optional keyword-only route: select "Run on all patients"; with existing data, "Replace existing search results?" shows annotation, prediction and sentence counts, including review decisions. "Keep existing results" cancels; "Replace and run" confirms. "Searching all patients" becomes "Search complete" or "Search failed", and "Review annotations" opens manual review. No event/provider/model is required.
-2. For the retained LLM route, save a valid query, define the event in step 2 and run a fresh sample search. Step 3 then unlocks. Sample search does not activate a project SearchQuery; only the whole-data action or final LLM commit does.
-3. Open "Test the model on a sample". It lists "Model", "Patients in sample", "Matched the search", "Estimated cost" (always "—"). Select "Run on N patients". When it ends the badge changes from "Draft" to "In review". Select the review step if explicit continuation kept the sample step open.
-4. Step 4 "Check the model against yourself": the metrics sit on top. Below them the queue shows "Patient 1 of N" and "0 of N judged". Read the matched notes ("Previous note" and "Next note"), then click "Correct", "Wrong" or "Skip", or press C, W, S. "Override event date" (E) opens "Corrected event date". When the queue is empty it says "Every sample patient is judged".
-5. Optional: open "Browse every patient in the sample" to filter by tab or change one judgment.
-6. Click "Run it on everyone". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Commit and run on all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
-7. Positive and negative results of the full LLM run appear on the Annotations page (`annotations.md`); keyword-only annotations have no predicted label and go directly to manual review.
+1. Finish steps 1 and 2 (`evaluation-setup.md`). The session page now shows step 3 enabled.
+2. The page opens the first unfinished step, here "Test the model on a sample". It lists "Model", "Patients in sample", "Matched the search", "Estimated cost" (always "—"). Click "Run on N patients". When it ends the badge changes from "Draft" to "In review", and the page moves on to step 4 by itself. Reopen step 3 to see "Classified N patients…".
+3. Step 4 "Check the model against yourself": the metrics sit on top. Below them the queue shows "Patient 1 of N" and "0 of N judged". Read the matched notes ("Previous note" and "Next note"), then click "Correct", "Wrong" or "Skip", or press C, W, S. "Override event date" (E) opens "Corrected event date". When the queue is empty it says "Every sample patient is judged".
+4. Optional: open "Browse every patient in the sample" to filter by tab or change one judgment.
+5. Click "Run it on everyone". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Commit and run on all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
+6. Positive and negative results of the full run appear on the Annotations page (`annotations.md`).
 
 ## Driving it with control-cedars
 
-- **eval-keyword-only-run**: fresh baseline project on an isolated instance; clear seeded LLM settings through the API, then search without event/provider/model. **Not driven (Docker unavailable)**; all outcomes below are assertions for the next live pass, not observed values:
-  ```bash
-  $CC api PUT /projects/{project} --as admin --body '{"llm_provider":"","llm_model":"","llm_api_base":"","llm_api_key":""}' --expect 200
-  $CC api GET /projects/{project} --field llm_provider
-  $CC api GET /projects/{project} --field llm_model
-  T0=$(date -u +%Y-%m-%dT%H:%M:%S)
-  $CC browser run - --as admin --save eval-keyword-only <<'EOF'
-  [{"goto":"/projects/{project}/evaluation"},
-   {"click":{"text":"Test an LLM filter first","exact":true}},
-   {"click":{"role":"button","name":"New session","exact":true}},
-   {"click":{"role":"button","name":"Add query","exact":true}},
-   {"fill":{"label":"Query 1","exact":true},"value":"DVT OR thromb*"},
-   {"click":{"role":"button","name":"Run on all patients","exact":true}},
-   {"expect_text":"Search complete","timeout":180},
-   {"expect":{"label":"Query 1","exact":true}},
-   {"expect_text":"Draft","exact":true},
-   {"screenshot":"keyword-complete"}]
-  EOF
-  SID=$($CC db query "select id from evaluation_sessions_v2 where project_id='{project}' order by created_at desc limit 1" --csv 2>/dev/null | tail -1)
-  $CC api GET "/projects/{project}/evaluation/sessions/$SID" --field search_queries
-  $CC api GET /projects/{project}/nlp/queries --field '[*].is_active'
-  $CC api GET /projects/{project}/nlp/stats --field processed_notes
-  $CC llm calls --since "$T0"
-  $CC db query "select count(*) as total, count(predicted_label) as labeled from annotations where project_id='{project}'"
-  $CC db query "select count(*) from annotation_predictions where project_id='{project}'"
-  ```
-  Expected: one saved include item `DVT OR thromb*`, one active project SearchQuery with `nlp_apply=false`, 103 processed seeded notes, annotations > 0 but labeled/prediction counts 0, zero suggest/classify LLM calls, session DRAFT with no event or committed config. No constituent project records are created by session saves. Fresh runs return the existing BackgroundJob contract; destructive reruns return the existing NlpJob contract.
-  Reopen the step-1 panel if reload selects event step 2, then repeat the whole-data action:
-  ```bash
-  $CC api GET /projects/{project}/nlp/reprocess-impact --save keyword-impact
-  $CC browser run - --as admin --save keyword-keep <<EOF
-  [{"goto":"/projects/{project}/evaluation/$SID"},
-   {"click":{"role":"button","name":"Find the notes worth reading"}},
-   {"click":{"role":"button","name":"Run on all patients","exact":true}},
-   {"expect_text":"Replace existing search results?"},
-   {"expect_text":"including review decisions"},
-   {"click":{"role":"button","name":"Keep existing results","exact":true}}]
-  EOF
-  $CC api GET /projects/{project}/nlp/reprocess-impact --save keyword-impact-kept
-  $CC browser run - --as admin --save keyword-replace <<EOF
-  [{"goto":"/projects/{project}/evaluation/$SID"},
-   {"click":{"role":"button","name":"Find the notes worth reading"}},
-   {"click":{"role":"button","name":"Run on all patients","exact":true}},
-   {"expect_text":"Replace existing search results?"},
-   {"click":{"role":"button","name":"Replace and run","exact":true}},
-   {"expect_text":"Search complete","timeout":180},
-   {"click":{"role":"link","name":"Review annotations","exact":true}},
-   {"expect_url":"/annotations$"}]
-  EOF
-  $CC llm calls --since "$T0"
-  $CC api GET /projects/{project}/nlp/queries --field '[*].is_active'
-  ```
-  Compare the dialog's three displayed counts with `keyword-impact`; cancellation keeps counts and active query unchanged. Confirmed replacement may add a query-history record, but exactly one remains active. Changed counts, active NLP/prediction/pipeline work or recent patient-review locks must reject before activation/deletion (400/409; `test_rejected_run_has_no_side_effects`, `test_stale_confirmation_rejected_even_when_impact_is_now_zero`). A 409 refreshes dialog counts; confirmation stays disabled until that refresh succeeds. All stages must leave LLM calls at zero.
-
-### Historical LLM drives (2026-10-05, cef611321063)
-
-The commands and exit-0 observations below are historical, not a current live PASS. To re-drive the retained LLM path, first use the current query-first/event-second drive in `evaluation-setup.md` on a fresh seeded project with its fake provider intact, then open "Test the model on a sample" explicitly; after classification open "Check the model against yourself" if continuation pinned step 3. Navigation/count assertions in these historical scripts require that adaptation. Current final-commit activation is covered locally by `test_commit_activates_one_merged_legacy_expression`, not by the old live run.
-
-Historical preconditions (2026-10-05 only): the baseline, `$CC llm mode normal`, then the former steps 1-2 drive from `evaluation-setup.md` (`eval-steps-1-2`), then capture `SID` as shown there. Take a timestamp before each drive: `T0=$(date -u +%Y-%m-%dT%H:%M:%S)`. For each failure drive start from a fresh `$CC seed` (for example `$CC seed --project-name drive-empty`), because a project can hold only one active session. `{project}` expands to the latest seed, and the drives click the first session named "Deep vein thrombosis".
+Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive from `evaluation-setup.md` (`eval-steps-1-2`), then capture `SID` as shown there. Take a timestamp before each drive: `T0=$(date -u +%Y-%m-%dT%H:%M:%S)`. For each failure drive start from a fresh `$CC seed` (for example `$CC seed --project-name drive-empty`), because a project can hold only one active session. `{project}` expands to the latest seed, and the drives click the first session named "Deep vein thrombosis".
 
 - **eval-sample-run**, **eval-sample-progress**, **eval-review-queue**, **eval-judgment**, **eval-metrics**, **eval-commit**, **eval-pipeline-stats**, **eval-worker-pipeline-job**: steps 3 to 5 as admin →
   ```
@@ -230,9 +169,6 @@ Historical preconditions (2026-10-05 only): the baseline, `$CC llm mode normal`,
 - **eval-pipeline-ws**: `$CC ws "/ws/projects/{project}/evaluation/$SID" --as admin --seconds 5`. For an existing session expect a close with a server error (MissingGreenlet suspected) and a traceback in `$CC stack logs backend --since 5m --grep 'MissingGreenlet|Traceback'`. Once fixed, an uncommitted session gives `{"type":"status","session_status":"reviewing"}`. An unknown session id gives `{"type":"error","detail":"Session not found"}`.
 
 ## Gotchas
-
-- **Whole-data keyword search is destructive when results exist.** It removes annotations, predictions, sentences and review decisions only after impact confirmation; it resets patient review metadata (`nlp/service.py:588-670`). Busy processing/recent review locks and stale counts reject before the new query is activated (`evaluation/service.py:277-307`). This guard is not an LLM commit or an EventConfig requirement.
-- **Saving is not activation.** Local rows normalize into one include expression; sample search uses that session expression. Project SearchQuery activation happens only in the session whole-data action or final LLM commit (`query_expression.py:6-35`, `service.py:301-307`, `:1165-1173`). Older inactive query history can remain; "one active" does not mean "one record forever".
 
 - **Known security defects** affect `eval-commit`, `eval-judgment` and `eval-pipeline-ws`. Details are tracked privately, not in this public repo.
 - **A sample where every patient failed looks finished.** The job sets REVIEWING whatever happened (`service.py:759-760`). Step 4 unlocks because `llm_status` is "completed" (`EvaluationSessionPage.tsx:92-93`). The queue has no COMPLETED rows, returns null, and the panel says "Every sample patient is judged" (`EvalReviewPanel.tsx:245-257`). Commit is allowed (`service.py:1055-1121`). No evaluation component renders the failure reason. `GET …/results` returns `error_message` because the route has no `response_model` (`router.py:337-357`). `PatientResultResponse` (`schemas.py:137-152`) lacks the field, so adding that schema as the response model would hide the reason from the API too. Confirmed live 2026-10-05 with the empty-mode drive above (exit 0). The red "Classification failed before it finished" notice appears only when the enqueue fails (`SampleRunSection.tsx:143-148`, `service.py:563-580`).

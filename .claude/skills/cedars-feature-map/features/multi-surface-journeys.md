@@ -1,16 +1,13 @@
 # Multi-surface journeys
 
-Last verified: e729907af332 on 2026-10-14 (source; working tree/not committed; local tests only)
+Last verified: cef611321063 on 2026-10-05 (live)
 
-A journey crosses areas, so it can fail where no single area file looks. Each one names the sub-feature IDs it touches, the invariant that must hold across areas, the last live result, and the path to drive it. Source reviewed on 2026-10-14 at e729907af332 plus working tree/not committed; query-first setup and keyword-only whole-data search are not deployed/live verified. The 2026-10-05 results and command blocks are explicitly historical. The new standalone keyword-only journey needs a fresh project and does not share state with that historical sequence.
-
-Current local evidence (2026-10-14): full backend SQLite suite via uv with the configured `.venv-test` interpreter PASS: 473 tests, 66.19% coverage, two pre-existing enum serialization warnings. `control-cedars test frontend` PASS in all lanes; the subsequent focused rerun PASS includes 3 EvaluationSessionPage and 15 SearchQueriesSection cases. Standalone uv Playwright with a synthetic API captured 1440x960 desktop and 390x844 mobile screenshots in `C:/tmp/cedars-verify/query-first-20261014/evidence/`: `query-first-desktop.png`, `query-first-mobile.png`, `query-confirmation-desktop.png`, and `query-confirmation-mobile.png`. Desktop query actions, confirmation dialog and cancellation visually PASS. The browser found query save auto-unmounted step 1 before confirmation; `onQueriesSaved` now pins step 1 (`EvaluationSessionPage.tsx:155`), and the page regression exercises the actual cache update. Mobile has no document overflow, but screenshot inspection found pre-existing sidebar crowding/clipping, not a mobile visual PASS (see `evaluation-setup.md`, Gotchas). This synthetic browser check is not a live backend, LLM or DEV journey. Mypy ratchet PASS: 425 <= 497; dependency audit PASS against unchanged baseline (106 Python / 2 npm high-critical findings); test-removal guard PASS with no removals or skips. The native backend verifier stopped at missing Windows `python3`; the uv fallback suite and ratchet executed. CI status is blocked by missing `gh`; Docker blocks doctor/parity/Postgres/live, and Terraform blocks infra validation. This is not complete CI/Postgres proof and makes no live/deployed promotion.
+A journey crosses areas, so it can fail where no single area file looks. Each one names the sub-feature IDs it touches, the invariant that must hold across areas, the last live result, and the API path to drive it. For the UI path, follow each area file's "Driving it" bullet for that sub-feature. Use this file for questions like "what happens to X after Y" and for release smoke tests. Journeys run in the order below, and each assumes the state the one before it left.
 
 Preconditions for all: an isolated instance, because these journeys mutate data and inject failures. Run `export CEDARS_VERIFY_INSTANCE=journeys-<date>`, then `$CC doctor` (if your name is UP and you did not start it, pick another), then the README baseline (`stack up`, `seed`). The evidence cited below is on instance `journeys`; a new name keeps it intact. The blocks are copy-pasteable in bash or zsh, in order, in one shell: each one reuses `$CC`, `$P`, `$S`, `$B` and `$RUN` from the block before. `api --field` prints one value, and `api GET … --until PATH=VALUE` polls until it holds (exit 1 on timeout). To run a subset, run journey 1 first, then close each journey's session before the next one clones (commit it as journey 3 does, or `$CC api DELETE $B --expect 200` to discard): a clone is a new session, and it returns 409 while one is draft, reviewing or committed (`evaluation/service.py:78-93`). Counts such as journey 5's 20 annotations assume all five ran. Journey 2 starts from a clone of journey 1's session. Once a session is committed, its results list shows only the pipeline copies (`evaluation/service.py:806-818`), so a re-run's new sample results would be invisible there.
 
 | ID | Journey | Areas | Last live | Result |
 |---|---|---|---|---|
-| j-query-first-keyword-only | Local rows -> one saved query -> whole-data keyword NLP -> manual review, without event/provider/model | evaluation-setup, evaluation-run, predictors-nlp, annotations | not driven (Docker unavailable) | SKIP: working tree/not committed, local tests only (2026-10-14) |
 | j-evaluate-to-export | Evaluate, commit, full pipeline, annotate, export | evaluation, jobs, annotations, export | 2026-10-05 | PARTIAL: counts agree; event dates dropped; JSON export 500 |
 | j-llm-failure-recovery | LLM returns empty, then errors, then recovers | evaluation-run, predictors-nlp | 2026-10-05 | PASS |
 | j-worker-crash-recovery | Worker dies mid-run; the run still finishes | jobs, evaluation-run, platform-ops | 2026-10-05 | PASS (WebSocket progress FAIL) |
@@ -22,78 +19,12 @@ Preconditions for all: an isolated instance, because these journeys mutate data 
 | j-deploy-rehearsal | Old release with data, new migration, roll | platform-ops | 2026-10-05 | PASS (64d13687 → cef61132, 16 steps) |
 | j-databricks-round-trip | Connect, ingest, evaluate, export to Databricks | data, export | not driven | SKIP: needs a Databricks workspace |
 
-## j-query-first-keyword-only
-
-Touches: `data-sample-dataset`, `eval-session-create`, `eval-step-unlock`, `eval-step2-queries`, `eval-step1-event`, `eval-step2-execute`, `eval-step2-match-browser`, `eval-keyword-only-run`, `nlp-queries`, `nlp-run`, `nlp-job-status`, `nlp-reprocess`, `nlp-engine`, `nlp-ui-orphan`, `ann-queue-lock`.
-
-Invariants:
-1. Query entry is step 1. Saving valid local include/exclude rows returns exactly one combined include item (Query 1), unlocks step 2 event entry even with zero sample matches, and creates no constituent project SearchQuery records.
-2. Sample search/preview use the session expression at index 0 without activating a project query. AND/grouping/phrases and sentence-scoped exclusions hold; an index-1 negative assertion from the old multi-row preview is not this contract.
-3. "Run on all patients" requires no event/provider/model, activates exactly one keyword-only SearchQuery only after guards pass, and processes all eligible project notes through existing NLP, not the LLM pipeline. The session remains DRAFT, with no committed config.
-4. Keyword annotations are ready for manual review, have no predicted labels, create no AnnotationPrediction records, and make zero suggestion/classification LLM calls.
-5. Existing annotations/predictions/sentences require current displayed impact counts and "Replace and run". "Keep existing results" leaves counts/query activation unchanged. Busy work, recent review locks and changed counts reject before activation/deletion; failed count refresh leaves confirmation disabled.
-
-Preconditions: own instance, fresh baseline/seed (5 patients, 103 notes), no existing session, no review locks. This is a proposed executable drive, **not driven (Docker unavailable)**. Clear the seed's fake provider through the supported project API; empty strings clear usable provider/model settings because PUT omits null fields (`projects/router.py:112`).
-
-```bash
-$CC api PUT /projects/{project} --as admin --body '{"llm_provider":"","llm_model":"","llm_api_base":"","llm_api_key":""}' --expect 200
-$CC api GET /projects/{project} --field llm_provider
-$CC api GET /projects/{project} --field llm_model
-KT0=$(date -u +%Y-%m-%dT%H:%M:%S)
-$CC browser run - --as admin --save j-keyword-save <<'EOF'
-[{"goto":"/projects/{project}/evaluation"},
- {"click":{"text":"Test an LLM filter first","exact":true}},
- {"click":{"role":"button","name":"New session","exact":true}},
- {"expect":{"role":"button","name":"Define the event"},"state":"disabled"},
- {"click":{"role":"button","name":"Add query","exact":true}},
- {"fill":{"label":"Query 1","exact":true},"value":"DVT OR thromb*"},
- {"click":{"role":"button","name":"Add query","exact":true}},
- {"select":{"label":"Query 2 type","exact":true},"value":"exclude"},
- {"fill":{"label":"Query 2","exact":true},"value":"suspected"},
- {"click":{"role":"button","name":"Continue to event definition","exact":true}},
- {"expect":{"label":"Event name"}},
- {"click":{"role":"button","name":"Find the notes worth reading"}},
- {"expect":{"label":"Query 1","exact":true}},
- {"click":{"role":"button","name":"Run search","exact":true}},
- {"expect_text":"Last search matched","timeout":60},
- {"click":{"role":"button","name":"Show matched notes","nth":0}},
- {"screenshot":"normalized-query"}]
-EOF
-KSID=$($CC db query "select id from evaluation_sessions_v2 where project_id='{project}' order by created_at desc limit 1" --csv 2>/dev/null | tail -1)
-$CC api GET "/projects/{project}/evaluation/sessions/$KSID" --field search_queries
-$CC api GET /projects/{project}/nlp/queries --field '[*].id'
-$CC api GET "/projects/{project}/evaluation/sessions/$KSID/queries/0/matches" --field query
-$CC browser run - --as admin --save j-keyword-run <<EOF
-[{"goto":"/projects/{project}/evaluation/$KSID"},
- {"click":{"role":"button","name":"Find the notes worth reading"}},
- {"click":{"role":"button","name":"Run on all patients","exact":true}},
- {"expect_text":"Search complete","timeout":180},
- {"expect_text":"Draft","exact":true},
- {"screenshot":"keyword-complete"}]
-EOF
-$CC api GET /projects/{project}/nlp/queries --field '[*].is_active'
-$CC api GET /projects/{project}/nlp/stats --field processed_notes
-$CC api GET "/projects/{project}/evaluation/sessions/$KSID" --field event_name
-$CC api GET "/projects/{project}/evaluation/sessions/$KSID" --field committed_config
-$CC db query "select count(*) as total, count(predicted_label) as labeled from annotations where project_id='{project}'"
-$CC db query "select count(*) from annotation_predictions where project_id='{project}'"
-$CC llm calls --since "$KT0"
-```
-
-Expected, not observed live: before run-all, one saved include expression `(DVT OR thromb*) AND !((suspected))` and no project queries; after run-all, one active query (`nlp_apply=false`), 103 processed notes, nonzero unlabeled annotations, zero predictions and zero LLM calls. Event and committed config remain null. Complete the cancellation/replacement and "Review annotations" UI checks in `eval-keyword-only-run` (`evaluation-run.md`), still with no provider; compare impact counts before/after cancellation and active-query count after replacement. Do not claim a live PASS from the local tests below.
-
-Local evidence: `tests/test_eval_service.py::test_normalizes_draft_without_creating_search_query_records`, `::test_sample_uses_own_combined_expression_not_active_query`, `::test_query_index_is_zero_after_exclude_normalization`; `tests/test_eval_router.py::TestRunAllQueries::test_fresh_keyword_run_without_event_or_provider`, `::test_rejected_run_has_no_side_effects`, `::test_stale_confirmation_rejected_even_when_impact_is_now_zero`; 3 EvaluationSessionPage and 15 SearchQueriesSection cases, including the page regression's actual cache update after query save. Standalone uv Playwright synthetic-API desktop query actions/dialog/cancellation visually PASS; mobile screenshots show the pre-existing sidebar crowding/clipping despite no document overflow (evidence paths above; `evaluation-setup.md`, Gotchas), so mobile visual PASS is not claimed. This is not a live backend, LLM or DEV journey. Final LLM activation remains covered separately by `test_commit_activates_one_merged_legacy_expression`.
-
-Status: **not driven (Docker unavailable)** on 2026-10-14; working tree/not committed, source and local focused tests only.
-
 ## j-evaluate-to-export
 
 Touches: `data-sample-dataset`, `eval-session-create`, `eval-step1-event`, `eval-step2-queries`, `eval-step2-execute`, `eval-sample-run`, `eval-judgment`, `eval-metrics`, `eval-commit`, `eval-pipeline-stats`, `jobs-page`, `ann-source-commit`, `ann-queue-lock`, `ann-event-date`, `ann-stats`, `export-stats`, `export-csv`, `export-filters`, `export-json`.
 
-Current UI recipe (not driven, Docker unavailable): follow `evaluation-setup.md`'s current query-first drive, saving a single Query 1 before step 2 event entry; keep the seed's fake provider configured. Then explicitly open LLM sample/review and commit as described in `evaluation-run.md`. Save/sample search creates no project SearchQuery; final commit activates one combined expression (`test_commit_activates_one_merged_legacy_expression`). The API block and results below are historical 2026-10-05 evidence, not an observed run of this revised recipe.
-
 Invariants:
-1. Patients matched in query step 1 = matched sample results in step 3 (historically 5 = 5 with the API query set below).
+1. Patients matched in step 2 = sample results in step 3 (5 = 5 on the sample).
 2. Metrics follow judgments: `correct` on a positive is tp, `wrong` is fp, `skipped` is not counted.
 3. After commit, `pipeline/stats.completed + failed + no_match` = `total`, and the session reaches `completed`.
 4. Annotation rows = `/annotations/stats.total` = `/export/stats.total` = CSV data rows.

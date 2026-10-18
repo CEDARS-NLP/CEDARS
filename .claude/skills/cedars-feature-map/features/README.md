@@ -119,15 +119,15 @@ IDs are kebab-case, prefixed with the area (`data-`, `eval-`, ...), and stable. 
 | [projects.md](projects.md) | Project CRUD, membership, LLM settings, stats | admin, all | beta |
 | [data.md](data.md) | File upload, sample dataset, Databricks, ingestion | admin | beta |
 | [patients.md](patients.md) | Patient browser, patient detail, notes, reopen | all | beta |
-| [evaluation-setup.md](evaluation-setup.md) | Session list, query-first step 1, gated event step 2; one combined saved expression | admin | beta (source reviewed 2026-10-14; changed behavior not driven) |
-| [evaluation-run.md](evaluation-run.md) | Optional keyword-only whole-data run; retained LLM sample, review, metrics, commit and full pipeline | admin, annotator | beta (source reviewed 2026-10-14; changed behavior not driven) |
+| [evaluation-setup.md](evaluation-setup.md) | Session list, steps 1-2: define event, search queries | admin | beta |
+| [evaluation-run.md](evaluation-run.md) | Steps 3-5: sample run, review, metrics, commit, full pipeline | admin, annotator | beta |
 | [annotations.md](annotations.md) | Patient-first annotation review, locks, bulk predictions | annotator | beta (bulk predictions api-only) |
 | [jobs.md](jobs.md) | Job dashboard, worker status, retries, WebSockets | admin | beta |
 | [export.md](export.md) | CSV/JSON export, Databricks export | all | beta (JSON stub, Databricks api-only) |
 | [admin-audit.md](admin-audit.md) | Platform admin endpoints, audit log | platform admin | api-only |
-| [predictors-nlp.md](predictors-nlp.md) | Predictor configs, PINES, LLM client; reachable keyword NLP and bounded Boolean/phrase search | admin | beta for reachable NLP (predictors api-only, PINES stub; source reviewed 2026-10-14) |
+| [predictors-nlp.md](predictors-nlp.md) | Predictor configs, PINES, LLM client, spaCy NLP | admin | api-only (PINES stub, LLM client beta) |
 | [platform-ops.md](platform-ops.md) | Health, config, deploy, migrations, S3, CI | operators | beta |
-| [multi-surface-journeys.md](multi-surface-journeys.md) | End-to-end journeys, including query-first keyword-only whole-data search | all | Historical: 3 PASS, 2 PARTIAL, 3 FAIL, 2 not driven (2026-10-05); keyword-only journey not driven (2026-10-14) |
+| [multi-surface-journeys.md](multi-surface-journeys.md) | End-to-end journeys that cross areas | all | 3 PASS, 2 PARTIAL, 3 FAIL, 2 not driven (2026-10-05) |
 
 ## Sweep order
 
