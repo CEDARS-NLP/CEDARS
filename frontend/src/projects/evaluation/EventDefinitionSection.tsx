@@ -25,14 +25,6 @@ interface Definition {
 const FIELD_CLASS =
   "flex w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60";
 
-/**
- * Step 1 — what counts as the event.
- *
- * This is deliberately first: the search queries in step 2 are generated from
- * these words, and the LLM in step 3 is prompted with them. Previously it sat
- * below the search queries, which is why the query suggester asked the user to
- * re-type a description they had already written here.
- */
 export default function EventDefinitionSection({
   projectId,
   session,
@@ -81,12 +73,6 @@ export default function EventDefinitionSection({
 
   return (
     <div className="space-y-4">
-      <p className="max-w-prose text-sm text-muted-foreground">
-        Describe the event in the words you would use with a colleague. Step 2 turns
-        this into search queries, and the model in step 3 reads it as its
-        instructions.
-      </p>
-
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5 md:col-span-1">
           <Label htmlFor="event-name">Event name</Label>

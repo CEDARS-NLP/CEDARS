@@ -94,6 +94,7 @@ def parse_query(query_str: str) -> list[list[dict]]:
         OR groups separated by OR
         AND conditions within a group
         ! prefix for negation
+        Backslash escapes literal ! and backslash characters
         * and ? wildcards
 
     Example: ``(DVT OR embolus) AND !suspected``
@@ -107,35 +108,91 @@ def parse_query(query_str: str) -> list[list[dict]]:
     if not query_str:
         return []
 
-    # Remove outer parentheses
-    query_str = re.sub(r"^\(|\)$", "", query_str.strip())
+    if len(query_str) > 10000:
+        raise ValueError("Search query is too long")
+    tokens = []
+    term_parts = []
+    for match in re.finditer(
+        r"\\[\\!]|(\bOR\b|\bAND\b|[()!])|.", query_str, flags=re.IGNORECASE | re.DOTALL
+    ):
+        if match.group(1) is None:
+            term_parts.append(match.group())
+        else:
+            term = "".join(term_parts).strip()
+            if term:
+                tokens.append(term)
+            term_parts = []
+            tokens.append(match.group())
+    term = "".join(term_parts).strip()
+    if term:
+        tokens.append(term)
+    if len(tokens) > 512:
+        raise ValueError("Search query is too complex")
+    position = 0
 
-    # Split by OR (case-insensitive, word boundary)
-    or_groups = re.split(r"\s+OR\s+", query_str, flags=re.IGNORECASE)
+    def parse_expression(min_precedence=0, depth=0):
+        nonlocal position
+        if depth > 32:
+            raise ValueError("Search query nesting is too deep")
+        if position >= len(tokens):
+            raise ValueError("Search query is missing a term")
+        token = tokens[position]
+        position += 1
+        if token == "!":
+            node = ("not", parse_expression(3, depth + 1))
+        elif token == "(":
+            node = parse_expression(0, depth + 1)
+            if position >= len(tokens) or tokens[position] != ")":
+                raise ValueError("Search query has unmatched parentheses")
+            position += 1
+        elif token.upper() in {"AND", "OR", ")"}:
+            raise ValueError("Search query is missing a term")
+        else:
+            node = ("term", token)
+        while position < len(tokens):
+            operator = tokens[position].upper()
+            precedence = {"OR": 1, "AND": 2}.get(operator, -1)
+            if precedence < min_precedence:
+                break
+            position += 1
+            node = (operator, node, parse_expression(precedence + 1, depth + 1))
+        return node
 
-    result = []
-    for group in or_groups:
-        group = group.strip().strip("()")
-        # Split by AND
-        and_terms = re.split(r"\s+AND\s+", group, flags=re.IGNORECASE)
+    def expand(node, negated=False):
+        operator = node[0]
+        if operator == "term":
+            term = re.sub(r"\\([\\!])", r"\1", node[1])
+            return [[{"pattern": _term_to_pattern(term), "negated": negated, "text": term}]]
+        if operator == "not":
+            return expand(node[1], not negated)
+        left = expand(node[1], negated)
+        right = expand(node[2], negated)
+        conjunction = (operator == "AND") != negated
+        group_count = len(left) * len(right) if conjunction else len(left) + len(right)
+        condition_count = (
+            sum(map(len, left)) * len(right) + sum(map(len, right)) * len(left)
+            if conjunction else sum(map(len, left)) + sum(map(len, right))
+        )
+        if group_count > 128 or condition_count > 1024:
+            raise ValueError("Search query Boolean expansion is too complex")
+        return [first + second for first in left for second in right] if conjunction else left + right
 
-        conditions = []
-        for term in and_terms:
-            term = term.strip()
-            negated = term.startswith("!")
-            if negated:
-                term = term[1:].strip()
-
-            pattern = _term_to_pattern(term)
-            conditions.append({"pattern": pattern, "negated": negated, "text": term})
-
-        result.append(conditions)
-
-    return result
+    expression = parse_expression()
+    if position != len(tokens):
+        raise ValueError("Search query has unexpected terms or parentheses")
+    return expand(expression)
 
 
 def _term_to_pattern(term: str) -> list[dict]:
     """Convert a single search term to a spaCy Matcher pattern."""
+    if " " in term or not ("*" in term or "?" in term):
+        pattern = []
+        for word in term.split():
+            if "*" in word or "?" in word:
+                pattern.extend(_term_to_pattern(word))
+            else:
+                pattern.extend({"LOWER": token.lower_} for token in get_nlp().make_doc(word))
+        return pattern
     if "*" in term or "?" in term:
         # Wildcard → regex on TEXT (case-insensitive)
         # Escape regex-special chars first, then convert our wildcards
@@ -180,12 +237,10 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
 
     matcher = Matcher(nlp.vocab)
     # Add all query patterns to matcher
-    pattern_meta: list[tuple[str, bool]] = []  # (term_text, is_negation_condition)
     for g_idx, group in enumerate(query_groups):
         for c_idx, condition in enumerate(group):
             name = f"q_{g_idx}_{c_idx}"
             matcher.add(name, [condition["pattern"]])
-            pattern_meta.append((condition["text"], condition["negated"]))
 
     sentences = []
     for sent_idx, sent in enumerate(doc.sents):
@@ -198,34 +253,30 @@ def process_note(note_text: str, query_groups: list[list[dict]]) -> list[dict]:
         matches = matcher(sent_doc) if query_groups else []
         matched_tokens = []
         match_spans: list[dict] = []
-        has_positive_match = False
-        has_negation_violation = False
-
+        condition_matches = {}
         for match_id, start, end in matches:
             rule_name = nlp.vocab.strings[match_id]
             parts = rule_name.split("_")
-            if len(parts) == 3:
-                g_idx = int(parts[1])
-                c_idx = int(parts[2])
-                meta_idx = sum(len(query_groups[i]) for i in range(g_idx)) + c_idx
-                if meta_idx < len(pattern_meta):
-                    _term_text, is_negated_condition = pattern_meta[meta_idx]
-                    token_span = sent_doc[start:end]
-                    token_text = token_span.text
-                    if is_negated_condition:
-                        has_negation_violation = True
-                    else:
-                        matched_tokens.append(token_text)
-                        # Offsets are relative to the whole note, as in v1.
-                        token_start = sent.start_char + token_span.start_char
-                        match_spans.append({
-                            "token": token_text,
-                            "note_start_index": token_start,
-                            "note_end_index": token_start + len(token_text),
-                        })
-                        has_positive_match = True
-
-        is_target = has_positive_match and not has_negation_violation
+            condition_matches.setdefault((int(parts[1]), int(parts[2])), []).append((start, end))
+        positive_spans = set()
+        for group_index, group in enumerate(query_groups):
+            if all(
+                bool(condition_matches.get((group_index, condition_index))) != condition["negated"]
+                for condition_index, condition in enumerate(group)
+            ):
+                for condition_index, condition in enumerate(group):
+                    if not condition["negated"]:
+                        positive_spans.update(condition_matches.get((group_index, condition_index), []))
+        for start, end in sorted(positive_spans):
+            token_span = sent_doc[start:end]
+            token_start = sent.start_char + token_span.start_char
+            matched_tokens.append(token_span.text)
+            match_spans.append({
+                "token": token_span.text,
+                "note_start_index": token_start,
+                "note_end_index": token_start + len(token_span.text),
+            })
+        is_target = bool(positive_spans)
 
         # Negation detection on matched tokens
         is_negated = False
@@ -265,7 +316,7 @@ def _detect_negation(sent_span, matched_tokens: list[str]) -> bool:
 
 def _detect_negation_dep(sent_span, matched_tokens: list[str]) -> bool:
     """Dependency-based negation detection (requires trained model)."""
-    matched_lower = {t.lower() for t in matched_tokens}
+    matched_lower = {token.lower_ for text in matched_tokens for token in get_nlp().make_doc(text)}
 
     for token in sent_span:
         if token.text.lower() not in matched_lower:
@@ -294,7 +345,7 @@ def _detect_negation_proximity(sent_span, matched_tokens: list[str]) -> bool:
     Checks a window of tokens before each matched token for negation cues.
     Window size of 5 tokens is the standard NegEx heuristic.
     """
-    matched_lower = {t.lower() for t in matched_tokens}
+    matched_lower = {token.lower_ for text in matched_tokens for token in get_nlp().make_doc(text)}
     window_size = 5
 
     for token in sent_span:

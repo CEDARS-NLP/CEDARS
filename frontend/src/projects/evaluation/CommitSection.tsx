@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +13,12 @@ import {
 import type { UnifiedSession, CommitResult, SessionCost } from "@/projects/types";
 import { approxCost, formatCost, formatTokens } from "@/lib/cost";
 import { CheckCircle2, Loader2, Lock } from "lucide-react";
+
+interface ReprocessImpact {
+  annotations: number;
+  predictions: number;
+  sentences: number;
+}
 
 interface CommitSectionProps {
   projectId: string;
@@ -39,18 +45,56 @@ export default function CommitSection({
   const reviewed = session.metrics?.total_reviewed ?? 0;
   const pending = session.metrics?.total_pending ?? 0;
 
-  const commitMutation = useMutation({
+  const impactPreview = useMutation({
     mutationFn: () =>
+      api.get<ReprocessImpact>(`/projects/${projectId}/nlp/reprocess-impact`),
+    retry: false,
+  });
+
+  const commitMutation = useMutation({
+    mutationFn: (impact: ReprocessImpact) =>
       api.post<CommitResult>(
         `/projects/${projectId}/evaluation/sessions/${session.id}/commit`,
-        {}
+        {
+          reprocess: {
+            confirmed: true,
+            expected_annotations: impact.annotations,
+            expected_predictions: impact.predictions,
+            expected_sentences: impact.sentences,
+          },
+        }
       ),
+    retry: false,
     onSuccess: () => {
       setConfirmOpen(false);
-      qc.invalidateQueries({ queryKey: ["eval-session", projectId, session.id] });
+      for (const key of [
+        "nlp-queries", "nlp-stats", "nlp-background-job", "annotation-stats",
+        "project-stats", "project", "eval-sessions",
+      ]) {
+        qc.invalidateQueries({ queryKey: [key, projectId] });
+      }
+      qc.invalidateQueries({ queryKey: ["annotation-context"] });
+      for (const key of [
+        "eval-session", "eval-results", "eval-metrics", "eval-next-result",
+        "eval-result-notes", "funnel", "cost",
+      ]) {
+        qc.invalidateQueries({ queryKey: [key, projectId, session.id] });
+      }
       onRefresh();
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        impactPreview.mutate();
+      }
+    },
   });
+
+  function openConfirmation() {
+    commitMutation.reset();
+    impactPreview.reset();
+    setConfirmOpen(true);
+    impactPreview.mutate();
+  }
 
   return (
     <div className="space-y-4">
@@ -118,7 +162,7 @@ export default function CommitSection({
         </p>
       )}
 
-      <Button onClick={() => setConfirmOpen(true)} disabled={commitMutation.isSuccess}>
+      <Button onClick={openConfirmation} disabled={commitMutation.isSuccess}>
         <Lock className="mr-2 h-4 w-4" /> Commit and run on all patients
       </Button>
 
@@ -133,7 +177,7 @@ export default function CommitSection({
             <DialogTitle>Commit and run on all patients?</DialogTitle>
             <DialogDescription>
               This locks the queries and event definition, then sends the matched
-              notes for every patient to the model. It can&rsquo;t be undone.
+              notes for every patient to the model. You cannot undo this action.
             </DialogDescription>
           </DialogHeader>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -161,9 +205,37 @@ export default function CommitSection({
               ? "Every patient the search is expected to match was already classified in the sample, so this adds no model cost."
               : "Scaled from the tokens the model used on your sample, so it is a ballpark. Patients already classified in the sample are reused and cost nothing more."}
           </p>
+          {impactPreview.isPending && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Checking existing results
+            </p>
+          )}
+          {impactPreview.isSuccess && Object.values(impactPreview.data).some((count) => count > 0) && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              This replaces {impactPreview.data.annotations} annotations, {impactPreview.data.predictions} predictions,
+              and {impactPreview.data.sentences} sentences. You will lose existing project results and review decisions.
+              Your sample results and judgments stay in this session.
+            </p>
+          )}
+          {impactPreview.isSuccess && Object.values(impactPreview.data).every((count) => count === 0) && (
+            <p className="text-sm text-muted-foreground">
+              No existing project results or review decisions to replace.
+            </p>
+          )}
+          {impactPreview.isError && (
+            <div role="alert" className="space-y-2 text-sm text-destructive">
+              <p>Could not check existing results. Try again before committing.</p>
+              <p>{impactPreview.error.message}</p>
+              <Button variant="outline" onClick={() => impactPreview.mutate()}>
+                Try again
+              </Button>
+            </div>
+          )}
           {commitMutation.isError && (
             <p role="alert" className="text-sm text-destructive">
-              {(commitMutation.error as Error).message}
+              {commitMutation.error instanceof ApiError && commitMutation.error.status === 409
+                ? "Project results changed. Review the updated counts and confirm again."
+                : commitMutation.error.message}
             </p>
           )}
           <DialogFooter>
@@ -175,8 +247,12 @@ export default function CommitSection({
               Cancel
             </Button>
             <Button
-              onClick={() => commitMutation.mutate()}
-              disabled={commitMutation.isPending}
+              onClick={() => {
+                if (impactPreview.isSuccess && !commitMutation.isPending) {
+                  commitMutation.mutate(impactPreview.data);
+                }
+              }}
+              disabled={commitMutation.isPending || !impactPreview.isSuccess}
             >
               {commitMutation.isPending ? (
                 <>

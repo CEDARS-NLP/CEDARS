@@ -20,15 +20,6 @@ import { STATUS_STYLES, statusLabel } from "./sessionStatus";
 /** No step index — used to mean "everything collapsed". */
 const NO_STEP = 0;
 
-/**
- * One evaluation session, as five steps.
- *
- * The page used to render seven peer sections top to bottom, in an order that
- * contradicted the dependencies between them: search queries above the event
- * definition they are derived from, review hidden behind a toggle below the
- * result list, commit visible before there was anything to commit. Each step now
- * states what it holds, opens one at a time, and says why it is not ready yet.
- */
 export default function EvaluationSessionPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const qc = useQueryClient();
@@ -100,6 +91,7 @@ export default function EvaluationSessionPage() {
 
   const hasEvent = !!session.event_name?.trim();
   const queryCount = session.search_queries.length;
+  const hasQuery = session.search_queries.some((query) => query.query.trim());
   const searched = (funnel?.matched_notes ?? 0) > 0;
   const classified =
     metrics?.llm_status === "completed" || (metrics?.llm_completed ?? 0) > 0;
@@ -107,10 +99,12 @@ export default function EvaluationSessionPage() {
   const pending = metrics?.total_pending ?? 0;
   const committed = ["committed", "completed"].includes(session.status);
 
-  const current = !hasEvent
+  const current = !hasQuery
     ? 1
-    : !searched
+    : !hasEvent
     ? 2
+    : !searched || searchStale
+    ? 1
     : !classified
     ? 3
     : committed
@@ -160,53 +154,50 @@ export default function EvaluationSessionPage() {
       <div className="space-y-3 p-6">
         <StepCard
           index={1}
-          title="Define the event"
-          state={stateFor(1, hasEvent)}
-          summary={
-            hasEvent
-              ? session.event_description || session.event_name!
-              : "Not defined yet"
-          }
-          open={open === 1}
-          onToggle={() => toggle(1)}
-        >
-          <EventDefinitionSection
-            projectId={projectId!}
-            session={session}
-            onRefresh={refresh}
-            onSaved={() => setOpenStep(2)}
-          />
-        </StepCard>
-
-        <StepCard
-          index={2}
           title="Find the notes worth reading"
-          state={stateFor(2, searched && !searchStale, !hasEvent)}
-          lockedReason="Define the event first — queries are built from it."
+          state={stateFor(1, hasQuery)}
           summary={
             queryCount === 0
               ? "No queries yet"
               : `${queryCount} ${queryCount === 1 ? "query" : "queries"} · ${matchSummary}`
           }
-          open={open === 2}
-          onToggle={() => toggle(2)}
+          open={open === 1}
+          onToggle={() => toggle(1)}
         >
           <SearchQueriesSection
             projectId={projectId!}
             session={session}
             onRefresh={refresh}
             searchStale={searchStale}
-            onQueriesSaved={() => setSearchStale(true)}
+            onQueriesSaved={() => { setSearchStale(true); setOpenStep(1); }}
             onSearchRun={() => setSearchStale(false)}
             matchedPatients={funnel?.matched_patients ?? null}
+            onContinue={() => setOpenStep(2)}
+          />
+        </StepCard>
+
+        <StepCard
+          index={2}
+          title="Define the event"
+          state={stateFor(2, hasEvent, !hasQuery)}
+          lockedReason="Save a search query first."
+          summary={hasEvent ? session.event_description || session.event_name! : "Not defined yet"}
+          open={open === 2}
+          onToggle={() => toggle(2)}
+        >
+          <EventDefinitionSection
+            projectId={projectId!}
+            session={session}
+            onRefresh={refresh}
+            onSaved={() => setOpenStep(3)}
           />
         </StepCard>
 
         <StepCard
           index={3}
           title="Test the model on a sample"
-          state={stateFor(3, classified, !searched)}
-          lockedReason="Run the search first so there is something to classify."
+          state={stateFor(3, classified, !hasEvent || !searched || searchStale)}
+          lockedReason="Define the event and run the search first."
           summary={
             llmRunning
               ? `Classifying ${metrics?.llm_completed ?? 0} of ${metrics?.llm_total ?? 0}…`

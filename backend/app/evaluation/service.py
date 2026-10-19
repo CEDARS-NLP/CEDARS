@@ -15,14 +15,17 @@ from app.config import settings
 from app.connectors.models import Note, Patient
 from app.evaluation.models import (
     EvaluationSession,
+    EvaluationSessionQuerySection,
     PatientResult,
     PatientResultStatus,
     SearchMatch,
     SessionStatus,
 )
+from app.evaluation.query_expression import normalize_queries
 from app.llm.pricing import estimate_cost
 from app.llm.usage import LlmUsage, add_usage
 from app.nlp.engine import parse_query, process_note
+from app.nlp.schemas import ReprocessRequest
 from app.pipeline.classifier import SYSTEM_PROMPT, classify_patient
 from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
 
@@ -99,10 +102,13 @@ async def create_session(
 
     # Handle cloning
     queries = search_queries or []
+    query_sections = list(queries)
+    raw_input = True
     event_name = None
     event_description = None
     include_criteria = None
     exclude_criteria = None
+    exclude_negated = True
 
     if cloned_from_id:
         clone_source = (
@@ -111,11 +117,27 @@ async def create_session(
             )
         ).scalar_one_or_none()
         if clone_source:
-            queries = queries or clone_source.search_queries or []
+            stored_sections = (
+                await db.execute(
+                    select(EvaluationSessionQuerySection)
+                    .where(EvaluationSessionQuerySection.session_id == cloned_from_id)
+                    .order_by(EvaluationSessionQuerySection.position)
+                )
+            ).scalars().all()
+            if not search_queries:
+                query_sections = [
+                    {"query": section.query, "type": section.type}
+                    for section in stored_sections
+                ] or list(clone_source.search_queries or [])
+                queries = query_sections
+                raw_input = bool(stored_sections)
             event_name = clone_source.event_name
             event_description = clone_source.event_description
             include_criteria = clone_source.include_criteria
             exclude_criteria = clone_source.exclude_criteria
+            exclude_negated = clone_source.exclude_negated
+
+    queries = normalize_queries(queries, allow_empty=True, raw_input=raw_input)
 
     # Sample patients
     patient_stmt = select(Patient.id).where(Patient.project_id == project_id)
@@ -133,6 +155,7 @@ async def create_session(
         sample_patient_ids=sampled_ids,
         sample_size=sample_size,
         cloned_from_id=cloned_from_id,
+        exclude_negated=exclude_negated,
         event_name=event_name,
         event_description=event_description,
         include_criteria=include_criteria,
@@ -140,6 +163,15 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+    for position, section in enumerate(_clean_query_sections(query_sections)):
+        db.add(
+            EvaluationSessionQuerySection(
+                session_id=session.id,
+                position=position,
+                query=section["query"],
+                type=section["type"],
+            )
+        )
     await db.commit()
     await db.refresh(session)
     return session
@@ -154,6 +186,31 @@ async def get_session(
         select(EvaluationSession).where(EvaluationSession.id == session_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_query_sections(
+    db: AsyncSession,
+    session_id: str,
+) -> list[dict[str, str]]:
+    result = await db.execute(
+        select(EvaluationSessionQuerySection)
+        .where(EvaluationSessionQuerySection.session_id == session_id)
+        .order_by(EvaluationSessionQuerySection.position)
+    )
+    sections = result.scalars().all()
+    if sections:
+        return [{"query": section.query, "type": section.type} for section in sections]
+
+    session = await get_session(db, session_id)
+    return _clean_query_sections(session.search_queries or []) if session else []
+
+
+def _clean_query_sections(search_queries: list[dict]) -> list[dict[str, str]]:
+    return [
+        {"query": query["query"].strip(), "type": query.get("type", "include")}
+        for query in search_queries
+        if query.get("query", "").strip()
+    ]
 
 
 async def list_sessions(
@@ -199,17 +256,49 @@ async def update_queries(
     db: AsyncSession,
     session_id: str,
     search_queries: list[dict],
+    exclude_negated: bool = True,
 ) -> EvaluationSession:
-    """Update the query list and clear old SearchMatch records."""
+    """Update the query list and negation option, and clear old SearchMatch records."""
     session = (
         await db.execute(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
         )
     ).scalar_one()
 
-    session.search_queries = search_queries
+    ensure_editable_session(session)
+    canonical_echo = search_queries == session.search_queries
+    normalized_queries = normalize_queries(search_queries, raw_input=not canonical_echo)
+    if canonical_echo:
+        stored_sections = (
+            await db.execute(
+                select(EvaluationSessionQuerySection)
+                .where(EvaluationSessionQuerySection.session_id == session_id)
+                .order_by(EvaluationSessionQuerySection.position)
+            )
+        ).scalars().all()
+        search_queries = [
+            {"query": section.query, "type": section.type} for section in stored_sections
+        ] or search_queries
+    query_sections = _clean_query_sections(search_queries)
+    session.search_queries = normalized_queries
+    session.exclude_negated = exclude_negated
     session.updated_at = now_utc()
     db.add(session)
+
+    await db.execute(
+        delete(EvaluationSessionQuerySection).where(
+            EvaluationSessionQuerySection.session_id == session_id
+        )
+    )
+    for position, section in enumerate(query_sections):
+        db.add(
+            EvaluationSessionQuerySection(
+                session_id=session_id,
+                position=position,
+                query=section["query"],
+                type=section["type"],
+            )
+        )
 
     # Clear old search matches
     await db.execute(
@@ -233,6 +322,7 @@ async def update_llm_config(
         )
     ).scalar_one()
 
+    ensure_editable_session(session)
     allowed_fields = {
         "event_name", "event_description", "include_criteria", "exclude_criteria",
     }
@@ -250,6 +340,77 @@ async def update_llm_config(
 # ── Search execution ─────────────────────────────────────────────
 
 
+class SessionLockedError(ValueError):
+    pass
+
+
+def ensure_editable_session(session: EvaluationSession) -> None:
+    if session.status not in (SessionStatus.DRAFT, SessionStatus.REVIEWING):
+        raise SessionLockedError("Only draft or reviewing sessions can be edited or searched")
+    if (session.metrics or {}).get("llm_status") == "running":
+        raise SessionLockedError("Wait for sample classification to finish before editing or searching")
+
+
+async def _activate_session_query(
+    db: AsyncSession,
+    session: EvaluationSession,
+    user_id: str,
+    confirmation: ReprocessRequest | None = None,
+):
+    """Activate the session query only after validating destructive replacement."""
+    from app.nlp import service as nlp_service
+
+    ensure_editable_session(session)
+    queries = normalize_queries(session.search_queries or [])
+    project_id = session.project_id
+    if await nlp_service.reprocess_is_busy(db, project_id):
+        raise SessionLockedError(
+            "Finish active processing and wait for open patient reviews "
+            "(locked in the last hour) before reprocessing."
+        )
+    impact = await nlp_service.get_reprocess_impact(db, project_id)
+    requires_deletion = any(impact.values())
+    if requires_deletion or confirmation is not None:
+        if confirmation is None or not confirmation.confirmed:
+            raise ValueError("Confirm deletion before reprocessing.")
+        expected = {
+            "annotations": confirmation.expected_annotations,
+            "predictions": confirmation.expected_predictions,
+            "sentences": confirmation.expected_sentences,
+        }
+        if impact != expected:
+            raise SessionLockedError(
+                "Deletion counts changed. Review the updated counts and confirm again."
+            )
+
+    session.search_queries = queries
+    db.add(session)
+    await nlp_service.create_search_query(
+        db, project_id, queries[0]["query"], created_by=user_id, nlp_apply=False,
+        exclude_negated=session.exclude_negated,
+        commit=False,
+    )
+    if requires_deletion:
+        await nlp_service.clear_sentences(db, project_id, commit=False)
+    return requires_deletion
+
+
+async def run_session_queries(
+    db: AsyncSession,
+    session: EvaluationSession,
+    user_id: str,
+    confirmation: ReprocessRequest | None = None,
+):
+    """Activate and run a keyword query while keeping the session editable."""
+    from app.nlp import service as nlp_service
+
+    requires_deletion = await _activate_session_query(db, session, user_id, confirmation)
+    project_id = session.project_id
+    if requires_deletion:
+        return await nlp_service.run_nlp_pipeline(db, project_id)
+    return await nlp_service.dispatch_nlp_job(db, project_id, user_id)
+
+
 async def execute_search_queries(
     db: AsyncSession,
     session_id: str,
@@ -264,6 +425,10 @@ async def execute_search_queries(
             select(EvaluationSession).where(EvaluationSession.id == session_id)
         )
     ).scalar_one()
+
+    ensure_editable_session(session)
+    queries = normalize_queries(session.search_queries or [])
+    session.search_queries = queries
 
     # Clear existing matches
     await db.execute(
@@ -280,8 +445,6 @@ async def execute_search_queries(
     notes_stmt = select(Note).where(Note.patient_id.in_(sample_patient_ids))
     result = await db.execute(notes_stmt)
     notes = result.scalars().all()
-
-    queries = session.search_queries or []
 
     # query_index must be the position in the full query list: the UI asks for
     # matches by the index it displays (queries/{index}/matches). Numbering only
@@ -301,7 +464,12 @@ async def execute_search_queries(
         for note in notes:
             sentences = process_note(note.text, query_groups)
             for sent in sentences:
-                if sent.get("is_target") and not sent.get("is_negated"):
+                # Negated matches are dropped unless the session asks to keep
+                # them; kept ones are stored with is_negated=True so previews
+                # can strike them through and downstream counts stay honest.
+                if sent.get("is_target") and (
+                    not sent.get("is_negated") or not session.exclude_negated
+                ):
                     match = SearchMatch(
                         session_id=session_id,
                         query_index=query_index,
@@ -679,10 +847,16 @@ async def run_llm_on_sample(
         )
     )
 
-    # Count matched patients for progress tracking
+    # Count matched patients for progress tracking. Sessions that keep negated
+    # matches classify them too, so the is_negated filter only applies when
+    # the session excludes them.
     matched_stmt = select(func.count(func.distinct(SearchMatch.patient_id))).where(
         SearchMatch.session_id == session_id,
-        SearchMatch.is_negated.is_(False),
+        *(
+            []
+            if not session.exclude_negated
+            else [SearchMatch.is_negated.is_(False)]
+        ),
     )
     matched_count = (await db.execute(matched_stmt)).scalar() or 0
 
@@ -758,10 +932,16 @@ async def _execute_sample_llm_impl(
 
     sample_patient_ids = set(session.sample_patient_ids or [])
 
-    # Find matched patient IDs from non-negated SearchMatch records
+    # Find matched patient IDs from SearchMatch records. Sessions that keep
+    # negated matches classify them too, so the is_negated filter only applies
+    # when the session excludes them.
     matched_stmt = select(func.distinct(SearchMatch.patient_id)).where(
         SearchMatch.session_id == session_id,
-        SearchMatch.is_negated.is_(False),
+        *(
+            []
+            if not session.exclude_negated
+            else [SearchMatch.is_negated.is_(False)]
+        ),
     )
     result = await db.execute(matched_stmt)
     matched_patient_ids = {r[0] for r in result.all()}
@@ -800,7 +980,11 @@ async def _execute_sample_llm_impl(
                     select(SearchMatch.note_id).where(
                         SearchMatch.session_id == session_id,
                         SearchMatch.patient_id.in_(batch_ids),
-                        SearchMatch.is_negated.is_(False),
+                        *(
+                            []
+                            if not session.exclude_negated
+                            else [SearchMatch.is_negated.is_(False)]
+                        ),
                     )
                 ),
             )
@@ -1206,6 +1390,7 @@ async def commit_session(
     session_id: str,
     user_id: str,
     confidence_threshold: float | None = None,
+    confirmation: ReprocessRequest | None = None,
 ) -> EvaluationSession:
     """Lock the session configuration and mark as COMMITTED.
 
@@ -1244,8 +1429,18 @@ async def commit_session(
             \nSet the LLM provider and model in project settings before committing."""
         )
 
+    from app.nlp.models import NlpJobStatus
+    from app.nlp.service import run_nlp_pipeline
+
+    await _activate_session_query(db, session, user_id, confirmation)
+    job = await run_nlp_pipeline(
+        db, session.project_id, create_annotations=False,
+    )
+    if job.status != NlpJobStatus.COMPLETED:
+        raise ValueError("Sentence rebuild failed. Retry before committing the session.")
     committed_config = {
         "search_queries": session.search_queries,
+        "exclude_negated": session.exclude_negated,
         "event_name": session.event_name,
         "event_description": session.event_description,
         "include_criteria": session.include_criteria,

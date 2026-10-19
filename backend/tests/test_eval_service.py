@@ -17,11 +17,13 @@ from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation import service as eval_service
 from app.evaluation.models import (
     EvaluationSession,
+    EvaluationSessionQuerySection,
     PatientResult,
     PatientResultStatus,
     SearchMatch,
     SessionStatus,
 )
+from app.evaluation.query_expression import normalize_queries
 from app.jobs.models import BackgroundJob  # noqa: F401
 from app.llm.usage import add_usage
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
@@ -109,6 +111,33 @@ async def seeded_db(db):
 
 
 class TestCreateSession:
+    async def test_normalizes_draft_without_creating_search_query_records(self, seeded_db):
+        from sqlalchemy import select
+
+        session = await eval_service.create_session(
+            seeded_db, "proj-1", "user-1", search_queries=[
+                {"query": " DVT ", "type": "include"},
+                {"query": "thromb*", "type": "include"},
+                {"query": "family history", "type": "exclude"},
+                {"query": "  ", "type": "include"},
+            ]
+        )
+        expected = [{"query": "((DVT) OR (thromb*)) AND !((family history))", "type": "include"}]
+        assert session.search_queries == expected
+        assert normalize_queries(expected) == expected
+        updated = await eval_service.update_queries(seeded_db, session.id, expected)
+        assert updated.search_queries == expected
+        assert (await seeded_db.execute(select(SearchQuery))).scalars().all() == []
+
+    @pytest.mark.parametrize("rows", [
+        [{"query": "DVT", "type": "other"}], [{"query": 1, "type": "include"}],
+        [{"query": "DVT", "type": "exclude"}], [{"query": "DVT AND", "type": "include"}],
+    ])
+    async def test_invalid_creation_does_not_persist(self, seeded_db, rows):
+        with pytest.raises(ValueError):
+            await eval_service.create_session(seeded_db, "proj-1", "user-1", search_queries=rows)
+        assert await eval_service.list_sessions(seeded_db, "proj-1") == []
+
     async def test_create_session_samples_patients(self, seeded_db):
         session = await eval_service.create_session(
             seeded_db,
@@ -196,6 +225,15 @@ class TestCreateSession:
             source.id,
             event_name="MI",
         )
+        await eval_service.update_queries(
+            seeded_db,
+            source.id,
+            search_queries=[
+                {"query": "troponin", "type": "include"},
+                {"query": "history", "type": "exclude"},
+            ],
+            exclude_negated=False,
+        )
         # Discard so we can create a new one
         await eval_service.discard_session(seeded_db, source.id)
 
@@ -207,8 +245,15 @@ class TestCreateSession:
             cloned_from_id=source.id,
         )
         assert cloned.cloned_from_id == source.id
-        assert cloned.search_queries == [{"query": "troponin", "type": "include"}]
+        assert cloned.search_queries == [
+            {"query": "(troponin) AND !((history))", "type": "include"}
+        ]
+        assert await eval_service.get_query_sections(seeded_db, cloned.id) == [
+            {"query": "troponin", "type": "include"},
+            {"query": "history", "type": "exclude"},
+        ]
         assert cloned.event_name == "MI"
+        assert cloned.exclude_negated is False
 
 
 class TestDiscardSession:
@@ -274,6 +319,29 @@ class TestGetSession:
 
 
 class TestExecuteSearchQueries:
+    async def test_sample_uses_own_combined_expression_not_active_query(self, seeded_db):
+        from sqlalchemy import select
+
+        session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
+        session.search_queries = [
+            {"query": "troponin elevation", "type": "include"},
+            {"query": "suspected", "type": "exclude"},
+        ]
+        note = await seeded_db.get(Note, "note-1-1")
+        note.text = "Suspected troponin elevation. Confirmed troponin elevation."
+        active = SearchQuery(project_id="proj-1", query="headache")
+        seeded_db.add(active)
+        await seeded_db.commit()
+        await eval_service.execute_search_queries(seeded_db, session.id)
+        matches = (await seeded_db.execute(select(SearchMatch))).scalars().all()
+        assert len(matches) == 5
+        assert {match.query_index for match in matches} == {0}
+        first = next(match for match in matches if match.note_id == note.id)
+        assert first.match_positions[0]["text"] == "Confirmed troponin elevation."
+        queries = (await seeded_db.execute(select(SearchQuery))).scalars().all()
+        assert len(queries) == 1 and queries[0].id == active.id and queries[0].is_active
+        assert len(session.search_queries) == 1
+
     async def test_execute_search_creates_matches(self, seeded_db):
         """Verify that executing search queries creates SearchMatch records."""
         session = await eval_service.create_session(
@@ -330,12 +398,7 @@ class TestExecuteSearchQueries:
             assert match.query_index == 0
 
     async def test_query_index_counts_excluded_queries(self, seeded_db):
-        """query_index must be the position in the saved list, not among includes.
-
-        The note preview panel asks for matches by the index of the row the user
-        expanded. When an exclude query sits above an include query, numbering
-        only the includes attributed matches to the wrong row.
-        """
+        """Matches reference the merged saved expression, not the draft row index."""
         session = await eval_service.create_session(
             seeded_db,
             project_id="proj-1",
@@ -356,23 +419,163 @@ class TestExecuteSearchQueries:
         )
         matches = result.scalars().all()
         assert len(matches) == 5
-        assert {m.query_index for m in matches} == {1}
+        assert session.search_queries == [
+            {"query": "(troponin) AND !((aspirin))", "type": "include"}
+        ]
+        assert {match.query_index for match in matches} == {0}
+
+    async def test_query_index_is_zero_after_exclude_normalization(self, seeded_db):
+        """An exclude-first draft becomes one include expression at index zero."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[
+                {"query": "aspirin", "type": "exclude"},
+                {"query": "troponin", "type": "include"},
+            ],
+        )
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=_mock_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        matches = result.scalars().all()
+        assert len(matches) == 5
+        assert {m.query_index for m in matches} == {0}
+        assert session.search_queries == [
+            {"query": "(troponin) AND !((aspirin))", "type": "include"}
+        ]
 
     async def test_execute_search_no_queries(self, seeded_db):
-        """Session with no queries should produce no matches."""
+        """Empty creation is allowed, but execution requires a saved include query."""
         session = await eval_service.create_session(
             seeded_db,
             project_id="proj-1",
             user_id="user-1",
             search_queries=[],
         )
-        await eval_service.execute_search_queries(seeded_db, session.id)
+        with pytest.raises(ValueError, match="include search query"):
+            await eval_service.execute_search_queries(seeded_db, session.id)
 
         from sqlalchemy import select as sa_select
         result = await seeded_db.execute(
             sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
         )
         assert len(result.scalars().all()) == 0
+
+    async def test_execute_search_drops_negated_by_default(self, seeded_db):
+        """Default sessions drop negated matches — the pre-existing behavior."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        assert session.exclude_negated is True
+
+        def negated_process_note(note_text, query_groups):
+            if "troponin" in note_text.lower():
+                return [{
+                    "sentence_number": 0,
+                    "text": note_text,
+                    "start_pos": 0,
+                    "end_pos": len(note_text),
+                    "is_target": True,
+                    "is_negated": True,
+                    "matched_tokens": ["troponin"],
+                }]
+            return [{
+                "sentence_number": 0,
+                "text": note_text,
+                "start_pos": 0,
+                "end_pos": len(note_text),
+                "is_target": False,
+                "is_negated": False,
+                "matched_tokens": [],
+            }]
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=negated_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        assert len(result.scalars().all()) == 0
+
+    async def test_update_queries_persists_exclude_negated(self, seeded_db):
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        assert session.exclude_negated is True
+
+        updated = await eval_service.update_queries(
+            seeded_db,
+            session.id,
+            search_queries=[{"query": "troponin", "type": "include"}],
+            exclude_negated=False,
+        )
+        assert updated.exclude_negated is False
+
+        refetched = await eval_service.get_session(seeded_db, session.id)
+        assert refetched.exclude_negated is False
+
+    async def test_execute_search_stores_negated_when_kept(self, seeded_db):
+        """exclude_negated=False stores negated matches with is_negated=True."""
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        await eval_service.update_queries(
+            seeded_db,
+            session.id,
+            search_queries=[{"query": "troponin", "type": "include"}],
+            exclude_negated=False,
+        )
+
+        def negated_process_note(note_text, query_groups):
+            if "troponin" in note_text.lower():
+                return [{
+                    "sentence_number": 0,
+                    "text": note_text,
+                    "start_pos": 0,
+                    "end_pos": len(note_text),
+                    "is_target": True,
+                    "is_negated": True,
+                    "matched_tokens": ["troponin"],
+                }]
+            return [{
+                "sentence_number": 0,
+                "text": note_text,
+                "start_pos": 0,
+                "end_pos": len(note_text),
+                "is_target": False,
+                "is_negated": False,
+                "matched_tokens": [],
+            }]
+
+        with patch.object(eval_service, "parse_query", side_effect=_mock_parse_query), \
+             patch.object(eval_service, "process_note", side_effect=negated_process_note):
+            await eval_service.execute_search_queries(seeded_db, session.id)
+
+        from sqlalchemy import select as sa_select
+        result = await seeded_db.execute(
+            sa_select(SearchMatch).where(SearchMatch.session_id == session.id)
+        )
+        matches = result.scalars().all()
+        assert len(matches) == 5
+        assert all(match.is_negated is True for match in matches)
 
 
 class TestFunnelStats:
@@ -523,6 +726,34 @@ class TestGetQueryMatches:
 
 
 class TestUpdateQueries:
+    async def test_get_query_sections_falls_back_for_legacy_session(self, seeded_db):
+        session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
+        session.search_queries = [{"query": "DVT OR PE", "type": "include"}]
+        seeded_db.add(session)
+        await seeded_db.commit()
+
+        assert await eval_service.get_query_sections(seeded_db, session.id) == [
+            {"query": "DVT OR PE", "type": "include"}
+        ]
+
+    async def test_update_queries_persists_display_sections_separately(self, seeded_db):
+        sections = [
+            {"query": "DVT OR embol*", "type": "include"},
+            {"query": "suspected", "type": "exclude"},
+        ]
+        session = await eval_service.create_session(
+            seeded_db,
+            project_id="proj-1",
+            user_id="user-1",
+        )
+
+        updated = await eval_service.update_queries(seeded_db, session.id, sections)
+
+        assert updated.search_queries == [
+            {"query": "(DVT OR embol*) AND !((suspected))", "type": "include"}
+        ]
+        assert await eval_service.get_query_sections(seeded_db, session.id) == sections
+
     async def test_update_queries_clears_matches(self, seeded_db):
         session = await eval_service.create_session(
             seeded_db,
@@ -1065,6 +1296,101 @@ class TestReview:
 
 
 class TestCommit:
+    @pytest.mark.parametrize("artifact", ["sentences", "annotations", "predictions"])
+    @pytest.mark.parametrize("confirmation_kind", ["missing", "unconfirmed", "stale"])
+    async def test_each_processed_artifact_requires_exact_confirmation(
+        self, seeded_db, artifact, confirmation_kind,
+    ):
+        from sqlalchemy import select
+
+        from app.annotations.models import AnnotationPrediction
+        from app.nlp.schemas import ReprocessRequest
+        from app.nlp.service import get_reprocess_impact
+
+        session = await eval_service.create_session(
+            seeded_db, "proj-1", "user-1",
+            search_queries=[{"query": "troponin", "type": "include"}],
+        )
+        session.status = SessionStatus.REVIEWING
+        old_query = SearchQuery(project_id="proj-1", query="aspirin")
+        seeded_db.add(old_query)
+        if artifact == "sentences":
+            seeded_db.add(Sentence(
+                project_id="proj-1", note_id="note-1-1", sentence_number=0,
+                text="Old sentence", start_pos=0, end_pos=12,
+            ))
+        else:
+            annotation = Annotation(
+                project_id="proj-1", patient_id="pat-1", note_id="note-1-1",
+                sentence_text="Old annotation",
+            )
+            seeded_db.add(annotation)
+            if artifact == "predictions":
+                await seeded_db.flush()
+                seeded_db.add(AnnotationPrediction(
+                    project_id="proj-1", annotation_id=annotation.id,
+                ))
+        await seeded_db.commit()
+        impact = await get_reprocess_impact(seeded_db, "proj-1")
+        assert impact == {
+            "sentences": int(artifact == "sentences"),
+            "annotations": int(artifact != "sentences"),
+            "predictions": int(artifact == "predictions"),
+        }
+        confirmation = None
+        if confirmation_kind != "missing":
+            expected = dict(impact)
+            if confirmation_kind == "stale":
+                expected[artifact] += 1
+            confirmation = ReprocessRequest(
+                confirmed=confirmation_kind != "unconfirmed",
+                **{f"expected_{key}": value for key, value in expected.items()},
+            )
+        with patch("app.nlp.service.run_nlp_pipeline", new_callable=AsyncMock) as rebuild:
+            with pytest.raises(ValueError, match=(
+                "counts changed" if confirmation_kind == "stale" else "Confirm deletion"
+            )):
+                await eval_service.commit_session(
+                    seeded_db, session.id, "user-1", confirmation=confirmation,
+                )
+            rebuild.assert_not_awaited()
+        await seeded_db.refresh(session)
+        await seeded_db.refresh(old_query)
+        assert session.status == SessionStatus.REVIEWING
+        assert session.committed_config is None
+        assert session.committed_at is None
+        assert session.committed_by is None
+        assert old_query.is_active
+        assert (await seeded_db.execute(select(SearchQuery))).scalars().all() == [old_query]
+        assert await get_reprocess_impact(seeded_db, "proj-1") == impact
+
+    @pytest.mark.parametrize("exclude_negated", [True, False])
+    async def test_commit_activates_one_merged_legacy_expression(self, seeded_db, exclude_negated):
+        from sqlalchemy import select
+
+        session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
+        session.status = SessionStatus.REVIEWING
+        session.exclude_negated = exclude_negated
+        session.search_queries = [
+            {"query": "DVT", "type": "include"},
+            {"query": "troponin", "type": "include"},
+            {"query": "suspected", "type": "exclude"},
+        ]
+        old = SearchQuery(project_id="proj-1", query="aspirin")
+        seeded_db.add(old)
+        await seeded_db.commit()
+        committed = await eval_service.commit_session(seeded_db, session.id, "user-1")
+        queries = (await seeded_db.execute(select(SearchQuery))).scalars().all()
+        assert len(queries) == 2
+        active = [query for query in queries if query.is_active]
+        assert len(active) == 1
+        assert active[0].query == "((DVT) OR (troponin)) AND !((suspected))"
+        assert active[0].exclude_negated is exclude_negated
+        assert committed.committed_config["exclude_negated"] is exclude_negated
+        assert committed.search_queries == committed.committed_config["search_queries"]
+        assert len(committed.search_queries) == 1
+        assert old.is_active is False
+
     async def test_commit_session(self, seeded_db):
         session = await _create_session_with_search(seeded_db)
 
