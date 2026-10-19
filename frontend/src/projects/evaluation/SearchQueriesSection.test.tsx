@@ -10,7 +10,7 @@ vi.mock("@/api/client", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/api/client")>();
   return { ...original, api: { get: vi.fn(), put: vi.fn(), post: vi.fn() } };
 });
-vi.mock("./NotePreviewList", () => ({ default: () => <div>Matched notes</div> }));
+vi.mock("./NotePreviewList", () => ({ default: () => <div>Matched documents</div> }));
 
 const sessionPath = "/projects/project/evaluation/sessions/session/queries";
 const impactPath = "/projects/project/nlp/reprocess-impact";
@@ -209,10 +209,10 @@ describe("SearchQueriesSection", () => {
       query_sections: cleanedQueries,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show matched notes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show matched documents" }));
 
-    expect(screen.getByText("Matched notes")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Show matched notes" })).toHaveLength(1);
+    expect(screen.getByText("Matched documents")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Show matched documents" })).toHaveLength(1);
   });
 
   it("shows the negation checkbox checked by default", () => {
