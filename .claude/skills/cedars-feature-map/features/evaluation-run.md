@@ -15,7 +15,7 @@ Steps 3 to 5 of an evaluation session. Step 3 "Test the model on a sample" runs 
 | eval-judgment | `POST results/{id}/judge` with `correct`, `wrong` or `skipped`, plus an optional date override | beta | UI+API | a5b72355 | 2026-10-05 (UI + API) | `service.py:850-883`, `router.py:376-398`, `tests/test_eval_service.py::TestReview::test_submit_judgment`, `::test_submit_judgment_with_date_override` |
 | eval-results-browser | Collapsed "Browse every patient in the sample": tabs all, positive, negative, inconclusive, unreviewed. Each card has "Model was right", "Model was wrong", "Skip" | beta | UI+API | cef61132 | 2026-10-05 (UI + API) | `ResultsSection.tsx:27-273`, `service.py:785-847`, `tests/test_eval_service.py::TestListPatientResults::test_list_patient_results_filter_by_label` |
 | eval-metrics | Accuracy, Precision, Recall, F1 and "Across N judged patients: …" over judged COMPLETED sample rows. Skips excluded | beta | UI+API | 5329ec92 | 2026-10-05 (UI + API) | `MetricsPanel.tsx:24-70`, `service.py:971-1049`, `tests/test_eval_service.py::TestReview::test_compute_metrics_mixed`, `::test_compute_metrics_preserves_llm_progress` |
-| eval-commit | "Commit and run on all patients": REVIEWING → COMMITTED, snapshot to `committed_config`, then dispatch the full run | beta | UI+API | 8f2676b6 | 2026-10-05 (UI + API) | `CommitSection.tsx:42-108`, `service.py:1055-1121`, `:1159-1240`, `router.py:436-463`, `tests/test_eval_service.py::TestCommit::test_commit_session`, `tests/test_eval_router.py::TestCommit::test_commit_requires_reviewing_status` |
+| eval-commit | "Save and process all patients": REVIEWING → COMMITTED, snapshot to `committed_config`, then dispatch the full run | beta | UI+API | 8f2676b6 | 2026-10-05 (UI + API) | `CommitSection.tsx:42-108`, `service.py:1055-1121`, `:1159-1240`, `router.py:436-463`, `tests/test_eval_service.py::TestCommit::test_commit_session`, `tests/test_eval_router.py::TestCommit::test_commit_requires_reviewing_status` |
 | eval-pipeline-stats | Step 5 grid Total, Matched, No match, Failed, Pending. Polls every 3 s while rows are queued or processing | beta | UI+API | 8f2676b6 | 2026-10-05 (UI + API) | `PipelineSection.tsx:34-188`, `service.py:1243-1284`, `router.py:466-479`. No tests |
 | eval-pipeline-cancel | "Cancel" while running: run CANCELLED, session DISCARDED | beta | UI+API | f88d0b99 | not driven | `service.py:1287-1315`, `backend/app/pipeline/orchestrator.py:203-237`, `PipelineSection.tsx:115-128`. No tests |
 | eval-pipeline-resume | "Resume" while running: PROCESSING rows back to QUEUED, enqueue another job | beta | UI+API | a5b72355 | not driven | `service.py:1355-1397`, `PipelineSection.tsx:101-114`. No tests |
@@ -45,7 +45,7 @@ Why the grades:
 2. The page opens the first unfinished step, here "Test the model on a sample". It lists "Model", "Patients in sample", "Matched the search", "Estimated cost" (always "—"). Click "Run on N patients". When it ends the badge changes from "Draft" to "In review", and the page moves on to step 4 by itself. Reopen step 3 to see "Classified N patients…".
 3. Step 4 "Evaluate the Model's Performance": the metrics sit on top. Below them the queue shows "Patient 1 of N" and "0 of N judged". Read the matched notes ("Previous note" and "Next note"), then click "Correct", "Wrong" or "Skip", or press C, W, S. "Override event date" (E) opens "Corrected event date". When the queue is empty it says "Every sample patient is judged".
 4. Optional: open "Browse every patient in the sample" to filter by tab or change one judgment.
-5. Click "Process All Patients". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Commit and run on all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
+5. Click "Process All Patients". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Save and process all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
 6. Positive and negative results of the full run appear on the Annotations page (`annotations.md`).
 
 ## Driving it with control-cedars
@@ -80,7 +80,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"screenshot":"reviewed"},
    {"click":{"role":"button","name":"Process All Patients"}},
    {"expect_text":"Agreement so far"},
-   {"click":{"role":"button","name":"Commit and run on all patients"}},
+   {"click":{"role":"button","name":"Save and process all patients"}},
    {"expect_text":"Pipeline complete. 4 patients matched, 1 no match.","timeout":120},
    {"expect":{"role":"button","name":"Re-run pipeline"}},
    {"screenshot":"committed"}]
@@ -112,7 +112,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"screenshot":"results-browser"}]
   EOF
   ```
-  → exit 0 (2026-10-05, a fresh sample: 4 positive, 1 no match, none judged). `exact` matters: "4 patients" without it also matches the step 3 header "4 patients classified", and "all" matches "Commit and run on all patients". "unreviewed" counts the NO_MATCH row too. API equivalent: `$CC api GET "/projects/{project}/evaluation/sessions/$SID/results?label=positive" --as viewer` → `total: 4`.
+  → exit 0 (2026-10-05, a fresh sample: 4 positive, 1 no match, none judged). `exact` matters: "4 patients" without it also matches the step 3 header "4 patients classified", and "all" matches "Save and process all patients". "unreviewed" counts the NO_MATCH row too. API equivalent: `$CC api GET "/projects/{project}/evaluation/sessions/$SID/results?label=positive" --as viewer` → `total: 4`.
 - **eval-llm-failure-handling** with `llm mode empty` (the pre-cef61132 Bedrock reply): `$CC seed`, the steps 1-2 drive, capture `SID`, then `$CC llm mode empty` →
   ```
   $CC browser run - --as admin --save eval-empty --timeout 30 <<'EOF'
@@ -128,15 +128,15 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"expect_text":"Classified 0 patients, 4 failed, 1 had no matching notes."},
    {"click":{"role":"button","name":"Process All Patients"}},
    {"expect_text":"judged any sample patients yet"},
-   {"expect":{"role":"button","name":"Commit and run on all patients"},"state":"enabled"},
+   {"expect":{"role":"button","name":"Save and process all patients"},"state":"enabled"},
    {"screenshot":"empty"}]
   EOF
   ```
   → exit 0, and that is the defect: nothing was classified, yet step 4 says every patient is judged and commit is offered. The step 3 header summary reads "0 patients classified, 4 failed". Session metrics (`api GET "/projects/{project}/evaluation/sessions/$SID" --as viewer`) → `"status":"reviewing"`, `"llm_status":"completed","llm_total":4,"llm_completed":0,"llm_failed":4,"llm_no_match":1`. `/metrics` → `"total_reviewed":0`. The UI never shows the reason, but the API does: `api GET "…/sessions/$SID/results"` returns each row's `error_message` (that route has no `response_model`, `router.py:337-357`). So does the DB: `$CC db query "select status, error_message, count(*) from patient_results where session_id = '$SID' group by 1, 2"` → `failed | Classification response has no 'event_detected' field: {} | 4` and `no_match | | 1`. `$CC llm calls --since "$T0"` → `classify/empty=4`. Before `cef61132` the same replies became 4 × "No event" at 50% and step 3 read "Classified 4 patients, 1 had no matching notes."
-  - Commit in empty mode: "Commit and run on all patients" → the 4 FAILED sample rows are queued again and fail again → "Pipeline complete. 0 patients matched, 1 no match. 4 failed.", session `completed`, 0 annotations, `classify/empty=8` in total.
+  - Commit in empty mode: "Save and process all patients" → the 4 FAILED sample rows are queued again and fail again → "Pipeline complete. 0 patients matched, 1 no match. 4 failed.", session `completed`, 0 annotations, `classify/empty=8` in total.
   - Commit after `$CC llm mode normal` instead: the full run classifies the 4 again (`classify/normal=4`) and shows "4 patients matched, 1 no match.", although no sample result was ever judged.
 - **eval-llm-failure-handling** with `llm mode fail` (HTTP 500): same drive with `$CC llm mode fail` → the same UI text as empty mode. `error_message` starts with `Classification failed: ` followed by the LiteLLM error. `llm calls --since "$T0"` shows `classify/fail` of at least 4, up to 16, because LiteLLM may retry each call 3 times (`classifier.py:112`). `llm mode garbage` gives `Could not parse LLM response as JSON: I am unable to classify these notes.` Run `$CC llm mode normal` when done.
-- **eval-orphan-recovery**: needs queued rows in a full run. `$CC seed`, steps 1-2, `$CC llm mode fail`, step 3 (4 failed), then `$CC llm mode slow` (20 s per call), commit in the UI ("Commit and run on all patients", expect "Running the committed configuration over every patient in the project."). Within 20 s run `$CC stack restart worker`, then `$CC stack logs worker --since 5m --grep 'orphan'` → `Auto-recovered orphaned pipeline run <id> (1 stuck rows reset)`. Then `$CC llm mode normal`. `$CC api GET "/projects/{project}/evaluation/sessions/$SID/pipeline/stats" --as viewer` → after about a minute `"completed":4,"no_match":1,"failed":0`. If the log says `No orphaned pipeline runs to recover`, the run had already finished.
+- **eval-orphan-recovery**: needs queued rows in a full run. `$CC seed`, steps 1-2, `$CC llm mode fail`, step 3 (4 failed), then `$CC llm mode slow` (20 s per call), commit in the UI ("Save and process all patients", expect "Running the committed configuration over every patient in the project."). Within 20 s run `$CC stack restart worker`, then `$CC stack logs worker --since 5m --grep 'orphan'` → `Auto-recovered orphaned pipeline run <id> (1 stuck rows reset)`. Then `$CC llm mode normal`. `$CC api GET "/projects/{project}/evaluation/sessions/$SID/pipeline/stats" --as viewer` → after about a minute `"completed":4,"no_match":1,"failed":0`. If the log says `No orphaned pipeline runs to recover`, the run had already finished.
 - **eval-pipeline-resume**: in the same slow full run, before it finishes → `$CC api POST "/projects/{project}/evaluation/sessions/$SID/pipeline/resume" --as admin` → 200 `{"resumed":true,"reset_stuck":1,"remaining_queued":N,"run_id":"…"}`. In the UI, "Resume" does the same with no confirmation of the result. After the run, `$CC db query "select count(*), count(distinct patient_id) from annotations where project_id = (select id from projects order by created_at desc limit 1)"` → when the two counts differ, a patient was classified twice (see Gotchas).
 - **eval-pipeline-cancel**: in a slow full run (set up as for orphan recovery, without the restart) →
   ```

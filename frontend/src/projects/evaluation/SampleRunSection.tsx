@@ -70,9 +70,9 @@ export default function SampleRunSection({
   return (
     <div className="space-y-4">
       <p className="max-w-prose text-sm text-muted-foreground">
-        The model reads the matched notes for each patient and decides whether your
-        event happened. Check its answers on this sample first — the full cohort
-        costs the same per note, with far more notes.
+        The model reads the matched notes for each patient and evaluates the likelihood of an event occuring within that note.
+        The model's performance will first be evaluated on this sample.
+        The full cohort costs the same per note, but with far more notes.
       </p>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">

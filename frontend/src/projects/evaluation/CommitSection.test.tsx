@@ -64,11 +64,11 @@ function showSession(cost?: SessionCost) {
 }
 
 function openConfirmation() {
-  fireEvent.click(screen.getByRole("button", { name: "Commit and run on all patients" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save and process all patients" }));
 }
 
 function confirmButton() {
-  return screen.getByRole("button", { name: "Commit and run" });
+  return screen.getByRole("button", { name: "Run on all patients" });
 }
 
 function expectPayload(impact: typeof zeroImpact) {
@@ -293,7 +293,7 @@ describe("CommitSection", () => {
     await waitFor(() => expect(onRefresh).toHaveBeenCalledExactlyOnceWith());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText(/Started. Processing 25 patients/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Commit and run on all patients" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save and process all patients" })).toBeDisabled();
     keys.forEach((key) => expect(client.getQueryState(key)?.isInvalidated).toBe(true));
     expect(client.getQueryState(["eval-session", "project", "other-session"])?.isInvalidated).toBe(false);
     expect(client.getQueryState(["project-stats", "other-project"])?.isInvalidated).toBe(false);

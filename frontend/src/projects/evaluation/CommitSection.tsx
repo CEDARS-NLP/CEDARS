@@ -101,7 +101,7 @@ export default function CommitSection({
       <p className="max-w-prose text-sm text-muted-foreground">
         Committing freezes this session&rsquo;s queries and event definition, then
         runs them over every patient in the project. The sample results and your
-        judgments stay as the record of why you trusted it.
+        judgments stay as the record for the performance of this query and prompt on the sample before the pipeline was run on all of the patients.
       </p>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
@@ -151,8 +151,8 @@ export default function CommitSection({
 
       {reviewed === 0 && (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          You haven&rsquo;t judged any sample patients yet, so there is no evidence
-          the model agrees with you. Judge a handful in step 4 first.
+          Not enough sample patients have been judged yet, so there is no evidence
+          about the performance for this model. You need to judge more patients to get a performance estimate.
         </p>
       )}
       {reviewed > 0 && pending > 0 && (
@@ -163,7 +163,7 @@ export default function CommitSection({
       )}
 
       <Button onClick={openConfirmation} disabled={commitMutation.isSuccess}>
-        <Lock className="mr-2 h-4 w-4" /> Commit and run on all patients
+        <Lock className="mr-2 h-4 w-4" /> Save and process all patients
       </Button>
 
       <Dialog
@@ -174,7 +174,7 @@ export default function CommitSection({
       >
         <DialogContent showCloseButton={!commitMutation.isPending}>
           <DialogHeader>
-            <DialogTitle>Commit and run on all patients?</DialogTitle>
+            <DialogTitle>Save and process all patients?</DialogTitle>
             <DialogDescription>
               This locks the queries and event definition, then sends the matched
               notes for every patient to the model. You cannot undo this action.
@@ -259,7 +259,7 @@ export default function CommitSection({
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Committing
                 </>
               ) : (
-                "Commit and run"
+                "Run on all patients"
               )}
             </Button>
           </DialogFooter>
