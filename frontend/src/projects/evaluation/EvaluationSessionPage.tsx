@@ -154,7 +154,7 @@ export default function EvaluationSessionPage() {
       <div className="space-y-3 p-6">
         <StepCard
           index={1}
-          title="Find the notes worth reading"
+          title="Apply Search Query"
           state={stateFor(1, hasQuery)}
           summary={
             queryCount === 0
@@ -221,7 +221,7 @@ export default function EvaluationSessionPage() {
 
         <StepCard
           index={4}
-          title="Check the model against yourself"
+          title="Evaluate the Model's Performance"
           state={stateFor(4, reviewed > 0 && pending === 0, !classified)}
           lockedReason="Run the model on the sample first."
           summary={
@@ -267,7 +267,7 @@ export default function EvaluationSessionPage() {
 
         <StepCard
           index={5}
-          title="Run it on everyone"
+          title="Process All Patients"
           state={stateFor(5, session.status === "completed", !classified)}
           lockedReason="Test the model on the sample first."
           summary={

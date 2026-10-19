@@ -2,7 +2,7 @@
 
 Last verified: cef611321063 on 2026-10-05 (source + live)
 
-Steps 3 to 5 of an evaluation session. Step 3 "Test the model on a sample" runs the project LLM on the sample patients the search matched. Step 4 "Check the model against yourself" is where admins and annotators judge each result and see accuracy, precision, recall and F1. Step 5 "Run it on everyone" commits the session and runs the full pipeline over every patient, with stats, cancel, resume and re-run. Two ARQ jobs do the work (`run_sample_llm_job`, `run_eval_pipeline_job`), and worker startup recovers orphaned full runs. Steps 1 and 2 are in `evaluation-setup.md`. Overall: beta. The happy path works on the fake LLM, and since `cef61132` an empty `{}` reply marks the patient failed instead of a fake negative. But a sample where every patient failed is shown as finished and can be committed. Re-run duplicates annotations. There are also known security defects, tracked privately (not in this public repo). DEV runs `cef61132` (`aws status`, 2026-10-05), so all of this is live on DEV.
+Steps 3 to 5 of an evaluation session. Step 3 "Test the model on a sample" runs the project LLM on the sample patients the search matched. Step 4 "Evaluate the Model's Performance" is where admins and annotators judge each result and see accuracy, precision, recall and F1. Step 5 "Process All Patients" commits the session and runs the full pipeline over every patient, with stats, cancel, resume and re-run. Two ARQ jobs do the work (`run_sample_llm_job`, `run_eval_pipeline_job`), and worker startup recovers orphaned full runs. Steps 1 and 2 are in `evaluation-setup.md`. Overall: beta. The happy path works on the fake LLM, and since `cef61132` an empty `{}` reply marks the patient failed instead of a fake negative. But a sample where every patient failed is shown as finished and can be committed. Re-run duplicates annotations. There are also known security defects, tracked privately (not in this public repo). DEV runs `cef61132` (`aws status`, 2026-10-05), so all of this is live on DEV.
 
 ## Sub-features
 
@@ -43,9 +43,9 @@ Why the grades:
 
 1. Finish steps 1 and 2 (`evaluation-setup.md`). The session page now shows step 3 enabled.
 2. The page opens the first unfinished step, here "Test the model on a sample". It lists "Model", "Patients in sample", "Matched the search", "Estimated cost" (always "—"). Click "Run on N patients". When it ends the badge changes from "Draft" to "In review", and the page moves on to step 4 by itself. Reopen step 3 to see "Classified N patients…".
-3. Step 4 "Check the model against yourself": the metrics sit on top. Below them the queue shows "Patient 1 of N" and "0 of N judged". Read the matched notes ("Previous note" and "Next note"), then click "Correct", "Wrong" or "Skip", or press C, W, S. "Override event date" (E) opens "Corrected event date". When the queue is empty it says "Every sample patient is judged".
+3. Step 4 "Evaluate the Model's Performance": the metrics sit on top. Below them the queue shows "Patient 1 of N" and "0 of N judged". Read the matched notes ("Previous note" and "Next note"), then click "Correct", "Wrong" or "Skip", or press C, W, S. "Override event date" (E) opens "Corrected event date". When the queue is empty it says "Every sample patient is judged".
 4. Optional: open "Browse every patient in the sample" to filter by tab or change one judgment.
-5. Click "Run it on everyone". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Commit and run on all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
+5. Click "Process All Patients". It shows "Queries to lock", "Patients you judged" and "Agreement so far". Click "Commit and run on all patients". The step then shows the stats grid. While rows are pending it shows "Resume" and "Cancel"; when done, "Pipeline complete. N patients matched, M no match." and "Re-run pipeline".
 6. Positive and negative results of the full run appear on the Annotations page (`annotations.md`).
 
 ## Driving it with control-cedars
@@ -66,7 +66,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"expect_text":"90% likely"},
    {"click":{"role":"button","name":"Test the model on a sample"}},
    {"expect_text":"Classified 4 patients, 1 had no matching notes."},
-   {"click":{"role":"button","name":"Check the model against yourself"}},
+   {"click":{"role":"button","name":"Evaluate the Model's Performance"}},
    {"expect_text":"Patient 1 of 4"},
    {"click":{"role":"button","name":"Correct"}},
    {"expect_text":"1 of 4 judged"},
@@ -78,7 +78,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"expect_text":"Every sample patient is judged"},
    {"expect_text":"Across 4 judged patients: 4 correctly flagged, 0 flagged in error, 0 missed, 0 correctly passed over."},
    {"screenshot":"reviewed"},
-   {"click":{"role":"button","name":"Run it on everyone"}},
+   {"click":{"role":"button","name":"Process All Patients"}},
    {"expect_text":"Agreement so far"},
    {"click":{"role":"button","name":"Commit and run on all patients"}},
    {"expect_text":"Pipeline complete. 4 patients matched, 1 no match.","timeout":120},
@@ -126,7 +126,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"expect_text":"0 patients classified, 4 failed"},
    {"click":{"role":"button","name":"Test the model on a sample"}},
    {"expect_text":"Classified 0 patients, 4 failed, 1 had no matching notes."},
-   {"click":{"role":"button","name":"Run it on everyone"}},
+   {"click":{"role":"button","name":"Process All Patients"}},
    {"expect_text":"judged any sample patients yet"},
    {"expect":{"role":"button","name":"Commit and run on all patients"},"state":"enabled"},
    {"screenshot":"empty"}]
@@ -159,7 +159,7 @@ Preconditions: the baseline, `$CC llm mode normal`, then the steps 1-2 drive fro
    {"click":{"text":"Deep vein thrombosis","nth":0}},
    {"click":{"role":"button","name":"Test the model on a sample"}},
    {"expect":{"role":"button","name":"Run again on 4 patients"},"state":"enabled"},
-   {"click":{"role":"button","name":"Check the model against yourself"}},
+   {"click":{"role":"button","name":"Evaluate the Model's Performance"}},
    {"expect_text":"Every sample patient is judged"},
    {"expect_no_text":"Patient 1 of 4"},
    {"snapshot":"viewer-step4"}]

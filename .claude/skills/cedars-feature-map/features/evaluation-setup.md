@@ -2,7 +2,7 @@
 
 Last verified: cef611321063 on 2026-10-05 (source + live)
 
-An evaluation session is how a project admin defines a clinical event, finds the notes worth reading, and tries the model on a sample before running it on every patient. This file covers the session list, create, clone and discard, the status machine, and steps 1 and 2 of the five-step session page: "Define the event" and "Find the notes worth reading" (queries, LLM suggestions, the search on the sample, the match browser and the funnel). It also covers how steps unlock and the bridge that turns a committed session into a pipeline run. Steps 3 to 5 are in `evaluation-run.md`. Admins drive it. Annotators and viewers can open every page but should only read. The UI lives under sidebar "Evaluation" (`/projects/:id/evaluation`). Overall: beta. The happy path works end to end on the fake LLM, but the UI shows admin controls to every role, the API lets a locked session be edited, and the sample search and the full-run search disagree on negation and exclude queries. DEV runs `cef61132` (`aws status`, 2026-10-05), so everything below is live on DEV. The five-step page came in `8f2676b6`.
+An evaluation session is how a project admin defines a clinical event, finds the notes worth reading, and tries the model on a sample before running it on every patient. This file covers the session list, create, clone and discard, the status machine, and steps 1 and 2 of the five-step session page: "Define the event" and "Apply Search Query" (queries, LLM suggestions, the search on the sample, the match browser and the funnel). It also covers how steps unlock and the bridge that turns a committed session into a pipeline run. Steps 3 to 5 are in `evaluation-run.md`. Admins drive it. Annotators and viewers can open every page but should only read. The UI lives under sidebar "Evaluation" (`/projects/:id/evaluation`). Overall: beta. The happy path works end to end on the fake LLM, but the UI shows admin controls to every role, the API lets a locked session be edited, and the sample search and the full-run search disagree on negation and exclude queries. DEV runs `cef61132` (`aws status`, 2026-10-05), so everything below is live on DEV. The five-step page came in `8f2676b6`.
 
 ## Sub-features
 
@@ -42,7 +42,7 @@ Why the grades:
 3. The list shows heading "Evaluation sessions". With no sessions it reads "No sessions yet. Start one to define an event and try it on a sample."
 4. Click "New session". The page opens on the new session with heading "Untitled session" and badge "Draft".
 5. Step 1 "Define the event" is open. Fill "Event name" (placeholder "Pulmonary embolism"), "What happened to the patient", "Counts as the event" and optionally "Does not count". Click "Save and continue".
-6. Step 2 "Find the notes worth reading" opens. Click "Suggest from event definition", then "Add all", or type queries after "Add query". Each row has a select "Include"/"Exclude", the query text, a chevron "Show matched notes", and a remove button.
+6. Step 2 "Apply Search Query" opens. Click "Suggest from event definition", then "Add all", or type queries after "Add query". Each row has a select "Include"/"Exclude", the query text, a chevron "Show matched notes", and a remove button.
 7. Click "Save and run search". The line "Last search matched N patients in the sample." appears and the bar at the top updates: "N patients in the sample", "M matched the search (X%)".
 8. Click a chevron to browse matched notes, "N notes from M patients", "Page X of Y".
 9. Back on the list, each card has "Clone to new session" (not on discarded cards) and "Discard session" (draft and in-review only).
@@ -87,7 +87,7 @@ Expected numbers on the seeded data (5 patients, 103 notes, queries `DVT` and `t
   → exit 0. Then `$CC llm calls` → `suggest/normal=1` and no classify calls. Confirm the stored state: `$CC api GET "/projects/{project}/evaluation/sessions/$SID/funnel" --as viewer` → `"sample_patients":5,"sample_notes":103,"matched_patients":4,"matched_notes":13,"filter_percent":87.4`, `"llm_positive":null`. `$CC api GET "/projects/{project}/evaluation/sessions/$SID" --as viewer` → `"status":"draft"`, `"search_queries":[{"query":"DVT","type":"include"},{"query":"thromb*","type":"include"}]`.
 - **eval-step2-match-browser** count defect: `$CC api GET "/projects/{project}/evaluation/sessions/$SID/queries/1/matches?page=1&page_size=10" --as viewer` → `"total_notes":11,"total_pages":2`, although `thromb*` matches 9 notes. `total_patients` counts only the 10 rows on that page.
 - **eval-session-create** blocking and gating: with the draft above, `$CC api POST /projects/{project}/evaluation/sessions --as admin --body '{"search_queries":[]}' --expect 409` → `Cannot create session: project already has a draft session`. `--as viewer` and `--as annotator` with `--expect 403` → `{"detail":"Insufficient permissions"}`.
-- **eval-step2-queries** gating: `$CC api PUT "/projects/{project}/evaluation/sessions/$SID/queries" --as annotator --body '{"search_queries":[{"query":"DVT"}]}' --expect 403`, and the same for `PUT .../event-config` (body `{"event_name":"x","event_description":"","include_criteria":""}`), `POST .../queries/execute` and `POST .../queries/suggest` (body `{"description":"x"}`) → 403. UI defect: `$CC browser snapshot "/projects/{project}/evaluation/$SID" --as annotator --wait-text 'Find the notes worth reading' --save eval-session-annotator` → the step 1 form with "Save and continue" is visible to an annotator.
+- **eval-step2-queries** gating: `$CC api PUT "/projects/{project}/evaluation/sessions/$SID/queries" --as annotator --body '{"search_queries":[{"query":"DVT"}]}' --expect 403`, and the same for `PUT .../event-config` (body `{"event_name":"x","event_description":"","include_criteria":""}`), `POST .../queries/execute` and `POST .../queries/suggest` (body `{"description":"x"}`) → 403. UI defect: `$CC browser snapshot "/projects/{project}/evaluation/$SID" --as annotator --wait-text 'Apply Search Query' --save eval-session-annotator` → the step 1 form with "Save and continue" is visible to an annotator.
 - **eval-step2-suggest** failures: `$CC llm mode empty`, then `$CC api POST "/projects/{project}/evaluation/sessions/$SID/queries/suggest" --as admin --body '{"description":"Deep vein thrombosis"}' --expect 502` → `{"detail":"Expected JSON array of query suggestions"}`. `$CC llm mode fail` and the same call → 502 `Query suggestion failed: ...` (the LiteLLM error text). In the UI both show as a red box under the step 2 buttons. `$CC llm mode normal` afterwards. With no LLM provider on the project the call returns 400 `Project LLM configuration is required. Set it in project settings.`
 - **eval-step-unlock**: on a new draft →
   ```
@@ -95,11 +95,11 @@ Expected numbers on the seeded data (5 patients, 103 notes, queries `DVT` and `t
   [{"goto":"/projects/{project}/evaluation"},
    {"click":{"role":"button","name":"New session","exact":true}},
    {"expect":{"label":"Event name"}},
-   {"expect":{"role":"button","name":"Find the notes worth reading"},"state":"disabled"},
+   {"expect":{"role":"button","name":"Apply Search Query"},"state":"disabled"},
    {"expect_text":"Define the event first — queries are built from it."},
    {"expect":{"role":"button","name":"Test the model on a sample"},"state":"disabled"},
-   {"expect":{"role":"button","name":"Check the model against yourself"},"state":"disabled"},
-   {"expect":{"role":"button","name":"Run it on everyone"},"state":"disabled"}]
+   {"expect":{"role":"button","name":"Evaluate the Model's Performance"},"state":"disabled"},
+   {"expect":{"role":"button","name":"Process All Patients"},"state":"disabled"}]
   EOF
   ```
   → exit 0. After the steps 1-2 run, step 3 is enabled and steps 4 and 5 stay disabled until a sample run finishes.
