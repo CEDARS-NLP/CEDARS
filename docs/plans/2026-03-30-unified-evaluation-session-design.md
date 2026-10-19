@@ -331,7 +331,7 @@ POST   /projects/{id}/evaluation/sessions/{sid}/results/{rid}/judge  # Submit ju
 GET    /projects/{id}/evaluation/sessions/{sid}/metrics         # Live metrics
 
 # Commit & pipeline
-POST   /projects/{id}/evaluation/sessions/{sid}/commit         # Commit and run full pipeline
+POST   /projects/{id}/evaluation/sessions/{sid}/commit         # Run on all patients full pipeline
 GET    /projects/{id}/evaluation/sessions/{sid}/pipeline/stats  # Full run progress
 POST   /projects/{id}/evaluation/sessions/{sid}/pipeline/cancel # Cancel full run
 POST   /projects/{id}/evaluation/sessions/{sid}/pipeline/retry-failed  # Retry failed patients

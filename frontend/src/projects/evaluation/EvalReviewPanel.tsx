@@ -321,7 +321,7 @@ export default function EvalReviewPanel({
                 {noteContext?.patient_id_ext ?? current.patient_id.slice(0, 8)}
               </div>
               <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
-                <span>{current.notes_searched} notes searched</span>
+                <span>{current.notes_searched} documents searched</span>
                 <span>&middot;</span>
                 <span>{current.notes_matched} matched</span>
               </div>
@@ -482,7 +482,7 @@ export default function EvalReviewPanel({
           <div className="rounded-lg border border-border bg-card">
             <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
               <span className="text-sm font-medium text-foreground">
-                Matched notes
+                Matched documents
               </span>
               {sortedNotes.length > 0 && (
                 <>

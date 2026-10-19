@@ -58,7 +58,7 @@ const OPTIONAL_FIELDS = [
 const SAMPLE_DATASET = {
   url: "/sample-data/simulated_patients.csv",
   filename: "simulated_patients.csv",
-  description: "5 synthetic patients · 103 notes",
+  description: "5 synthetic patients · 103 documents",
 } as const;
 
 /** Normalize a column name for matching: lowercase, trim, collapse spaces/underscores */

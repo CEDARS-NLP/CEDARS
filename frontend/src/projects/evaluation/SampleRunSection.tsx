@@ -70,9 +70,9 @@ export default function SampleRunSection({
   return (
     <div className="space-y-4">
       <p className="max-w-prose text-sm text-muted-foreground">
-        The model reads the matched notes for each patient and decides whether your
-        event happened. Check its answers on this sample first — the full cohort
-        costs the same per note, with far more notes.
+        The model reads the matched documents for each patient and evaluates the likelihood of an event occuring within that document.
+        The model's performance will first be evaluated on this sample.
+        The full cohort costs the same per document, but with far more documents.
       </p>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
@@ -95,7 +95,7 @@ export default function SampleRunSection({
       <p className="max-w-prose text-xs text-muted-foreground">
         Models bill by <em>tokens</em> — small chunks of text, roughly ¾ of a word
         each — for what they read and what they write. The estimate multiplies an
-        average excerpt size by the matched notes and applies the provider's list
+        average excerpt size by the matched documents and applies the provider's list
         price, so treat it as a ballpark; local models (Ollama, vLLM) cost nothing
         per token and show no estimate.
       </p>
@@ -123,7 +123,7 @@ export default function SampleRunSection({
       {modelReady && matched > 0 && searchStale && (
         <Notice>
           The queries changed after the last search. Run the search again in step 2
-          so the model sees the right notes.
+          so the model sees the right documents.
         </Notice>
       )}
 
@@ -144,7 +144,7 @@ export default function SampleRunSection({
           Classified {metrics?.llm_completed ?? 0} patients
           {(metrics?.llm_failed ?? 0) > 0 && `, ${metrics!.llm_failed} failed`}
           {(metrics?.llm_no_match ?? 0) > 0 &&
-            `, ${metrics!.llm_no_match} had no matching notes`}
+            `, ${metrics!.llm_no_match} had no matching documents`}
           .
         </p>
       )}

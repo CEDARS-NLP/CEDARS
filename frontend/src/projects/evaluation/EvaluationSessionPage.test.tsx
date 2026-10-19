@@ -40,7 +40,7 @@ describe("query-first evaluation", () => {
   it("opens the query editor before event definition", async () => {
     showSession();
     expect(await screen.findByText("Query editor")).toBeInTheDocument();
-    const search = screen.getByRole("button", { name: /Find the notes worth reading/ });
+    const search = screen.getByRole("button", { name: /Apply Search Query/ });
     const event = screen.getByRole("button", { name: /^Define the event/ });
     expect(search.compareDocumentPosition(event) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(event).toBeDisabled();

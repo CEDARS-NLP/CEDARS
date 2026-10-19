@@ -292,7 +292,7 @@ export default function PatientDetailPage() {
       {/* Notes list */}
       <div className="space-y-3">
         <h2 className="text-lg font-medium">
-          Clinical notes{" "}
+          Clinical documents{" "}
           {notes && (
             <span className="text-muted-foreground font-normal">
               ({notes.length})
@@ -301,10 +301,10 @@ export default function PatientDetailPage() {
         </h2>
 
         {notesLoading ? (
-          <p className="text-sm text-muted-foreground">Loading notes...</p>
+          <p className="text-sm text-muted-foreground">Loading documents...</p>
         ) : !notes?.length ? (
           <p className="text-sm text-muted-foreground">
-            No notes found for this patient.
+            No documents found for this patient.
           </p>
         ) : (
           notes.map((note) => {

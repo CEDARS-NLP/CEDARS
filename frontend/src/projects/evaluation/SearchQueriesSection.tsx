@@ -298,12 +298,12 @@ export default function SearchQueriesSection({
             className="h-8 px-2"
             onClick={() => setExpanded((value) => !value)}
             disabled={dirty}
-            title={dirty ? "Run the search to see matched notes" : "Show matched notes"}
+            title={dirty ? "Run the search to see matched documents" : "Show matched documents"}
           >
             <ChevronDown
               className={`mr-1 h-4 w-4 transition-transform ${expanded ? "" : "-rotate-90"}`}
             />
-            Show matched notes
+            Show matched documents
           </Button>
           {expanded && !dirty && (
             <div className="border-t border-border p-3">
@@ -486,7 +486,7 @@ export default function SearchQueriesSection({
             <DialogTitle>Replace existing search results?</DialogTitle>
             <DialogDescription>
               This removes {impactPreview.data?.annotations ?? 0} annotations, {impactPreview.data?.predictions ?? 0} predictions,
-              and {impactPreview.data?.sentences ?? 0} sentences, including review decisions. It then searches all notes again.
+              and {impactPreview.data?.sentences ?? 0} sentences, including review decisions. It then searches all documents again.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
