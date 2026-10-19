@@ -61,13 +61,13 @@ export default function NotePreviewList({ projectId, sessionId, queryIndex }: No
 
   if (isLoading) return <p className="py-4 text-sm text-muted-foreground">Loading matches...</p>;
   if (!data || data.notes.length === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">No matched notes for this query.</p>;
+    return <p className="py-4 text-sm text-muted-foreground">No matched documents for this query.</p>;
   }
 
   return (
     <div className="space-y-3">
       <div className="text-xs text-muted-foreground">
-        {data.total_notes} notes from {data.total_patients} patients
+        {data.total_notes} documents from {data.total_patients} patients
       </div>
 
       {data.notes.map((note) => (

@@ -103,7 +103,7 @@ export default function PatientsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Patients</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Search and browse patients. View notes and annotation decisions.
+          Search and browse patients. View documents and annotation decisions.
         </p>
       </div>
 

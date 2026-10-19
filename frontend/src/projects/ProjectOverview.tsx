@@ -55,13 +55,13 @@ interface AnnotationStats {
 const stepConfig = [
   {
     label: "Data",
-    description: "Upload clinical notes",
+    description: "Upload clinical documents to the project",
     path: "data",
     icon: Database,
   },
   {
     label: "Search",
-    description: "Match notes by keyword, optionally filter with an LLM",
+    description: "Match documents by keyword, optionally filter with an LLM",
     path: "evaluation",
     icon: BarChart3,
   },
@@ -381,8 +381,8 @@ function ProjectSettings({ projectId }: { projectId: string }) {
               <div>
                 <span className="text-sm text-foreground">Skip annotations after event date</span>
                 <p className="text-xs text-muted-foreground">
-                  When a reviewer sets an event date, automatically skip annotations from notes
-                  on or after that date and show only earlier notes for verification.
+                  When a reviewer sets an event date, automatically skip annotations from documents
+                  on or after that date and show only earlier documents for verification.
                 </p>
               </div>
             </label>
@@ -485,13 +485,13 @@ export default function ProjectOverview() {
     const state = getStepState(stepIndex);
     switch (stepIndex) {
       case 0:
-        return hasData ? `${totalNotes} notes uploaded` : "Upload clinical notes to get started";
+        return hasData ? `${totalNotes} documents uploaded` : "Upload clinical documents to get started";
       case 1:
         if (state === "locked") return "Waiting for data upload";
         if (hasCommitted && committedSession?.metrics?.f1 !== undefined)
           return `Committed, F1: ${(committedSession.metrics.f1 * 100).toFixed(1)}%`;
         if (hasAnnotations) return `${totalAnnotations} matched sentences found`;
-        return "Start an evaluation session to find matching notes";
+        return "Start an evaluation session to find matching documents";
       case 2:
         if (state === "locked") return "Waiting for a search run";
         if (hasAnnotations)

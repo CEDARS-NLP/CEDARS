@@ -177,7 +177,7 @@ export default function CommitSection({
             <DialogTitle>Save and process all patients?</DialogTitle>
             <DialogDescription>
               This locks the queries and event definition, then sends the matched
-              notes for every patient to the model. You cannot undo this action.
+              documents for every patient to the model. You cannot undo this action.
             </DialogDescription>
           </DialogHeader>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
