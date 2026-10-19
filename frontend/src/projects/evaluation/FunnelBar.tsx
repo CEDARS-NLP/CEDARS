@@ -53,7 +53,7 @@ export default function FunnelBar({ stats, isLoading, stale, cost }: FunnelBarPr
           const spentTokens = cost
             ? cost.spent_prompt_tokens + cost.spent_completion_tokens
             : 0;
-          const skipped = `Search skipped ${stats.filter_percent.toFixed(0)}% of notes`;
+          const skipped = `Keywords found in ${(100 - (stats.filter_percent)).toFixed(0)}% of documents`;
           if (cost && spentTokens > 0) {
             return (
               <span className="text-xs text-muted-foreground tabular-nums">
