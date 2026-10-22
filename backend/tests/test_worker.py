@@ -144,3 +144,66 @@ async def test_eval_worker_uses_boolean_truth_and_session_query(app):
         )
         refreshed_session = await db.get(EvaluationSession, session.id)
         assert refreshed_session.status == SessionStatus.COMPLETED
+
+
+async def test_nlp_worker_reuses_confirmed_production_run(app):
+    """A queued NLP job must reuse the API-created production run.
+
+    Regression: the worker previously called _process_notes_into_sentences with
+    create_annotations=True, which started a second, unconfirmed production run
+    and raised ProductionConfirmationRequired once production data existed.
+    """
+    from app.jobs.models import BackgroundJob, JobType
+    from app.jobs.nlp import execute_nlp_job
+
+    project_id, user_id = await seed_project_and_user(app)
+    async with app.state.test_session_factory() as db:
+        patient = Patient(project_id=project_id, patient_id_ext="reuse-patient")
+        db.add(patient)
+        await db.flush()
+        db.add(Note(
+            project_id=project_id,
+            patient_id=patient.id,
+            patient_id_ext=patient.patient_id_ext,
+            text_id="reuse-note",
+            text="Troponin elevated.",
+            note_date=now_utc(),
+        ))
+        db.add(SearchQuery(project_id=project_id, query="troponin AND elevated"))
+        await db.commit()
+
+        run = await start_run(
+            db,
+            project_id,
+            user_id,
+            {
+                "query": "troponin AND elevated",
+                "exclude_negated": True,
+                "llm_config": {"provider": "openai", "model": "synthetic-model"},
+            },
+            confirmed=True,
+        )
+        job = BackgroundJob(
+            project_id=project_id,
+            job_type=JobType.NLP,
+            result_summary={"production_run_id": run.id},
+        )
+        db.add(job)
+        await db.commit()
+        job_id = job.id
+        run_id = run.id
+
+    classification = NoteClassification(
+        label=1, score=0.9, reasoning="Match", evidence_spans=[],
+    )
+    with patch("app.production.service.classify_note", new_callable=AsyncMock,
+               return_value=classification):
+        result = await execute_nlp_job(project_id, job_id, app.state.test_session_factory)
+
+    assert result.get("run_id") == run_id
+    async with app.state.test_session_factory() as db:
+        job = await db.get(BackgroundJob, job_id)
+        assert job.status.value == "completed"
+        predictions = (await db.execute(select(NotePrediction))).scalars().all()
+        assert len(predictions) == 1
+        assert predictions[0].run_id == run_id
