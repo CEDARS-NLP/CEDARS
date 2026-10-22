@@ -27,7 +27,6 @@ from app.llm.usage import LlmUsage, add_usage
 from app.nlp.engine import parse_query, process_note
 from app.nlp.schemas import ReprocessRequest
 from app.pipeline.classifier import SYSTEM_PROMPT, classify_patient
-from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
 
 # True when running against PostgreSQL (supports SELECT FOR UPDATE).
 # SQLite (used in tests) does not support FOR UPDATE.
@@ -404,11 +403,14 @@ async def run_session_queries(
     """Activate and run a keyword query while keeping the session editable."""
     from app.nlp import service as nlp_service
 
-    requires_deletion = await _activate_session_query(db, session, user_id, confirmation)
+    await _activate_session_query(db, session, user_id, confirmation)
     project_id = session.project_id
-    if requires_deletion:
-        return await nlp_service.run_nlp_pipeline(db, project_id)
-    return await nlp_service.dispatch_nlp_job(db, project_id, user_id)
+    return await nlp_service.dispatch_nlp_job(
+        db,
+        project_id,
+        user_id,
+        confirmed=bool(confirmation and confirmation.confirmed),
+    )
 
 
 async def execute_search_queries(
@@ -535,6 +537,17 @@ async def get_cost_summary(db: AsyncSession, session_id: str) -> dict:
             )
         ).all()
     ]
+    from app.production.models import ProductionRun
+
+    production_runs = (
+        await db.scalars(
+            select(ProductionRun).where(ProductionRun.project_id == session.project_id)
+        )
+    ).all()
+    run_ids.extend(
+        run.id for run in production_runs
+        if (run.config_snapshot or {}).get("evaluation_session_id") == session_id
+    )
     spent_prompt, spent_completion = (
         await db.execute(
             select(
@@ -543,7 +556,7 @@ async def get_cost_summary(db: AsyncSession, session_id: str) -> dict:
             ).where(
                 LlmUsage.project_id == session.project_id,
                 LlmUsage.ref_id.in_([session_id, *run_ids]),
-                LlmUsage.source.in_(["evaluation_sample", "pipeline_run"]),
+                LlmUsage.source.in_(["evaluation_sample", "pipeline_run", "production_run"]),
             )
         )
     ).one()
@@ -1429,15 +1442,9 @@ async def commit_session(
             \nSet the LLM provider and model in project settings before committing."""
         )
 
-    from app.nlp.models import NlpJobStatus
-    from app.nlp.service import run_nlp_pipeline
-
-    await _activate_session_query(db, session, user_id, confirmation)
-    job = await run_nlp_pipeline(
-        db, session.project_id, create_annotations=False,
+    production_confirmation = await _validate_production_reset(
+        db, session.project_id, confirmation
     )
-    if job.status != NlpJobStatus.COMPLETED:
-        raise ValueError("Sentence rebuild failed. Retry before committing the session.")
     committed_config = {
         "search_queries": session.search_queries,
         "exclude_negated": session.exclude_negated,
@@ -1451,6 +1458,7 @@ async def commit_session(
         "llm_api_key": project.llm_api_key,
         "sample_size": session.sample_size,
         "metrics": session.metrics,
+        "_production_confirmation": production_confirmation,
     }
     if confidence_threshold is not None:
         committed_config["confidence_threshold"] = confidence_threshold
@@ -1469,48 +1477,65 @@ async def commit_session(
 # ── Pipeline Dispatch ────────────────────────────────────────────
 
 
-async def _get_or_create_event_config_for_session(
-    db: AsyncSession, eval_session: EvaluationSession
-) -> EventConfig:
-    """Create a synthetic EventConfig from the committed session config.
+async def _validate_production_reset(
+    db: AsyncSession,
+    project_id: str,
+    confirmation: ReprocessRequest | dict | None,
+) -> dict:
+    """Validate the existing deletion-impact confirmation without rebuilding NLP data."""
+    from app.nlp import service as nlp_service
 
-    This bridges the new evaluation session model with the existing pipeline
-    infrastructure which requires an EventConfig.
-    """
-    # Read LLM config from project
-    from app.projects.models import Project
-    project = (
-        await db.execute(select(Project).where(Project.id == eval_session.project_id))
-    ).scalar_one()
+    if await nlp_service.reprocess_is_busy(db, project_id):
+        raise SessionLockedError(
+            "Finish active processing and wait for open patient reviews "
+            "(locked in the last hour) before reprocessing."
+        )
+    impact = await nlp_service.get_reprocess_impact(db, project_id)
+    requires_confirmation = any(impact.values())
+    if confirmation is None:
+        confirmed = False
+        expected = None
+    elif isinstance(confirmation, dict):
+        confirmed = bool(confirmation.get("confirmed"))
+        expected = confirmation.get("impact") or {
+            "annotations": confirmation.get("annotations"),
+            "predictions": confirmation.get("predictions"),
+            "sentences": confirmation.get("sentences"),
+        }
+    else:
+        confirmed = confirmation.confirmed
+        expected = {
+            "annotations": confirmation.expected_annotations,
+            "predictions": confirmation.expected_predictions,
+            "sentences": confirmation.expected_sentences,
+        }
 
-    ec = EventConfig(
-        project_id=eval_session.project_id,
-        name=eval_session.event_name or "Evaluation Session",
-        description=eval_session.event_description or "",
-        include_criteria=eval_session.include_criteria or "",
-        exclude_criteria=eval_session.exclude_criteria or "",
-        search_patterns={"queries": eval_session.search_queries or []},
-        llm_provider=project.llm_provider or "",
-        llm_model=project.llm_model or "",
-        llm_api_base=project.llm_api_base,
-        llm_api_key=project.llm_api_key,
-        is_committed=True,
-    )
-    db.add(ec)
-    await db.flush()
-    return ec
+    if requires_confirmation and not confirmed:
+        raise ValueError("Confirm deletion before reprocessing.")
+    if expected is not None and impact != expected:
+        raise SessionLockedError(
+            "Deletion counts changed. Review the updated counts and confirm again."
+        )
+    if confirmation is not None and not isinstance(confirmation, dict) and not confirmed:
+        raise ValueError("Confirm deletion before reprocessing.")
+    return {"confirmed": confirmed, "impact": impact}
 
 
 async def dispatch_full_pipeline_run(
     db: AsyncSession,
     eval_session: EvaluationSession,
     cost_estimate: dict | None = None,
-) -> PipelineRun:
-    """Create a PipelineRun for the committed session and dispatch to workers."""
-    # Create synthetic EventConfig for pipeline compatibility
-    ec = await _get_or_create_event_config_for_session(db, eval_session)
+) -> SimpleNamespace:
+    """Start production note processing for a committed evaluation session."""
+    from app.production import service as production_service
 
-    # Count all patients in project
+    committed_config = eval_session.committed_config or {}
+    confirmation = await _validate_production_reset(
+        db,
+        eval_session.project_id,
+        committed_config.get("_production_confirmation"),
+    )
+
     stmt = select(func.count(Patient.id)).where(
         Patient.project_id == eval_session.project_id,
         Patient.deleted_at.is_(None),
@@ -1518,144 +1543,116 @@ async def dispatch_full_pipeline_run(
     result = await db.execute(stmt)
     total_patients = result.scalar() or 0
 
-    run = PipelineRun(
-        project_id=eval_session.project_id,
-        event_config_id=ec.id,
-        run_type="full",
-        status=PipelineRunStatus.QUEUED,
-        # The estimate is kept with the run so it can be compared to actual spend.
-        config_snapshot={
-            **(eval_session.committed_config or {}),
-            **({"cost_estimate": cost_estimate} if cost_estimate else {}),
+    queries = committed_config.get("search_queries") or eval_session.search_queries or []
+    include_queries = [
+        item.get("query", "").strip()
+        for item in queries
+        if item.get("type", "include") != "exclude" and item.get("query", "").strip()
+    ]
+    exclude_queries = [
+        item.get("query", "").strip()
+        for item in queries
+        if item.get("type") == "exclude" and item.get("query", "").strip()
+    ]
+    if not include_queries:
+        raise ValueError("At least one include search query is required to start production.")
+    query = " OR ".join(f"({item})" for item in include_queries)
+    for excluded in exclude_queries:
+        query = f"({query}) AND !({excluded})"
+
+    production_config = {
+        **committed_config,
+        "query": query,
+        "exclude_negated": committed_config.get("exclude_negated", True),
+        "event_name": committed_config.get("event_name") or "Evaluation Session",
+        "evaluation_session_id": eval_session.id,
+        "llm_config": {
+            "provider": committed_config.get("llm_provider"),
+            "model": committed_config.get("llm_model"),
+            "api_base": committed_config.get("llm_api_base"),
+            "api_key": committed_config.get("llm_api_key"),
         },
-        total_patients=total_patients,
-        created_by=eval_session.committed_by or "",
+        **({"cost_estimate": cost_estimate} if cost_estimate else {}),
+    }
+    run = await production_service.start_run(
+        db=db,
+        project_id=eval_session.project_id,
+        user_id=eval_session.committed_by or eval_session.created_by,
+        config=production_config,
+        confirmed=confirmation["confirmed"],
     )
-    db.add(run)
-    await db.flush()
-
-    # Get ALL patient IDs
-    stmt = select(Patient.id).where(
-        Patient.project_id == eval_session.project_id,
-        Patient.deleted_at.is_(None),
-    )
-    result = await db.execute(stmt)
-    all_patient_ids = [row[0] for row in result.all()]
-
-    # Copy completed sample results
-    sample_result_map = {}
-    stmt = select(PatientResult).where(
-        PatientResult.session_id == eval_session.id,
-        PatientResult.pipeline_run_id.is_(None),
-        PatientResult.status.in_([PatientResultStatus.COMPLETED, PatientResultStatus.NO_MATCH]),
-    )
-    result = await db.execute(stmt)
-    for sr in result.scalars().all():
-        sample_result_map[sr.patient_id] = sr
-
-    for pid in all_patient_ids:
-        if pid in sample_result_map:
-            sr = sample_result_map[pid]
-            pr = PatientResult(
-                session_id=eval_session.id,
-                pipeline_run_id=run.id,
-                patient_id=pid,
-                status=sr.status,
-                notes_searched=sr.notes_searched,
-                notes_matched=sr.notes_matched,
-                finding_label=sr.finding_label,
-                finding_reasoning=sr.finding_reasoning,
-                finding_evidence=sr.finding_evidence,
-                event_date=sr.event_date,
-                predicted_score=sr.predicted_score,
-                token_usage=sr.token_usage,
-                completed_at=sr.completed_at,
-                # Preserve any review judgments from sample phase
-                review_judgment=sr.review_judgment,
-                reviewed_by=sr.reviewed_by,
-                reviewed_at=sr.reviewed_at,
-                reviewer_date_override=sr.reviewer_date_override,
-            )
-        else:
-            pr = PatientResult(
-                session_id=eval_session.id,
-                pipeline_run_id=run.id,
-                patient_id=pid,
-                status=PatientResultStatus.QUEUED,
-            )
-        db.add(pr)
-
-    await db.commit()
-    await db.refresh(run)
     await _enqueue_eval_pipeline_run(run.id)
-    return run
+    return SimpleNamespace(id=run.id, total_patients=total_patients)
+
+
+async def _production_run_for_session(db: AsyncSession, session_id: str):
+    session = await db.get(EvaluationSession, session_id)
+    if not session:
+        raise ValueError("Session not found")
+    from app.production.models import ProductionRun
+
+    runs = list(
+        await db.scalars(
+            select(ProductionRun)
+            .where(ProductionRun.project_id == session.project_id)
+            .order_by(ProductionRun.created_at.desc())
+        )
+    )
+    run = next(
+        (
+            item
+            for item in runs
+            if (item.config_snapshot or {}).get("evaluation_session_id") == session_id
+        ),
+        None,
+    )
+    if run is None:
+        raise ValueError("Production run not found for this session")
+    return session, run
 
 
 async def get_pipeline_stats(db: AsyncSession, session_id: str) -> dict:
-    """Get pipeline run stats for a committed session."""
-    session = await db.get(EvaluationSession, session_id)
-    if not session or session.status not in (SessionStatus.COMMITTED, SessionStatus.COMPLETED):
-        raise ValueError("No committed pipeline for this session")
+    """Adapt production run state to the existing evaluation stats response."""
+    from app.annotations.models import Annotation
+    from app.production import service as production_service
+    from app.production.models import ProductionResult
 
-    # Find the pipeline run via PatientResult linkage
-    stmt = select(PatientResult.pipeline_run_id).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id.isnot(None),
-    ).distinct().limit(1)
-    result = await db.execute(stmt)
-    row = result.first()
-    if not row:
-        raise ValueError("Pipeline run not found for this session")
-
-    run_id = row[0]
-    run = await db.get(PipelineRun, run_id)
-    if not run:
-        raise ValueError("Pipeline run not found")
-
-    # Aggregate PatientResult statuses for the pipeline run
-    stmt = (
-        select(PatientResult.status, func.count())
-        .where(
-            PatientResult.session_id == session_id,
-            PatientResult.pipeline_run_id == run_id,
+    _, run = await _production_run_for_session(db, session_id)
+    production_stats = await production_service.get_stats(db, run.id)
+    rows = list(
+        await db.execute(
+            select(ProductionResult.processing_status, func.count())
+            .where(ProductionResult.project_id == run.project_id)
+            .group_by(ProductionResult.processing_status)
         )
-        .group_by(PatientResult.status)
     )
-    result = await db.execute(stmt)
-    counts = {(s.value if hasattr(s, "value") else s): c for s, c in result.all()}
-
+    counts = dict(rows)
+    completed = counts.get("completed", 0)
+    matched_patients = await db.scalar(
+        select(func.count(func.distinct(Annotation.patient_id))).where(
+            Annotation.production_run_id == run.id
+        )
+    ) or 0
+    no_match = max(0, completed - matched_patients)
     return {
         "total": sum(counts.values()),
         "queued": counts.get("queued", 0),
-        "processing": counts.get("processing", 0),
-        "completed": counts.get("completed", 0),
+        "processing": counts.get("running", 0),
+        "completed": max(0, completed - no_match),
         "failed": counts.get("failed", 0),
-        "no_match": counts.get("no_match", 0),
-        "is_cancelled": run.is_cancelled,
+        "no_match": no_match,
+        "is_cancelled": production_stats["status"] == "cancelled",
     }
 
 
 async def cancel_pipeline_run(db: AsyncSession, session_id: str, project_id: str) -> dict:
     """Cancel the pipeline run for a committed session."""
-    from app.pipeline.orchestrator import cancel_run
+    from app.production import service as production_service
 
-    session = await db.get(EvaluationSession, session_id)
-    if not session:
+    session, run = await _production_run_for_session(db, session_id)
+    if session.project_id != project_id:
         raise ValueError("Session not found")
-
-    # Find associated pipeline run
-    stmt = select(PatientResult.pipeline_run_id).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id.isnot(None),
-    ).distinct().limit(1)
-    result = await db.execute(stmt)
-    row = result.first()
-    if not row:
-        raise ValueError("No pipeline run found for this session")
-
-    run = await cancel_run(db, project_id, row[0])
-    if not run:
-        raise ValueError("Pipeline run not found")
+    run = await production_service.cancel_run(db, run.id)
 
     # Move session to discarded so new sessions can be created
     session.status = SessionStatus.DISCARDED
@@ -1667,40 +1664,17 @@ async def cancel_pipeline_run(db: AsyncSession, session_id: str, project_id: str
 
 
 async def retry_failed_pipeline(db: AsyncSession, session_id: str, project_id: str) -> dict:
-    """Retry failed patients in the full pipeline run."""
-    stmt = select(PatientResult.pipeline_run_id).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id.isnot(None),
-    ).distinct().limit(1)
-    result = await db.execute(stmt)
-    row = result.first()
-    if not row:
-        raise ValueError("No pipeline run found for this session")
+    """Retry failed production note predictions for a committed session."""
+    from app.production import service as production_service
 
-    run_id = row[0]
-
-    # Reset failed PatientResults to queued
-    stmt = select(PatientResult).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id == run_id,
-        PatientResult.status == PatientResultStatus.FAILED,
-    )
-    result = await db.execute(stmt)
-    failed = list(result.scalars().all())
-
-    if not failed:
+    session, run = await _production_run_for_session(db, session_id)
+    if session.project_id != project_id:
+        raise ValueError("Session not found")
+    before = await production_service.get_stats(db, run.id)
+    if not before["failed_notes"]:
         raise ValueError("No failed patients to retry")
-
-    for pr in failed:
-        pr.status = PatientResultStatus.QUEUED
-        pr.error_message = None
-        pr.started_at = None
-        pr.completed_at = None
-        db.add(pr)
-
-    await db.commit()
-    await _enqueue_eval_pipeline_run(run_id)
-    return {"requeued": len(failed), "run_id": run_id}
+    run = await production_service.retry_run(db, run.id)
+    return {"requeued": before["failed_notes"], "run_id": run.id}
 
 
 async def resume_pipeline(db: AsyncSession, session_id: str, project_id: str) -> dict:
@@ -1709,44 +1683,19 @@ async def resume_pipeline(db: AsyncSession, session_id: str, project_id: str) ->
     Resets any 'processing' PatientResults back to 'queued' and re-enqueues
     the ARQ job so the worker picks up where it left off.
     """
-    stmt = select(PatientResult.pipeline_run_id).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id.isnot(None),
-    ).distinct().limit(1)
-    result = await db.execute(stmt)
-    row = result.first()
-    if not row:
-        raise ValueError("No pipeline run found for this session")
+    from app.production import service as production_service
 
-    run_id = row[0]
-
-    # Reset stuck 'processing' rows back to 'queued'
-    stuck_stmt = select(PatientResult).where(
-        PatientResult.session_id == session_id,
-        PatientResult.pipeline_run_id == run_id,
-        PatientResult.status == PatientResultStatus.PROCESSING,
-    )
-    result = await db.execute(stuck_stmt)
-    stuck = list(result.scalars().all())
-    for pr in stuck:
-        pr.status = PatientResultStatus.QUEUED
-        pr.started_at = None
-        db.add(pr)
-
-    await db.commit()
-    await _enqueue_eval_pipeline_run(run_id)
-
-    # Count remaining
-    remaining = (await db.execute(
-        select(func.count()).where(
-            PatientResult.session_id == session_id,
-            PatientResult.pipeline_run_id == run_id,
-            PatientResult.status == PatientResultStatus.QUEUED,
-        )
-    )).scalar() or 0
-
-    return {"resumed": True, "reset_stuck": len(stuck),
-            "remaining_queued": remaining, "run_id": run_id}
+    session, run = await _production_run_for_session(db, session_id)
+    if session.project_id != project_id:
+        raise ValueError("Session not found")
+    before = await production_service.get_stats(db, run.id)
+    run = await production_service.resume_run(db, run.id)
+    return {
+        "resumed": True,
+        "reset_stuck": before["processing_notes"],
+        "remaining_queued": before["queued_notes"] + before["processing_notes"],
+        "run_id": run.id,
+    }
 
 
 async def rerun_pipeline(
@@ -1768,8 +1717,53 @@ async def rerun_pipeline(
         session.status = SessionStatus.COMMITTED
         db.add(session)
 
-    run = await dispatch_full_pipeline_run(db, session)
-    return {"run_id": run.id, "total_patients": run.total_patients}
+    from app.production import service as production_service
+
+    config = dict(session.committed_config or {})
+    queries = config.get("search_queries") or session.search_queries or []
+    include_queries = [
+        item.get("query", "").strip()
+        for item in queries
+        if item.get("type", "include") != "exclude" and item.get("query", "").strip()
+    ]
+    exclude_queries = [
+        item.get("query", "").strip()
+        for item in queries
+        if item.get("type") == "exclude" and item.get("query", "").strip()
+    ]
+    if not include_queries:
+        raise ValueError("At least one include search query is required to start production.")
+    query = " OR ".join(f"({item})" for item in include_queries)
+    for excluded in exclude_queries:
+        query = f"({query}) AND !({excluded})"
+    production_config = {
+        **config,
+        "query": query,
+        "exclude_negated": config.get("exclude_negated", True),
+        "event_name": config.get("event_name") or "Evaluation Session",
+        "evaluation_session_id": session.id,
+        "llm_config": {
+            "provider": config.get("llm_provider"),
+            "model": config.get("llm_model"),
+            "api_base": config.get("llm_api_base"),
+            "api_key": config.get("llm_api_key"),
+        },
+    }
+    run = await production_service.start_run(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        config=production_config,
+        confirmed=True,
+    )
+    await _enqueue_eval_pipeline_run(run.id)
+    total_patients = await db.scalar(
+        select(func.count(Patient.id)).where(
+            Patient.project_id == project_id,
+            Patient.deleted_at.is_(None),
+        )
+    ) or 0
+    return {"run_id": run.id, "total_patients": total_patients}
 
 
 async def get_result_note_context(

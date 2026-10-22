@@ -38,12 +38,19 @@ interface Annotation extends ReviewMetadata {
   project_id: string;
   patient_id: string;
   note_id: string;
-  sentence_id: string;
+  sentence_id: string | null;
   sentence_text: string;
-  matched_tokens: string;
+  matched_tokens: string | null;
+  note_start_index: number | null;
+  note_end_index: number | null;
+  sentence_number: number | null;
+  sentence_start: number | null;
+  sentence_end: number | null;
   is_negated: boolean;
   predicted_score: number | null;
   predicted_label: number | null;
+  evidence_spans?: EvidenceSpan[] | null;
+  note_prediction?: NotePrediction | null;
   predictor_model: string;
   reasoning: string;
   review_status: string;
@@ -51,10 +58,24 @@ interface Annotation extends ReviewMetadata {
   created_at: string;
 }
 
+interface EvidenceSpan {
+  start: number;
+  end: number;
+  text?: string;
+}
+
+interface NotePrediction {
+  label?: number | null;
+  score?: number | null;
+  reasoning?: string | null;
+  model?: string | null;
+  evidence_spans?: EvidenceSpan[] | null;
+}
+
 interface PatientAnnotation extends Annotation {
   note_date: string | null;
   note_text_id: string;
-  sentence_number: number;
+  sentence_number: number | null;
 }
 
 interface PatientInfo extends ReviewMetadata {
@@ -69,6 +90,14 @@ interface ReviewResult {
   annotation: Annotation;
   skipped_count: number;
   earlier_count: number;
+  current_annotation_id: string | null;
+  next_annotation_id: string | null;
+}
+
+interface ReviewCursor {
+  current_annotation_id: string | null;
+  next_annotation_id: string | null;
+  annotation_ids: string[];
 }
 
 interface DeleteEventDateResult {
@@ -94,6 +123,16 @@ interface NoteContext {
   note_date: string | null;
   note_tags: Record<string, string>;
   search_keywords: string[];
+  current_note_evidence?: EvidenceSpan[];
+  annotation_spans?: {
+    annotation_id: string;
+    start: number;
+    end: number;
+    sentence_start: number;
+    sentence_end: number;
+    sentence_number: number;
+    is_negated: boolean;
+  }[];
   sentences: {
     id: string;
     text: string;
@@ -248,18 +287,69 @@ function highlightKeywords(
   );
 }
 
+function highlightExactSpans(
+  text: string,
+  baseOffset: number,
+  spans: EvidenceSpan[],
+  keywords: string[],
+  evidenceSpans: EvidenceSpan[] = []
+): React.ReactNode {
+  const toRelativeRanges = (source: EvidenceSpan[]) => source
+    .map(({ start, end }) => ({ start: start - baseOffset, end: end - baseOffset }))
+    .filter(({ start, end }) => start >= 0 && end <= text.length && start < end)
+    .sort((a, b) => a.start - b.start);
+  const matchRanges = toRelativeRanges(spans);
+  const evidenceRanges = toRelativeRanges(evidenceSpans);
+  const boundaries = new Set([0, text.length]);
+  for (const range of [...matchRanges, ...evidenceRanges]) {
+    boundaries.add(range.start);
+    boundaries.add(range.end);
+  }
+  const points = [...boundaries].sort((a, b) => a - b);
+  const segments: React.ReactNode[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (start === end) continue;
+    const matched = matchRanges.some((range) => range.start <= start && range.end >= end);
+    const evidence = evidenceRanges.some((range) => range.start <= start && range.end >= end);
+    let segment: React.ReactNode = text.slice(start, end);
+    if (matched) {
+      segment = (
+        <mark className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30">
+          {highlightKeywords(text.slice(start, end), keywords)}
+        </mark>
+      );
+    }
+    if (evidence) {
+      segment = (
+        <mark
+          data-llm-evidence="true"
+          className="rounded bg-emerald-300/50 decoration-emerald-700 decoration-2 underline dark:bg-emerald-400/25 dark:decoration-emerald-300"
+        >
+          {segment}
+        </mark>
+      );
+    }
+    segments.push(<span key={`offset-${start}`}>{segment}</span>);
+  }
+  return segments;
+}
+
 // ── Note Context Viewer ─────────────────────────────────────────
 
 function NoteViewer({
   context,
   targetSentenceId,
-  sentenceText,
   keywords,
+  targetStart,
+  targetEnd,
 }: {
   context: NoteContext;
   targetSentenceId: string;
-  sentenceText: string;
   keywords: string[];
+  targetStart: number | null;
+  targetEnd: number | null;
 }) {
   const targetRef = useRef<HTMLSpanElement>(null);
 
@@ -270,32 +360,7 @@ function NoteViewer({
   const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
   if (context.sentences.length === 0) {
-    // Pipeline annotations without NLP sentences — show raw note text
-    // Try to find and highlight the sentence text within the note
     const noteText = context.text || "";
-    const sentIdx = sentenceText
-      ? noteText.toLowerCase().indexOf(sentenceText.slice(0, 60).toLowerCase())
-      : -1;
-
-    if (sentIdx === -1) {
-      // Can't locate sentence — just highlight keywords
-      return (
-        <div
-          className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60"
-          style={noteFont}
-        >
-          {highlightKeywords(noteText, keywords)}
-        </div>
-      );
-    }
-
-    // Split into before / sentence region / after and highlight the sentence
-    // Find the end by searching for the sentence text (use first 200 chars for matching)
-    const matchLen = Math.min(sentenceText.length, 200);
-    const before = noteText.slice(0, sentIdx);
-    const matched = noteText.slice(sentIdx, sentIdx + matchLen);
-    const after = noteText.slice(sentIdx + matchLen);
-
     return (
       <div
         className="whitespace-pre-wrap text-[14px] leading-relaxed"
@@ -303,17 +368,16 @@ function NoteViewer({
         role="region"
         aria-label="Clinical note context"
       >
-        <span className="text-foreground/50">
-          {highlightKeywords(before, keywords)}
-        </span>
-        <span
-          ref={targetRef}
-          className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
-        >
-          {highlightKeywords(matched, keywords)}
-        </span>
-        <span className="text-foreground/50">
-          {highlightKeywords(after, keywords)}
+        <span ref={targetRef}>
+          {highlightExactSpans(
+            noteText,
+            0,
+            targetStart !== null && targetEnd !== null
+              ? [{ start: targetStart, end: targetEnd }]
+              : [],
+            keywords,
+            context.current_note_evidence ?? []
+          )}
         </span>
       </div>
     );
@@ -343,7 +407,17 @@ function NoteViewer({
             }
             aria-current={isTarget ? "true" : undefined}
           >
-            {highlightKeywords(sent.text, keywords)}{" "}
+            {highlightExactSpans(
+              sent.text,
+              sent.start_pos,
+              (context.annotation_spans ?? []).filter(
+                (span) => span.start >= sent.start_pos && span.end <= sent.end_pos
+              ),
+              keywords,
+              (context.current_note_evidence ?? []).filter(
+                (span) => span.start >= sent.start_pos && span.end <= sent.end_pos
+              )
+            )}{" "}
           </span>
         );
       })}
@@ -420,12 +494,14 @@ function PipelineNoteViewer({
   noteText,
   matchPositions,
   keywords,
+  evidenceSpans,
 }: {
   noteText: string;
-  matchPositions: { start: number; end: number; text?: string }[];
+  matchPositions: EvidenceSpan[];
   keywords: string[];
+  evidenceSpans: EvidenceSpan[];
 }) {
-  const firstMatchRef = useRef<HTMLSpanElement>(null);
+  const firstMatchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     firstMatchRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -433,57 +509,13 @@ function PipelineNoteViewer({
 
   const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
-  // Build sorted, non-overlapping match ranges
-  const ranges = matchPositions
-    .filter((p) => p.start < p.end)
-    .sort((a, b) => a.start - b.start);
-
-  if (ranges.length === 0) {
-    return (
-      <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60" style={noteFont}>
-        {highlightKeywords(noteText, keywords)}
-      </div>
-    );
-  }
-
-  const segments: React.ReactNode[] = [];
-  let cursor = 0;
-  let isFirst = true;
-
-  for (const range of ranges) {
-    if (range.start < cursor) continue;
-    if (range.start > cursor) {
-      segments.push(
-        <span key={`pre-${cursor}`} className="text-foreground/50">
-          {highlightKeywords(noteText.slice(cursor, range.start), keywords)}
-        </span>
-      );
-    }
-    const refProp = isFirst ? { ref: firstMatchRef } : {};
-    segments.push(
-      <span
-        key={`match-${range.start}`}
-        {...refProp}
-        className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
-      >
-        {highlightKeywords(noteText.slice(range.start, range.end), keywords)}
-      </span>
-    );
-    isFirst = false;
-    cursor = range.end;
-  }
-
-  if (cursor < noteText.length) {
-    segments.push(
-      <span key={`post-${cursor}`} className="text-foreground/50">
-        {highlightKeywords(noteText.slice(cursor), keywords)}
-      </span>
-    );
-  }
-
   return (
-    <div className="whitespace-pre-wrap text-[14px] leading-relaxed" style={noteFont}>
-      {segments}
+    <div
+      ref={firstMatchRef}
+      className="whitespace-pre-wrap text-[14px] leading-relaxed"
+      style={noteFont}
+    >
+      {highlightExactSpans(noteText, 0, matchPositions, keywords, evidenceSpans)}
     </div>
   );
 }
@@ -492,7 +524,6 @@ function PipelineNoteViewer({
 
 function PatientReviewPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [showEventDateInput, setShowEventDateInput] = useState(false);
   const [eventDateValue, setEventDateValue] = useState("");
   const [completionMessage, setCompletionMessage] = useState<string | null>(
@@ -533,6 +564,15 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     enabled: !!patientId,
   });
 
+  const { data: reviewCursor, refetch: refetchCursor } = useQuery<ReviewCursor>({
+    queryKey: ["patient-review-cursor", projectId, patientId],
+    queryFn: () =>
+      api.get<ReviewCursor>(
+        `/projects/${projectId}/annotations/patient/${patientId}/cursor`
+      ),
+    enabled: !!patientId,
+  });
+
   // 3. Get patient stats
   const { data: patientStats, refetch: refetchStats } =
     useQuery<PatientReviewStats>({
@@ -544,10 +584,24 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       enabled: !!patientId,
     });
 
-  const current = annotations?.[currentIndex] ?? null;
+  const sequenceAnnotations = (reviewCursor?.annotation_ids ?? [])
+    .map((id) => annotations?.find((annotation) => annotation.id === id))
+    .filter((annotation): annotation is PatientAnnotation => !!annotation);
+  const currentIndex = sequenceAnnotations.findIndex(
+    (annotation) => annotation.id === reviewCursor?.current_annotation_id
+  );
+  const current = sequenceAnnotations[currentIndex] ?? null;
 
   // 4. Get note context for current annotation
-  const isPipelineAnnotation = !!current && !current.sentence_id;
+  const isManualAnnotation =
+    !!current &&
+    !current.sentence_id &&
+    current.note_start_index !== null &&
+    current.note_end_index !== null &&
+    current.sentence_start !== null &&
+    current.sentence_end !== null;
+  const isPipelineAnnotation =
+    !!current && !current.sentence_id && !isManualAnnotation;
 
   // 4a. Get note context for NLP sentence-level annotations
   const { data: context, isLoading: contextLoading } = useQuery<NoteContext>({
@@ -574,25 +628,15 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     setNoteIndex(0);
   }, [patientId]);
 
-  // Navigate to first unreviewed when annotations load
-  useEffect(() => {
-    if (annotations && annotations.length > 0) {
-      const firstUnreviewed = annotations.findIndex(
-        (a) => a.review_status === "unreviewed"
-      );
-      if (firstUnreviewed >= 0) {
-        setCurrentIndex(firstUnreviewed);
-      }
-    }
-  }, [annotations]);
-
   // Prefetch next annotation context
   useEffect(() => {
-    if (!annotations || annotations.length <= 1) return;
-    const nextAnno = annotations.find(
-      (a, i) => i > currentIndex && a.review_status === "unreviewed"
+    const nextAnno = annotations?.find(
+      (annotation) => annotation.id === reviewCursor?.next_annotation_id
     );
-    if (nextAnno) {
+    if (
+      nextAnno &&
+      (nextAnno.sentence_id !== null || nextAnno.note_start_index !== null)
+    ) {
       queryClient.prefetchQuery({
         queryKey: ["annotation-context", nextAnno.id],
         queryFn: () =>
@@ -601,22 +645,20 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           ),
       });
     }
-  }, [annotations, currentIndex, queryClient]);
+  }, [annotations, reviewCursor?.next_annotation_id, queryClient]);
 
   // After action: refresh and advance
   const handlePostAction = useCallback(async () => {
     const { data: freshAnnotations } = await refetchAnnotations();
     await refetchStats();
+    const { data: freshCursor } = await refetchCursor();
     queryClient.invalidateQueries({
       queryKey: ["annotation-stats", projectId],
     });
 
     if (!freshAnnotations) return;
 
-    const hasUnreviewed = freshAnnotations.some(
-      (a) => a.review_status === "unreviewed"
-    );
-    if (!hasUnreviewed) {
+    if (!freshCursor?.current_annotation_id) {
       const reviewed = freshAnnotations.filter(
         (a) => a.review_status === "reviewed"
       ).length;
@@ -637,38 +679,70 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       setTimeout(() => {
         setCompletionMessage(null);
         setEarlierNotesBanner(null);
-        setCurrentIndex(0);
         queryClient.removeQueries({
           queryKey: ["patient-annotations", projectId, patientId],
+        });
+        queryClient.removeQueries({
+          queryKey: ["patient-review-cursor", projectId, patientId],
         });
         queryClient.removeQueries({
           queryKey: ["patient-stats", projectId, patientId],
         });
         refetchPatient();
       }, 2000);
-    } else {
-      const nextIdx = freshAnnotations.findIndex(
-        (a, i) => a.review_status === "unreviewed" && i > currentIndex
-      );
-      if (nextIdx >= 0) {
-        setCurrentIndex(nextIdx);
-      } else {
-        const firstUnreviewed = freshAnnotations.findIndex(
-          (a) => a.review_status === "unreviewed"
-        );
-        if (firstUnreviewed >= 0) setCurrentIndex(firstUnreviewed);
-      }
     }
   }, [
     refetchAnnotations,
     refetchStats,
+    refetchCursor,
     queryClient,
     projectId,
     patientId,
     patientInfo,
-    currentIndex,
     refetchPatient,
   ]);
+
+  const navigateAction = useCallback(async (action: string) => {
+    if (!patientId) return;
+    const cursor = await api.post<ReviewCursor>(
+      `/projects/${projectId}/annotations/patient/${patientId}/navigate/${action}`,
+      {}
+    );
+    queryClient.setQueryData<ReviewCursor>(
+      ["patient-review-cursor", projectId, patientId],
+      cursor
+    );
+  }, [patientId, projectId, queryClient]);
+
+  const navigateToIndex = useCallback(async (targetIndex: number) => {
+    if (!patientId || !reviewCursor || targetIndex < 0) return;
+    let cursor = reviewCursor;
+    let index = cursor.annotation_ids.indexOf(cursor.current_annotation_id ?? "");
+    if (targetIndex === 0) {
+      cursor = await api.post<ReviewCursor>(
+        `/projects/${projectId}/annotations/patient/${patientId}/navigate/first_anno`,
+        {}
+      );
+    } else if (targetIndex === cursor.annotation_ids.length - 1) {
+      cursor = await api.post<ReviewCursor>(
+        `/projects/${projectId}/annotations/patient/${patientId}/navigate/last_anno`,
+        {}
+      );
+    } else {
+      if (index < 0) index = 0;
+      const action = targetIndex > index ? "next_1" : "prev_1";
+      for (let step = 0; step < Math.abs(targetIndex - index); step += 1) {
+        cursor = await api.post<ReviewCursor>(
+          `/projects/${projectId}/annotations/patient/${patientId}/navigate/${action}`,
+          {}
+        );
+      }
+    }
+    queryClient.setQueryData<ReviewCursor>(
+      ["patient-review-cursor", projectId, patientId],
+      cursor
+    );
+  }, [patientId, projectId, queryClient, reviewCursor]);
 
   // Mutations
   const reviewMutation = useMutation({
@@ -703,19 +777,14 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     onSuccess: async () => {
       await refetchAnnotations();
       await refetchStats();
+      await refetchCursor();
       queryClient.invalidateQueries({
         queryKey: ["annotation-stats", projectId],
       });
-      if (annotations) {
-        const firstUnreviewed = annotations.findIndex(
-          (a) => a.review_status === "unreviewed"
-        );
-        if (firstUnreviewed >= 0) setCurrentIndex(firstUnreviewed);
-      }
     },
   });
 
-  const total = annotations?.length ?? 0;
+  const total = sequenceAnnotations.length;
 
   const handleAdjudicate = useCallback(() => {
     if (!current || reviewMutation.isPending) return;
@@ -739,29 +808,12 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     deleteEventDateMutation.mutate(patientStats.event_annotation_id);
   }, [patientStats, deleteEventDateMutation]);
 
-  const handlePrev = useCallback(() => {
-    if (currentIndex > 0) setCurrentIndex((i) => i - 1);
-  }, [currentIndex]);
-
-  const handleNext = useCallback(() => {
-    if (currentIndex < total - 1) setCurrentIndex((i) => i + 1);
-  }, [currentIndex, total]);
-
-  const handlePrevPage = useCallback(() => {
-    setCurrentIndex((i) => Math.max(0, i - 10));
-  }, []);
-
-  const handleNextPage = useCallback(() => {
-    setCurrentIndex((i) => Math.min(total - 1, i + 10));
-  }, [total]);
-
-  const handleFirst = useCallback(() => {
-    setCurrentIndex(0);
-  }, []);
-
-  const handleLast = useCallback(() => {
-    if (total > 0) setCurrentIndex(total - 1);
-  }, [total]);
+  const handlePrev = useCallback(() => navigateAction("prev_1"), [navigateAction]);
+  const handleNext = useCallback(() => navigateAction("next_1"), [navigateAction]);
+  const handlePrevPage = useCallback(() => navigateAction("prev_10"), [navigateAction]);
+  const handleNextPage = useCallback(() => navigateAction("next_10"), [navigateAction]);
+  const handleFirst = useCallback(() => navigateAction("first_anno"), [navigateAction]);
+  const handleLast = useCallback(() => navigateAction("last_anno"), [navigateAction]);
 
   // Default event date to note date
   useEffect(() => {
@@ -845,7 +897,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   }, [patientId, projectId]);
 
   // Loading
-  if (patientLoading || annotationsLoading) {
+  if (patientLoading || annotationsLoading || (!!patientId && !reviewCursor)) {
     return <ReviewSkeleton />;
   }
 
@@ -923,6 +975,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   const patientTotal = patientStats?.total ?? total;
   const progressPct =
     patientTotal > 0 ? Math.round((reviewedCount / patientTotal) * 100) : 0;
+  const notePrediction = current.note_prediction;
+  const predictionLabel = notePrediction?.label ?? current.predicted_label;
+  const predictionScore = notePrediction?.score ?? current.predicted_score;
+  const predictionReasoning = notePrediction?.reasoning ?? current.reasoning;
+  const predictionModel = notePrediction?.model ?? current.predictor_model;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -970,9 +1027,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           {/* Sequence markers */}
           <div className="min-w-0 flex-1 overflow-x-auto">
             <SequenceMarkers
-              annotations={annotations}
+              annotations={sequenceAnnotations}
               currentIndex={currentIndex}
-              onNavigate={setCurrentIndex}
+              onNavigate={navigateToIndex}
             />
           </div>
 
@@ -1118,27 +1175,27 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               </div>
 
               <div className="space-y-3">
-                {current.predicted_label === null &&
-                current.predicted_score === null &&
-                !current.predictor_model ? (
+                {predictionLabel === null &&
+                predictionScore === null &&
+                !predictionModel ? (
                   <p className="text-sm text-muted-foreground">SpaCy Match Found</p>
                 ) : (
                   <div className="flex items-center gap-2">
-                    {current.predicted_label !== null && (
+                    {predictionLabel !== null && (
                       <Badge
                         className={
-                          current.predicted_label === 1
+                          predictionLabel === 1
                             ? "bg-emerald-600 text-white hover:bg-emerald-700"
                             : "bg-zinc-500 text-white hover:bg-zinc-600"
                         }
                       >
-                        {current.predicted_label === 1
+                        {predictionLabel === 1
                           ? "Event Detected"
                           : "No Event"}
                       </Badge>
                     )}
                     <span className="text-sm tabular-nums text-muted-foreground">
-                      {formatScore(current.predicted_score)} likely
+                      {formatScore(predictionScore)} likely
                     </span>
                   </div>
                 )}
@@ -1154,23 +1211,23 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                 )}
 
                 {/* Reasoning */}
-                {current.reasoning && (
+                {predictionReasoning && (
                   <div className="rounded-md bg-muted/50 p-3">
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
                       Reasoning
                     </div>
                     <p className="text-sm leading-relaxed text-foreground/80">
-                      {current.reasoning}
+                      {predictionReasoning}
                     </p>
                   </div>
                 )}
 
                 {/* Model tag */}
-                {current.predictor_model && (
+                {predictionModel && (
                   <div className="text-xs text-muted-foreground">
                     Model:{" "}
                     <span className="font-mono">
-                      {current.predictor_model}
+                      {predictionModel}
                     </span>
                   </div>
                 )}
@@ -1264,7 +1321,97 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
           {/* ── RIGHT PANEL: Sentence + Full Note ─────────────── */}
           <div className="space-y-4">
-            {isPipelineAnnotation ? (
+            {isManualAnnotation ? (
+              contextLoading ? (
+                <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-4/6" />
+                </div>
+              ) : context ? (
+                <>
+                  {(() => {
+                    const sentenceStart = current.sentence_start!;
+                    const sentenceEnd = current.sentence_end!;
+                    const sentenceText = context.text.slice(sentenceStart, sentenceEnd);
+                    const sentenceSpans = (context.annotation_spans ?? [])
+                      .filter((span) => span.sentence_number === current.sentence_number)
+                      .map(({ start, end }) => ({ start, end }));
+                    const spans = sentenceSpans.length > 0
+                      ? sentenceSpans
+                      : [{ start: current.note_start_index!, end: current.note_end_index! }];
+
+                    return (
+                      <>
+                        <div className="rounded-lg border border-border bg-card">
+                          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+                            <ArrowRight className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium text-foreground">
+                              Matched Sentence
+                            </span>
+                            <span className="text-muted-foreground">&middot;</span>
+                            <span className="text-xs text-muted-foreground">
+                              {context.text_id}
+                              {context.note_date && ` \u2014 ${formatDate(context.note_date)}`}
+                            </span>
+                            {Object.entries(context.note_tags ?? {})
+                              .filter(([key]) => key.startsWith("text_tag"))
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([key, value]) => (
+                                <Badge
+                                  key={key}
+                                  variant="outline"
+                                  className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
+                                >
+                                  {String(value)}
+                                </Badge>
+                              ))}
+                          </div>
+                          <div className="max-h-48 overflow-y-auto px-5 py-4">
+                            <p
+                              className="text-[16px] leading-[1.8] text-foreground"
+                              style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+                            >
+                              {sentenceText || current.sentence_text
+                                ? highlightExactSpans(
+                                    sentenceText || current.sentence_text,
+                                    sentenceStart,
+                                    spans,
+                                    context.search_keywords ?? []
+                                  )
+                                : null}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-border bg-card">
+                          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium text-foreground">Full Note</span>
+                            <span className="text-xs text-muted-foreground">
+                              {context.text_id}
+                              {context.note_date && ` \u2014 ${formatDate(context.note_date)}`}
+                            </span>
+                          </div>
+                          <div className="h-[420px] overflow-y-auto px-5 py-4">
+                            <PipelineNoteViewer
+                              noteText={context.text}
+                              matchPositions={spans}
+                              keywords={context.search_keywords ?? []}
+                              evidenceSpans={context.current_note_evidence ?? []}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <p className="text-sm text-muted-foreground">Note context unavailable.</p>
+                </div>
+              )
+            ) : isPipelineAnnotation ? (
               /* Pipeline annotation: show all matched notes, one at a time */
               matchedNotesLoading ? (
                 <div className="space-y-2 rounded-lg border border-border bg-card p-4">
@@ -1360,6 +1507,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                         noteText={matchedNotes[noteIndex].text}
                         matchPositions={matchedNotes[noteIndex].match_positions}
                         keywords={matchedNotes[noteIndex].search_keywords}
+                        evidenceSpans={
+                          matchedNotes[noteIndex].text_id === current.note_text_id
+                            ? current.note_prediction?.evidence_spans ?? current.evidence_spans ?? []
+                            : []
+                        }
                       />
                     </div>
                   </div>
@@ -1451,9 +1603,10 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                     ) : context ? (
                       <NoteViewer
                         context={context}
-                        targetSentenceId={current.sentence_id}
-                        sentenceText={current.sentence_text}
+                        targetSentenceId={current.sentence_id ?? ""}
                         keywords={context.search_keywords ?? []}
+                        targetStart={current.note_start_index}
+                        targetEnd={current.note_end_index}
                       />
                     ) : (
                       <p className="text-sm text-muted-foreground">

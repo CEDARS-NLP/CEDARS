@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.annotations.query_service import get_patient_matched_notes
+from app.annotations.adjudication_service import AdjudicationConflictError
+from app.annotations.query_service import get_patient_matched_notes, serialize_annotation
 from app.annotations.schemas import (
     AnnotationResponse,
     AnnotationStatsResponse,
@@ -35,6 +36,8 @@ from app.annotations.service import (
     get_patient_review_stats,
     get_prediction_job_status,
     list_annotations,
+    navigate_patient_review,
+    patient_review_cursor,
     reopen_patient,
     review_annotation,
     run_bulk_predictions,
@@ -48,6 +51,10 @@ from app.dependencies import require_project_role
 from app.evaluation.models import EvaluationSession, PatientResult
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/annotations", tags=["annotations"])
+
+
+def _adjudication_conflict(exc: AdjudicationConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
 
 
 def _extract_keywords_from_queries(search_queries: list[dict]) -> list[str]:
@@ -229,6 +236,51 @@ async def patient_annotations_endpoint(
     return await get_patient_annotations(session, project_id, patient_id)
 
 
+@router.get("/patient/{patient_id}/cursor")
+async def patient_review_cursor_endpoint(
+    project_id: str,
+    patient_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    try:
+        cursor = await patient_review_cursor(session, project_id, patient_id, current_user.id)
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+    if not cursor:
+        raise_not_found("Patient not found")
+    return {
+        "current_annotation_id": cursor["current_annotation_id"],
+        "next_annotation_id": cursor["next_annotation_id"],
+        "annotation_ids": cursor["annotation_ids"],
+    }
+
+
+@router.post("/patient/{patient_id}/navigate/{action}")
+async def navigate_patient_review_endpoint(
+    project_id: str,
+    patient_id: str,
+    action: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    if action not in {"first_anno", "prev_10", "prev_1", "next_1", "next_10", "last_anno"}:
+        raise HTTPException(status_code=422, detail="Unsupported navigation action")
+    try:
+        cursor = await navigate_patient_review(
+            session, project_id, patient_id, current_user.id, action
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+    if not cursor:
+        raise_not_found("Patient not found")
+    return {
+        "current_annotation_id": cursor["current_annotation_id"],
+        "next_annotation_id": cursor["next_annotation_id"],
+        "annotation_ids": cursor["annotation_ids"],
+    }
+
+
 @router.get("/patient/{patient_id}/stats", response_model=PatientReviewStats)
 async def patient_stats_endpoint(
     project_id: str,
@@ -284,7 +336,7 @@ async def get_annotation_endpoint(
     annotation = await get_annotation(session, project_id, annotation_id)
     if not annotation:
         raise_not_found("Annotation not found")
-    return annotation
+    return await serialize_annotation(session, annotation)
 
 
 @router.get("/{annotation_id}/context")
@@ -299,7 +351,7 @@ async def annotation_context_endpoint(
     if not annotation:
         raise_not_found("Annotation not found")
 
-    context = await get_note_context(session, annotation.note_id)
+    context = await get_note_context(session, annotation.note_id or annotation.text_id)
     if not context:
         raise_not_found("Note not found")
 
@@ -345,12 +397,17 @@ async def review_annotation_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as reviewed, optionally with an event date."""
-    result = await review_annotation(
-        session, project_id, annotation_id, current_user.id,
-        event_date=body.event_date,
-    )
+    try:
+        result = await review_annotation(
+            session, project_id, annotation_id, current_user.id,
+            event_date=body.event_date,
+            skip_after_event=body.skip_after_event,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not result:
         raise_not_found("Annotation not found")
+    result["annotation"] = await serialize_annotation(session, result["annotation"])
     return result
 
 
@@ -365,11 +422,15 @@ async def delete_event_date_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Delete an event date and revert skipped annotations."""
-    result = await delete_event_date(
-        session, project_id, annotation_id, current_user.id,
-    )
+    try:
+        result = await delete_event_date(
+            session, project_id, annotation_id, current_user.id,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not result:
         raise_not_found("Annotation not found or no event date set")
+    result["annotation"] = await serialize_annotation(session, result["annotation"])
     return result
 
 
@@ -384,9 +445,12 @@ async def skip_annotation_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as skipped."""
-    annotation = await skip_annotation(
-        session, project_id, annotation_id, current_user.id,
-    )
+    try:
+        annotation = await skip_annotation(
+            session, project_id, annotation_id, current_user.id,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not annotation:
         raise_not_found("Annotation not found")
-    return annotation
+    return await serialize_annotation(session, annotation)

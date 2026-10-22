@@ -1,6 +1,6 @@
 """Request/response schemas for annotations."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -22,15 +22,16 @@ class AnnotationResponse(BaseModel):
     sentence_number: int | None = None
     sentence_start: int | None = None
     sentence_end: int | None = None
-    text_date: datetime | None = None
-    predicted_score: float | None
-    predicted_label: int | None
-    predictor_model: str
+    text_date: date | None = None
+    predicted_score: float | None = None
+    predicted_label: int | None = None
+    evidence_spans: list[dict] | None = None
+    predictor_model: str = ""
     reasoning: str | None = None
     review_status: str
     reviewed_by: str | None
     reviewed_at: datetime | None
-    event_date: datetime | None
+    event_date: date | None = None
     created_at: datetime
 
 
@@ -38,6 +39,7 @@ class ReviewRequest(BaseModel):
     """Mark an annotation as reviewed, optionally with an event date."""
 
     event_date: datetime | None = None
+    skip_after_event: bool | None = None
 
 
 class BulkRunResponse(BaseModel):
@@ -87,12 +89,16 @@ class NextPatientResponse(BaseModel):
     total_annotations: int = 0
     unreviewed_annotations: int = 0
     all_complete: bool = False
+    current_annotation_id: str | None = None
+    next_annotation_id: str | None = None
 
 
 class ReviewResultResponse(BaseModel):
     annotation: AnnotationResponse
     skipped_count: int = 0
     earlier_count: int = 0
+    current_annotation_id: str | None = None
+    next_annotation_id: str | None = None
 
 
 class DeleteEventDateResponse(BaseModel):
@@ -105,7 +111,7 @@ class PatientReviewStats(BaseModel):
     unreviewed: int
     reviewed: int
     skipped: int
-    current_event_date: datetime | None = None
+    current_event_date: date | None = None
     event_annotation_id: str | None = None
 
 

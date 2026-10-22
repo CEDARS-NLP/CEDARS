@@ -7,11 +7,11 @@ from sqlalchemy import select
 from app.annotations.models import Annotation
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient
-from app.evaluation.models import EvaluationSession, PatientResult, PatientResultStatus
-from app.nlp.engine import process_note
+from app.evaluation.models import EvaluationSession, SessionStatus
 from app.nlp.models import SearchQuery
-from app.pipeline.classifier import ClassificationResult
-from app.pipeline.models import EventConfig, PipelineRun
+from app.production.classifier import NoteClassification
+from app.production.models import NotePrediction
+from app.production.service import start_run
 from app.worker import run_eval_pipeline_job
 from tests.conftest import seed_project_and_user
 
@@ -69,19 +69,12 @@ async def test_dispatch_creates_background_job(app, auth_client):
 async def test_eval_worker_uses_boolean_truth_and_session_query(app):
     project_id, user_id = await seed_project_and_user(app)
     async with app.state.test_session_factory() as db:
-        session = EvaluationSession(project_id=project_id, created_by=user_id)
-        event = EventConfig(
-            project_id=project_id, name="Event", description="Synthetic event",
-            include_criteria="Elevated troponin", exclude_criteria="",
-            llm_provider="openai", llm_model="synthetic-model",
+        session = EvaluationSession(
+            project_id=project_id,
+            created_by=user_id,
+            status=SessionStatus.COMMITTED,
         )
-        db.add_all([session, event])
-        await db.flush()
-        run = PipelineRun(
-            project_id=project_id, event_config_id=event.id, created_by=user_id, run_type="full",
-            config_snapshot={"search_queries": [{"type": "include", "query": "troponin AND elevated"}]},
-        )
-        db.add(run)
+        db.add(session)
         db.add(SearchQuery(project_id=project_id, query="headache"))
         await db.flush()
         for index, text in enumerate([
@@ -92,35 +85,62 @@ async def test_eval_worker_uses_boolean_truth_and_session_query(app):
             db.add(patient)
             await db.flush()
             db.add(Note(
-                project_id=project_id, patient_id=patient.id, text_id=f"synthetic-{index}",
-                text=text, note_date=now_utc(),
+                project_id=project_id,
+                patient_id=patient.id,
+                patient_id_ext=patient.patient_id_ext,
+                text_id=f"synthetic-{index}",
+                text=text,
+                note_date=now_utc(),
             ))
-            db.add(PatientResult(
-                session_id=session.id, pipeline_run_id=run.id, patient_id=patient.id,
-                status=PatientResultStatus.COMPLETED if index == 3 else PatientResultStatus.QUEUED,
-                finding_label="positive" if index == 3 else None,
-            ))
-        await db.commit()
+        await db.flush()
+        run = await start_run(
+            db,
+            project_id,
+            user_id,
+            {
+                "query": "troponin AND elevated",
+                "exclude_negated": True,
+                "evaluation_session_id": session.id,
+                "llm_config": {"provider": "openai", "model": "synthetic-model"},
+            },
+        )
         run_id = run.id
 
-    def process_with_partial_tokens(text, groups):
-        sentences = process_note(text, groups)
-        for sentence in sentences:
-            if not sentence["is_target"]:
-                sentence["matched_tokens"] = ["troponin"]
-        return sentences
-
-    classification = ClassificationResult(label="positive", confidence=0.9, reasoning="Match")
+    classification = NoteClassification(
+        label=1,
+        score=0.9,
+        reasoning="Match",
+        evidence_spans=[],
+    )
     with patch("app.common.database.async_session", app.state.test_session_factory), \
-         patch("app.nlp.engine.process_note", side_effect=process_with_partial_tokens), \
-         patch("app.pipeline.classifier.classify_patient", new_callable=AsyncMock,
+         patch("app.production.service.classify_note", new_callable=AsyncMock,
                return_value=classification) as classify:
         await run_eval_pipeline_job({}, run_id)
-        classify.assert_awaited_once()
-        assert classify.call_args.args[0][0]["text"] == "Troponin elevated."
+        assert classify.await_count == 2
+        assert {
+            call.args[1]["text_id"] for call in classify.await_args_list
+        } == {"synthetic-2", "synthetic-3"}
     async with app.state.test_session_factory() as db:
-        results = (await db.execute(select(PatientResult))).scalars().all()
-        assert sum(result.status == PatientResultStatus.NO_MATCH for result in results) == 2
+        predictions = (await db.execute(select(NotePrediction))).scalars().all()
+        assert len(predictions) == 2
+        assert {prediction.patient_id for prediction in predictions} == {
+            "synthetic-2", "synthetic-3",
+        }
         annotations = (await db.execute(select(Annotation))).scalars().all()
-        assert len(annotations) == 2
-        assert all(annotation.sentence_text == "Troponin elevated." for annotation in annotations)
+        assert len(annotations) == 6
+        excluded_negations = [
+            annotation for annotation in annotations
+            if annotation.patient_id == "synthetic-1"
+        ]
+        assert len(excluded_negations) == 2
+        assert all(annotation.status == "R" for annotation in excluded_negations)
+        assert {annotation.review_reason for annotation in excluded_negations} == {
+            "negated", "duplicate",
+        }
+        assert all(
+            annotation.sentence == "Troponin elevated."
+            for annotation in annotations
+            if annotation.patient_id in {"synthetic-2", "synthetic-3"}
+        )
+        refreshed_session = await db.get(EvaluationSession, session.id)
+        assert refreshed_session.status == SessionStatus.COMPLETED

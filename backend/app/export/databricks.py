@@ -6,10 +6,10 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from app.annotations.models import Annotation
 from app.connectors.databricks import _fqn, connect_databricks
-from app.connectors.models import DataSource, Note
-from app.predictors.service import get_active_predictor_config
+from app.connectors.models import DataSource, Note, Patient
+from app.production.models import NotePrediction, ProductionState
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class ExportType(str, enum.Enum):
     ANNOTATIONS = "annotations"
     PREDICTIONS = "predictions"
+    RESULTS = "results"
     EVALUATION = "evaluation"
 
 
@@ -38,6 +39,39 @@ SCHEMAS = {
         ("score", "DOUBLE"),
         ("label", "INT"),
         ("reasoning", "STRING"),
+    ],
+    ExportType.RESULTS: [
+        ("project_id", "STRING"),
+        ("patient_uuid", "STRING"),
+        ("patient_id", "STRING"),
+        ("index_no", "INT"),
+        ("processing_status", "STRING"),
+        ("review_status", "STRING"),
+        ("comments", "STRING"),
+        ("event_information", "STRING"),
+        ("event_date", "STRING"),
+        ("event_annotation_id", "INT"),
+        ("first_note_date", "STRING"),
+        ("last_note_date", "STRING"),
+        ("max_score", "DOUBLE"),
+        ("max_score_note_date", "STRING"),
+        ("max_score_note_id", "STRING"),
+        ("reviewer", "STRING"),
+        ("reviewed_notes", "INT"),
+        ("reviewed_sentences", "INT"),
+        ("total_notes", "INT"),
+        ("total_sentences", "INT"),
+        ("notes_total", "INT"),
+        ("notes_processed", "INT"),
+        ("notes_failed", "INT"),
+        ("annotations_total", "INT"),
+        ("annotations_pending", "INT"),
+        ("annotations_reviewed", "INT"),
+        ("annotations_skipped", "INT"),
+        ("reason_counts", "STRING"),
+        ("failure_count", "INT"),
+        ("last_error", "STRING"),
+        ("last_updated_at", "STRING"),
     ],
     ExportType.EVALUATION: [
         ("session_name", "STRING"),
@@ -116,6 +150,8 @@ async def _fetch_export_rows(
         return await _fetch_annotation_rows(session, project_id)
     elif export_type == ExportType.PREDICTIONS:
         return await _fetch_prediction_rows(session, project_id)
+    elif export_type == ExportType.RESULTS:
+        return await _fetch_result_rows(session, project_id)
     elif export_type == ExportType.EVALUATION:
         return await _fetch_evaluation_rows(session, project_id)
     return []
@@ -125,22 +161,24 @@ async def _fetch_annotation_rows(
     session: AsyncSession, project_id: str
 ) -> list[tuple]:
     stmt = (
-        select(Annotation, Note.text_id)
-        .join(Note, Annotation.note_id == Note.id)
+        select(Annotation, Patient)
+        .join(Patient, Patient.id == Annotation.patient_uuid)
         .where(
             Annotation.project_id == project_id,
-            Annotation.review_status != ReviewStatus.UNREVIEWED,
+            Annotation.status != "U",
         )
     )
     result = await session.execute(stmt)
     rows = []
-    for ann, text_id in result.all():
+    for ann, patient in result.all():
         rows.append((
             ann.patient_id,
-            text_id,
-            ann.sentence_text,
-            ann.review_status.value,
-            ann.event_date.isoformat() if ann.event_date else None,
+            ann.text_id,
+            ann.sentence,
+            {"U": "unreviewed", "R": "reviewed", "S": "skipped"}[ann.status],
+            patient.event_date.isoformat()
+            if patient.event_annotation_id == ann.annotation_id and patient.event_date
+            else None,
             ann.reviewed_by or "",
             ann.reviewed_at.isoformat() if ann.reviewed_at else None,
         ))
@@ -150,53 +188,56 @@ async def _fetch_annotation_rows(
 async def _fetch_prediction_rows(
     session: AsyncSession, project_id: str
 ) -> list[tuple]:
-    active = await get_active_predictor_config(session, project_id)
-    active_id = active.id if active else None
-
-    # No active predictor: preserve legacy behavior (inline annotation fields).
-    if active_id is None:
-        stmt = (
-            select(Annotation, Note.text_id)
-            .join(Note, Annotation.note_id == Note.id)
-            .where(
-                Annotation.project_id == project_id,
-                Annotation.predicted_label.isnot(None),
-            )
-        )
-        result = await session.execute(stmt)
-        return [
-            (
-                ann.patient_id, text_id, ann.sentence_text,
-                ann.predictor_model, ann.predicted_score,
-                ann.predicted_label, ann.reasoning,
-            )
-            for ann, text_id in result.all()
-        ]
-
-    # Active predictor: source from that predictor's AnnotationPrediction rows.
+    state = await session.get(ProductionState, project_id)
+    if not state or not state.active_run_id:
+        return []
     stmt = (
         select(
-            Annotation, Note.text_id,
-            AnnotationPrediction.predictor_model,
-            AnnotationPrediction.predicted_score,
-            AnnotationPrediction.predicted_label,
-            AnnotationPrediction.reasoning,
+            NotePrediction,
+            Note.text,
         )
-        .join(Note, Annotation.note_id == Note.id)
-        .join(
-            AnnotationPrediction,
-            (AnnotationPrediction.annotation_id == Annotation.id)
-            & (AnnotationPrediction.predictor_config_id == active_id),
+        .join(Note, Note.id == NotePrediction.note_uuid)
+        .where(
+            NotePrediction.project_id == project_id,
+            NotePrediction.run_id == state.active_run_id,
+            NotePrediction.label.isnot(None),
         )
-        .where(Annotation.project_id == project_id)
     )
     result = await session.execute(stmt)
     return [
         (
-            ann.patient_id, text_id, ann.sentence_text,
-            model, score, label, reasoning,
+            prediction.patient_id,
+            prediction.text_id,
+            note_text,
+            prediction.model_fingerprint or "",
+            prediction.score,
+            prediction.label,
+            prediction.reasoning or "",
         )
-        for ann, text_id, model, score, label, reasoning in result.all()
+        for prediction, note_text in result.all()
+    ]
+
+
+async def _fetch_result_rows(session: AsyncSession, project_id: str) -> list[tuple]:
+    import json
+
+    from app.export.service import export_results
+
+    rows = await export_results(session, project_id)
+    date_fields = {
+        "event_date", "first_note_date", "last_note_date", "max_score_note_date",
+        "last_updated_at",
+    }
+    json_fields = {"event_information", "reason_counts"}
+    headers = [name for name, _ in SCHEMAS[ExportType.RESULTS]]
+    return [
+        tuple(
+            value.isoformat() if name in date_fields and value else
+            json.dumps(value, sort_keys=True) if name in json_fields and value is not None else
+            value
+            for name, value in ((name, row.get(name)) for name in headers)
+        )
+        for row in rows
     ]
 
 async def _fetch_evaluation_rows(

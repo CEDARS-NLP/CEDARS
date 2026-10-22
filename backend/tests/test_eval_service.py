@@ -31,6 +31,7 @@ from app.pipeline.models import EventConfig as _EC  # noqa: F401
 from app.pipeline.models import Evidence as _Ev
 from app.pipeline.models import PatientTask as _PT
 from app.pipeline.models import PipelineRun as _PR
+from app.production.models import NotePrediction, ProductionRun
 from app.predictors.models import PredictorConfig  # noqa: F401
 from app.projects.models import Project, ProjectMember  # noqa: F401
 
@@ -1058,12 +1059,7 @@ class TestListPatientResults:
 
 class TestReviewQueue:
     async def test_queue_empties_and_ignores_pipeline_results(self, seeded_db):
-        """The queue serves sample results only, and runs out when all are judged.
-
-        A committed session's full-project results share the session_id, so
-        without the pipeline_run_id filter they joined the sample review queue
-        and its counts stopped agreeing with the metrics shown above it.
-        """
+        """The sample queue stays empty after sample judgments and production work."""
         session = await _create_session_with_search(seeded_db)
 
         mock_result = ClassificationResult(
@@ -1087,38 +1083,33 @@ class TestReviewQueue:
 
         assert await eval_service.get_next_unreviewed_result(seeded_db, session.id) is None
 
-        # An unjudged full-project result must not reopen the sample queue.
-        from app.pipeline.models import EventConfig, PipelineRun, PipelineRunStatus
-        config = EventConfig(
+        # A completed production note prediction must not reopen the sample queue.
+        run = ProductionRun(
             project_id="proj-1",
-            name="MI Detection",
-            description="Myocardial infarction",
-            include_criteria="Troponin elevation",
-            exclude_criteria="",
-            llm_provider="openai",
-            llm_model="gpt-4o",
-        )
-        seeded_db.add(config)
-        await seeded_db.flush()
-        run = PipelineRun(
-            project_id="proj-1",
-            event_config_id=config.id,
-            run_type="full",
-            status=PipelineRunStatus.RUNNING,
+            created_by="user-1",
+            status="completed",
+            config_snapshot={"evaluation_session_id": session.id},
+            total_notes=1,
+            completed_notes=1,
         )
         seeded_db.add(run)
         await seeded_db.flush()
-
-        seeded_db.add(
-            PatientResult(
-                session_id=session.id,
-                patient_id="pat-1",
-                pipeline_run_id=run.id,
-                status=PatientResultStatus.COMPLETED,
-                finding_label="positive",
-                predicted_score=0.9,
-            )
-        )
+        seeded_db.add(NotePrediction(
+            project_id="proj-1",
+            run_id=run.id,
+            text_id="TXT-1-1",
+            patient_id="EXT-1",
+            note_uuid="note-1-1",
+            patient_uuid="pat-1",
+            status="succeeded",
+            label=1,
+            score=0.9,
+            token_usage={
+                "prompt_tokens": 1000,
+                "completion_tokens": 100,
+                "total_tokens": 1100,
+            },
+        ))
         await seeded_db.commit()
 
         assert await eval_service.get_next_unreviewed_result(seeded_db, session.id) is None
@@ -1321,8 +1312,20 @@ class TestCommit:
             ))
         else:
             annotation = Annotation(
-                project_id="proj-1", patient_id="pat-1", note_id="note-1-1",
-                sentence_text="Old annotation",
+                project_id="proj-1",
+                text_id="TXT-1-1",
+                patient_id="EXT-1",
+                text_date=datetime(2024, 1, 15, tzinfo=UTC).date(),
+                sentence="Old annotation",
+                token="annotation",
+                isNegated=False,
+                note_start_index=0,
+                note_end_index=15,
+                sentence_number=0,
+                sentence_start=0,
+                sentence_end=15,
+                patient_uuid="pat-1",
+                note_uuid="note-1-1",
             )
             seeded_db.add(annotation)
             if artifact == "predictions":
@@ -1367,6 +1370,7 @@ class TestCommit:
     @pytest.mark.parametrize("exclude_negated", [True, False])
     async def test_commit_activates_one_merged_legacy_expression(self, seeded_db, exclude_negated):
         from sqlalchemy import select
+        from app.nlp.schemas import ReprocessRequest
 
         session = await eval_service.create_session(seeded_db, "proj-1", "user-1")
         session.status = SessionStatus.REVIEWING
@@ -1378,18 +1382,36 @@ class TestCommit:
         ]
         old = SearchQuery(project_id="proj-1", query="aspirin")
         seeded_db.add(old)
+        sentence = Sentence(
+            project_id="proj-1", note_id="note-1-1", sentence_number=0,
+            text="Existing source sentence", start_pos=0, end_pos=24,
+        )
+        seeded_db.add(sentence)
         await seeded_db.commit()
-        committed = await eval_service.commit_session(seeded_db, session.id, "user-1")
+        committed = await eval_service.commit_session(
+            seeded_db,
+            session.id,
+            "user-1",
+            confirmation=ReprocessRequest(
+                confirmed=True,
+                expected_annotations=0,
+                expected_predictions=0,
+                expected_sentences=1,
+            ),
+        )
         queries = (await seeded_db.execute(select(SearchQuery))).scalars().all()
-        assert len(queries) == 2
-        active = [query for query in queries if query.is_active]
-        assert len(active) == 1
-        assert active[0].query == "((DVT) OR (troponin)) AND !((suspected))"
-        assert active[0].exclude_negated is exclude_negated
+        assert queries == [old]
+        assert old.is_active
+        assert (await seeded_db.execute(select(Sentence))).scalars().all() == [sentence]
         assert committed.committed_config["exclude_negated"] is exclude_negated
-        assert committed.search_queries == committed.committed_config["search_queries"]
-        assert len(committed.search_queries) == 1
-        assert old.is_active is False
+        assert committed.search_queries == [
+            {"query": "DVT", "type": "include"},
+            {"query": "troponin", "type": "include"},
+            {"query": "suspected", "type": "exclude"},
+        ]
+        assert committed.committed_config["search_queries"] == committed.search_queries
+        assert (await seeded_db.execute(select(ProductionRun))).scalars().all() == []
+        assert (await seeded_db.execute(select(NotePrediction))).scalars().all() == []
 
     async def test_commit_session(self, seeded_db):
         session = await _create_session_with_search(seeded_db)
@@ -1452,16 +1474,16 @@ class TestCostSummary:
         await db.commit()
         return session
 
-    def _classified(self, db, session, patient, *, run_id=None, usage=None, source=None):
-        """A classified patient plus (optionally) the ledger row its call produced."""
+    def _classified(self, db, session, patient, *, usage=None, source=None):
+        """A sample result plus (optionally) the ledger row its call produced."""
         db.add(PatientResult(
-            session_id=session.id, patient_id=patient, pipeline_run_id=run_id,
+            session_id=session.id, patient_id=patient,
             status=PatientResultStatus.COMPLETED,
             token_usage=self.USAGE if usage is None else usage,
         ))
         if source:
             add_usage(db, project_id="proj-1", source=source, provider="openai",
-                      model="gpt-4o", usage=self.USAGE, ref_id=run_id or session.id)
+                      model="gpt-4o", usage=self.USAGE, ref_id=session.id)
 
     async def test_projection_uses_measured_sample_tokens(self, seeded_db):
         session = await self._session_with_matches(seeded_db)
@@ -1496,16 +1518,45 @@ class TestCostSummary:
 
     async def test_commit_copies_do_not_double_count_spend(self, seeded_db):
         session = await self._session_with_matches(seeded_db)
-        # One sample call, one real full-run call; commit also copies the sample row
-        # (token_usage and all) into the run, which made no call.
+        # Sample results stay evaluation-owned; the full run has one note prediction
+        # and an independently attributed production usage row.
         self._classified(seeded_db, session, "pat-1", source="evaluation_sample")
-        self._classified(seeded_db, session, "pat-1", run_id="run-1")  # the copy
-        self._classified(seeded_db, session, "pat-2", run_id="run-1", source="pipeline_run")
+        run = ProductionRun(
+            project_id="proj-1",
+            created_by="user-1",
+            status="completed",
+            config_snapshot={"evaluation_session_id": session.id},
+            total_notes=1,
+            completed_notes=1,
+        )
+        seeded_db.add(run)
+        await seeded_db.flush()
+        seeded_db.add(NotePrediction(
+            project_id="proj-1",
+            run_id=run.id,
+            text_id="TXT-1-1",
+            patient_id="EXT-1",
+            note_uuid="note-1-1",
+            patient_uuid="pat-1",
+            status="succeeded",
+            label=1,
+            score=0.9,
+            token_usage=self.USAGE,
+        ))
+        add_usage(
+            seeded_db,
+            project_id="proj-1",
+            source="production_run",
+            provider="openai",
+            model="gpt-4o",
+            usage=self.USAGE,
+            ref_id=run.id,
+        )
         await seeded_db.commit()
 
         cost = await eval_service.get_cost_summary(seeded_db, session.id)
 
-        assert cost["spent_prompt_tokens"] == 2000  # two calls, not three rows
+        assert cost["spent_prompt_tokens"] == 2000  # sample call plus production note call
         assert cost["projection"]["sample_patients_classified"] == 1  # copies aren't the sample
 
     async def test_failed_patients_do_not_dilute_the_sample_average(self, seeded_db):

@@ -2,28 +2,163 @@
 
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.annotations.filters import reviewable_filter
-from app.annotations.models import Annotation, ReviewStatus
+from app.annotations.models import Annotation
 from app.annotations.schemas import AnnotationStatsResponse
 from app.connectors.models import Note, Patient
 from app.evaluation.models import EvaluationSession, PatientResult, SearchMatch
-from app.nlp.models import Sentence
-from app.predictors.service import get_active_predictor_config
+from app.nlp.models import SearchQuery, Sentence
+from app.production.models import NotePrediction, ProductionRun, ProductionState
 
 logger = logging.getLogger(__name__)
+_STATUS_TO_API = {"U": "unreviewed", "R": "reviewed", "S": "skipped"}
+_API_TO_STATUS = {value: key for key, value in _STATUS_TO_API.items()}
+
+
+async def _production_search_finished(
+    session: AsyncSession, project_id: str, run_id: str
+) -> bool:
+    if not run_id:
+        return True
+    run = await session.get(ProductionRun, run_id, populate_existing=True)
+    if not run or run.project_id != project_id:
+        return False
+    scanned = (run.progress_metadata or {}).get("scanned_note_match_counts", {})
+    return run.status == "completed" or len(scanned) >= run.total_notes
+
+
+async def _patient_review_ready(
+    session: AsyncSession, project_id: str, patient_id: str, run_id: str
+) -> bool:
+    if not run_id:
+        return True
+    if not await _production_search_finished(session, project_id, run_id):
+        return False
+    predictions = (
+        await session.scalars(
+            select(NotePrediction).where(
+                col(NotePrediction.project_id) == project_id,
+                col(NotePrediction.run_id) == run_id,
+                col(NotePrediction.patient_id) == patient_id,
+            )
+        )
+    ).all()
+    if any(row.status != "succeeded" for row in predictions):
+        return False
+    from app.production.service import _llm_enabled
+
+    run = await session.get(ProductionRun, run_id)
+    if _llm_enabled(run.config_snapshot):
+        matched_notes = set(
+            await session.scalars(
+                select(col(Annotation.text_id)).where(
+                    col(Annotation.project_id) == project_id,
+                    col(Annotation.production_run_id) == run_id,
+                    col(Annotation.patient_id) == patient_id,
+                )
+            )
+        )
+        return matched_notes.issubset({row.text_id for row in predictions})
+    return True
+
+
+async def serialize_annotation(
+    session: AsyncSession, annotation: Annotation
+) -> dict:
+    """Build the legacy API shape from external IDs and current linked records."""
+    note = None
+    if annotation.note_uuid:
+        note = await session.get(Note, annotation.note_uuid)
+    if note is None:
+        note = (
+            await session.execute(
+                select(Note).where(
+                    col(Note.project_id) == annotation.project_id,
+                    col(Note.text_id) == annotation.text_id,
+                    col(Note.patient_id_ext) == annotation.patient_id,
+                )
+            )
+        ).scalar_one_or_none()
+    patient = None
+    if annotation.patient_uuid:
+        patient = await session.get(Patient, annotation.patient_uuid)
+    if patient is None:
+        patient = (
+            await session.execute(
+                select(Patient).where(
+                    col(Patient.project_id) == annotation.project_id,
+                    col(Patient.patient_id_ext) == annotation.patient_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    production_state = await session.get(ProductionState, annotation.project_id)
+    prediction = None
+    if production_state and production_state.active_run_id:
+        prediction = (
+            await session.execute(
+                select(NotePrediction).where(
+                    col(NotePrediction.project_id) == annotation.project_id,
+                    col(NotePrediction.run_id) == production_state.active_run_id,
+                    col(NotePrediction.text_id) == annotation.text_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    current_event_date = (
+        patient.event_date
+        if patient and patient.event_annotation_id == annotation.annotation_id
+        else None
+    )
+    return {
+        "id": str(annotation.annotation_id),
+        "project_id": annotation.project_id,
+        "patient_id": patient.id if patient else annotation.patient_id,
+        "patient_id_ext": annotation.patient_id,
+        "note_id": note.id if note else (annotation.note_uuid or annotation.text_id),
+        "sentence_id": None,
+        "sentence_text": annotation.sentence,
+        "matched_tokens": annotation.token,
+        "is_negated": annotation.isNegated,
+        "review_excluded": annotation.review_reason in {"llm_negative", "duplicate", "negated"},
+        "manual_review_override": False,
+        "token": annotation.token,
+        "note_start_index": annotation.note_start_index,
+        "note_end_index": annotation.note_end_index,
+        "sentence_number": annotation.sentence_number,
+        "sentence_start": annotation.sentence_start,
+        "sentence_end": annotation.sentence_end,
+        "text_date": annotation.text_date,
+        "predicted_score": prediction.score if prediction else None,
+        "predicted_label": prediction.label if prediction else None,
+        "evidence_spans": prediction.evidence_spans if prediction else None,
+        "predictor_model": (prediction.model_fingerprint or "") if prediction else "",
+        "reasoning": prediction.reasoning if prediction else None,
+        "review_status": _STATUS_TO_API[annotation.status],
+        "reviewed_by": annotation.reviewed_by,
+        "reviewed_at": annotation.reviewed_at,
+        "event_date": current_event_date,
+        "created_at": annotation.created_at,
+        "note_date": note.note_date if note else None,
+        "note_text_id": annotation.text_id,
+    }
 
 
 async def get_annotation(
     session: AsyncSession,
     project_id: str,
-    annotation_id: str,
+    annotation_id: str | int,
 ) -> Annotation | None:
+    try:
+        numeric_id = int(annotation_id)
+    except (TypeError, ValueError):
+        return None
     stmt = select(Annotation).where(
-        col(Annotation.id) == annotation_id,
+        col(Annotation.annotation_id) == numeric_id,
         col(Annotation.project_id) == project_id,
     )
     result = await session.execute(stmt)
@@ -37,39 +172,104 @@ async def list_annotations(
     patient_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[Annotation]:
-    """List annotations with optional filtering."""
+) -> list[dict]:
+    """List annotations through explicit compatibility serialization."""
     stmt = select(Annotation).where(col(Annotation.project_id) == project_id)
 
     if status:
-        stmt = stmt.where(col(Annotation.review_status) == status)
+        stmt = stmt.where(col(Annotation.status) == _API_TO_STATUS.get(status, status))
     if patient_id:
-        stmt = stmt.where(col(Annotation.patient_id) == patient_id)
+        stmt = stmt.where(
+            or_(col(Annotation.patient_id) == patient_id,
+                col(Annotation.patient_uuid) == patient_id)
+        )
 
-    stmt = stmt.order_by(col(Annotation.created_at)).offset(offset).limit(limit)
+    stmt = stmt.order_by(
+        col(Annotation.text_date), col(Annotation.text_id), col(Annotation.note_start_index)
+    ).offset(offset).limit(limit)
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return [await serialize_annotation(session, row) for row in result.scalars().all()]
+
+
+async def get_patient_annotations(
+    session: AsyncSession, project_id: str, patient_id: str
+) -> list[dict]:
+    """Return a patient's annotations in note chronology and occurrence order."""
+    patient = (
+        await session.execute(
+            select(Patient).where(
+                col(Patient.project_id) == project_id,
+                or_(col(Patient.id) == patient_id, col(Patient.patient_id_ext) == patient_id),
+            )
+        )
+    ).scalar_one_or_none()
+    if not patient:
+        return []
+    rows = (
+        await session.execute(
+            select(Annotation, Note)
+            .join(
+                Note,
+                and_(
+                    col(Note.project_id) == col(Annotation.project_id),
+                    col(Note.text_id) == col(Annotation.text_id),
+                    col(Note.patient_id_ext) == col(Annotation.patient_id),
+                ),
+            )
+            .where(
+                col(Annotation.project_id) == project_id,
+                or_(col(Annotation.patient_uuid) == patient.id,
+                    col(Annotation.patient_id) == patient.patient_id_ext),
+            )
+            .order_by(
+                col(Note.note_date), col(Note.text_id),
+                col(Annotation.sentence_number), col(Annotation.note_start_index),
+            )
+        )
+    ).all()
+    annotations = []
+    for annotation, note in rows:
+        item = await serialize_annotation(session, annotation)
+        item["note_date"] = note.note_date
+        item["note_text_id"] = note.text_id
+        annotations.append(item)
+    return annotations
 
 
 async def get_next_unreviewed(
     session: AsyncSession,
     project_id: str,
     patient_id: str | None = None,
-) -> Annotation | None:
+) -> dict | None:
     """Get the next unreviewed annotation for review."""
-    active = await get_active_predictor_config(session, project_id)
     stmt = select(Annotation).where(
         col(Annotation.project_id) == project_id,
-        col(Annotation.review_status) == ReviewStatus.UNREVIEWED,
-        col(Annotation.review_excluded).is_(False),
-        reviewable_filter(active.id if active else None),
+        col(Annotation.status) == "U",
+        reviewable_filter(),
     )
 
+    production_state = await session.get(ProductionState, project_id, populate_existing=True)
+    run_id = production_state.active_run_id if production_state else None
+    if run_id:
+        stmt = stmt.where(col(Annotation.production_run_id) == run_id)
     if patient_id:
-        stmt = stmt.where(col(Annotation.patient_id) == patient_id)
-    stmt = stmt.order_by(col(Annotation.created_at)).limit(1)
+        stmt = stmt.where(
+            or_(col(Annotation.patient_id) == patient_id,
+                col(Annotation.patient_uuid) == patient_id)
+        )
+    stmt = stmt.order_by(
+        col(Annotation.text_date), col(Annotation.text_id), col(Annotation.note_start_index)
+    )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    readiness = {}
+    for annotation in result.scalars():
+        if annotation.patient_id not in readiness:
+            readiness[annotation.patient_id] = await _patient_review_ready(
+                session, project_id, annotation.patient_id, run_id or ""
+            )
+        if readiness[annotation.patient_id]:
+            return await serialize_annotation(session, annotation)
+    return None
 
 
 async def get_annotation_stats(
@@ -81,31 +281,33 @@ async def get_annotation_stats(
     Scoped to the same set the review queue surfaces: annotations not ruled out
     by an optional predictor.
     """
-    active = await get_active_predictor_config(session, project_id)
     base = select(func.count()).select_from(Annotation).where(
         col(Annotation.project_id) == project_id,
-        reviewable_filter(active.id if active else None),
+        reviewable_filter(),
     )
 
     total = (await session.execute(base)).scalar() or 0
     unreviewed = (
         await session.execute(
-            base.where(col(Annotation.review_status) == ReviewStatus.UNREVIEWED)
+            base.where(col(Annotation.status) == "U")
         )
     ).scalar() or 0
     reviewed = (
         await session.execute(
-            base.where(col(Annotation.review_status) == ReviewStatus.REVIEWED)
+            base.where(col(Annotation.status) == "R")
         )
     ).scalar() or 0
     skipped = (
         await session.execute(
-            base.where(col(Annotation.review_status) == ReviewStatus.SKIPPED)
+            base.where(col(Annotation.status) == "S")
         )
     ).scalar() or 0
     events_found = (
         await session.execute(
-            base.where(col(Annotation.event_date).isnot(None))
+            select(func.count()).select_from(Patient).where(
+                col(Patient.project_id) == project_id,
+                col(Patient.event_date).isnot(None),
+            )
         )
     ).scalar() or 0
 
@@ -128,6 +330,29 @@ async def get_note_context(
     if not note:
         return None
 
+    production_state = await session.get(ProductionState, note.project_id)
+    prediction = None
+    if production_state and production_state.active_run_id:
+        prediction = (
+            await session.execute(
+                select(NotePrediction).where(
+                    col(NotePrediction.project_id) == note.project_id,
+                    col(NotePrediction.run_id) == production_state.active_run_id,
+                    col(NotePrediction.text_id) == note.text_id,
+                )
+            )
+        ).scalar_one_or_none()
+    active_query = (
+        await session.execute(
+            select(SearchQuery).where(
+                col(SearchQuery.project_id) == note.project_id,
+                col(SearchQuery.is_active).is_(True),
+                col(SearchQuery.deleted_at).is_(None),
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    exclude_negated = bool(active_query and active_query.exclude_negated)
+
     patient = (
         await session.execute(select(Patient).where(col(Patient.id) == note.patient_id))
     ).scalar_one_or_none()
@@ -142,10 +367,12 @@ async def get_note_context(
     excluded_sentence_ids = set(
         (
             await session.execute(
-                select(col(Annotation.sentence_id)).where(
-                    col(Annotation.note_id) == note_id,
-                    col(Annotation.review_excluded).is_(True),
-                    col(Annotation.sentence_id).is_not(None),
+                select(col(Annotation.sentence_number)).where(
+                    col(Annotation.note_uuid) == note_id,
+                    col(Annotation.review_reason).in_(
+                        ("llm_negative", "duplicate", "negated")
+                        if exclude_negated else ("llm_negative", "duplicate")
+                    ),
                 )
             )
         ).scalars().all()
@@ -159,6 +386,7 @@ async def get_note_context(
         "text_id": note.text_id,
         "note_date": note.note_date.isoformat() if note.note_date else None,
         "note_tags": note.metadata_ or {},
+        "current_note_evidence": prediction.evidence_spans if prediction else [],
         "sentences": [
             {
                 "id": s.id,
@@ -167,10 +395,32 @@ async def get_note_context(
                 "end_pos": s.end_pos,
                 "is_target": s.is_target,
                 "is_negated": s.is_negated,
-                "review_excluded": s.id in excluded_sentence_ids,
+                "review_excluded": s.sentence_number in excluded_sentence_ids,
                 "matched_tokens": s.matched_tokens,
             }
             for s in sentences
+        ],
+        "annotation_spans": [
+            {
+                "annotation_id": str(row.annotation_id),
+                "start": row.note_start_index,
+                "end": row.note_end_index,
+                "sentence_start": row.sentence_start,
+                "sentence_end": row.sentence_end,
+                "sentence_number": row.sentence_number,
+                "is_negated": row.isNegated,
+            }
+            for row in (
+                await session.execute(
+                    select(Annotation).where(
+                        col(Annotation.project_id) == note.project_id,
+                        col(Annotation.text_id) == note.text_id,
+                        col(Annotation.patient_id) == (patient.patient_id_ext if patient else ""),
+                        *([col(Annotation.isNegated).is_(False)] if exclude_negated else []),
+                    )
+                    .order_by(col(Annotation.note_start_index))
+                )
+            ).scalars().all()
         ],
     }
 
@@ -280,81 +530,65 @@ async def _matched_notes_from_annotations(
     project_id: str,
     patient_id: str,
 ) -> list[dict]:
-    """Reconstruct matched-notes for a patient from their annotations.
-
-    Used for full-pipeline patients that have no SearchMatch rows. The full
-    pipeline stores the keyword sentences on the Annotation (``sentence_text``,
-    joined with ``"; "``) and the matched tokens on ``matched_tokens``
-    (comma-separated), so we can rebuild everything the review UI needs.
-    """
-    ann_stmt = (
-        select(Annotation)
-        .where(
-            col(Annotation.project_id) == project_id,
-            col(Annotation.patient_id) == patient_id,
+    """Build production review context from actual stored match offsets."""
+    patient = (
+        await session.execute(
+            select(Patient).where(
+                col(Patient.project_id) == project_id,
+                or_(col(Patient.id) == patient_id, col(Patient.patient_id_ext) == patient_id),
+            )
         )
-        .order_by(col(Annotation.created_at))
-    )
-    annotations = list((await session.execute(ann_stmt)).scalars().all())
-    if not annotations:
+    ).scalar_one_or_none()
+    if not patient:
         return []
-
-    # Group annotations by note.
-    anns_by_note: dict[str, list[Annotation]] = {}
-    for a in annotations:
-        anns_by_note.setdefault(a.note_id, []).append(a)
-
-    note_ids = list(anns_by_note.keys())
-    notes_stmt = (
-        select(Note)
-        .where(col(Note.id).in_(note_ids))
-        .order_by(col(Note.note_date))
-    )
-    notes = list((await session.execute(notes_stmt)).scalars().all())
-
-    def _find_positions(text: str, keywords: list[str]) -> list[dict]:
-        """Locate case-insensitive keyword occurrences in the note text."""
-        lowered = text.lower()
-        positions = []
-        for kw in keywords:
-            if not kw:
-                continue
-            start = lowered.find(kw)
-            while start != -1:
-                positions.append({"start": start, "end": start + len(kw)})
-                start = lowered.find(kw, start + 1)
-        return positions
-
-    result = []
-    for note in notes:
-        note_anns = anns_by_note.get(note.id, [])
-
-        # Keywords come from the comma-separated matched_tokens.
-        keywords: list[str] = []
-        for a in note_anns:
-            for tok in (a.matched_tokens or "").split(","):
-                tok = tok.strip()
-                if len(tok) >= 2:
-                    keywords.append(tok.lower())
-        keywords = sorted(set(keywords))
-
-        # Matched sentences come from the "; "-joined sentence_text.
-        matched_sentences: list[str] = []
-        for a in note_anns:
-            for sent in (a.sentence_text or "").split(";"):
-                sent = sent.strip()
-                if sent and sent not in matched_sentences:
-                    matched_sentences.append(sent)
-
-        result.append({
-            "note_id": note.id,
-            "text_id": note.text_id,
-            "text": note.text,
-            "note_date": note.note_date.isoformat() if note.note_date else None,
-            "note_tags": note.metadata_ or {},
-            "matched_sentences": matched_sentences,
-            "match_positions": _find_positions(note.text, keywords),
-            "search_keywords": keywords,
+    rows = (
+        await session.execute(
+            select(Annotation, Note)
+            .join(
+                Note,
+                and_(
+                    col(Note.project_id) == col(Annotation.project_id),
+                    col(Note.text_id) == col(Annotation.text_id),
+                    col(Note.patient_id_ext) == col(Annotation.patient_id),
+                ),
+            )
+            .where(
+                col(Annotation.project_id) == project_id,
+                col(Annotation.patient_id) == patient.patient_id_ext,
+            )
+            .order_by(
+                col(Note.note_date), col(Note.text_id), col(Annotation.sentence_number),
+                col(Annotation.note_start_index),
+            )
+        )
+    ).all()
+    notes_by_text_id: dict[str, dict] = {}
+    for annotation, note in rows:
+        item = notes_by_text_id.setdefault(
+            note.text_id,
+            {
+                "note_id": note.id,
+                "text_id": note.text_id,
+                "text": note.text,
+                "note_date": note.note_date.isoformat() if note.note_date else None,
+                "note_tags": note.metadata_ or {},
+                "matched_sentences": [],
+                "match_positions": [],
+                "search_keywords": [],
+            },
+        )
+        if annotation.sentence not in item["matched_sentences"]:
+            item["matched_sentences"].append(annotation.sentence)
+        item["match_positions"].append({
+            "start": annotation.note_start_index,
+            "end": annotation.note_end_index,
+            "text": annotation.token,
+            "sentence": annotation.sentence,
+            "sentence_start": annotation.sentence_start,
+            "sentence_end": annotation.sentence_end,
+            "sentence_number": annotation.sentence_number,
+            "is_negated": annotation.isNegated,
         })
-
-    return result
+        if annotation.token and annotation.token not in item["search_keywords"]:
+            item["search_keywords"].append(annotation.token)
+    return list(notes_by_text_id.values())

@@ -65,6 +65,7 @@ async def _seed_parents(session, pid, uid):
     note = Note(
         project_id=pid,
         patient_id=patient.id,
+        patient_id_ext=patient.patient_id_ext,
         text_id="note-parent",
         note_date=now_utc(),
         text="parent note text",
@@ -144,10 +145,28 @@ def _build_specs(pid, uid, parents):
                                 patient_id=parents["patient_id"], status=m)]),
         (ProjectRole, "role",
          lambda m: _project_member_rows(pid, m)),
-        (ReviewStatus, "review_status",
-         lambda m: [Annotation(project_id=pid, patient_id=parents["patient_id"],
-                               note_id=parents["note_id"], sentence_text="x",
-                               review_status=m)]),
+        (ReviewStatus, "status",
+         lambda m: [Annotation(
+             project_id=pid,
+             patient_id="ext-parent",
+             patient_uuid=parents["patient_id"],
+             note_uuid=parents["note_id"],
+             text_id="note-parent",
+             text_date=now_utc().date(),
+             sentence="x",
+             token="x",
+             isNegated=False,
+             note_start_index=0,
+             note_end_index=1,
+             sentence_number=0,
+             sentence_start=0,
+             sentence_end=1,
+             status={
+                 ReviewStatus.UNREVIEWED: "U",
+                 ReviewStatus.REVIEWED: "R",
+                 ReviewStatus.SKIPPED: "S",
+             }[m],
+         )]),
         (SessionStatus, "status",
          lambda m: [EvaluationSession(project_id=pid, created_by=uid, status=m)]),
         (PatientResultStatus, "status",
@@ -177,7 +196,14 @@ async def test_all_enums_roundtrip_identically(app):
 
         failures: list[str] = []
         for enum_cls, attr, build in specs:
-            for member in enum_cls:
+            members = enum_cls
+            if enum_cls is ReviewStatus:
+                members = (
+                    ReviewStatus.UNREVIEWED,
+                    ReviewStatus.REVIEWED,
+                    ReviewStatus.SKIPPED,
+                )
+            for member in members:
                 rows = build(member)
                 target = rows[-1]
                 try:
@@ -193,17 +219,41 @@ async def test_all_enums_roundtrip_identically(app):
 
                 await session.refresh(target)
                 actual = getattr(target, attr)
-                if actual != member:
+                expected = (
+                    {
+                        ReviewStatus.UNREVIEWED: "U",
+                        ReviewStatus.REVIEWED: "R",
+                        ReviewStatus.SKIPPED: "S",
+                    }[member]
+                    if enum_cls is ReviewStatus
+                    else member
+                )
+                if actual != expected:
                     failures.append(
                         f"{enum_cls.__name__}.{member.name}: read back {actual!r}, "
-                        f"expected {member!r}"
+                        f"expected {expected!r}"
                     )
                 # (str, Enum) members equal their value; the stored form must too.
-                if actual != member.value:
+                if enum_cls is not ReviewStatus and actual != member.value:
                     failures.append(
                         f"{enum_cls.__name__}.{member.name}: read back {actual!r} "
                         f"!= value {member.value!r}"
                     )
+
+        review_status_aliases = {
+            ReviewStatus.PENDING: ("U", ReviewStatus.UNREVIEWED),
+            ReviewStatus.CONFIRMED: ("R", ReviewStatus.REVIEWED),
+            ReviewStatus.REJECTED: ("R", ReviewStatus.REVIEWED),
+        }
+        for alias, (stored_status, canonical_status) in review_status_aliases.items():
+            annotation = Annotation()
+            annotation.review_status = alias
+            if annotation.status != stored_status or annotation.review_status != canonical_status:
+                failures.append(
+                    f"ReviewStatus.{alias.name}: expected {stored_status!r} / "
+                    f"{canonical_status!r}, got {annotation.status!r} / "
+                    f"{annotation.review_status!r}"
+                )
 
         assert not failures, "Enum round-trip failures:\n" + "\n".join(failures)
         break

@@ -1,33 +1,31 @@
 """Migration-backed regressions for review attribution and prediction completion."""
 
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from requests import session
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.filters import reviewable_filter
 from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
-from app.annotations.query_service import get_annotation_stats, get_next_unreviewed
 from app.annotations.review_service import (
     ReopenConflictError,
-    get_patient_annotations,
     reopen_patient,
-    review_annotation,
 )
 from app.auth.models import User
 from app.connectors.models import Note, Patient, PatientStatus
 from app.export.service import export_annotations
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.models import SearchQuery, Sentence
-from app.predictors.base import PredictionResult, PredictorError, TokenUsage
+from app.predictors.base import PredictorError, TokenUsage
 from app.predictors.models import PredictorConfig, PredictorType
-from app.predictors.service import activate_predictor
+from app.production.classifier import NoteClassification
+from app.production.models import NotePrediction, ProductionRun, ProductionState
+from app.production.service import execute_run, start_run
 from app.projects.models import Project, ProjectMember, ProjectRole
 
 
@@ -69,6 +67,7 @@ async def _seed_project(
         id=note_id,
         project_id=project_id,
         patient_id=patient_id,
+        patient_id_ext=patient.patient_id_ext,
         text_id=f"text-{note_id}",
         note_date=datetime(2026, 1, 1, tzinfo=UTC),
         text=note_text,
@@ -76,41 +75,25 @@ async def _seed_project(
     session.add(note)
     await session.flush()
 
-    sentence_ids = []
     annotations = []
     for index in range(annotation_count):
-        sentence_id = _id()
-        sentence_ids.append(sentence_id)
-        session.add(
-            Sentence(
-                id=sentence_id,
-                note_id=note_id,
-                project_id=project_id,
-                sentence_number=index,
-                text=f"Sentence {index}.",
-                start_pos=index * 10,
-                end_pos=index * 10 + 10,
-                is_target=True,
-                matched_tokens=["target"],
-            )
-        )
-    await session.flush()
-
-    for index, sentence_id in enumerate(sentence_ids):
+        sentence = f"Sentence {index}."
         annotation = Annotation(
-            id=_id(),
             project_id=project_id,
-            patient_id=patient_id,
-            note_id=note_id,
-            sentence_id=sentence_id,
-            sentence_text=f"Sentence {index}.",
-            matched_tokens="target",
+            text_id=note.text_id,
+            patient_id=patient.patient_id_ext,
+            patient_uuid=patient_id,
+            note_uuid=note_id,
+            sentence=sentence,
             token="target",
+            isNegated=False,
+            note_start_index=index * 10,
+            note_end_index=index * 10 + 6,
             sentence_number=index,
             sentence_start=index * 10,
-            sentence_end=index * 10 + 10,
-            text_date=note.note_date,
-            review_status=ReviewStatus.UNREVIEWED,
+            sentence_end=index * 10 + len(sentence),
+            text_date=note.note_date.date(),
+            status="U",
         )
         session.add(annotation)
         annotations.append(annotation)
@@ -129,37 +112,19 @@ async def _seed_project(
         project_id=project_id,
         job_type=JobType.PREDICTION,
     )
-    session.add_all([config, job])
+    session.add_all([config, job, SearchQuery(project_id=project_id, query="target")])
     await session.commit()
     return {
         "user_id": user_id,
         "project_id": project_id,
         "patient_id": patient_id,
         "note_id": note_id,
+        "text_id": note.text_id,
+        "patient_external_id": patient.patient_id_ext,
         "annotations": annotations,
         "config_id": config.id,
         "job_id": job.id,
     }
-
-
-async def _deactivate_active(session, project_id, config_id):
-    """Deactivate the project's active predictor (no active predictor remains)."""
-    config = await session.get(PredictorConfig, config_id)
-    assert config is not None
-    config.is_active = False
-    session.add(config)
-    await session.commit()
-
-def _make_inactive_predictor(seeded) -> PredictorConfig:
-    return PredictorConfig(
-        id=_id(),
-        project_id=seeded["project_id"],
-        predictor_type=PredictorType.LLM,
-        name="Inactive predictor",
-        config={},
-        is_active=False,
-        created_by=seeded["user_id"],
-    )
 
 
 @pytest.mark.parametrize("writer", ["bulk", "worker"])
@@ -171,46 +136,54 @@ async def test_prediction_writers_persist_optional_usage_and_complete_worker_job
     session_factory, writer, token_usage
 ):
     async with session_factory() as session:
-        seeded = await _seed_project(session)
+        seeded = await _seed_project(session, annotation_count=0)
 
-    predictor = AsyncMock()
-    predictor.predict = AsyncMock(
-        return_value=PredictionResult(
-            score=0.91,
-            label=1,
-            model="mock-model",
-            reasoning="positive test result",
-            token_usage=token_usage,
-        )
+    result = NoteClassification(
+        score=0.91,
+        label=1,
+        reasoning="positive full-note result",
+        evidence_spans=[],
+        token_usage=asdict(token_usage) if token_usage else None,
     )
-    module = (
-        "app.annotations.prediction_service"
-        if writer == "bulk"
-        else "app.jobs.prediction"
-    )
-    with patch(f"{module}.create_predictor", return_value=predictor):
+    with patch("app.production.service.classify_note", new=AsyncMock(return_value=result)) as classify:
         if writer == "bulk":
             from app.annotations.prediction_service import run_bulk_predictions
 
             async with session_factory() as session:
-                await run_bulk_predictions(session, seeded["project_id"])
+                stats = await run_bulk_predictions(session, seeded["project_id"])
         else:
+            async with session_factory() as session:
+                run = await start_run(
+                    session, seeded["project_id"], seeded["user_id"],
+                    {"query": "target", "llm_config": {"provider": "ollama", "model": "test-model"}},
+                )
+                job = await session.get(BackgroundJob, seeded["job_id"])
+                job.result_summary = {"production_run_id": run.id}
+                await session.commit()
             from app.jobs.prediction import execute_prediction_job
 
-            await execute_prediction_job(
+            stats = await execute_prediction_job(
                 seeded["project_id"], seeded["job_id"], session_factory
             )
+    classify.assert_awaited_once()
+    assert classify.await_args.args[0] == "Patient has a target finding."
+    assert stats["predictions_made"] == 1
 
     async with session_factory() as session:
         prediction = (
             await session.execute(
-                select(AnnotationPrediction).where(
-                    AnnotationPrediction.annotation_id == seeded["annotations"][0].id
+                select(NotePrediction).where(
+                    NotePrediction.project_id == seeded["project_id"]
                 )
             )
         ).scalar_one()
         assert prediction.token_usage == (asdict(token_usage) if token_usage else None)
-        assert prediction.predicted_label == 1
+        assert prediction.label == 1
+        assert prediction.status == "succeeded"
+        assert prediction.text_id == seeded["text_id"]
+        state = await session.get(ProductionState, seeded["project_id"])
+        run = await session.get(ProductionRun, state.active_run_id)
+        assert run.status == "completed"
 
         if writer == "worker":
             job = await session.get(BackgroundJob, seeded["job_id"])
@@ -247,22 +220,19 @@ async def test_llm_completion_requires_every_visible_annotation_negative(
 
     async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
-        if expected_source:
-            assert patient.status == PatientStatus.REVIEWED
-            assert patient.review_source == "llm"
-            assert patient.review_reason == "all_keyword_predictions_negative"
-            assert patient.reviewed_by is None
-            assert patient.reviewed_at is not None
-        else:
-            assert patient.status == PatientStatus.REVIEWING
-            assert patient.review_source is None
+        assert (expected_source == "llm") is all(label == 0 for label in labels)
+        assert patient.status == PatientStatus.REVIEWING
+        assert patient.review_source is None
+        assert await session.scalar(select(NotePrediction)) is None
 
 
 async def test_manual_override_prevents_llm_auto_completion(session_factory):
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        annotation.manual_review_override = True
+        annotation.status = "R"
+        annotation.reviewed_by = seeded["user_id"]
+        annotation.reviewed_at = datetime.now(UTC)
         session.add(
             AnnotationPrediction(
                 annotation_id=annotation.id,
@@ -280,67 +250,78 @@ async def test_manual_override_prevents_llm_auto_completion(session_factory):
 
     async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
+        annotation = await session.get(Annotation, seeded["annotations"][0].annotation_id)
         assert patient.status == PatientStatus.REVIEWING
         assert patient.review_source is None
+        assert annotation.status == "R"
+        assert annotation.reviewed_by == seeded["user_id"]
 
 
 async def test_prediction_error_does_not_auto_complete_patient(session_factory):
     async with session_factory() as session:
-        seeded = await _seed_project(session)
+        seeded = await _seed_project(session, annotation_count=0)
+        run = await start_run(
+            session,
+            seeded["project_id"],
+            seeded["user_id"],
+            {"query": "target", "llm_config": {"provider": "ollama", "model": "test-model"}},
+        )
 
-    predictor = AsyncMock()
-    predictor.predict = AsyncMock(side_effect=PredictorError("mock provider failure"))
-    with patch("app.annotations.prediction_service.create_predictor", return_value=predictor):
-        from app.annotations.prediction_service import run_bulk_predictions
-
+    with patch(
+        "app.production.service.classify_note",
+        new=AsyncMock(side_effect=PredictorError("mock provider failure")),
+    ):
         async with session_factory() as session:
-            stats = await run_bulk_predictions(session, seeded["project_id"])
-    assert stats["errors"] == 1
+            run = await execute_run(session, run.id)
 
     async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
-        assert patient.status == PatientStatus.REVIEWING
+        assert patient.status == PatientStatus.NLP_PROCESSING
         assert patient.review_source is None
-        assert not (
-            await session.execute(select(AnnotationPrediction))
-        ).scalars().all()
+        prediction = await session.scalar(select(NotePrediction))
+        assert run.status == "failed"
+        assert prediction.status == "failed"
+        assert prediction.error == "mock provider failure"
+        assert patient.event_date is None
 
 
 async def test_automated_processing_preserves_human_provenance(session_factory):
     async with session_factory() as session:
         seeded = await _seed_project(
-            session, patient_status=PatientStatus.REVIEWED, review_source="human"
+            session, patient_status=PatientStatus.REVIEWED, review_source="human",
+            annotation_count=1,
         )
         annotation = seeded["annotations"][0]
-        annotation.review_status = ReviewStatus.REVIEWED
+        annotation.status = "R"
+        annotation.review_reason = "human_event"
         annotation.reviewed_by = seeded["user_id"]
-        session.add(
-            AnnotationPrediction(
-                annotation_id=annotation.id, project_id=seeded["project_id"],
-                predictor_config_id=seeded["config_id"], predicted_label=0,
-            )
-        )
+        annotation.reviewed_at = datetime.now(UTC)
+        patient = await session.get(Patient, seeded["patient_id"])
+        patient.event_date = date(2026, 1, 1)
+        patient.event_annotation_id = annotation.annotation_id
+        patient.event_reviewer = seeded["user_id"]
+        session.add_all([annotation, _prediction(seeded, annotation, seeded["config_id"], 0)])
         await session.commit()
+
         config = await session.get(PredictorConfig, seeded["config_id"])
         await complete_negative_llm_patients(
             session, seeded["project_id"], [seeded["patient_id"]], config
         )
-        session.add(
-            Note(
-                project_id=seeded["project_id"], patient_id=seeded["patient_id"],
-                text_id=_id(), note_date=datetime(2026, 1, 4, tzinfo=UTC),
-                text="Patient is stable.",
-            )
-        )
         await session.commit()
-        from app.nlp.service import _process_notes_into_sentences
 
-        await _process_notes_into_sentences(session, seeded["project_id"])
+    async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
-        await session.refresh(patient)
         assert patient.status == PatientStatus.REVIEWED
         assert patient.review_source == "human"
+        assert patient.review_reason == "seeded_review_reason"
         assert patient.reviewed_by == seeded["user_id"]
+        assert patient.reviewed_at is not None
+        assert patient.event_date == date(2026, 1, 1)
+        assert patient.event_annotation_id == seeded["annotations"][0].annotation_id
+        assert patient.event_reviewer == seeded["user_id"]
+        annotation = await session.get(Annotation, seeded["annotations"][0].annotation_id)
+        assert annotation.status == "R"
+        assert annotation.review_reason == "human_event"
 
 
 async def test_cedars_processing_creates_excluded_negated_annotation_and_keeps_no_match(
@@ -349,11 +330,13 @@ async def test_cedars_processing_creates_excluded_negated_annotation_and_keeps_n
     async with session_factory() as session:
         seeded = await _seed_project(session, annotation_count=0, note_text="Patient is stable.")
         other_patient_id, other_note_id = _id(), _id()
+        other_external_id = f"external-{other_patient_id}"
+        other_text_id = f"text-{other_note_id}"
         session.add(
             Patient(
                 id=other_patient_id,
                 project_id=seeded["project_id"],
-                patient_id_ext=f"external-{other_patient_id}",
+                patient_id_ext=other_external_id,
                 status=PatientStatus.REVIEWING,
             )
         )
@@ -363,104 +346,28 @@ async def test_cedars_processing_creates_excluded_negated_annotation_and_keeps_n
                 id=other_note_id,
                 project_id=seeded["project_id"],
                 patient_id=other_patient_id,
-                text_id=f"text-{other_note_id}",
+                patient_id_ext=other_external_id,
+                text_id=other_text_id,
                 note_date=datetime(2026, 1, 2, tzinfo=UTC),
                 text="No evidence of DVT.",
             )
         )
-        session.add(
-            SearchQuery(
-                project_id=seeded["project_id"],
-                query="DVT",
-                exclude_negated=True,
-            )
+        run = await start_run(
+            session, seeded["project_id"], seeded["user_id"],
+            {"query": "DVT", "exclude_negated": True},
         )
-        await session.commit()
-
-        from app.nlp.service import _process_notes_into_sentences
-
-        stats = await _process_notes_into_sentences(session, seeded["project_id"])
-        await session.commit()
-        assert stats["total_notes"] == 2
-        assert stats["annotations_created"] == 1
-
-        annotations = (await session.execute(select(Annotation))).scalars().all()
+        run = await execute_run(session, run.id)
+        annotations = (await session.scalars(select(Annotation))).all()
+        assert run.status == "completed"
         assert len(annotations) == 1
-        assert annotations[0].is_negated is True
-        assert annotations[0].review_excluded is True
-        assert annotations[0].review_status == ReviewStatus.REVIEWED
-        sentences = (await session.execute(select(Sentence))).scalars().all()
-        assert len(sentences) == 2
-        assert any(sentence.is_target is False for sentence in sentences)
+        assert annotations[0].isNegated is True
+        assert annotations[0].status == "R"
+        assert annotations[0].review_reason == "negated"
+        assert annotations[0].actor_type == "system"
         no_match_patient = await session.get(Patient, seeded["patient_id"])
         negated_patient = await session.get(Patient, other_patient_id)
-        assert no_match_patient.review_source == "cedars"
-        assert no_match_patient.review_reason == "no_keyword_matches"
-        assert negated_patient.review_source == "cedars"
-        assert negated_patient.review_reason == "negated_matches_only"
-        assert no_match_patient.reviewed_by is None
-        assert negated_patient.reviewed_by is None
-
-
-async def test_reopening_patient_restores_excluded_rows_and_preserves_predictions(
-    session_factory,
-):
-    async with session_factory() as session:
-        seeded = await _seed_project(
-            session,
-            patient_status=PatientStatus.REVIEWED,
-            review_source="llm",
-        )
-        annotation = seeded["annotations"][0]
-        annotation.review_excluded = True
-        annotation.review_status = ReviewStatus.REVIEWED
-        prediction = AnnotationPrediction(
-            annotation_id=annotation.id,
-            project_id=seeded["project_id"],
-            predictor_config_id=seeded["config_id"],
-            predictor_model="saved-model",
-            predicted_score=0.1,
-            predicted_label=0,
-            token_usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
-        )
-        session.add(prediction)
-        await session.commit()
-
-        assert await reopen_patient(
-            session, seeded["project_id"], seeded["patient_id"], seeded["user_id"]
-        )
-
-    async with session_factory() as session:
-        annotation = await session.get(Annotation, seeded["annotations"][0].id)
-        patient = await session.get(Patient, seeded["patient_id"])
-        prediction = (
-            await session.execute(
-                select(AnnotationPrediction).where(
-                    AnnotationPrediction.annotation_id == annotation.id
-                )
-            )
-        ).scalar_one()
-        assert annotation.review_excluded is False
-        assert annotation.manual_review_override is True
-        assert annotation.review_status == ReviewStatus.UNREVIEWED
-        assert annotation.predicted_label is None
-        assert prediction.predicted_label == 0
-        assert prediction.predictor_model == "saved-model"
-        assert patient.status == PatientStatus.REVIEWING
-        assert patient.review_source is None
-        assert patient.review_reason is None
-        visible = await get_patient_annotations(
-            session, seeded["project_id"], seeded["patient_id"]
-        )
-        assert len(visible) == 1
-        assert visible[0]["predicted_label"] == 0
-        await review_annotation(
-            session, seeded["project_id"], annotation.id, seeded["user_id"]
-        )
-        await session.refresh(patient)
-        assert patient.status == PatientStatus.REVIEWED
-        assert patient.review_source == "human"
-        assert patient.reviewed_by == seeded["user_id"]
+        assert no_match_patient.review_reason == "production_complete"
+        assert negated_patient.review_reason == "production_complete"
 
 
 async def test_reopening_reviewed_patient_without_annotations_conflicts(session_factory):
@@ -477,6 +384,60 @@ async def test_reopening_reviewed_patient_without_annotations_conflicts(session_
             )
 
 
+async def test_reopening_patient_restores_excluded_rows_and_preserves_predictions(
+    session_factory,
+):
+    async with session_factory() as session:
+        seeded = await _seed_project(
+            session,
+            annotation_count=2,
+            patient_status=PatientStatus.REVIEWED,
+            review_source="human",
+        )
+        event_annotation, excluded_annotation = seeded["annotations"]
+        event_annotation.status = "R"
+        event_annotation.review_reason = "human_event"
+        event_annotation.reviewed_by = seeded["user_id"]
+        event_annotation.reviewed_at = datetime.now(UTC)
+        excluded_annotation.status = "R"
+        excluded_annotation.review_reason = "duplicate"
+        excluded_annotation.actor_type = "system"
+        patient = await session.get(Patient, seeded["patient_id"])
+        patient.event_date = date(2026, 1, 1)
+        patient.event_annotation_id = event_annotation.annotation_id
+        patient.event_reviewer = seeded["user_id"]
+        patient.locked_by = seeded["user_id"]
+        patient.locked_at = datetime.now(UTC)
+        session.add_all([event_annotation, excluded_annotation, patient])
+        assert await reopen_patient(
+            session, seeded["project_id"], seeded["patient_id"], seeded["user_id"]
+        )
+
+    async with session_factory() as session:
+        patient = await session.get(Patient, seeded["patient_id"])
+        event_annotation = await session.get(
+            Annotation, seeded["annotations"][0].annotation_id
+        )
+        excluded_annotation = await session.get(
+            Annotation, seeded["annotations"][1].annotation_id
+        )
+        assert patient.status == PatientStatus.REVIEWING
+        assert patient.review_source is None
+        assert patient.review_reason is None
+        assert patient.reviewed_by is None
+        assert patient.reviewed_at is None
+        assert patient.locked_by is None
+        assert patient.locked_at is None
+        assert patient.event_date == date(2026, 1, 1)
+        assert patient.event_annotation_id == event_annotation.annotation_id
+        assert patient.event_reviewer == seeded["user_id"]
+        assert (event_annotation.status, event_annotation.review_reason) == ("R", "human_event")
+        assert (excluded_annotation.status, excluded_annotation.review_reason) == (
+            "R",
+            "duplicate",
+        )
+
+
 async def test_export_includes_manual_override_and_patient_review_attribution(session_factory):
     async with session_factory() as session:
         seeded = await _seed_project(
@@ -485,15 +446,14 @@ async def test_export_includes_manual_override_and_patient_review_attribution(se
             review_source="llm",
         )
         annotation = seeded["annotations"][0]
-        annotation.review_excluded = True
-        annotation.manual_review_override = True
+        annotation.status = "R"
+        annotation.review_reason = "human_negative"
         session.add(annotation)
         await session.commit()
 
         rows = await export_annotations(session, seeded["project_id"])
         assert len(rows) == 1
-        assert rows[0]["review_excluded"] is True
-        assert rows[0]["manual_review_override"] is True
+        assert rows[0]["review_status"] == ReviewStatus.REVIEWED.value
         assert rows[0]["patient_review_source"] == "llm"
         assert rows[0]["patient_review_reason"] == "seeded_review_reason"
         assert rows[0]["patient_reviewed_by"] is None
@@ -546,14 +506,23 @@ async def test_reprocess_requires_matching_impact_and_deletes_confirmed_rows(
                 end_pos=36,
             )
         )
+        session.add(SearchQuery(project_id=project_id, query="NLP", created_by=user.id))
         await session.flush()
         annotation = Annotation(
             project_id=project_id,
-            patient_id=patient_id,
-            note_id=note_id,
-            sentence_id=sentence_id,
-            sentence_text="No active NLP processing is needed.",
+            text_id=f"text-{note_id}",
+            patient_id=f"external-{patient_id}",
+            patient_uuid=patient_id,
+            note_uuid=note_id,
+            text_date=date(2026, 1, 3),
+            sentence="No active NLP processing is needed.",
             token="NLP",
+            isNegated=False,
+            note_start_index=8,
+            note_end_index=11,
+            sentence_number=0,
+            sentence_start=0,
+            sentence_end=36,
         )
         session.add(annotation)
         await session.flush()
@@ -639,7 +608,8 @@ async def test_llm_completion_closes_patient_with_human_and_negative_annotations
         seeded = await _seed_project(session, annotation_count=2)
         config = await session.get(PredictorConfig, seeded["config_id"])
         reviewed, hidden = seeded["annotations"]
-        reviewed.review_status = ReviewStatus.REVIEWED
+        reviewed.status = "R"
+        reviewed.review_reason = "human_negative"
         reviewed.reviewed_by = seeded["user_id"]
         session.add(reviewed)
         session.add(_prediction(seeded, hidden, config.id, 0))
@@ -650,10 +620,16 @@ async def test_llm_completion_closes_patient_with_human_and_negative_annotations
 
     async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
-        assert patient.status == PatientStatus.REVIEWED
-        assert patient.review_source == "human"
-        assert patient.review_reason == "manual_review"
-        assert patient.reviewed_by == seeded["user_id"]
+        annotations = list(await session.scalars(
+            select(Annotation).where(Annotation.project_id == seeded["project_id"])
+        ))
+        assert patient.status == PatientStatus.REVIEWING
+        assert patient.review_source is None
+        assert patient.event_annotation_id is None
+        assert {row.status for row in annotations} == {"R", "U"}
+        assert next(row for row in annotations if row.annotation_id == reviewed.annotation_id).review_reason == (
+            "human_negative"
+        )
 
 
 async def test_unlock_closes_patient_whose_remaining_annotations_were_ruled_out(session_factory):
@@ -663,7 +639,8 @@ async def test_unlock_closes_patient_whose_remaining_annotations_were_ruled_out(
         seeded = await _seed_project(session, annotation_count=2)
         config = await session.get(PredictorConfig, seeded["config_id"])
         reviewed, hidden = seeded["annotations"]
-        reviewed.review_status = ReviewStatus.REVIEWED
+        reviewed.status = "R"
+        reviewed.review_reason = "human_negative"
         reviewed.reviewed_by = seeded["user_id"]
         session.add(reviewed)
         session.add(_prediction(seeded, hidden, config.id, 0))
@@ -678,14 +655,18 @@ async def test_unlock_closes_patient_whose_remaining_annotations_were_ruled_out(
         )
         await session.commit()
         await session.refresh(patient)
-        assert patient.status == PatientStatus.REVIEWING  # locked: skipped
+        assert patient.status == PatientStatus.REVIEWING
 
         await unlock_patient(session, seeded["project_id"], seeded["patient_id"], seeded["user_id"])
 
     async with session_factory() as session:
         patient = await session.get(Patient, seeded["patient_id"])
-        assert patient.status == PatientStatus.REVIEWED
+        annotations = list(await session.scalars(
+            select(Annotation).where(Annotation.project_id == seeded["project_id"])
+        ))
+        assert patient.status == PatientStatus.REVIEWING
         assert patient.locked_by is None
+        assert {row.status for row in annotations} == {"R", "U"}
 
 
 @pytest.mark.parametrize(
@@ -721,20 +702,38 @@ async def test_export_identifies_annotation_and_predictor_per_row(session_factor
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        other = PredictorConfig(
-            id=_id(), project_id=seeded["project_id"], predictor_type=PredictorType.LLM,
-            name="Second", config={}, is_active=False, created_by=seeded["user_id"],
+        stale_run = ProductionRun(
+            project_id=seeded["project_id"], created_by=seeded["user_id"],
+            status="completed", config_snapshot={},
         )
-        session.add(other)
+        active_run = ProductionRun(
+            project_id=seeded["project_id"], created_by=seeded["user_id"],
+            status="completed", config_snapshot={},
+        )
+        session.add_all([stale_run, active_run])
         await session.flush()
-        session.add(_prediction(seeded, annotation, seeded["config_id"], 1))
-        session.add(_prediction(seeded, annotation, other.id, 0))
+        session.add(ProductionState(
+            project_id=seeded["project_id"], active_run_id=active_run.id
+        ))
+        session.add(NotePrediction(
+            project_id=seeded["project_id"],
+            run_id=active_run.id,
+            text_id=seeded["text_id"],
+            patient_id=seeded["patient_external_id"],
+            note_uuid=seeded["note_id"],
+            patient_uuid=seeded["patient_id"],
+            status="succeeded",
+            label=1,
+            score=0.8,
+        ))
         await session.commit()
 
         rows = await export_annotations(session, seeded["project_id"])
-        assert len(rows) == 1 # Each annotation is exported once, rows should now be 1
-        assert {r["annotation_id"] for r in rows} == {annotation.id}
-        assert {r["predictor_config_id"] for r in rows} == {seeded["config_id"]}
+        assert len(rows) == 1
+        assert {row["annotation_id"] for row in rows} == {annotation.annotation_id}
+        assert rows[0]["predictor_config_id"] is None
+        assert rows[0]["predicted_label"] == 1
+        assert rows[0]["predicted_score"] == 0.8
 
 
 async def test_purge_data_source_removes_predictions(session_factory):
@@ -780,7 +779,8 @@ async def test_bulk_prediction_skips_excluded_annotations(session_factory):
     async with session_factory() as session:
         seeded = await _seed_project(session, annotation_count=2)
         excluded = seeded["annotations"][0]
-        excluded.review_excluded = True
+        excluded.status = "R"
+        excluded.review_reason = "duplicate"
         session.add(excluded)
         await session.commit()
 
@@ -789,7 +789,9 @@ async def test_bulk_prediction_skips_excluded_annotations(session_factory):
                 _unscored_annotations_stmt(seeded["project_id"], seeded["config_id"])
             )
         ).scalars().all()
-        assert [a.id for a in rows] == [seeded["annotations"][1].id]
+        assert [annotation.annotation_id for annotation in rows] == [
+            seeded["annotations"][1].annotation_id
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -797,94 +799,142 @@ async def test_bulk_prediction_skips_excluded_annotations(session_factory):
 # ---------------------------------------------------------------------------
 
 async def test_reviewable_filter_ignores_inactive_predictors(session_factory):
-    """A non-active predictor's label==0 must NOT rule out an annotation when a
-    different predictor is active."""
+    """Only the active production run's note prediction controls eligibility."""
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        other = _make_inactive_predictor(seeded)
-        session.add(other)
+        stale_run = ProductionRun(
+            project_id=seeded["project_id"], created_by=seeded["user_id"],
+            status="completed", config_snapshot={},
+        )
+        active_run = ProductionRun(
+            project_id=seeded["project_id"], created_by=seeded["user_id"],
+            status="completed", config_snapshot={},
+        )
+        session.add_all([stale_run, active_run])
         await session.flush()
-        session.add_all([
-            _prediction(seeded, annotation, seeded["config_id"], 1),
-            _prediction(seeded, annotation, other.id, 0),
-        ])
+        session.add(ProductionState(
+            project_id=seeded["project_id"], active_run_id=active_run.id
+        ))
+        prediction = NotePrediction(
+            project_id=seeded["project_id"],
+            run_id=stale_run.id,
+            text_id=seeded["text_id"],
+            patient_id=seeded["patient_external_id"],
+            note_uuid=seeded["note_id"],
+            patient_uuid=seeded["patient_id"],
+            status="succeeded",
+            label=0,
+            score=0.8,
+        )
+        session.add(prediction)
         await session.commit()
 
-        # Active-scoped filter -> NOT ruled out.
         cond = reviewable_filter(active_predictor_id=seeded["config_id"])
         rows = (
             await session.execute(
-                select(Annotation).where(Annotation.id == annotation.id, cond)
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
             )
         ).scalars().all()
         assert len(rows) == 1
 
-        # Inactive config id -> ruled out (its label==0 row is the one being scoped to).
-        cond = reviewable_filter(active_predictor_id=other.id)
+        prediction.run_id = active_run.id
+        session.add(prediction)
+        await session.commit()
         rows = (
             await session.execute(
-                select(Annotation).where(Annotation.id == annotation.id, cond)
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
             )
         ).scalars().all()
         assert len(rows) == 0
+
+        prediction.label = 1
+        session.add(prediction)
+        await session.commit()
+        rows = (
+            await session.execute(
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
 
 
 async def test_reviewable_filter_no_active_predictor_keeps_legacy_behavior(session_factory):
-    """With no active predictor, both inline predicted_label and any-prediction
-    rows rule out (current behavior)."""
+    """With no active production run, a keyword-only annotation stays reviewable."""
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        # Inline field set, no AnnotationPrediction row.
-        annotation.predicted_label = 0
-        session.add(annotation)
-        await _deactivate_active(session, seeded["project_id"], seeded["config_id"])
-
         cond = reviewable_filter(active_predictor_id=None)
         rows = (
             await session.execute(
-                select(Annotation).where(Annotation.id == annotation.id, cond)
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
             )
         ).scalars().all()
-        assert len(rows) == 0
+        assert len(rows) == 1
 
 
 async def test_reviewable_filter_no_active_keeps_any_prediction_ruling_out(session_factory):
-    """With no active predictor, ANY AnnotationPrediction with label==0 rules out."""
+    """Legacy annotation predictions do not rule out without an active production run."""
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        other = _make_inactive_predictor(seeded)
-        session.add(other)
-        await session.flush()
-        session.add(_prediction(seeded, annotation, other.id, 0))
-        await _deactivate_active(session, seeded["project_id"], seeded["config_id"])
+        session.add(_prediction(seeded, annotation, seeded["config_id"], 0))
+        await session.commit()
 
         cond = reviewable_filter(active_predictor_id=None)
         rows = (
             await session.execute(
-                select(Annotation).where(Annotation.id == annotation.id, cond)
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
             )
         ).scalars().all()
-        assert len(rows) == 0
+        assert len(rows) == 1
 
 
 async def test_reviewable_filter_manual_override_wins_regardless(session_factory):
-    """manual_review_override=True keeps the annotation reviewable even when the
-    active predictor returned label==0."""
+    """A human-negative reason is not treated as a production-model exclusion."""
     async with session_factory() as session:
         seeded = await _seed_project(session)
         annotation = seeded["annotations"][0]
-        annotation.manual_review_override = True
+        annotation.status = "R"
+        annotation.review_reason = "human_negative"
+        annotation.reviewed_by = seeded["user_id"]
+        run = ProductionRun(
+            project_id=seeded["project_id"], created_by=seeded["user_id"],
+            status="completed", config_snapshot={},
+        )
+        session.add(run)
+        await session.flush()
+        session.add(ProductionState(project_id=seeded["project_id"], active_run_id=run.id))
+        session.add(NotePrediction(
+            project_id=seeded["project_id"],
+            run_id=run.id,
+            text_id=seeded["text_id"],
+            patient_id=seeded["patient_external_id"],
+            note_uuid=seeded["note_id"],
+            patient_uuid=seeded["patient_id"],
+            status="succeeded",
+            label=1,
+            score=0.8,
+        ))
         session.add(annotation)
-        session.add(_prediction(seeded, annotation, seeded["config_id"], 0))
         await session.commit()
 
         cond = reviewable_filter(active_predictor_id=seeded["config_id"])
         rows = (
             await session.execute(
-                select(Annotation).where(Annotation.id == annotation.id, cond)
+                select(Annotation).where(
+                    Annotation.annotation_id == annotation.annotation_id, cond
+                )
             )
         ).scalars().all()
         assert len(rows) == 1

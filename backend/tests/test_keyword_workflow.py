@@ -2,13 +2,16 @@
 
 from datetime import UTC, datetime
 
-from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from sqlalchemy import select
+
+from app.annotations.models import Annotation
 from app.annotations.query_service import get_annotation_stats
 from app.annotations.review_service import get_next_patient_for_review
+from app.auth.models import User
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.engine import parse_query, process_note
-from app.nlp.models import SearchQuery
-from app.nlp.service import _process_notes_into_sentences
+from app.production.models import NotePrediction, ProductionState
+from app.production.service import execute_run, start_run
 from tests.conftest import seed_project_and_user
 
 
@@ -28,6 +31,7 @@ async def _seed_notes(app, project_id: str, notes: list[tuple[str, str]]) -> dic
             Note(
                 project_id=project_id,
                 patient_id=patient.id,
+                patient_id_ext=patient_ext,
                 text_id=f"note-{patient_ext}",
                 text=text,
                 note_date=datetime(2024, 1, 15, tzinfo=UTC),
@@ -36,6 +40,12 @@ async def _seed_notes(app, project_id: str, notes: list[tuple[str, str]]) -> dic
         ids[patient_ext] = patient.id
     await session.commit()
     return ids
+
+
+async def _run_keyword_pipeline(session, project_id: str, query: str) -> None:
+    user = await session.get(User, "user-1")
+    run = await start_run(session, project_id, user.id, {"query": query})
+    await execute_run(session, run.id)
 
 
 class TestMatchSpans:
@@ -63,34 +73,31 @@ class TestNlpProducesAnnotations:
         await _seed_notes(app, pid, [("P1", "Troponin elevated. Repeat troponin high.")])
 
         session = await _session(app)
-        session.add(SearchQuery(project_id=pid, query="troponin"))
-        await session.commit()
+        await _run_keyword_pipeline(session, pid, "troponin")
 
-        stats = await _process_notes_into_sentences(session, pid)
-        assert stats["annotations_created"] == 2
-        assert stats["patients_with_matches"] == 1
-
-        annotations = (await session.execute(Annotation.__table__.select())).all()
+        annotations = list(await session.scalars(select(Annotation)))
         assert len(annotations) == 2
+        assert {ann.token.lower() for ann in annotations} == {"troponin"}
+        assert all(ann.status == "U" for ann in annotations)
 
     async def test_records_v1_fields(self, app):
         pid, _ = await seed_project_and_user(app)
         await _seed_notes(app, pid, [("P1", "No findings. Troponin elevated.")])
 
         session = await _session(app)
-        session.add(SearchQuery(project_id=pid, query="troponin"))
-        await session.commit()
-        await _process_notes_into_sentences(session, pid)
+        await _run_keyword_pipeline(session, pid, "troponin")
 
-        ann = (await session.execute(Annotation.__table__.select())).one()
+        ann = await session.scalar(select(Annotation))
         assert ann.token == "Troponin"
         assert ann.note_start_index == 13
         assert ann.note_end_index == 21
         assert ann.sentence_number == 1
         assert ann.sentence_start == 13
         assert ann.text_date is not None
-        assert ann.review_status == ReviewStatus.UNREVIEWED.value
-        assert ann.predicted_label is None
+        assert ann.status == "U"
+        assert ann.patient_id == "P1"
+        assert ann.text_id == "note-P1"
+        assert await session.scalar(select(NotePrediction)) is None
 
     async def test_patient_without_matches_is_auto_reviewed(self, app):
         pid, _ = await seed_project_and_user(app)
@@ -99,17 +106,15 @@ class TestNlpProducesAnnotations:
         )
 
         session = await _session(app)
-        session.add(SearchQuery(project_id=pid, query="troponin"))
-        await session.commit()
-        stats = await _process_notes_into_sentences(session, pid)
+        await _run_keyword_pipeline(session, pid, "troponin")
 
-        assert stats["patients_auto_completed"] == 1
         matched = await session.get(Patient, ids["P1"])
         unmatched = await session.get(Patient, ids["P2"])
         await session.refresh(matched)
         await session.refresh(unmatched)
         assert matched.status == PatientStatus.NLP_COMPLETE
         assert unmatched.status == PatientStatus.REVIEWED
+        assert unmatched.review_reason == "production_complete"
 
 
 class TestReviewWithoutPredictor:
@@ -118,9 +123,7 @@ class TestReviewWithoutPredictor:
         await _seed_notes(app, pid, [("P1", "Troponin elevated.")])
 
         session = await _session(app)
-        session.add(SearchQuery(project_id=pid, query="troponin"))
-        await session.commit()
-        await _process_notes_into_sentences(session, pid)
+        await _run_keyword_pipeline(session, pid, "troponin")
 
         result = await get_next_patient_for_review(session, pid, uid)
         assert result.patient_id is not None
@@ -131,24 +134,46 @@ class TestReviewWithoutPredictor:
         await _seed_notes(app, pid, [("P1", "Troponin elevated.")])
 
         session = await _session(app)
-        session.add(SearchQuery(project_id=pid, query="troponin"))
-        await session.commit()
-        await _process_notes_into_sentences(session, pid)
+        from app.production.classifier import NoteClassification
 
-        annotation = (await session.execute(Annotation.__table__.select())).one()
-        session.add(
-            AnnotationPrediction(
-                annotation_id=annotation.id,
-                project_id=pid,
-                predicted_label=0,
-                predicted_score=0.1,
-            )
+        run = await start_run(
+            session,
+            pid,
+            uid,
+            {
+                "query": "troponin",
+                "llm_config": {"provider": "openai", "model": "test-model"},
+            },
         )
-        await session.commit()
+        async def classify_note(_full_note, _config, *, api_key=None):
+            return NoteClassification(
+                label=0,
+                score=0.1,
+                reasoning="No event is documented.",
+                evidence_spans=[],
+            )
+
+        from unittest.mock import patch
+
+        with patch("app.production.service.classify_note", side_effect=classify_note):
+            await execute_run(session, run.id)
 
         result = await get_next_patient_for_review(session, pid, uid)
         assert result.patient_id is None
         assert result.all_complete is True
+
+        prediction = await session.scalar(select(NotePrediction))
+        annotation = await session.scalar(select(Annotation))
+        active_run_id = await session.scalar(
+            select(ProductionState.active_run_id).where(ProductionState.project_id == pid)
+        )
+        assert prediction is not None
+        assert prediction.status == "succeeded"
+        assert prediction.label == 0
+        assert prediction.run_id == active_run_id
+        assert annotation is not None
+        assert annotation.status == "R"
+        assert annotation.review_reason == "llm_negative"
 
         stats = await get_annotation_stats(session, pid)
         assert stats.total == 0

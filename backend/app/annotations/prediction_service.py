@@ -1,23 +1,22 @@
 """Prediction service: bulk prediction runs and token estimation."""
 
 import logging
-from dataclasses import asdict
 
 import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.annotations.completion_service import complete_negative_llm_patients
 from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
+from app.connectors.models import Note
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.llm.pricing import estimate_cost
-from app.llm.usage import add_usage
-from app.predictors.base import PredictionResult, PredictorError
-from app.predictors.factory import create_predictor
+from app.nlp.models import SearchQuery
 from app.predictors.llm import SYSTEM_PROMPT
+from app.predictors.models import PredictorType
 from app.predictors.service import get_active_predictor_config
+from app.production.models import NotePrediction
 
 logger = logging.getLogger(__name__)
 
@@ -26,78 +25,80 @@ async def run_bulk_predictions(
     session: AsyncSession,
     project_id: str,
 ) -> dict:
-    """Run the active predictor over existing annotations as an optional filter.
+    """Run the configured predictor on complete matched notes via production."""
+    config = await _production_config(session, project_id)
+    from app.production.service import execute_run, start_run
 
-    Flow:
-    1. Get the active predictor config for the project
-    2. Find annotations it has not scored yet
-    3. Run predictor on each annotation's sentence
-    4. Record the verdict as an AnnotationPrediction (annotations are not mutated)
-    """
-    # Get active predictor
-    predictor_config = await get_active_predictor_config(session, project_id)
+    run = await start_run(session, project_id, None, config, confirmed=False)
+    from app.nlp.service import _process_notes_into_sentences
 
-    if not predictor_config:
-        raise ValueError("No active predictor configured for this project")
-
-    predictor = create_predictor(predictor_config)
-
-    result = await session.execute(_unscored_annotations_stmt(project_id, predictor_config.id))
-    annotations = list(result.scalars().all())
-
-    stats: dict = {
-        "total_sentences": len(annotations),
-        "predictions_made": 0,
-        "annotations_created": 0,
-        "errors": 0,
-        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-
-    for annotation in annotations:
-        prediction: PredictionResult | None = None
-        try:
-            prediction = await predictor.predict(annotation.sentence_text)
-            stats["predictions_made"] += 1
-            pred_usage = prediction.token_usage
-            add_usage(
-                session,
-                project_id=project_id,
-                source="bulk_prediction",
-                provider=predictor_config.config.get("provider"),
-                model=predictor_config.config.get("model"),
-                usage=asdict(pred_usage) if pred_usage else None,
-            )
-            if pred_usage:
-                stats["token_usage"]["prompt_tokens"] += pred_usage.prompt_tokens
-                stats["token_usage"]["completion_tokens"] += pred_usage.completion_tokens
-                stats["token_usage"]["total_tokens"] += pred_usage.total_tokens
-        except PredictorError as e:
-            logger.warning("Prediction failed for annotation %s: %s", annotation.id, e)
-            stats["errors"] += 1
-            continue
-
-        session.add(
-            AnnotationPrediction(
-                annotation_id=annotation.id,
-                project_id=project_id,
-                predictor_config_id=predictor_config.id,
-                predictor_model=prediction.model,
-                predicted_score=prediction.score,
-                predicted_label=prediction.label,
-                reasoning=prediction.reasoning or "",
-                token_usage=(
-                    asdict(prediction.token_usage) if prediction.token_usage else None
-                ),
+    await _process_notes_into_sentences(
+        session, project_id, create_annotations=False, rebuild=True
+    )
+    run = await execute_run(session, run.id)
+    annotations = list(
+        await session.scalars(
+            select(Annotation).where(
+                Annotation.project_id == project_id,
+                Annotation.production_run_id == run.id,
             )
         )
-        stats["annotations_created"] += 1
-
-    await complete_negative_llm_patients(
-        session, project_id, list({annotation.patient_id for annotation in annotations}),
-        predictor_config,
     )
-    await session.commit()
-    return stats
+    predictions = list(
+        await session.scalars(
+            select(NotePrediction).where(
+                NotePrediction.project_id == project_id,
+                NotePrediction.run_id == run.id,
+            )
+        )
+    )
+    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    for prediction in predictions:
+        usage = prediction.token_usage or {}
+        for key in token_usage:
+            token_usage[key] += int(usage.get(key, 0) or 0)
+    return {
+        "total_sentences": len(annotations),
+        "predictions_made": sum(item.status == "succeeded" for item in predictions),
+        "annotations_created": len(annotations),
+        "errors": sum(item.status == "failed" for item in predictions),
+        "token_usage": token_usage,
+    }
+
+
+async def _production_config(session: AsyncSession, project_id: str) -> dict:
+    predictor = await get_active_predictor_config(session, project_id)
+    if predictor is None:
+        raise ValueError("No active predictor configured for this project")
+    if predictor.predictor_type != PredictorType.LLM:
+        raise ValueError("Production full-note prediction currently requires an LLM predictor")
+
+    query = await session.scalar(
+        select(SearchQuery).where(
+            SearchQuery.project_id == project_id,
+            SearchQuery.deleted_at.is_(None),
+            SearchQuery.is_active.is_(True),
+        )
+    )
+    if query is None:
+        raise ValueError("No active search query configured for this project")
+
+    predictor_settings = dict(predictor.config or {})
+    llm_settings = predictor_settings.get("llm_config") or predictor_settings.get("llm") or {
+        key: predictor_settings[key]
+        for key in ("provider", "model", "api_base")
+        if key in predictor_settings
+    }
+    if not llm_settings.get("provider") or not llm_settings.get("model"):
+        raise ValueError("The active LLM predictor requires a provider and model")
+    return {
+        **predictor_settings,
+        "query": query.query,
+        "hide_duplicates": query.hide_duplicates,
+        "skip_after_event": query.skip_after_event,
+        "exclude_negated": query.exclude_negated,
+        "llm_config": llm_settings,
+    }
 
 
 def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
@@ -105,14 +106,14 @@ def _unscored_annotations_stmt(project_id: str, predictor_config_id: str):
     already_scored = (
         select(col(AnnotationPrediction.id))
         .where(
-            col(AnnotationPrediction.annotation_id) == col(Annotation.id),
+            col(AnnotationPrediction.annotation_id) == col(Annotation.annotation_id),
             col(AnnotationPrediction.predictor_config_id) == predictor_config_id,
         )
         .exists()
     )
     return select(Annotation).where(
         col(Annotation.project_id) == project_id,
-        col(Annotation.review_excluded).is_(False),
+        col(Annotation.status) == "U",
         ~already_scored,
     )
 
@@ -122,9 +123,9 @@ async def estimate_bulk_predictions(
     project_id: str,
 ) -> dict:
     """Estimate token usage for running the active predictor over unscored annotations."""
-    predictor_config = await get_active_predictor_config(session, project_id)
-
-    if not predictor_config:
+    try:
+        config = await _production_config(session, project_id)
+    except ValueError:
         return {
             "sentence_count": 0,
             "estimated_prompt_tokens": 0,
@@ -134,11 +135,25 @@ async def estimate_bulk_predictions(
         }
 
     result = await session.execute(
-        _unscored_annotations_stmt(project_id, predictor_config.id).with_only_columns(
-            col(Annotation.sentence_text)
+        select(Note.text)
+        .join(
+            Annotation,
+            (Annotation.project_id == Note.project_id)
+            & (Annotation.text_id == Note.text_id),
         )
+        .outerjoin(
+            NotePrediction,
+            (NotePrediction.project_id == Note.project_id)
+            & (NotePrediction.text_id == Note.text_id),
+        )
+        .where(
+            Note.project_id == project_id,
+            Note.deleted_at.is_(None),
+            NotePrediction.id.is_(None),
+        )
+        .distinct()
     )
-    texts = [r[0] for r in result.all()]
+    texts = list(result.scalars())
 
     sentence_count = len(texts)
     if sentence_count == 0:
@@ -168,8 +183,8 @@ async def estimate_bulk_predictions(
         "estimated_completion_tokens": estimated_completion_tokens,
         "estimated_total_tokens": total_prompt_tokens + estimated_completion_tokens,
         "estimated_cost": estimate_cost(
-            predictor_config.config.get("provider"),
-            predictor_config.config.get("model"),
+            config["llm_config"].get("provider"),
+            config["llm_config"].get("model"),
             total_prompt_tokens,
             estimated_completion_tokens,
         ),
@@ -181,79 +196,77 @@ async def dispatch_prediction_job(
     project_id: str,
     user_id: str,
 ) -> dict:
-    """Create a BackgroundJob and enqueue prediction processing via ARQ.
+    """Dispatch a full-note production run while preserving the legacy job shape."""
+    config = await _production_config(session, project_id)
+    from app.production.service import start_run
 
-    Falls back to synchronous execution if Redis/ARQ is unavailable.
-    Raises ValueError if no active predictor is configured.
-    """
-    # Verify active predictor exists before dispatching
-    predictor_config = await get_active_predictor_config(session, project_id)
-    if not predictor_config:
-        raise ValueError("No active predictor configured for this project")
+    run = await start_run(session, project_id, user_id, config, confirmed=False)
 
     bg_job = BackgroundJob(
         project_id=project_id,
         job_type=JobType.PREDICTION,
         status=JobStatus.PENDING,
         created_by=user_id,
+        result_summary={"production_run_id": run.id},
     )
     session.add(bg_job)
     await session.commit()
     await session.refresh(bg_job)
 
-    use_sync = True
-    try:
-        from arq import create_pool
+    import asyncio
 
-        from app.worker import parse_redis_settings
+    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        redis = await create_pool(parse_redis_settings())
+    factory = async_sessionmaker(session.bind, class_=_AsyncSession, expire_on_commit=False)
+    task = asyncio.create_task(_execute_production_prediction_job(bg_job.id, run.id, factory))
 
-        # Check if any ARQ workers are active before enqueuing
-        health_key = await redis.exists(b"arq:queue:health-check")
-        if health_key:
-            arq_job = await redis.enqueue_job("run_prediction_job", project_id, bg_job.id)
-            if arq_job is not None:
-                bg_job.arq_job_id = arq_job.job_id
-                session.add(bg_job)
-                await session.commit()
-                use_sync = False
-            else:
-                logger.warning("ARQ refused the job (duplicate ID), running synchronously")
-        else:
-            logger.warning("No ARQ workers found, running prediction synchronously")
+    def _on_done(done: asyncio.Task) -> None:
+        if not done.cancelled() and done.exception():
+            logger.exception(
+                "Background production prediction task failed", exc_info=done.exception()
+            )
 
-        await redis.aclose()
-    except Exception:
-        logger.warning("ARQ unavailable, running prediction synchronously")
-
-    if use_sync:
-        import asyncio
-
-        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.jobs.prediction import execute_prediction_job
-
-        factory = async_sessionmaker(
-            session.bind, class_=_AsyncSession, expire_on_commit=False
-        )
-        # Run as a background task so the endpoint returns immediately
-        # and the job is cancellable via the cancel endpoint.
-        def _on_done(t: asyncio.Task) -> None:
-            if not t.cancelled() and t.exception():
-                logger.exception("Background prediction task failed", exc_info=t.exception())
-
-        task = asyncio.create_task(
-            execute_prediction_job(project_id, bg_job.id, session_factory=factory)
-        )
-        task.add_done_callback(_on_done)
+    task.add_done_callback(_on_done)
 
     return {
         "job_id": bg_job.id,
         "status": bg_job.status.value,
         "progress": bg_job.progress,
     }
+
+
+async def _execute_production_prediction_job(job_id, run_id, session_factory) -> None:
+    from app.production.service import execute_run, get_stats
+
+    async with session_factory() as session:
+        job = await session.get(BackgroundJob, job_id)
+        if job is None:
+            return
+        job.status = JobStatus.RUNNING
+        job.started_at = now_utc()
+        await session.commit()
+        try:
+            from app.nlp.service import _process_notes_into_sentences
+
+            await _process_notes_into_sentences(
+                session, job.project_id, create_annotations=False, rebuild=True
+            )
+            run = await execute_run(session, run_id)
+            stats = await get_stats(session, run_id)
+            job.status = JobStatus.FAILED if run.status == "failed" else JobStatus.COMPLETED
+            job.progress = 100
+            job.result_summary = {**(job.result_summary or {}), **stats}
+        except Exception as exc:
+            await session.rollback()
+            job = await session.get(BackgroundJob, job_id)
+            if job is None:
+                return
+            job.status = JobStatus.FAILED
+            job.error_message = str(exc)[:2000]
+        job.completed_at = now_utc()
+        session.add(job)
+        await session.commit()
 
 
 async def get_prediction_job_status(
@@ -309,6 +322,11 @@ async def cancel_prediction_job(
     if not bg_job:
         return None
 
+    run_id = (bg_job.result_summary or {}).get("production_run_id")
+    if run_id:
+        from app.production.service import cancel_run
+
+        await cancel_run(session, run_id)
     bg_job.is_cancelled = True
     # If job is stuck (already cancelled but still "running"), force terminal state
     if bg_job.status in (JobStatus.PENDING, JobStatus.RUNNING):

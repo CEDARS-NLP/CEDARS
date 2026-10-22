@@ -57,6 +57,9 @@ select = ["E", "F", "I", "W"]
 # Formatting is not enforced yet (44 files would change); long lines are left to a later cleanup.
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"app/annotations/adjudication_handler.py" = ["E731", "F841"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
