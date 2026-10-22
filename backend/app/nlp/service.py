@@ -6,13 +6,14 @@ from datetime import timedelta
 from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, AnnotationPrediction
+from app.annotations.models import Annotation
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.engine import parse_query, process_note
 from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
+from app.production.models import NotePrediction
 
 logger = logging.getLogger(__name__)
 
@@ -612,7 +613,7 @@ async def list_target_sentences(
 async def get_reprocess_impact(session: AsyncSession, project_id: str) -> dict:
     counts = {}
     for name, model in (
-        ("annotations", Annotation), ("predictions", AnnotationPrediction),
+        ("annotations", Annotation), ("predictions", NotePrediction),
         ("sentences", Sentence),
     ):
         counts[name] = (

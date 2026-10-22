@@ -20,6 +20,7 @@ from app.evaluation.models import (
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.models import NlpJob, SearchQuery, Sentence
 from app.nlp.service import _process_notes_into_sentences, get_reprocess_impact
+from app.production.models import NotePrediction, ProductionRun
 from app.projects.models import Project, ProjectMember, ProjectRole
 
 
@@ -552,7 +553,8 @@ async def setup_query_run(client, app, *, processed=False):
         db.add(patient)
         await db.flush()
         db.add(Note(
-            project_id=project_id, patient_id=patient.id, text_id="synthetic-note",
+            project_id=project_id, patient_id=patient.id,
+            patient_id_ext=patient.patient_id_ext, text_id="synthetic-note",
             note_date=now_utc(),
             text="Troponin elevated. Suspected DVT. Confirmed DVT.",
         ))
@@ -563,7 +565,26 @@ async def setup_query_run(client, app, *, processed=False):
         if processed:
             await _process_notes_into_sentences(db, project_id)
             annotation = (await db.execute(select(Annotation).limit(1))).scalar_one()
-            db.add(AnnotationPrediction(annotation_id=annotation.id, project_id=project_id))
+            production_run = ProductionRun(
+                project_id=project_id,
+                status="completed",
+                config_snapshot={},
+                total_notes=1,
+            )
+            db.add(production_run)
+            await db.flush()
+            note = await db.get(Note, annotation.note_uuid)
+            patient = await db.get(Patient, annotation.patient_uuid)
+            db.add(NotePrediction(
+                project_id=project_id,
+                run_id=production_run.id,
+                text_id=note.text_id,
+                patient_id=patient.patient_id_ext,
+                note_uuid=note.id,
+                patient_uuid=patient.id,
+                status="succeeded",
+                label=1,
+            ))
             await db.commit()
         impact = await get_reprocess_impact(db, project_id)
     return project_id, evaluation["id"], endpoint + "/run-all", old_id, impact

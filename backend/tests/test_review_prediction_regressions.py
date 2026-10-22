@@ -488,6 +488,7 @@ async def test_reprocess_requires_matching_impact_and_deletes_confirmed_rows(
                 id=note_id,
                 project_id=project_id,
                 patient_id=patient_id,
+                patient_id_ext=f"external-{patient_id}",
                 text_id=f"text-{note_id}",
                 note_date=datetime(2026, 1, 3, tzinfo=UTC),
                 text="No active NLP processing is needed.",
@@ -526,23 +527,25 @@ async def test_reprocess_requires_matching_impact_and_deletes_confirmed_rows(
         )
         session.add(annotation)
         await session.flush()
-        config = PredictorConfig(
+        production_run = ProductionRun(
             project_id=project_id,
-            predictor_type=PredictorType.LLM,
-            name="Reprocess test config",
-            config={"provider": "ollama", "model": "test-model"},
             created_by=user.id,
+            status="completed",
+            config_snapshot={},
+            total_notes=1,
         )
-        session.add(config)
+        session.add(production_run)
         await session.flush()
-        session.add(
-            AnnotationPrediction(
-                annotation_id=annotation.id,
-                project_id=project_id,
-                predictor_config_id=config.id,
-                predicted_label=1,
-            )
-        )
+        session.add(NotePrediction(
+            project_id=project_id,
+            run_id=production_run.id,
+            text_id=f"text-{note_id}",
+            patient_id=f"external-{patient_id}",
+            note_uuid=note_id,
+            patient_uuid=patient_id,
+            status="succeeded",
+            label=1,
+        ))
         await session.commit()
 
     endpoint = f"/api/v1/projects/{project_id}/nlp/reprocess"

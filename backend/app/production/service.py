@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.annotations.models import Annotation, AnnotationPrediction
+from app.annotations.models import Annotation
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.engine import parse_query, process_note
 from app.production.classifier import NoteClassification, classify_note
@@ -106,7 +106,7 @@ def _now() -> datetime:
 
 
 async def _has_existing_data(db: AsyncSession, project_id: str) -> bool:
-    for model in (Annotation, AnnotationPrediction, NotePrediction, ProductionResult):
+    for model in (Annotation, NotePrediction, ProductionResult):
         row = await db.scalar(select(model).where(model.project_id == project_id).limit(1))
         if row is not None:
             return True
@@ -159,10 +159,6 @@ async def _reset_project(db: AsyncSession, project_id: str) -> None:
         update(Annotation)
         .where(Annotation.project_id == project_id)
         .values(duplicate_of=None, skipped_by_event_annotation_id=None)
-    )
-    annotation_ids = select(Annotation.annotation_id).where(Annotation.project_id == project_id)
-    await db.execute(
-        delete(AnnotationPrediction).where(AnnotationPrediction.annotation_id.in_(annotation_ids))
     )
     await db.execute(delete(NotePrediction).where(NotePrediction.project_id == project_id))
     await db.execute(delete(Annotation).where(Annotation.project_id == project_id))

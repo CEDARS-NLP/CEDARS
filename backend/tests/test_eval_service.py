@@ -1294,15 +1294,21 @@ class TestCommit:
     ):
         from sqlalchemy import select
 
-        from app.annotations.models import AnnotationPrediction
         from app.nlp.schemas import ReprocessRequest
         from app.nlp.service import get_reprocess_impact
+        from app.production.models import NotePrediction, ProductionRun
 
         session = await eval_service.create_session(
             seeded_db, "proj-1", "user-1",
             search_queries=[{"query": "troponin", "type": "include"}],
         )
         session.status = SessionStatus.REVIEWING
+        seeded_db.add(PatientResult(
+            session_id=session.id,
+            patient_id="pat-1",
+            status=PatientResultStatus.COMPLETED,
+            finding_label="positive",
+        ))
         old_query = SearchQuery(project_id="proj-1", query="aspirin")
         seeded_db.add(old_query)
         if artifact == "sentences":
@@ -1330,8 +1336,24 @@ class TestCommit:
             seeded_db.add(annotation)
             if artifact == "predictions":
                 await seeded_db.flush()
-                seeded_db.add(AnnotationPrediction(
-                    project_id="proj-1", annotation_id=annotation.id,
+                run = ProductionRun(
+                    project_id="proj-1",
+                    created_by="user-1",
+                    status="completed",
+                    config_snapshot={},
+                    total_notes=1,
+                )
+                seeded_db.add(run)
+                await seeded_db.flush()
+                seeded_db.add(NotePrediction(
+                    project_id="proj-1",
+                    run_id=run.id,
+                    text_id="TXT-1-1",
+                    patient_id="EXT-1",
+                    patient_uuid="pat-1",
+                    note_uuid="note-1-1",
+                    status="succeeded",
+                    label=1,
                 ))
         await seeded_db.commit()
         impact = await get_reprocess_impact(seeded_db, "proj-1")
