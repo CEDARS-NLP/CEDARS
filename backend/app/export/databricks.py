@@ -5,6 +5,7 @@ import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.connectors.databricks import _fqn, connect_databricks
@@ -98,8 +99,8 @@ async def export_to_databricks(
     ds = (
         await session.execute(
             select(DataSource).where(
-                DataSource.id == data_source_id,
-                DataSource.project_id == project_id,
+                col(DataSource.id) == data_source_id,
+                col(DataSource.project_id) == project_id,
             )
         )
     ).scalar_one_or_none()
@@ -162,10 +163,10 @@ async def _fetch_annotation_rows(
 ) -> list[tuple]:
     stmt = (
         select(Annotation, Patient)
-        .join(Patient, Patient.id == Annotation.patient_uuid)
+        .join(Patient, col(Patient.id) == col(Annotation.patient_uuid))
         .where(
-            Annotation.project_id == project_id,
-            Annotation.status != "U",
+            col(Annotation.project_id) == project_id,
+            col(Annotation.status) != "U",
         )
     )
     result = await session.execute(stmt)
@@ -192,15 +193,12 @@ async def _fetch_prediction_rows(
     if not state or not state.active_run_id:
         return []
     stmt = (
-        select(
-            NotePrediction,
-            Note.text,
-        )
-        .join(Note, Note.id == NotePrediction.note_uuid)
+        select(NotePrediction, col(Note.text))
+        .join(Note, col(Note.id) == col(NotePrediction.note_uuid))
         .where(
-            NotePrediction.project_id == project_id,
-            NotePrediction.run_id == state.active_run_id,
-            NotePrediction.label.isnot(None),
+            col(NotePrediction.project_id) == project_id,
+            col(NotePrediction.run_id) == state.active_run_id,
+            col(NotePrediction.label).isnot(None),
         )
     )
     result = await session.execute(stmt)

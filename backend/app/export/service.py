@@ -6,6 +6,7 @@ import json
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.connectors.models import Note, Patient
@@ -19,21 +20,24 @@ async def get_export_stats(
 ) -> dict:
     """Get counts for export preview."""
     base = select(func.count()).select_from(Annotation).where(
-        Annotation.project_id == project_id
+        col(Annotation.project_id) == project_id
     )
     total = (await session.execute(base)).scalar() or 0
-    reviewed = (await session.execute(base.where(Annotation.status == "R"))).scalar() or 0
+    reviewed = (await session.execute(base.where(col(Annotation.status) == "R"))).scalar() or 0
     events = (
         await session.execute(
             select(func.count())
             .select_from(Patient)
-            .where(Patient.project_id == project_id, Patient.event_annotation_id.isnot(None))
+            .where(
+                col(Patient.project_id) == project_id,
+                col(Patient.event_annotation_id).isnot(None),
+            )
         )
     ).scalar() or 0
 
     # Sum token usage from evaluation sessions
     eval_stmt = select(EvaluationSession).where(
-        EvaluationSession.project_id == project_id
+        col(EvaluationSession.project_id) == project_id
     )
     eval_result = await session.execute(eval_stmt)
     total_eval_tokens = 0
@@ -59,31 +63,36 @@ async def export_annotations(
     """
     state = await session.get(ProductionState, project_id)
     join_conditions = [
-        NotePrediction.project_id == Annotation.project_id,
-        NotePrediction.text_id == Annotation.text_id,
-        NotePrediction.patient_id == Annotation.patient_id,
+        col(NotePrediction.project_id) == col(Annotation.project_id),
+        col(NotePrediction.text_id) == col(Annotation.text_id),
+        col(NotePrediction.patient_id) == col(Annotation.patient_id),
     ]
     if state and state.active_run_id:
-        join_conditions.append(NotePrediction.run_id == state.active_run_id)
+        join_conditions.append(col(NotePrediction.run_id) == state.active_run_id)
     else:
-        join_conditions.append(NotePrediction.run_id == "")
+        join_conditions.append(col(NotePrediction.run_id) == "")
     stmt = (
         select(Annotation, NotePrediction, Patient, Note)
         .outerjoin(NotePrediction, and_(*join_conditions))
         .outerjoin(
             Patient,
-            and_(Patient.id == Annotation.patient_uuid, Patient.project_id == Annotation.project_id),
+            and_(
+                col(Patient.id) == col(Annotation.patient_uuid),
+                col(Patient.project_id) == col(Annotation.project_id),
+            ),
         )
-        .outerjoin(Note, Note.id == Annotation.note_uuid)
-        .where(Annotation.project_id == project_id)
+        .outerjoin(Note, col(Note.id) == col(Annotation.note_uuid))
+        .where(col(Annotation.project_id) == project_id)
     )
 
     if status_filter == "reviewed":
-        stmt = stmt.where(Annotation.status == "R")
+        stmt = stmt.where(col(Annotation.status) == "R")
     elif status_filter == "events":
-        stmt = stmt.where(Patient.event_annotation_id == Annotation.annotation_id)
+        stmt = stmt.where(col(Patient.event_annotation_id) == col(Annotation.annotation_id))
 
-    stmt = stmt.order_by(Annotation.patient_id, Annotation.text_date, Annotation.annotation_id)
+    stmt = stmt.order_by(
+        col(Annotation.patient_id), col(Annotation.text_date), col(Annotation.annotation_id)
+    )
     rows = (await session.execute(stmt)).all()
 
     return [
@@ -130,13 +139,13 @@ async def export_results(session: AsyncSession, project_id: str) -> list[dict]:
     """Export the patient-level RESULTS projection with canonical event truth."""
     stmt = (
         select(ProductionResult, Patient)
-        .join(Patient, Patient.id == ProductionResult.patient_uuid)
+        .join(Patient, col(Patient.id) == col(ProductionResult.patient_uuid))
         .where(
-            ProductionResult.project_id == project_id,
-            Patient.project_id == project_id,
-            Patient.deleted_at.is_(None),
+            col(ProductionResult.project_id) == project_id,
+            col(Patient.project_id) == project_id,
+            col(Patient.deleted_at).is_(None),
         )
-        .order_by(ProductionResult.index_no, ProductionResult.patient_id)
+        .order_by(col(ProductionResult.index_no), col(ProductionResult.patient_id))
     )
     rows = (await session.execute(stmt)).all()
     exported = []

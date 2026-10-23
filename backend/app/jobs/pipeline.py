@@ -17,6 +17,7 @@ import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import col
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -130,9 +131,9 @@ async def process_single_patient(
 
                 # Load patient notes
                 note_stmt = select(Note).where(
-                    Note.patient_id == task.patient_id,
-                    Note.project_id == run.project_id,
-                    Note.deleted_at.is_(None),
+                    col(Note.patient_id) == task.patient_id,
+                    col(Note.project_id) == run.project_id,
+                    col(Note.deleted_at).is_(None),
                 )
                 notes = list((await db.execute(note_stmt)).scalars().all())
 
@@ -256,10 +257,10 @@ async def execute_pipeline_run(
         stmt = (
             select(PatientTask)
             .where(
-                PatientTask.pipeline_run_id == pipeline_run_id,
-                PatientTask.status == PatientTaskStatus.QUEUED,
+                col(PatientTask.pipeline_run_id) == pipeline_run_id,
+                col(PatientTask.status) == PatientTaskStatus.QUEUED,
             )
-            .order_by(PatientTask.id)
+            .order_by(col(PatientTask.id))
         )
         tasks = list((await db.execute(stmt)).scalars().all())
 

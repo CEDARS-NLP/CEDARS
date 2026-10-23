@@ -52,7 +52,8 @@ async def execute_nlp_job(
         )
         async with session_factory() as session:
             completed = await session.get(BackgroundJob, job_db_id)
-            return completed.result_summary if completed else {"error": "Job not found"}
+            summary = completed.result_summary if completed else None
+            return summary if isinstance(summary, dict) else {"error": "Job not found"}
 
     async with session_factory() as session:
         bg_job = await session.get(BackgroundJob, job_db_id)

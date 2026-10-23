@@ -39,16 +39,16 @@ async def run_bulk_predictions(
     annotations = list(
         await session.scalars(
             select(Annotation).where(
-                Annotation.project_id == project_id,
-                Annotation.production_run_id == run.id,
+                col(Annotation.project_id) == project_id,
+                col(Annotation.production_run_id) == run.id,
             )
         )
     )
     predictions = list(
         await session.scalars(
             select(NotePrediction).where(
-                NotePrediction.project_id == project_id,
-                NotePrediction.run_id == run.id,
+                col(NotePrediction.project_id) == project_id,
+                col(NotePrediction.run_id) == run.id,
             )
         )
     )
@@ -75,9 +75,9 @@ async def _production_config(session: AsyncSession, project_id: str) -> dict:
 
     query = await session.scalar(
         select(SearchQuery).where(
-            SearchQuery.project_id == project_id,
-            SearchQuery.deleted_at.is_(None),
-            SearchQuery.is_active.is_(True),
+            col(SearchQuery.project_id) == project_id,
+            col(SearchQuery.deleted_at).is_(None),
+            col(SearchQuery.is_active).is_(True),
         )
     )
     if query is None:
@@ -135,21 +135,21 @@ async def estimate_bulk_predictions(
         }
 
     result = await session.execute(
-        select(Note.text)
+        select(col(Note.text))
         .join(
             Annotation,
-            (Annotation.project_id == Note.project_id)
-            & (Annotation.text_id == Note.text_id),
+            (col(Annotation.project_id) == col(Note.project_id))
+            & (col(Annotation.text_id) == col(Note.text_id)),
         )
         .outerjoin(
             NotePrediction,
-            (NotePrediction.project_id == Note.project_id)
-            & (NotePrediction.text_id == Note.text_id),
+            (col(NotePrediction.project_id) == col(Note.project_id))
+            & (col(NotePrediction.text_id) == col(Note.text_id)),
         )
         .where(
-            Note.project_id == project_id,
-            Note.deleted_at.is_(None),
-            NotePrediction.id.is_(None),
+            col(Note.project_id) == project_id,
+            col(Note.deleted_at).is_(None),
+            col(NotePrediction.id).is_(None),
         )
         .distinct()
     )

@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.common.crud import get_scoped, list_scoped, soft_delete
@@ -39,9 +40,9 @@ async def create_search_query(
     await session.execute(
         update(SearchQuery)
         .where(
-            SearchQuery.project_id == project_id,
-            SearchQuery.deleted_at.is_(None),
-            SearchQuery.is_active.is_(True),
+            col(SearchQuery.project_id) == project_id,
+            col(SearchQuery.deleted_at).is_(None),
+            col(SearchQuery.is_active).is_(True),
         )
         .values(is_active=False)
     )
@@ -224,9 +225,9 @@ async def dispatch_nlp_job(
 async def _active_production_config(session: AsyncSession, project_id: str) -> dict:
     result = await session.execute(
         select(SearchQuery).where(
-            SearchQuery.project_id == project_id,
-            SearchQuery.deleted_at.is_(None),
-            SearchQuery.is_active.is_(True),
+            col(SearchQuery.project_id) == project_id,
+            col(SearchQuery.deleted_at).is_(None),
+            col(SearchQuery.is_active).is_(True),
         )
     )
     query = result.scalar_one_or_none()
@@ -288,10 +289,10 @@ async def get_nlp_job_status(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.NLP,
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.NLP,
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)

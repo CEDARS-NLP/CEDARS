@@ -218,8 +218,9 @@ async def _claim_patient(
         )
         .values(locked_by=user_id, locked_at=now_utc())
         .execution_options(synchronize_session="fetch")
+        .returning(col(Patient.id))
     )
-    if result.rowcount != 1:
+    if result.scalar_one_or_none() is None:
         await session.rollback()
         raise AdjudicationConflictError("Patient is locked by another reviewer")
     await session.flush()
@@ -370,7 +371,7 @@ async def _sync_cursor(
     )
     duplicate_set = set(duplicate_ids)
     if duplicate_set:
-        survivors: dict[tuple[str, str], int] = {}
+        survivors: dict[tuple[str, str], int | None] = {}
         hide_across_patient = bool(query.hide_duplicates) if query else True
         for row in visible:
             normalized = row.sentence.lower().strip()
@@ -980,7 +981,7 @@ async def submit_review_batch(
     if not run_id:
         raise AdjudicationConflictError("No active production run")
     active_job = await session.scalar(
-        select(PatientReviewJob.id).where(
+        select(col(PatientReviewJob.id)).where(
             col(PatientReviewJob.patient_uuid) == patient.id,
             col(PatientReviewJob.status).in_(("queued", "running")),
         ).limit(1)

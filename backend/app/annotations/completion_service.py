@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.connectors.models import Patient
 from app.predictors.models import PredictorConfig, PredictorType
@@ -25,8 +26,8 @@ async def complete_negative_llm_patients(
 
     patients = await session.scalars(
         select(Patient).where(
-            Patient.project_id == project_id,
-            Patient.id.in_(patient_ids),
+            col(Patient.project_id) == project_id,
+            col(Patient.id).in_(patient_ids),
         )
     )
     for patient in patients:

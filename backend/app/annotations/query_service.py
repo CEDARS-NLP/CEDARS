@@ -52,7 +52,7 @@ async def _patient_review_ready(
     from app.production.service import _llm_enabled
 
     run = await session.get(ProductionRun, run_id)
-    if _llm_enabled(run.config_snapshot):
+    if run is not None and _llm_enabled(run.config_snapshot):
         matched_notes = set(
             await session.scalars(
                 select(col(Annotation.text_id)).where(

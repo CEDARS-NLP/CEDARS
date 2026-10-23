@@ -128,6 +128,7 @@ async def on_worker_startup(ctx: dict) -> None:
     log = logging.getLogger("arq.worker.startup")
     try:
         from sqlalchemy import select
+        from sqlmodel import col
 
         from app.common.database import async_session
         from app.jobs.review import recover_patient_review_jobs
@@ -137,7 +138,7 @@ async def on_worker_startup(ctx: dict) -> None:
             orphaned_runs = list(
                 await db.scalars(
                     select(ProductionRun).where(
-                        ProductionRun.status.in_(["queued", "running"])
+                        col(ProductionRun.status).in_(["queued", "running"])
                     )
                 )
             )

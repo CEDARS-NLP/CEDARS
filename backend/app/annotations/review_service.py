@@ -115,7 +115,7 @@ async def get_next_patient_for_review(
     run_id, generation = await _lock_run_identity(session, project_id)
     stale_before = now_utc() - _REVIEW_LEASE
     active_job_for_patient = exists(
-        select(PatientReviewJob.id).where(
+        select(col(PatientReviewJob.id)).where(
             col(PatientReviewJob.patient_uuid) == col(Patient.id),
             col(PatientReviewJob.status).in_(("queued", "running")),
         )
@@ -192,8 +192,9 @@ async def get_next_patient_for_review(
                     col(Patient.locked_by).is_(None),
                 )
                 .values(locked_by=user_id, locked_at=now_utc())
+                .returning(col(Patient.id))
             )
-            if claim.rowcount == 1:
+            if claim.scalar_one_or_none() is not None:
                 patient = candidate
                 break
     if not patient:
@@ -254,8 +255,8 @@ async def get_next_patient_for_review(
     total, pending = (
         await session.execute(
             select(
-                func.count(Annotation.annotation_id),
-                func.sum(func.cast(Annotation.status == "U", Integer)),
+                func.count(col(Annotation.annotation_id)),
+                func.sum(func.cast(col(Annotation.status) == "U", Integer)),
             ).where(
                 col(Annotation.project_id) == project_id,
                 or_(col(Annotation.patient_uuid) == patient.id,
@@ -271,7 +272,7 @@ async def get_next_patient_for_review(
             user_id=user_id, patient_id=patient.id,
         )
     failed_job_id = await session.scalar(
-        select(PatientReviewJob.id)
+        select(col(PatientReviewJob.id))
         .where(
             col(PatientReviewJob.patient_uuid) == patient.id,
             col(PatientReviewJob.status) == "failed",
@@ -361,7 +362,7 @@ async def get_patient_review_stats(
         return PatientReviewStats(total=0, unreviewed=0, reviewed=0, skipped=0)
     rows = (
         await session.execute(
-            select(Annotation.status, func.count())
+            select(col(Annotation.status), func.count())
             .where(
                 col(Annotation.project_id) == project_id,
                 or_(col(Annotation.patient_uuid) == patient.id,

@@ -5,6 +5,7 @@ import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import col
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -76,9 +77,10 @@ async def execute_prediction_job(
                     "production_run_id": production_run_id,
                 }
             else:
-                run = await session.get(ProductionRun, production_run_id)
-                if run is None or run.project_id != project_id:
+                existing_run = await session.get(ProductionRun, production_run_id)
+                if existing_run is None or existing_run.project_id != project_id:
                     raise ValueError("Production run not found for this prediction job")
+                run = existing_run
 
             bg_job.status = JobStatus.RUNNING
             bg_job.started_at = bg_job.started_at or now_utc()
@@ -167,8 +169,8 @@ async def _link_predictions_to_annotations(
     predictions = list(
         await session.scalars(
             select(NotePrediction).where(
-                NotePrediction.project_id == project_id,
-                NotePrediction.run_id == run_id,
+                col(NotePrediction.project_id) == project_id,
+                col(NotePrediction.run_id) == run_id,
             )
         )
     )
@@ -176,8 +178,8 @@ async def _link_predictions_to_annotations(
     annotations = list(
         await session.scalars(
             select(Annotation).where(
-                Annotation.project_id == project_id,
-                Annotation.production_run_id == run_id,
+                col(Annotation.project_id) == project_id,
+                col(Annotation.production_run_id) == run_id,
             )
         )
     )
@@ -190,7 +192,7 @@ async def _link_predictions_to_annotations(
     for prediction in predictions:
         predictions_by_patient.setdefault(prediction.patient_id, []).append(prediction)
     for patient in await session.scalars(
-        select(Patient).where(Patient.project_id == project_id)
+        select(Patient).where(col(Patient.project_id) == project_id)
     ):
         patient_predictions = predictions_by_patient.get(patient.patient_id_ext, [])
         if (
@@ -210,20 +212,20 @@ async def _collect_stats(
     predictions = list(
         await session.scalars(
             select(NotePrediction).where(
-                NotePrediction.project_id == project_id,
-                NotePrediction.run_id == run_id,
+                col(NotePrediction.project_id) == project_id,
+                col(NotePrediction.run_id) == run_id,
             )
         )
     )
     annotations_count = await session.scalar(
         select(func.count()).select_from(Annotation).where(
-            Annotation.project_id == project_id,
-            Annotation.production_run_id == run_id,
+            col(Annotation.project_id) == project_id,
+            col(Annotation.production_run_id) == run_id,
         )
     )
     results = list(
         await session.scalars(
-            select(ProductionResult).where(ProductionResult.project_id == project_id)
+            select(ProductionResult).where(col(ProductionResult.project_id) == project_id)
         )
     )
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

@@ -2,6 +2,7 @@
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
@@ -116,36 +117,36 @@ async def compute_run_metrics(session: AsyncSession, run_id: str) -> dict:
     production_run_id = (pipeline_run.result_summary or {}).get("production_run_id") \
         if pipeline_run else None
     annotation_run_filter = (
-        Annotation.production_run_id == production_run_id
+        col(Annotation.production_run_id) == production_run_id
         if production_run_id
-        else Annotation.pipeline_run_id == run_id
+        else col(Annotation.pipeline_run_id) == run_id
     )
     stmt = (
         select(Annotation, NotePrediction, Patient)
         .join(
             NotePrediction,
             and_(
-                NotePrediction.project_id == Annotation.project_id,
-                NotePrediction.run_id == Annotation.production_run_id,
-                NotePrediction.text_id == Annotation.text_id,
+                col(NotePrediction.project_id) == col(Annotation.project_id),
+                col(NotePrediction.run_id) == col(Annotation.production_run_id),
+                col(NotePrediction.text_id) == col(Annotation.text_id),
             ),
         )
         .join(
             Patient,
             and_(
-                Patient.project_id == Annotation.project_id,
-                Patient.patient_id_ext == Annotation.patient_id,
+                col(Patient.project_id) == col(Annotation.project_id),
+                col(Patient.patient_id_ext) == col(Annotation.patient_id),
             ),
         )
         .where(
             annotation_run_filter,
-            Annotation.status == "R",
+            col(Annotation.status) == "R",
             or_(
-                Annotation.review_reason == "human_negative",
-                Patient.event_annotation_id == Annotation.annotation_id,
+                col(Annotation.review_reason) == "human_negative",
+                col(Patient.event_annotation_id) == col(Annotation.annotation_id),
             ),
-            NotePrediction.status == "succeeded",
-            NotePrediction.label.is_not(None),
+            col(NotePrediction.status) == "succeeded",
+            col(NotePrediction.label).is_not(None),
         )
     )
     reviewed = list((await session.execute(stmt)).all())

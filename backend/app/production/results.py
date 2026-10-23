@@ -4,6 +4,7 @@ from collections import Counter
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.common.utils import now_utc
@@ -25,9 +26,9 @@ async def refresh_patient_result(
     patient = (
         await db.execute(
             select(Patient).where(
-                Patient.id == patient_uuid,
-                Patient.project_id == project_id,
-                Patient.deleted_at.is_(None),
+                col(Patient.id) == patient_uuid,
+                col(Patient.project_id) == project_id,
+                col(Patient.deleted_at).is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -37,8 +38,8 @@ async def refresh_patient_result(
     result = (
         await db.execute(
             select(ProductionResult).where(
-                ProductionResult.project_id == project_id,
-                ProductionResult.patient_uuid == patient_uuid,
+                col(ProductionResult.project_id) == project_id,
+                col(ProductionResult.patient_uuid) == patient_uuid,
             )
         )
     ).scalar_one_or_none()
@@ -55,11 +56,11 @@ async def refresh_patient_result(
             await db.execute(
                 select(Note)
                 .where(
-                    Note.project_id == project_id,
-                    Note.patient_id == patient.id,
-                    Note.deleted_at.is_(None),
+                    col(Note.project_id) == project_id,
+                    col(Note.patient_id) == patient.id,
+                    col(Note.deleted_at).is_(None),
                 )
-                .order_by(Note.note_date, Note.text_id)
+                .order_by(col(Note.note_date), col(Note.text_id))
             )
         )
         .scalars()
@@ -70,10 +71,14 @@ async def refresh_patient_result(
             await db.execute(
                 select(Annotation)
                 .where(
-                    Annotation.project_id == project_id,
-                    Annotation.patient_id == patient.patient_id_ext,
+                    col(Annotation.project_id) == project_id,
+                    col(Annotation.patient_id) == patient.patient_id_ext,
                 )
-                .order_by(Annotation.text_date, Annotation.text_id, Annotation.note_start_index)
+                .order_by(
+                    col(Annotation.text_date),
+                    col(Annotation.text_id),
+                    col(Annotation.note_start_index),
+                )
             )
         )
         .scalars()
@@ -85,13 +90,13 @@ async def refresh_patient_result(
         await db.get(ProductionRun, state.active_run_id) if state and state.active_run_id else None
     )
     predictions_stmt = select(NotePrediction).where(
-        NotePrediction.project_id == project_id,
-        NotePrediction.patient_uuid == patient_uuid,
+        col(NotePrediction.project_id) == project_id,
+        col(NotePrediction.patient_uuid) == patient_uuid,
     )
     if state and state.active_run_id:
-        predictions_stmt = predictions_stmt.where(NotePrediction.run_id == state.active_run_id)
+        predictions_stmt = predictions_stmt.where(col(NotePrediction.run_id) == state.active_run_id)
     else:
-        predictions_stmt = predictions_stmt.where(NotePrediction.run_id == "")
+        predictions_stmt = predictions_stmt.where(col(NotePrediction.run_id) == "")
     predictions = (await db.execute(predictions_stmt)).scalars().all()
 
     note_by_text_id = {note.text_id: note for note in notes}
@@ -126,7 +131,12 @@ async def refresh_patient_result(
 
     scored_predictions = [prediction for prediction in predictions if prediction.score is not None]
     best_prediction = (
-        max(scored_predictions, key=lambda prediction: prediction.score)
+        max(
+            scored_predictions,
+            key=lambda prediction: (
+                prediction.score if prediction.score is not None else float("-inf")
+            ),
+        )
         if scored_predictions
         else None
     )
@@ -141,11 +151,14 @@ async def refresh_patient_result(
         await db.execute(
             select(func.count())
             .select_from(Patient)
-            .where(Patient.project_id == project_id, Patient.deleted_at.is_(None))
+            .where(col(Patient.project_id) == project_id, col(Patient.deleted_at).is_(None))
             .where(
                 or_(
-                    Patient.created_at < patient.created_at,
-                    and_(Patient.created_at == patient.created_at, Patient.id <= patient.id),
+                    col(Patient.created_at) < patient.created_at,
+                    and_(
+                        col(Patient.created_at) == patient.created_at,
+                        col(Patient.id) <= patient.id,
+                    ),
                 )
             )
         )
@@ -211,9 +224,9 @@ async def refresh_project_results(
     patients = (
         (
             await db.execute(
-                select(Patient.id)
-                .where(Patient.project_id == project_id, Patient.deleted_at.is_(None))
-                .order_by(Patient.created_at, Patient.id)
+                select(col(Patient.id))
+                .where(col(Patient.project_id) == project_id, col(Patient.deleted_at).is_(None))
+                .order_by(col(Patient.created_at), col(Patient.id))
             )
         )
         .scalars()

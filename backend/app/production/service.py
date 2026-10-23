@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.connectors.models import Note, Patient, PatientStatus
@@ -107,16 +108,16 @@ def _now() -> datetime:
 
 async def _has_existing_data(db: AsyncSession, project_id: str) -> bool:
     for model in (Annotation, NotePrediction, ProductionResult):
-        row = await db.scalar(select(model).where(model.project_id == project_id).limit(1))
+        row = await db.scalar(select(model).where(col(model.project_id) == project_id).limit(1))
         if row is not None:
             return True
     patient = await db.scalar(
-        select(Patient.id)
+        select(col(Patient.id))
         .where(
-            Patient.project_id == project_id,
-            (Patient.event_date.is_not(None))
-            | (Patient.reviewed_at.is_not(None))
-            | (Patient.review_reason.is_not(None)),
+            col(Patient.project_id) == project_id,
+            (col(Patient.event_date).is_not(None))
+            | (col(Patient.reviewed_at).is_not(None))
+            | (col(Patient.review_reason).is_not(None)),
         )
         .limit(1)
     )
@@ -126,10 +127,10 @@ async def _has_existing_data(db: AsyncSession, project_id: str) -> bool:
 async def _reset_project(db: AsyncSession, project_id: str) -> None:
     locked = list(
         await db.scalars(
-            select(Patient.patient_id_ext).where(
-                Patient.project_id == project_id,
-                Patient.deleted_at.is_(None),
-                (Patient.locked_by.is_not(None)) | (Patient.locked_at.is_not(None)),
+            select(col(Patient.patient_id_ext)).where(
+                col(Patient.project_id) == project_id,
+                col(Patient.deleted_at).is_(None),
+                (col(Patient.locked_by).is_not(None)) | (col(Patient.locked_at).is_not(None)),
             )
         )
     )
@@ -140,7 +141,7 @@ async def _reset_project(db: AsyncSession, project_id: str) -> None:
 
     await db.execute(
         update(Patient)
-        .where(Patient.project_id == project_id)
+        .where(col(Patient.project_id) == project_id)
         .values(
             event_date=None,
             event_annotation_id=None,
@@ -154,20 +155,20 @@ async def _reset_project(db: AsyncSession, project_id: str) -> None:
             locked_at=None,
         )
     )
-    await db.execute(delete(ProductionResult).where(ProductionResult.project_id == project_id))
+    await db.execute(delete(ProductionResult).where(col(ProductionResult.project_id) == project_id))
     await db.execute(
         update(Annotation)
-        .where(Annotation.project_id == project_id)
+        .where(col(Annotation.project_id) == project_id)
         .values(duplicate_of=None, skipped_by_event_annotation_id=None)
     )
-    await db.execute(delete(NotePrediction).where(NotePrediction.project_id == project_id))
-    await db.execute(delete(Annotation).where(Annotation.project_id == project_id))
+    await db.execute(delete(NotePrediction).where(col(NotePrediction.project_id) == project_id))
+    await db.execute(delete(Annotation).where(col(Annotation.project_id) == project_id))
 
 
 async def start_run(
     db: AsyncSession,
     project_id: str,
-    user_id: str,
+    user_id: str | None,
     config: Any,
     confirmed: bool = False,
 ) -> ProductionRun:
@@ -177,7 +178,7 @@ async def start_run(
     async with db.begin_nested():
         state = await db.scalar(
             select(ProductionState)
-            .where(ProductionState.project_id == project_id)
+            .where(col(ProductionState.project_id) == project_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -202,15 +203,17 @@ async def start_run(
         patients = list(
             await db.scalars(
                 select(Patient).where(
-                    Patient.project_id == project_id,
-                    Patient.deleted_at.is_(None),
+                    col(Patient.project_id) == project_id,
+                    col(Patient.deleted_at).is_(None),
                 )
             )
         )
         patient_by_id = {patient.id: patient for patient in patients}
         notes = list(
             await db.scalars(
-                select(Note).where(Note.project_id == project_id, Note.deleted_at.is_(None))
+                select(Note).where(
+                    col(Note.project_id) == project_id, col(Note.deleted_at).is_(None)
+                )
             )
         )
         notes = [note for note in notes if note.patient_id in patient_by_id]
@@ -245,14 +248,14 @@ async def start_run(
 async def _active_run(db: AsyncSession, run_id: str) -> tuple[ProductionRun, ProductionState]:
     run = await db.scalar(
         select(ProductionRun)
-        .where(ProductionRun.id == run_id)
+        .where(col(ProductionRun.id) == run_id)
         .execution_options(populate_existing=True)
     )
     if run is None:
         raise ProductionError("Production run was not found")
     state = await db.scalar(
         select(ProductionState)
-        .where(ProductionState.project_id == run.project_id)
+        .where(col(ProductionState.project_id) == run.project_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
@@ -278,9 +281,9 @@ async def _patient_completion(db: AsyncSession, run: ProductionRun, patient: Pat
     predictions = list(
         await db.scalars(
             select(NotePrediction).where(
-                NotePrediction.run_id == run.id,
-                NotePrediction.project_id == run.project_id,
-                NotePrediction.patient_id == patient.patient_id_ext,
+                col(NotePrediction.run_id) == run.id,
+                col(NotePrediction.project_id) == run.project_id,
+                col(NotePrediction.patient_id) == patient.patient_id_ext,
             )
         )
     )
@@ -290,12 +293,12 @@ async def _patient_completion(db: AsyncSession, run: ProductionRun, patient: Pat
         return
 
     pending_count = await db.scalar(
-        select(Annotation.annotation_id)
+        select(col(Annotation.annotation_id))
         .where(
-            Annotation.project_id == run.project_id,
-            Annotation.production_run_id == run.id,
-            Annotation.patient_id == patient.patient_id_ext,
-            Annotation.status == "U",
+            col(Annotation.project_id) == run.project_id,
+            col(Annotation.production_run_id) == run.id,
+            col(Annotation.patient_id) == patient.patient_id_ext,
+            col(Annotation.status) == "U",
         )
         .limit(1)
     )
@@ -304,8 +307,8 @@ async def _patient_completion(db: AsyncSession, run: ProductionRun, patient: Pat
     patient.review_reason = "production_complete"
     result = await db.scalar(
         select(ProductionResult).where(
-            ProductionResult.project_id == run.project_id,
-            ProductionResult.patient_uuid == patient.id,
+            col(ProductionResult.project_id) == run.project_id,
+            col(ProductionResult.patient_uuid) == patient.id,
         )
     )
     if result:
@@ -328,9 +331,9 @@ async def _patient_completion(db: AsyncSession, run: ProductionRun, patient: Pat
             select(func.count())
             .select_from(Note)
             .where(
-                Note.project_id == run.project_id,
-                Note.patient_id == patient.id,
-                Note.deleted_at.is_(None),
+                col(Note.project_id) == run.project_id,
+                col(Note.patient_id) == patient.id,
+                col(Note.deleted_at).is_(None),
             )
         )
         if not predictions:
@@ -371,9 +374,9 @@ async def _create_matches(
     existing = list(
         await db.scalars(
             select(Annotation).where(
-                Annotation.project_id == run.project_id,
-                Annotation.production_run_id == run.id,
-                Annotation.text_id == note.text_id,
+                col(Annotation.project_id) == run.project_id,
+                col(Annotation.production_run_id) == run.id,
+                col(Annotation.text_id) == note.text_id,
             )
         )
     )
@@ -384,9 +387,9 @@ async def _create_matches(
     all_existing = list(
         await db.scalars(
             select(Annotation).where(
-                Annotation.project_id == run.project_id,
-                Annotation.production_run_id == run.id,
-                Annotation.patient_id == patient.patient_id_ext,
+                col(Annotation.project_id) == run.project_id,
+                col(Annotation.production_run_id) == run.id,
+                col(Annotation.patient_id) == patient.patient_id_ext,
             )
         )
     )
@@ -468,20 +471,21 @@ async def _classify_and_store(
     claimed = await db.execute(
         update(NotePrediction)
         .where(
-            NotePrediction.id == prediction_id,
-            NotePrediction.run_id == run_id,
-            NotePrediction.status == "queued",
+            col(NotePrediction.id) == prediction_id,
+            col(NotePrediction.run_id) == run_id,
+            col(NotePrediction.status) == "queued",
         )
         .values(
             status="processing",
-            attempts=NotePrediction.attempts + 1,
+            attempts=col(NotePrediction.attempts) + 1,
             started_at=_now(),
             claimed_at=_now(),
             error=None,
         )
         .execution_options(synchronize_session=False)
+        .returning(col(NotePrediction.id))
     )
-    if claimed.rowcount != 1:
+    if claimed.scalar_one_or_none() is None:
         await db.commit()
         return False
     await db.commit()
@@ -493,45 +497,45 @@ async def _classify_and_store(
         )
     except Exception as exc:
         run = await _fence(db, run_id)
-        prediction = await db.get(NotePrediction, prediction_id, populate_existing=True)
-        patient = await db.get(Patient, patient_uuid, populate_existing=True)
-        if prediction is None or patient is None:
+        failed_prediction = await db.get(NotePrediction, prediction_id, populate_existing=True)
+        failed_patient = await db.get(Patient, patient_uuid, populate_existing=True)
+        if failed_prediction is None or failed_patient is None:
             raise ObsoleteRun(
                 "Prediction or patient row disappeared while classification was running"
             )
-        prediction.status = "failed"
-        prediction.error = str(exc)[:2000]
-        prediction.completed_at = _now()
+        failed_prediction.status = "failed"
+        failed_prediction.error = str(exc)[:2000]
+        failed_prediction.completed_at = _now()
         run.failed_notes += 1
         run.error_summary = f"One or more note classifications failed ({run.failed_notes})"
-        patient.status = PatientStatus.NLP_PROCESSING
+        failed_patient.status = PatientStatus.NLP_PROCESSING
         result = await db.scalar(
             select(ProductionResult).where(
-                ProductionResult.project_id == run.project_id,
-                ProductionResult.patient_uuid == patient.id,
+                col(ProductionResult.project_id) == run.project_id,
+                col(ProductionResult.patient_uuid) == failed_patient.id,
             )
         )
         if result:
             result.processing_status = "failed"
             result.notes_failed += 1
             result.failure_count += 1
-            result.last_error = prediction.error
-        await _refresh_results(db, run.project_id, patient.id)
+            result.last_error = failed_prediction.error
+        await _refresh_results(db, run.project_id, failed_patient.id)
         await db.commit()
         return True
 
     run = await _fence(db, run_id)
-    prediction = await db.get(NotePrediction, prediction_id, populate_existing=True)
-    patient = await db.get(Patient, patient_uuid, populate_existing=True)
-    if prediction is None or patient is None:
+    completed_prediction = await db.get(NotePrediction, prediction_id, populate_existing=True)
+    completed_patient = await db.get(Patient, patient_uuid, populate_existing=True)
+    if completed_prediction is None or completed_patient is None:
         raise ObsoleteRun("Prediction or patient row disappeared while classification was running")
-    prediction.status = "succeeded"
-    prediction.label = classification.label
-    prediction.score = classification.score
-    prediction.reasoning = classification.reasoning
-    prediction.evidence_spans = classification.evidence_spans
-    prediction.token_usage = classification.token_usage
-    prediction.completed_at = _now()
+    completed_prediction.status = "succeeded"
+    completed_prediction.label = classification.label
+    completed_prediction.score = classification.score
+    completed_prediction.reasoning = classification.reasoning
+    completed_prediction.evidence_spans = classification.evidence_spans
+    completed_prediction.token_usage = classification.token_usage
+    completed_prediction.completed_at = _now()
     _record_completed_note(run, note_text_id)
     from app.llm.usage import add_usage
 
@@ -550,10 +554,10 @@ async def _classify_and_store(
     annotations = list(
         await db.scalars(
             select(Annotation).where(
-                Annotation.project_id == run.project_id,
-                Annotation.production_run_id == run.id,
-                Annotation.text_id == note_text_id,
-                Annotation.status == "U",
+                col(Annotation.project_id) == run.project_id,
+                col(Annotation.production_run_id) == run.id,
+                col(Annotation.text_id) == note_text_id,
+                col(Annotation.status) == "U",
             )
         )
     )
@@ -565,14 +569,14 @@ async def _classify_and_store(
             annotation.reviewed_at = _now()
     result = await db.scalar(
         select(ProductionResult).where(
-            ProductionResult.project_id == run.project_id,
-            ProductionResult.patient_uuid == patient.id,
+            col(ProductionResult.project_id) == run.project_id,
+            col(ProductionResult.patient_uuid) == completed_patient.id,
         )
     )
     if result:
         result.processing_status = "running"
         result.notes_processed += 1
-    await _patient_completion(db, run, patient)
+    await _patient_completion(db, run, completed_patient)
     await db.commit()
     return True
 
@@ -588,11 +592,12 @@ async def execute_run(
     else:
         claim = await db.execute(
             update(ProductionRun)
-            .where(ProductionRun.id == run_id, ProductionRun.status == "queued")
-            .values(status="running", started_at=func.coalesce(ProductionRun.started_at, _now()))
+            .where(col(ProductionRun.id) == run_id, col(ProductionRun.status) == "queued")
+            .values(status="running", started_at=func.coalesce(col(ProductionRun.started_at), _now()))
             .execution_options(synchronize_session=False)
+            .returning(col(ProductionRun.id))
         )
-        if claim.rowcount != 1:
+        if claim.scalar_one_or_none() is None:
             await db.rollback()
             raise ProductionError("Production run is already claimed or is not queued")
         await db.refresh(run)
@@ -603,7 +608,7 @@ async def execute_run(
     query_groups = parse_query(_query(config))
     project = await db.scalar(
         select(Project)
-        .where(Project.id == run.project_id)
+        .where(col(Project.id) == run.project_id)
         .execution_options(populate_existing=True)
     )
     api_key = project.llm_api_key if project else None
@@ -611,16 +616,16 @@ async def execute_run(
         patient.id: patient
         for patient in await db.scalars(
             select(Patient).where(
-                Patient.project_id == run.project_id,
-                Patient.deleted_at.is_(None),
+                col(Patient.project_id) == run.project_id,
+                col(Patient.deleted_at).is_(None),
             )
         )
     }
     notes = list(
         await db.scalars(
             select(Note)
-            .where(Note.project_id == run.project_id, Note.deleted_at.is_(None))
-            .order_by(Note.note_date, Note.text_id)
+            .where(col(Note.project_id) == run.project_id, col(Note.deleted_at).is_(None))
+            .order_by(col(Note.note_date), col(Note.text_id))
         )
     )
     llm_enabled = _llm_enabled(config)
@@ -649,16 +654,16 @@ async def execute_run(
             patient.status = PatientStatus.NLP_PROCESSING
             result = await db.scalar(
                 select(ProductionResult).where(
-                    ProductionResult.project_id == run.project_id,
-                    ProductionResult.patient_uuid == patient.id,
+                    col(ProductionResult.project_id) == run.project_id,
+                    col(ProductionResult.patient_uuid) == patient.id,
                 )
             )
             if result:
                 result.processing_status = "running"
             prediction = await db.scalar(
                 select(NotePrediction).where(
-                    NotePrediction.project_id == run.project_id,
-                    NotePrediction.text_id == note.text_id,
+                    col(NotePrediction.project_id) == run.project_id,
+                    col(NotePrediction.text_id) == note.text_id,
                 )
             )
             if prediction is None:
@@ -721,7 +726,7 @@ async def resume_run(db: AsyncSession, run_id: str) -> ProductionRun:
         raise ProductionError("A running production run cannot be resumed concurrently")
     for prediction in await db.scalars(
         select(NotePrediction).where(
-            NotePrediction.run_id == run_id, NotePrediction.status == "processing"
+            col(NotePrediction.run_id) == run_id, col(NotePrediction.status) == "processing"
         )
     ):
         prediction.status = "queued"
@@ -736,8 +741,8 @@ async def retry_run(db: AsyncSession, run_id: str) -> ProductionRun:
     failed = list(
         await db.scalars(
             select(NotePrediction).where(
-                NotePrediction.run_id == run_id,
-                NotePrediction.status == "failed",
+                col(NotePrediction.run_id) == run_id,
+                col(NotePrediction.status) == "failed",
             )
         )
     )
@@ -752,8 +757,8 @@ async def retry_run(db: AsyncSession, run_id: str) -> ProductionRun:
     run.error_summary = None
     for result in await db.scalars(
         select(ProductionResult).where(
-            ProductionResult.project_id == run.project_id,
-            ProductionResult.processing_status == "failed",
+            col(ProductionResult.project_id) == run.project_id,
+            col(ProductionResult.processing_status) == "failed",
         )
     ):
         result.processing_status = "queued"
@@ -778,13 +783,13 @@ async def cancel_run(db: AsyncSession, run_id: str) -> ProductionRun:
 async def get_stats(db: AsyncSession, run_id: str) -> dict[str, Any]:
     run, _ = await _active_run(db, run_id)
     predictions = list(
-        await db.scalars(select(NotePrediction).where(NotePrediction.run_id == run_id))
+        await db.scalars(select(NotePrediction).where(col(NotePrediction.run_id) == run_id))
     )
     annotations = list(
         await db.scalars(
             select(Annotation).where(
-                Annotation.project_id == run.project_id,
-                Annotation.production_run_id == run_id,
+                col(Annotation.project_id) == run.project_id,
+                col(Annotation.production_run_id) == run_id,
             )
         )
     )

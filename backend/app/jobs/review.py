@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import col
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -50,20 +51,21 @@ async def _claim_job(session: AsyncSession, job_id: str) -> bool:
     result = await session.execute(
         update(PatientReviewJob)
         .where(
-            PatientReviewJob.id == job_id,
-            PatientReviewJob.status == "queued",
-            PatientReviewJob.attempt_count < MAX_REVIEW_ATTEMPTS,
+            col(PatientReviewJob.id) == job_id,
+            col(PatientReviewJob.status) == "queued",
+            col(PatientReviewJob.attempt_count) < MAX_REVIEW_ATTEMPTS,
         )
         .values(
             status="running",
-            attempt_count=PatientReviewJob.attempt_count + 1,
+            attempt_count=col(PatientReviewJob.attempt_count) + 1,
             started_at=now_utc(),
             updated_at=now_utc(),
         )
         .execution_options(synchronize_session=False)
+        .returning(col(PatientReviewJob.id))
     )
     await session.commit()
-    return result.rowcount == 1
+    return result.scalar_one_or_none() is not None
 
 
 async def _record_failure(
@@ -76,7 +78,7 @@ async def _record_failure(
     async with session_factory() as session:
         job = await session.scalar(
             select(PatientReviewJob)
-            .where(PatientReviewJob.id == job_id)
+            .where(col(PatientReviewJob.id) == job_id)
             .with_for_update()
         )
         if job is None or job.status != "running":
@@ -85,7 +87,7 @@ async def _record_failure(
         job.updated_at = now_utc()
         attempt = job.attempt_count
         patient = await session.scalar(
-            select(Patient).where(Patient.id == job.patient_uuid).with_for_update()
+            select(Patient).where(col(Patient.id) == job.patient_uuid).with_for_update()
         )
         if attempt >= MAX_REVIEW_ATTEMPTS:
             job.status = "failed"
@@ -163,8 +165,8 @@ async def recover_patient_review_jobs(
             await session.scalars(
                 select(PatientReviewJob)
                 .where(
-                    PatientReviewJob.status == "running",
-                    PatientReviewJob.started_at < stale_before,
+                    col(PatientReviewJob.status) == "running",
+                    col(PatientReviewJob.started_at) < stale_before,
                 )
                 .with_for_update(skip_locked=True)
             )
@@ -194,8 +196,8 @@ async def recover_patient_review_jobs(
         queued = list(
             await session.scalars(
                 select(PatientReviewJob)
-                .where(PatientReviewJob.status == "queued")
-                .order_by(PatientReviewJob.created_at)
+                .where(col(PatientReviewJob.status) == "queued")
+                .order_by(col(PatientReviewJob.created_at))
             )
         )
 
@@ -213,8 +215,8 @@ async def request_patient_review_retry(
 
     job = await session.scalar(
         select(PatientReviewJob).where(
-            PatientReviewJob.id == job_id,
-            PatientReviewJob.project_id == project_id,
+            col(PatientReviewJob.id) == job_id,
+            col(PatientReviewJob.project_id) == project_id,
         ).with_for_update()
     )
     if job is None or job.status != "failed":
@@ -236,14 +238,14 @@ async def retry_patient_review_job(
 
     job = await session.scalar(
         select(PatientReviewJob).where(
-            PatientReviewJob.id == job_id,
-            PatientReviewJob.project_id == project_id,
+            col(PatientReviewJob.id) == job_id,
+            col(PatientReviewJob.project_id) == project_id,
         ).with_for_update()
     )
     if job is None or job.status != "failed":
         return None
     patient = await session.scalar(
-        select(Patient).where(Patient.id == job.patient_uuid).with_for_update()
+        select(Patient).where(col(Patient.id) == job.patient_uuid).with_for_update()
     )
     if patient is None:
         return None
@@ -277,8 +279,8 @@ async def discard_failed_patient_review_job(
 
     job = await session.scalar(
         select(PatientReviewJob).where(
-            PatientReviewJob.id == job_id,
-            PatientReviewJob.project_id == project_id,
+            col(PatientReviewJob.id) == job_id,
+            col(PatientReviewJob.project_id) == project_id,
         ).with_for_update()
     )
     if job is None or job.status != "failed":

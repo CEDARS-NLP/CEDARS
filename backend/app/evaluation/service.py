@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.common.utils import now_utc
 from app.config import settings
@@ -219,8 +220,8 @@ async def list_sessions(
     """List all sessions for a project, ordered by created_at desc."""
     stmt = (
         select(EvaluationSession)
-        .where(EvaluationSession.project_id == project_id)
-        .order_by(EvaluationSession.created_at.desc())
+        .where(col(EvaluationSession.project_id) == project_id)
+        .order_by(col(EvaluationSession.created_at).desc())
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -586,9 +587,9 @@ async def get_cost_summary(db: AsyncSession, session_id: str) -> dict:
     if funnel["sample_patients"] > 0 and funnel["matched_patients"] > 0:
         total_patients = (
             await db.execute(
-                select(func.count(Patient.id)).where(
-                    Patient.project_id == session.project_id,
-                    Patient.deleted_at.is_(None),
+                select(func.count(col(Patient.id))).where(
+                    col(Patient.project_id) == session.project_id,
+                    col(Patient.deleted_at).is_(None),
                 )
             )
         ).scalar() or 0
@@ -1013,11 +1014,13 @@ async def _execute_sample_llm_impl(
         # always read "N notes searched · N matched" — hiding the one number
         # that shows what the queries actually skipped.
         totals_stmt = (
-            select(Note.patient_id, func.count())
-            .where(Note.patient_id.in_(batch_ids))
-            .group_by(Note.patient_id)
+            select(col(Note.patient_id), func.count())
+            .where(col(Note.patient_id).in_(batch_ids))
+            .group_by(col(Note.patient_id))
         )
-        notes_total = dict((await db.execute(totals_stmt)).all())
+        notes_total: dict[str, int] = {
+            patient_id: count for patient_id, count in (await db.execute(totals_stmt)).all()
+        }
 
         for patient_id in batch_ids:
             # Already ordered by (patient_id, note_date) in the query above.
@@ -1621,16 +1624,16 @@ async def get_pipeline_stats(db: AsyncSession, session_id: str) -> dict:
     production_stats = await production_service.get_stats(db, run.id)
     rows = list(
         await db.execute(
-            select(ProductionResult.processing_status, func.count())
-            .where(ProductionResult.project_id == run.project_id)
-            .group_by(ProductionResult.processing_status)
+            select(col(ProductionResult.processing_status), func.count())
+            .where(col(ProductionResult.project_id) == run.project_id)
+            .group_by(col(ProductionResult.processing_status))
         )
     )
-    counts = dict(rows)
+    counts: dict[str, int] = {status: count for status, count in rows}
     completed = counts.get("completed", 0)
     matched_patients = await db.scalar(
-        select(func.count(func.distinct(Annotation.patient_id))).where(
-            Annotation.production_run_id == run.id
+        select(func.count(func.distinct(col(Annotation.patient_id)))).where(
+            col(Annotation.production_run_id) == run.id
         )
     ) or 0
     no_match = max(0, completed - matched_patients)
