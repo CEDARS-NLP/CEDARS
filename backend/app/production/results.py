@@ -154,6 +154,7 @@ async def refresh_patient_result(
     result.patient_id = patient.patient_id_ext
     result.processing_status = processing_status
     result.review_status = review_status
+    result.review_type = patient.review_type
     result.notes_total = notes_total
     result.notes_processed = statuses["succeeded"]
     if not predictions and processing_status == "completed":

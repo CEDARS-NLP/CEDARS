@@ -9,6 +9,7 @@ from sqlmodel import col
 from app.annotations.adjudication_compat import ReviewStatus
 from app.annotations.adjudication_service import (
     _lock_run_identity,
+    _refresh_note_reviews,
     _refresh_result,
     _skip_after_event_enabled,
     _sync_cursor,
@@ -52,8 +53,15 @@ async def _check_patient_completion(
     if patient.locked_by not in (None, user_id):
         return
     cursor = await _sync_cursor(session, project_id, patient, user_id, run_id, generation)
+    state = cursor["handler_state"]
+    review_type = await _refresh_note_reviews(
+        session, project_id, patient, run_id, user_id, now_utc()
+    )
+    is_reviewed = all(
+        status != ReviewStatus.UNREVIEWED for status in state["review_statuses"]
+    )
     await _update_patient_completion(
-        session, project_id, patient, user_id, run_id, cursor["handler"]
+        session, project_id, patient, user_id, run_id, is_reviewed, review_type
     )
     await _refresh_result(session, project_id, patient.id)
     await session.commit()

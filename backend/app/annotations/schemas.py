@@ -1,9 +1,10 @@
 """Request/response schemas for annotations."""
 
 from datetime import date, datetime
-from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app.annotations.models import ReviewStatus
 
 
 class AnnotationResponse(BaseModel):
@@ -30,6 +31,7 @@ class AnnotationResponse(BaseModel):
     predictor_model: str = ""
     reasoning: str | None = None
     review_status: str
+    review_type: str | None = None
     reviewed_by: str | None
     reviewed_at: datetime | None
     event_date: date | None = None
@@ -45,7 +47,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewDecision(BaseModel):
     annotation_id: str
-    action: Literal["negative", "event"]
+    status: ReviewStatus
     event_date: date | None = None
 
 

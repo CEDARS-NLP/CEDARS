@@ -103,6 +103,7 @@ class Patient(SQLModel, table=True):
     status: PatientStatus = Field(default=PatientStatus.NEW)
     review_source: str | None = Field(default=None, max_length=20)
     review_reason: str | None = Field(default=None, max_length=80)
+    review_type: str | None = Field(default=None, max_length=20)
     reviewed_by: str | None = Field(default=None, foreign_key="users.id")
     reviewed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True),
@@ -170,6 +171,13 @@ class Note(SQLModel, table=True):
     )
     source_ref: str | None = Field(default=None)
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
+    review_status: str | None = Field(default=None, max_length=20)
+    review_type: str | None = Field(default=None, max_length=20)
+    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),

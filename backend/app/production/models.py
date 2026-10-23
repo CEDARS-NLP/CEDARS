@@ -144,6 +144,7 @@ class ProductionResult(SQLModel, table=True):
     patient_id: str = Field(max_length=100)
     processing_status: str = Field(default="queued", max_length=20)
     review_status: str = Field(default="pending", max_length=20)
+    review_type: str | None = Field(default=None, max_length=20)
     notes_total: int = Field(default=0)
     notes_processed: int = Field(default=0)
     notes_failed: int = Field(default=0)

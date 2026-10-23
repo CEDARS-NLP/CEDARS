@@ -160,8 +160,8 @@ describe("manual annotation review", () => {
       "/projects/project/annotations/patient/patient/review-batches",
       expect.objectContaining({
         decisions: [
-          { annotation_id: "1", action: "negative", event_date: null },
-          { annotation_id: "2", action: "negative", event_date: null },
+          { annotation_id: "1", status: "reviewed", event_date: null },
+          { annotation_id: "2", status: "reviewed", event_date: null },
         ],
       }),
     );

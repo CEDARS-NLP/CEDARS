@@ -35,6 +35,15 @@ class ReviewStatus(str, enum.Enum):
     REJECTED = "rejected"
 
 
+class ReviewType(str, enum.Enum):
+    """How a patient, note, or annotation came to be reviewed."""
+
+    NO_ANNOTATION = "no_annotation"
+    NEGATION = "negation"
+    LLM = "llm"
+    HUMAN = "human"
+
+
 class Annotation(SQLModel, table=True):
     """A production match row using the physical v1 Annotations contract."""
 
@@ -94,6 +103,7 @@ class Annotation(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    review_type: str | None = Field(default=None, max_length=20)
     actor_type: str | None = Field(default=None, max_length=20)
     prediction_id: int | None = Field(default=None)
     duplicate_of: int | None = Field(default=None, foreign_key="Annotations.annotation_id")

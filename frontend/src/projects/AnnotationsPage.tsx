@@ -91,7 +91,7 @@ interface PatientInfo extends ReviewMetadata {
 
 interface ReviewDecisionDraft {
   annotation_id: string;
-  action: "negative" | "event";
+  status: "reviewed" | "skipped";
   event_date: string | null;
 }
 
@@ -117,12 +117,12 @@ function getDraftStatuses(
   const statuses = new Map<string, string>();
   let eventSkipped = new Set<string>();
   for (const decision of decisions) {
-    if (decision.action === "event") {
+    if (decision.event_date) {
       for (const annotationId of eventSkipped) statuses.delete(annotationId);
       eventSkipped = new Set<string>();
     }
-    statuses.set(decision.annotation_id, "reviewed");
-    if (decision.action !== "event" || !decision.event_date || !skipAfterEvent) continue;
+    statuses.set(decision.annotation_id, decision.status);
+    if (!decision.event_date || !skipAfterEvent) continue;
     const eventDate = decision.event_date.slice(0, 10);
     for (const annotation of annotations) {
       const status = statuses.get(annotation.id) ?? annotation.review_status;
@@ -648,12 +648,12 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   const localStatuses = new Map<string, string>();
   let skippedByDraftEvent = new Set<string>();
   for (const decision of draftForPatient) {
-    if (decision.action === "event") {
+    if (decision.event_date) {
       for (const annotationId of skippedByDraftEvent) localStatuses.delete(annotationId);
       skippedByDraftEvent = new Set<string>();
     }
-    localStatuses.set(decision.annotation_id, "reviewed");
-    if (decision.action === "event" && decision.event_date && patientInfo?.skip_after_event) {
+    localStatuses.set(decision.annotation_id, decision.status);
+    if (decision.event_date && patientInfo?.skip_after_event) {
       const eventDate = decision.event_date.slice(0, 10);
       for (const annotation of sequenceAnnotations) {
         const currentStatus = localStatuses.get(annotation.id) ?? annotation.review_status;
@@ -911,14 +911,14 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
   const handleAdjudicate = useCallback(() => {
     if (!current || isSubmittingBatch) return;
-    void handlePostAction({ annotation_id: current.id, action: "negative", event_date: null });
+    void handlePostAction({ annotation_id: current.id, status: "reviewed", event_date: null });
   }, [current, handlePostAction, isSubmittingBatch]);
 
   const handleEventDate = useCallback(() => {
     if (!current || !eventDateValue || isSubmittingBatch) return;
     void handlePostAction({
       annotation_id: current.id,
-      action: "event",
+      status: "reviewed",
       event_date: eventDateValue,
     });
   }, [current, eventDateValue, handlePostAction, isSubmittingBatch]);

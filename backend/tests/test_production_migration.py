@@ -32,6 +32,7 @@ from app.production.models import ProductionResult
 ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "c1d2e3f4a5b6"
 PRODUCTION_REVISION = "d4e5f6a7b8c9"
+HEAD_REVISION = "f2b3c4d5e6a7"
 
 
 def _alembic_config(database_url: str, output_buffer=None) -> Config:
@@ -203,7 +204,7 @@ def test_production_migration_preserves_source_rows_and_enforces_constraints(tmp
             )
         )
 
-    command.upgrade(config, PRODUCTION_REVISION)
+    command.upgrade(config, HEAD_REVISION)
 
     with engine.connect() as connection:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
@@ -351,7 +352,7 @@ def test_production_migration_matches_model_on_postgresql():
             _create_pre_revision_schema(engine)
             config = _alembic_config(str(isolated_url))
             command.stamp(config, PREVIOUS_HEAD)
-            command.upgrade(config, PRODUCTION_REVISION)
+            command.upgrade(config, HEAD_REVISION)
             with engine.connect() as connection:
                 _assert_result_columns_match_model(connection)
         finally:

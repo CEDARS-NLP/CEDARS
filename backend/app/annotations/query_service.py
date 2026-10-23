@@ -139,6 +139,7 @@ async def serialize_annotation(
         "predictor_model": (prediction.model_fingerprint or "") if prediction else "",
         "reasoning": prediction.reasoning if prediction else None,
         "review_status": _STATUS_TO_API[annotation.status],
+        "review_type": annotation.review_type,
         "reviewed_by": annotation.reviewed_by,
         "reviewed_at": annotation.reviewed_at,
         "event_date": current_event_date,

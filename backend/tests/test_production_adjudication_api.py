@@ -329,7 +329,7 @@ async def test_review_batch_keeps_lock_until_worker_applies_complete_batch(clien
         "idempotency_key": "batch-complete-patient-1",
         "skip_after_event": True,
         "decisions": [
-            {"annotation_id": str(annotation_id), "action": "negative", "event_date": None}
+            {"annotation_id": str(annotation_id), "status": "reviewed", "event_date": None}
             for annotation_id in ids
         ],
     }
@@ -381,7 +381,7 @@ async def test_review_batch_unlocks_after_third_worker_failure(client, monkeypat
         json={
             "idempotency_key": "batch-fails-three-times",
             "decisions": [
-                {"annotation_id": str(annotation_id), "action": "negative", "event_date": None}
+                {"annotation_id": str(annotation_id), "status": "reviewed", "event_date": None}
                 for annotation_id in ids
             ],
         },
@@ -413,3 +413,151 @@ async def test_review_batch_unlocks_after_third_worker_failure(client, monkeypat
         assert job.last_error == "synthetic review write failure"
         assert patient.locked_by is None
         assert all(row.status == "U" for row in rows)
+
+
+async def test_review_batch_accepts_out_of_order_snapshot(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    # Submit the snapshot in reverse order; the batch must apply by annotation id.
+    body = {
+        "idempotency_key": "batch-out-of-order",
+        "skip_after_event": False,
+        "decisions": [
+            {"annotation_id": str(annotation_id), "status": "reviewed", "event_date": None}
+            for annotation_id in reversed(ids)
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    from app.jobs.review import execute_patient_review_job
+
+    app = client._transport.app
+    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    assert result["status"] == "completed"
+    async with app.state.test_session_factory() as session:
+        patient = await session.get(Patient, patient_id)
+        rows = [await session.get(Annotation, annotation_id) for annotation_id in ids]
+        assert patient.status == PatientStatus.REVIEWED
+        assert all(row.status == "R" and row.review_reason == "human_negative" for row in rows)
+
+
+async def test_review_batch_accepts_incomplete_snapshot(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    body = {
+        "idempotency_key": "batch-incomplete",
+        "skip_after_event": False,
+        "decisions": [
+            {"annotation_id": str(ids[0]), "status": "reviewed", "event_date": None},
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    from app.jobs.review import execute_patient_review_job
+
+    app = client._transport.app
+    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    assert result["status"] == "completed"
+    async with app.state.test_session_factory() as session:
+        patient = await session.get(Patient, patient_id)
+        rows = [await session.get(Annotation, annotation_id) for annotation_id in ids]
+        assert patient.status == PatientStatus.REVIEWING
+        assert rows[0].status == "R"
+        assert rows[1].status == "U"
+        assert rows[2].status == "U"
+
+
+async def test_review_batch_records_note_review_type_and_results(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    body = {
+        "idempotency_key": "batch-note-review-type",
+        "skip_after_event": False,
+        "decisions": [
+            {"annotation_id": str(annotation_id), "status": "reviewed", "event_date": None}
+            for annotation_id in ids
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    from app.jobs.review import execute_patient_review_job
+    from app.production.models import ProductionResult
+
+    app = client._transport.app
+    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    assert result["status"] == "completed"
+    async with app.state.test_session_factory() as session:
+        patient = await session.get(Patient, patient_id)
+        notes = (
+            await session.execute(select(Note).where(Note.patient_id == patient_id))
+        ).scalars().all()
+        assert patient.review_type == "human"
+        assert all(note.review_status == "reviewed" for note in notes)
+        assert all(note.review_type == "human" for note in notes)
+        production_result = await session.scalar(
+            select(ProductionResult).where(ProductionResult.patient_uuid == patient_id)
+        )
+        assert production_result is not None
+        assert production_result.review_type == "human"
+
+
+async def test_review_batch_marks_llm_negative_note_reviewed(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    app = client._transport.app
+    async with app.state.test_session_factory() as session:
+        prediction = await session.scalar(
+            select(NotePrediction).where(NotePrediction.text_id == "N-1")
+        )
+        prediction.label = 0
+        session.add(prediction)
+        await session.commit()
+
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    body = {
+        "idempotency_key": "batch-llm-negative",
+        "skip_after_event": False,
+        "decisions": [
+            {"annotation_id": str(ids[1]), "status": "reviewed", "event_date": None},
+            {"annotation_id": str(ids[2]), "status": "reviewed", "event_date": None},
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    from app.jobs.review import execute_patient_review_job
+
+    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    assert result["status"] == "completed"
+    async with app.state.test_session_factory() as session:
+        patient = await session.get(Patient, patient_id)
+        llm_note = await session.scalar(select(Note).where(Note.text_id == "N-1"))
+        assert patient.status == PatientStatus.REVIEWED
+        assert llm_note.review_status == "reviewed"
+        assert llm_note.review_type == "llm"

@@ -109,6 +109,7 @@ async def export_annotations(
             "predictor_model": pred.model_fingerprint if pred else "",
             "reasoning": (pred.reasoning if pred else "") or "",
             "review_status": getattr(ann.review_status, "value", ann.review_status),
+            "review_type": ann.review_type,
             "reviewed_by": ann.reviewed_by,
             "reviewed_at": ann.reviewed_at,
             "event_date": (
@@ -184,6 +185,7 @@ _CSV_HEADERS = [
     "predictor_model",
     "reasoning",
     "review_status",
+    "review_type",
     "reviewed_by",
     "reviewed_at",
     "event_date",
@@ -196,7 +198,7 @@ _CSV_HEADERS = [
 _CSV_DATE_FIELDS = ("text_date", "reviewed_at", "event_date", "patient_reviewed_at")
 _RESULT_CSV_HEADERS = [
     "project_id", "patient_uuid", "patient_id", "index_no", "processing_status",
-    "review_status", "comments", "event_information", "event_date",
+    "review_status", "review_type", "comments", "event_information", "event_date",
     "event_annotation_id", "first_note_date", "last_note_date", "max_score",
     "max_score_note_date", "max_score_note_id", "reviewer", "reviewed_notes",
     "reviewed_sentences", "total_notes", "total_sentences", "notes_total",

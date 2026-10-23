@@ -27,6 +27,7 @@ class ExportAnnotationRow(BaseModel):
     predictor_model: str
     reasoning: str
     review_status: str
+    review_type: str | None = None
     reviewed_by: str | None
     reviewed_at: datetime | None
     event_date: date | datetime | None
@@ -43,6 +44,7 @@ class ExportResultRow(BaseModel):
     index_no: int | None = None
     processing_status: str
     review_status: str
+    review_type: str | None = None
     comments: str | None = None
     event_information: dict | None = None
     event_date: date | None = None
