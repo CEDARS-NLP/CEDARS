@@ -10,9 +10,17 @@ vi.mock("@/api/client", () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 const noteText = "DVT ruled out; DVT confirmed; DVT absent.";
 let currentAnnotationId = "1";
 let annotationRows: Record<string, unknown>[];
+let annotationIds: string[];
 let patientNextCalls: number;
+let patientSkipAfterEvent: boolean;
 
-function annotation(id: string, start: number, end: number, reasoning: string) {
+function annotation(
+  id: string,
+  start: number,
+  end: number,
+  reasoning: string,
+  noteDate = "2026-01-01T00:00:00Z",
+) {
   return {
     id,
     project_id: "project",
@@ -34,7 +42,7 @@ function annotation(id: string, start: number, end: number, reasoning: string) {
     review_status: id === "1" && currentAnnotationId === "2" ? "reviewed" : "unreviewed",
     event_date: null,
     created_at: "2026-01-01T00:00:00Z",
-    note_date: "2026-01-01T00:00:00Z",
+    note_date: noteDate,
     note_text_id: "TEXT-1",
   };
 }
@@ -55,6 +63,8 @@ function showAnnotations() {
 beforeEach(() => {
   currentAnnotationId = "1";
   patientNextCalls = 0;
+  patientSkipAfterEvent = false;
+  annotationIds = ["1", "2"];
   annotationRows = [
     annotation("1", 0, 3, "Prediction one"),
     annotation("2", 15, 18, "Prediction two"),
@@ -76,11 +86,22 @@ beforeEach(() => {
           failed_review_job_id: null,
         };
       }
-      return { patient_id: "patient", patient_id_ext: "P-1", total_annotations: 2, unreviewed_annotations: 2, all_complete: false };
+      return {
+        patient_id: "patient",
+        patient_id_ext: "P-1",
+        total_annotations: annotationIds.length,
+        unreviewed_annotations: annotationIds.length,
+        all_complete: false,
+        skip_after_event: patientSkipAfterEvent,
+      };
     }
     if (path.endsWith("/annotations/patient/patient/annotations")) return annotationRows;
     if (path.endsWith("/annotations/patient/patient/cursor")) {
-      return { current_annotation_id: currentAnnotationId, next_annotation_id: "2", annotation_ids: ["1", "2"] };
+      return {
+        current_annotation_id: currentAnnotationId,
+        next_annotation_id: annotationIds[1] ?? null,
+        annotation_ids: annotationIds,
+      };
     }
     if (path.endsWith("/annotations/patient/patient/stats")) {
       return { total: 2, unreviewed: 2, reviewed: 0, skipped: 0, current_event_date: null, event_annotation_id: null };
@@ -197,5 +218,107 @@ describe("manual annotation review", () => {
     const firstPayload = vi.mocked(api.post).mock.calls[0][1];
     const retryPayload = vi.mocked(api.post).mock.calls[1][1];
     expect(retryPayload).toEqual(firstPayload);
+  });
+
+  it("overwrites the previous event date so only one event is submitted", async () => {
+    showAnnotations();
+
+    expect(await screen.findByText("Prediction one")).toBeInTheDocument();
+
+    // Record an event date on the first annotation.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Set Event Date/ }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Event date"), {
+        target: { value: "2026-01-15" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    });
+
+    await waitFor(() => expect(screen.getByText("Prediction two")).toBeInTheDocument());
+    expect(api.post).not.toHaveBeenCalled();
+
+    // Record a different event date on the second annotation.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Set Event Date/ }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Event date"), {
+        target: { value: "2026-02-15" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    });
+
+    // The first annotation is reverted to unreviewed; finish it with No Event.
+    await waitFor(() => expect(screen.getByText("Prediction one")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /No Event/ }));
+    });
+
+    await waitFor(() => expect(screen.getByText("Finalizing 1 patient review.")).toBeInTheDocument());
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(api.post).mock.calls[0][1] as {
+      decisions: { annotation_id: string; status: string; event_date: string | null }[];
+    };
+    expect(payload.decisions.filter((decision) => decision.event_date)).toEqual([
+      { annotation_id: "2", status: "reviewed", event_date: "2026-02-15" },
+    ]);
+    expect(payload.decisions).toHaveLength(2);
+  });
+
+  it("re-derives skips when a later event date replaces an earlier one", async () => {
+    patientSkipAfterEvent = true;
+    annotationIds = ["1", "2", "3"];
+    annotationRows = [
+      annotation("1", 0, 3, "Prediction one", "2026-05-01T00:00:00Z"),
+      annotation("2", 15, 18, "Prediction two", "2026-01-01T00:00:00Z"),
+      annotation("3", 30, 33, "Prediction three", "2026-06-01T00:00:00Z"),
+    ];
+    showAnnotations();
+
+    expect(await screen.findByText("Prediction one")).toBeInTheDocument();
+
+    // First event skips the later note but leaves the earlier note unreviewed.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Set Event Date/ }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Event date"), {
+        target: { value: "2026-02-15" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    });
+
+    await waitFor(() => expect(screen.getByText("Prediction two")).toBeInTheDocument());
+    expect(api.post).not.toHaveBeenCalled();
+
+    // A new event date replaces the first and re-derives every skip.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Set Event Date/ }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Event date"), {
+        target: { value: "2026-01-15" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    });
+
+    await waitFor(() => expect(screen.getByText("Finalizing 1 patient review.")).toBeInTheDocument());
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(api.post).mock.calls[0][1] as {
+      decisions: { annotation_id: string; status: string; event_date: string | null }[];
+    };
+    expect(payload.decisions).toEqual([
+      { annotation_id: "2", status: "reviewed", event_date: "2026-01-15" },
+    ]);
   });
 });

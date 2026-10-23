@@ -109,31 +109,55 @@ interface ReviewCursor {
   annotation_ids: string[];
 }
 
+/**
+ * Merge a new decision into the in-memory draft for a patient.
+ *
+ * A patient may only carry a single event date. Setting a new event date
+ * discards any previously recorded event decision so the latest date is the
+ * ground truth; the backend therefore never receives more than one event date.
+ * Non-event decisions replace any earlier decision for the same annotation.
+ */
+function mergeReviewDecision(
+  draft: ReviewDecisionDraft[],
+  decision: ReviewDecisionDraft,
+): ReviewDecisionDraft[] {
+  if (decision.event_date) {
+    return [...draft.filter((item) => !item.event_date), decision];
+  }
+  return [
+    ...draft.filter((item) => item.annotation_id !== decision.annotation_id),
+    decision,
+  ];
+}
+
+/**
+ * Derive the effective review status for every annotation from the draft.
+ *
+ * Applies the recorded decisions, then, when skip-after-event is enabled,
+ * marks every still-unreviewed annotation at or after the event date as
+ * skipped. The event decision is always last in the draft, so all explicit
+ * decisions are applied before the skip pass.
+ */
 function getDraftStatuses(
   annotations: PatientAnnotation[],
   decisions: ReviewDecisionDraft[],
   skipAfterEvent: boolean,
 ): Map<string, string> {
   const statuses = new Map<string, string>();
-  let eventSkipped = new Set<string>();
   for (const decision of decisions) {
-    if (decision.event_date) {
-      for (const annotationId of eventSkipped) statuses.delete(annotationId);
-      eventSkipped = new Set<string>();
-    }
     statuses.set(decision.annotation_id, decision.status);
-    if (!decision.event_date || !skipAfterEvent) continue;
-    const eventDate = decision.event_date.slice(0, 10);
-    for (const annotation of annotations) {
-      const status = statuses.get(annotation.id) ?? annotation.review_status;
-      if (
-        annotation.id !== decision.annotation_id &&
-        status === "unreviewed" &&
-        (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
-      ) {
-        statuses.set(annotation.id, "skipped");
-        eventSkipped.add(annotation.id);
-      }
+  }
+  const eventDecision = decisions.find((decision) => decision.event_date);
+  if (!eventDecision?.event_date || !skipAfterEvent) return statuses;
+  const eventDate = eventDecision.event_date.slice(0, 10);
+  for (const annotation of annotations) {
+    const status = statuses.get(annotation.id) ?? annotation.review_status;
+    if (
+      annotation.id !== eventDecision.annotation_id &&
+      status === "unreviewed" &&
+      (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
+    ) {
+      statuses.set(annotation.id, "skipped");
     }
   }
   return statuses;
@@ -645,29 +669,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     () => reviewDraft.patientId === patientId ? reviewDraft.decisions : [],
     [reviewDraft, patientId]
   );
-  const localStatuses = new Map<string, string>();
-  let skippedByDraftEvent = new Set<string>();
-  for (const decision of draftForPatient) {
-    if (decision.event_date) {
-      for (const annotationId of skippedByDraftEvent) localStatuses.delete(annotationId);
-      skippedByDraftEvent = new Set<string>();
-    }
-    localStatuses.set(decision.annotation_id, decision.status);
-    if (decision.event_date && patientInfo?.skip_after_event) {
-      const eventDate = decision.event_date.slice(0, 10);
-      for (const annotation of sequenceAnnotations) {
-        const currentStatus = localStatuses.get(annotation.id) ?? annotation.review_status;
-        if (
-          annotation.id !== decision.annotation_id &&
-          currentStatus === "unreviewed" &&
-          (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
-        ) {
-          localStatuses.set(annotation.id, "skipped");
-          skippedByDraftEvent.add(annotation.id);
-        }
-      }
-    }
-  }
+  const localStatuses = getDraftStatuses(
+    sequenceAnnotations,
+    draftForPatient,
+    patientInfo?.skip_after_event ?? false,
+  );
   const displayAnnotations = sequenceAnnotations.map((annotation) => ({
     ...annotation,
     review_status: localStatuses.get(annotation.id) ?? annotation.review_status,
@@ -740,7 +746,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   const handlePostAction = useCallback(async (decision: ReviewDecisionDraft) => {
     if (!patientId || !reviewCursor) return;
     setBatchError(null);
-    const decisions = [...draftForPatient, decision];
+    const decisions = mergeReviewDecision(draftForPatient, decision);
     const statuses = getDraftStatuses(
       sequenceAnnotations,
       decisions,

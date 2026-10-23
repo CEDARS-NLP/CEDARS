@@ -561,3 +561,26 @@ async def test_review_batch_marks_llm_negative_note_reviewed(client):
         assert patient.status == PatientStatus.REVIEWED
         assert llm_note.review_status == "reviewed"
         assert llm_note.review_type == "llm"
+
+
+async def test_review_batch_rejects_multiple_event_dates(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    # The frontend must collapse to a single event date; the API guards against
+    # a batch that carries more than one so the ground truth stays unambiguous.
+    body = {
+        "idempotency_key": "batch-multiple-events",
+        "skip_after_event": False,
+        "decisions": [
+            {"annotation_id": str(ids[0]), "status": "reviewed", "event_date": "2026-01-15"},
+            {"annotation_id": str(ids[1]), "status": "reviewed", "event_date": "2026-02-15"},
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "Review batch contains multiple event dates"
