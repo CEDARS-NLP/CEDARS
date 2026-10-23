@@ -301,7 +301,7 @@ class TestNlpProcessing:
         stats = stats_resp.json()
         assert stats["total_notes"] == 3
         assert stats["processed_notes"] == 3
-        assert stats["total_sentences"] > 0
+        assert stats["total_sentences"] == 3
         assert stats["target_sentences"] > 0
 
     async def test_run_nlp_no_queries(self, client):
@@ -309,7 +309,7 @@ class TestNlpProcessing:
         pid = await create_project(client)
         await self._setup_project_with_notes(client, pid)
 
-        # Run NLP without any search queries -- all sentences, none targeted
+        # Without a query, cache sentence boundaries and finish with no targets.
         import asyncio
         resp = await client.post(f"/api/v1/projects/{pid}/nlp/run")
         assert resp.status_code == 200
@@ -318,6 +318,8 @@ class TestNlpProcessing:
 
         stats_resp = await client.get(f"/api/v1/projects/{pid}/nlp/stats")
         stats = stats_resp.json()
+        assert stats["processed_notes"] == 3
+        assert stats["total_sentences"] == 3
         assert stats["target_sentences"] == 0
 
     async def test_negated_matches_are_auto_reviewed_without_a_predictor(self, client):
@@ -352,7 +354,7 @@ class TestNlpProcessing:
 
         stats_resp = await client.get(f"/api/v1/projects/{pid}/annotations/stats")
         assert stats_resp.status_code == 200
-        assert stats_resp.json()["reviewed"] == len(negated)
+        assert stats_resp.json()["reviewed"] == 0
 
         next_patient = await client.get(f"/api/v1/projects/{pid}/annotations/patient/next")
         assert next_patient.status_code == 200

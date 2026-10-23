@@ -57,6 +57,42 @@ async def _enqueue_pipeline_run(run_id: str) -> None:
         logger.exception("Failed to enqueue pipeline run %s — no worker will pick it up", run_id)
 
 
+def _production_config_from_snapshot(snapshot: dict) -> dict:
+    patterns = snapshot.get("search_patterns") or {}
+    keywords = patterns.get("keywords", [])
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    query = patterns.get("query") or " OR ".join(
+        str(keyword).strip() for keyword in keywords if str(keyword).strip()
+    )
+    if not query:
+        raise ValueError("Full production runs require a keyword or query search pattern")
+
+    exclusions = patterns.get("exclusion_patterns", [])
+    if isinstance(exclusions, str):
+        exclusions = [exclusions]
+    exclusions = [str(pattern).strip() for pattern in exclusions if str(pattern).strip()]
+    if exclusions:
+        query = f"({query}) AND !({' OR '.join(exclusions)})"
+    return {
+        "query": query,
+        "hide_duplicates": patterns.get("hide_duplicates", True),
+        "skip_after_event": patterns.get("skip_after_event", True),
+        "exclude_negated": patterns.get("exclude_negated", False),
+        "llm_config": {
+            "provider": snapshot.get("llm_provider"),
+            "model": snapshot.get("llm_model"),
+            "api_base": snapshot.get("llm_api_base"),
+        },
+        "event_definition": {
+            "name": snapshot.get("name", ""),
+            "description": snapshot.get("description", ""),
+            "include_criteria": snapshot.get("include_criteria", ""),
+            "exclude_criteria": snapshot.get("exclude_criteria", ""),
+        },
+    }
+
+
 async def dispatch_sample_run(
     session: AsyncSession,
     project_id: str,
@@ -139,20 +175,9 @@ async def dispatch_full_run(
 
     await _check_no_active_run(session, event_config_id)
 
-    # All patients not already processed by this event config
-    already_processed = (
-        select(PatientTask.patient_id)
-        .join(PipelineRun, PatientTask.pipeline_run_id == PipelineRun.id)
-        .where(
-            PipelineRun.event_config_id == event_config_id,
-            PatientTask.status.in_([PatientTaskStatus.COMPLETED, PatientTaskStatus.NO_MATCH]),
-        )
-        .scalar_subquery()
-    )
     stmt = select(Patient.id).where(
         Patient.project_id == project_id,
         Patient.deleted_at.is_(None),
-        Patient.id.notin_(already_processed),
     )
     result = await session.execute(stmt)
     patient_ids = [row[0] for row in result.all()]
@@ -194,6 +219,22 @@ async def dispatch_full_run(
         )
         session.add(task)
 
+    try:
+        from app.production.service import start_run
+
+        production_run = await start_run(
+            session,
+            project_id,
+            user_id,
+            _production_config_from_snapshot(config_snapshot),
+            confirmed=False,
+        )
+    except Exception:
+        await session.rollback()
+        raise
+
+    run.result_summary = {"production_run_id": production_run.id}
+    session.add(run)
     await session.commit()
     await session.refresh(run)
     await _enqueue_pipeline_run(run.id)
@@ -300,6 +341,23 @@ async def rerun(
             patient_id=pid,
             status=PatientTaskStatus.QUEUED,
         ))
+
+    if old_run.run_type == "full":
+        try:
+            from app.production.service import start_run
+
+            production_run = await start_run(
+                session,
+                project_id,
+                user_id,
+                _production_config_from_snapshot(old_run.config_snapshot),
+                confirmed=False,
+            )
+        except Exception:
+            await session.rollback()
+            raise
+        new_run.result_summary = {"production_run_id": production_run.id}
+        session.add(new_run)
 
     await session.commit()
     await session.refresh(new_run)

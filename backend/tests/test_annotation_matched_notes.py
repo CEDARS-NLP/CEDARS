@@ -5,7 +5,7 @@ the full pipeline have no SearchMatch rows, so the endpoint must fall back to
 reconstructing matched notes from the patient's annotations.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -51,6 +51,7 @@ async def db():
 
 async def _seed_full_pipeline_patient(db: AsyncSession):
     """A patient processed by the full pipeline: has an Annotation, NO SearchMatch."""
+    note_text = "Findings: marked splenomegaly. Impression: small splenic infarct noted."
     db.add(User(id="u1", email="a@b.com", name="A", password_hash="x"))
     db.add(Project(id="proj-1", name="P", owner_id="u1"))
     db.add(Patient(id="pat-1", project_id="proj-1", patient_id_ext="EXT-1"))
@@ -58,22 +59,39 @@ async def _seed_full_pipeline_patient(db: AsyncSession):
         id="note-1",
         project_id="proj-1",
         patient_id="pat-1",
+        patient_id_ext="EXT-1",
         text_id="TXT-1",
         note_date=datetime(2022, 4, 27, tzinfo=UTC),
-        text="Findings: marked splenomegaly. Impression: small splenic infarct noted.",
+        text=note_text,
     ))
-    db.add(Annotation(
-        id="ann-1",
-        project_id="proj-1",
-        patient_id="pat-1",
-        note_id="note-1",
-        sentence_text="marked splenomegaly; small splenic infarct noted",
-        matched_tokens="splenomegaly,splenic",
-        predicted_score=0.95,
-        predicted_label=1,
-        predictor_model="test-model",
-        review_status=ReviewStatus.UNREVIEWED,
-    ))
+    first_sentence = "Findings: marked splenomegaly."
+    first_token = "splenomegaly"
+    first_start = note_text.index(first_token)
+    second_sentence = "Impression: small splenic infarct noted."
+    second_token = "splenic"
+    second_sentence_start = note_text.index(second_sentence)
+    second_start = note_text.index(second_token, second_sentence_start)
+    for sentence_number, sentence, sentence_start, token, token_start in (
+        (0, first_sentence, 0, first_token, first_start),
+        (1, second_sentence, second_sentence_start, second_token, second_start),
+    ):
+        db.add(Annotation(
+            project_id="proj-1",
+            text_id="TXT-1",
+            patient_id="EXT-1",
+            patient_uuid="pat-1",
+            note_uuid="note-1",
+            text_date=date(2022, 4, 27),
+            sentence=sentence,
+            token=token,
+            isNegated=False,
+            note_start_index=token_start,
+            note_end_index=token_start + len(token),
+            sentence_number=sentence_number,
+            sentence_start=sentence_start,
+            sentence_end=sentence_start + len(sentence),
+            status="U",
+        ))
     await db.commit()
 
 
@@ -88,14 +106,14 @@ class TestMatchedNotesAnnotationFallback:
         assert n["note_id"] == "note-1"
         assert n["text_id"] == "TXT-1"
         assert "splenomegaly" in n["text"]
-        # Keywords derived from comma-separated matched_tokens.
+        # Each row retains its exact matched token and source offset.
         assert set(n["search_keywords"]) == {"splenomegaly", "splenic"}
-        # Sentences split from the "; "-joined sentence_text.
         assert len(n["matched_sentences"]) == 2
-        # Positions computed by locating keywords in the full note text.
-        assert len(n["match_positions"]) >= 2
+        assert {pos["text"] for pos in n["match_positions"]} == {"splenomegaly", "splenic"}
+        assert len(n["match_positions"]) == 2
         for pos in n["match_positions"]:
             assert 0 <= pos["start"] < pos["end"] <= len(n["text"])
+            assert n["text"][pos["start"]:pos["end"]] == pos["text"]
 
     async def test_returns_empty_when_no_annotations(self, db):
         db.add(User(id="u1", email="a@b.com", name="A", password_hash="x"))

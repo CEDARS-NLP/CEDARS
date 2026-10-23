@@ -1,7 +1,8 @@
 """Business logic for pipeline EventConfig management and metrics."""
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
@@ -106,17 +107,51 @@ async def commit_event_config(
 
 
 async def compute_run_metrics(session: AsyncSession, run_id: str) -> dict:
-    """Compute precision/recall/F1 from reviewed annotations in a pipeline run."""
-    from app.annotations.models import Annotation, ReviewStatus
+    """Compute metrics from note predictions and current human production decisions."""
+    from app.annotations.models import Annotation
+    from app.connectors.models import Patient
+    from app.pipeline.models import PipelineRun
+    from app.production.models import NotePrediction
 
-    stmt = select(Annotation).where(
-        Annotation.pipeline_run_id == run_id,
-        Annotation.review_status.in_([ReviewStatus.CONFIRMED, ReviewStatus.REJECTED]),
+    pipeline_run = await session.get(PipelineRun, run_id)
+    production_run_id = (pipeline_run.result_summary or {}).get("production_run_id") \
+        if pipeline_run else None
+    annotation_run_filter = (
+        col(Annotation.production_run_id) == production_run_id
+        if production_run_id
+        else col(Annotation.pipeline_run_id) == run_id
     )
-    result = await session.execute(stmt)
-    annotations = list(result.scalars().all())
+    stmt = (
+        select(Annotation, NotePrediction, Patient)
+        .join(
+            NotePrediction,
+            and_(
+                col(NotePrediction.project_id) == col(Annotation.project_id),
+                col(NotePrediction.run_id) == col(Annotation.production_run_id),
+                col(NotePrediction.text_id) == col(Annotation.text_id),
+            ),
+        )
+        .join(
+            Patient,
+            and_(
+                col(Patient.project_id) == col(Annotation.project_id),
+                col(Patient.patient_id_ext) == col(Annotation.patient_id),
+            ),
+        )
+        .where(
+            annotation_run_filter,
+            col(Annotation.status) == "R",
+            or_(
+                col(Annotation.review_reason) == "human_negative",
+                col(Patient.event_annotation_id) == col(Annotation.annotation_id),
+            ),
+            col(NotePrediction.status) == "succeeded",
+            col(NotePrediction.label).is_not(None),
+        )
+    )
+    reviewed = list((await session.execute(stmt)).all())
 
-    if not annotations:
+    if not reviewed:
         return {
             "total_reviewed": 0,
             "true_positives": 0,
@@ -132,9 +167,11 @@ async def compute_run_metrics(session: AsyncSession, run_id: str) -> dict:
     tp = fp = fn = tn = 0
     scores: list[float] = []
 
-    for ann in annotations:
-        predicted_positive = (ann.predicted_label == 1)
-        reviewer_positive = (ann.review_status == ReviewStatus.CONFIRMED)
+    true_positive_scores: list[float] = []
+
+    for ann, prediction, patient in reviewed:
+        predicted_positive = prediction.label == 1
+        reviewer_positive = patient.event_annotation_id == ann.annotation_id
 
         if predicted_positive and reviewer_positive:
             tp += 1
@@ -145,22 +182,28 @@ async def compute_run_metrics(session: AsyncSession, run_id: str) -> dict:
         else:
             tn += 1
 
-        if ann.predicted_score is not None:
-            scores.append(ann.predicted_score)
+        if prediction.score is not None:
+            scores.append(prediction.score)
+            if predicted_positive and reviewer_positive:
+                true_positive_scores.append(prediction.score)
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else None
     recall = tp / (tp + fn) if (tp + fn) > 0 else None
-    f1 = (2 * precision * recall / (precision + recall)) if precision and recall else None
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision is not None and recall is not None and precision + recall > 0
+        else None
+    )
 
     # Suggest threshold: median of true positive scores, or None
-    tp_scores = [
-        s for s, a in zip(scores, annotations)
-        if a.predicted_label == 1 and a.review_status == ReviewStatus.CONFIRMED
-    ]
-    suggested = sorted(tp_scores)[len(tp_scores) // 2] if tp_scores else None
+    suggested = (
+        sorted(true_positive_scores)[len(true_positive_scores) // 2]
+        if true_positive_scores
+        else None
+    )
 
     return {
-        "total_reviewed": len(annotations),
+        "total_reviewed": len(reviewed),
         "true_positives": tp,
         "false_positives": fp,
         "false_negatives": fn,

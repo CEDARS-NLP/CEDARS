@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -38,12 +38,19 @@ interface Annotation extends ReviewMetadata {
   project_id: string;
   patient_id: string;
   note_id: string;
-  sentence_id: string;
+  sentence_id: string | null;
   sentence_text: string;
-  matched_tokens: string;
+  matched_tokens: string | null;
+  note_start_index: number | null;
+  note_end_index: number | null;
+  sentence_number: number | null;
+  sentence_start: number | null;
+  sentence_end: number | null;
   is_negated: boolean;
   predicted_score: number | null;
   predicted_label: number | null;
+  evidence_spans?: EvidenceSpan[] | null;
+  note_prediction?: NotePrediction | null;
   predictor_model: string;
   reasoning: string;
   review_status: string;
@@ -51,10 +58,24 @@ interface Annotation extends ReviewMetadata {
   created_at: string;
 }
 
+interface EvidenceSpan {
+  start: number;
+  end: number;
+  text?: string;
+}
+
+interface NotePrediction {
+  label?: number | null;
+  score?: number | null;
+  reasoning?: string | null;
+  model?: string | null;
+  evidence_spans?: EvidenceSpan[] | null;
+}
+
 interface PatientAnnotation extends Annotation {
   note_date: string | null;
   note_text_id: string;
-  sentence_number: number;
+  sentence_number: number | null;
 }
 
 interface PatientInfo extends ReviewMetadata {
@@ -63,12 +84,83 @@ interface PatientInfo extends ReviewMetadata {
   total_annotations: number;
   unreviewed_annotations: number;
   all_complete: boolean;
+  skip_after_event: boolean;
+  pending_review_jobs: number;
+  failed_review_job_id: string | null;
 }
 
-interface ReviewResult {
-  annotation: Annotation;
-  skipped_count: number;
-  earlier_count: number;
+interface ReviewDecisionDraft {
+  annotation_id: string;
+  status: "reviewed" | "skipped";
+  event_date: string | null;
+}
+
+interface ReviewBatchResponse {
+  job_id: string;
+  status: string;
+  patient_id: string;
+  attempt_count: number;
+  last_error: string | null;
+}
+
+interface ReviewCursor {
+  current_annotation_id: string | null;
+  next_annotation_id: string | null;
+  annotation_ids: string[];
+}
+
+/**
+ * Merge a new decision into the in-memory draft for a patient.
+ *
+ * A patient may only carry a single event date. Setting a new event date
+ * discards any previously recorded event decision so the latest date is the
+ * ground truth; the backend therefore never receives more than one event date.
+ * Non-event decisions replace any earlier decision for the same annotation.
+ */
+function mergeReviewDecision(
+  draft: ReviewDecisionDraft[],
+  decision: ReviewDecisionDraft,
+): ReviewDecisionDraft[] {
+  if (decision.event_date) {
+    return [...draft.filter((item) => !item.event_date), decision];
+  }
+  return [
+    ...draft.filter((item) => item.annotation_id !== decision.annotation_id),
+    decision,
+  ];
+}
+
+/**
+ * Derive the effective review status for every annotation from the draft.
+ *
+ * Applies the recorded decisions, then, when skip-after-event is enabled,
+ * marks every still-unreviewed annotation at or after the event date as
+ * skipped. The event decision is always last in the draft, so all explicit
+ * decisions are applied before the skip pass.
+ */
+function getDraftStatuses(
+  annotations: PatientAnnotation[],
+  decisions: ReviewDecisionDraft[],
+  skipAfterEvent: boolean,
+): Map<string, string> {
+  const statuses = new Map<string, string>();
+  for (const decision of decisions) {
+    statuses.set(decision.annotation_id, decision.status);
+  }
+  const eventDecision = decisions.find((decision) => decision.event_date);
+  if (!eventDecision?.event_date || !skipAfterEvent) return statuses;
+  const eventDate = eventDecision.event_date.slice(0, 10);
+  for (const annotation of annotations) {
+    const status = statuses.get(annotation.id) ?? annotation.review_status;
+    if (
+      annotation.id !== eventDecision.annotation_id &&
+      status === "unreviewed" &&
+      (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
+    ) {
+      statuses.set(annotation.id, "skipped");
+    }
+  }
+  return statuses;
 }
 
 interface DeleteEventDateResult {
@@ -94,6 +186,16 @@ interface NoteContext {
   note_date: string | null;
   note_tags: Record<string, string>;
   search_keywords: string[];
+  current_note_evidence?: EvidenceSpan[];
+  annotation_spans?: {
+    annotation_id: string;
+    start: number;
+    end: number;
+    sentence_start: number;
+    sentence_end: number;
+    sentence_number: number;
+    is_negated: boolean;
+  }[];
   sentences: {
     id: string;
     text: string;
@@ -248,18 +350,69 @@ function highlightKeywords(
   );
 }
 
+function highlightExactSpans(
+  text: string,
+  baseOffset: number,
+  spans: EvidenceSpan[],
+  keywords: string[],
+  evidenceSpans: EvidenceSpan[] = []
+): React.ReactNode {
+  const toRelativeRanges = (source: EvidenceSpan[]) => source
+    .map(({ start, end }) => ({ start: start - baseOffset, end: end - baseOffset }))
+    .filter(({ start, end }) => start >= 0 && end <= text.length && start < end)
+    .sort((a, b) => a.start - b.start);
+  const matchRanges = toRelativeRanges(spans);
+  const evidenceRanges = toRelativeRanges(evidenceSpans);
+  const boundaries = new Set([0, text.length]);
+  for (const range of [...matchRanges, ...evidenceRanges]) {
+    boundaries.add(range.start);
+    boundaries.add(range.end);
+  }
+  const points = [...boundaries].sort((a, b) => a - b);
+  const segments: React.ReactNode[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (start === end) continue;
+    const matched = matchRanges.some((range) => range.start <= start && range.end >= end);
+    const evidence = evidenceRanges.some((range) => range.start <= start && range.end >= end);
+    let segment: React.ReactNode = text.slice(start, end);
+    if (matched) {
+      segment = (
+        <mark className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30">
+          {highlightKeywords(text.slice(start, end), keywords)}
+        </mark>
+      );
+    }
+    if (evidence) {
+      segment = (
+        <mark
+          data-llm-evidence="true"
+          className="rounded bg-emerald-300/50 decoration-emerald-700 decoration-2 underline dark:bg-emerald-400/25 dark:decoration-emerald-300"
+        >
+          {segment}
+        </mark>
+      );
+    }
+    segments.push(<span key={`offset-${start}`}>{segment}</span>);
+  }
+  return segments;
+}
+
 // ── Note Context Viewer ─────────────────────────────────────────
 
 function NoteViewer({
   context,
   targetSentenceId,
-  sentenceText,
   keywords,
+  targetStart,
+  targetEnd,
 }: {
   context: NoteContext;
   targetSentenceId: string;
-  sentenceText: string;
   keywords: string[];
+  targetStart: number | null;
+  targetEnd: number | null;
 }) {
   const targetRef = useRef<HTMLSpanElement>(null);
 
@@ -270,32 +423,7 @@ function NoteViewer({
   const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
   if (context.sentences.length === 0) {
-    // Pipeline annotations without NLP sentences — show raw note text
-    // Try to find and highlight the sentence text within the note
     const noteText = context.text || "";
-    const sentIdx = sentenceText
-      ? noteText.toLowerCase().indexOf(sentenceText.slice(0, 60).toLowerCase())
-      : -1;
-
-    if (sentIdx === -1) {
-      // Can't locate sentence — just highlight keywords
-      return (
-        <div
-          className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60"
-          style={noteFont}
-        >
-          {highlightKeywords(noteText, keywords)}
-        </div>
-      );
-    }
-
-    // Split into before / sentence region / after and highlight the sentence
-    // Find the end by searching for the sentence text (use first 200 chars for matching)
-    const matchLen = Math.min(sentenceText.length, 200);
-    const before = noteText.slice(0, sentIdx);
-    const matched = noteText.slice(sentIdx, sentIdx + matchLen);
-    const after = noteText.slice(sentIdx + matchLen);
-
     return (
       <div
         className="whitespace-pre-wrap text-[14px] leading-relaxed"
@@ -303,17 +431,16 @@ function NoteViewer({
         role="region"
         aria-label="Clinical note context"
       >
-        <span className="text-foreground/50">
-          {highlightKeywords(before, keywords)}
-        </span>
-        <span
-          ref={targetRef}
-          className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
-        >
-          {highlightKeywords(matched, keywords)}
-        </span>
-        <span className="text-foreground/50">
-          {highlightKeywords(after, keywords)}
+        <span ref={targetRef}>
+          {highlightExactSpans(
+            noteText,
+            0,
+            targetStart !== null && targetEnd !== null
+              ? [{ start: targetStart, end: targetEnd }]
+              : [],
+            keywords,
+            context.current_note_evidence ?? []
+          )}
         </span>
       </div>
     );
@@ -343,7 +470,17 @@ function NoteViewer({
             }
             aria-current={isTarget ? "true" : undefined}
           >
-            {highlightKeywords(sent.text, keywords)}{" "}
+            {highlightExactSpans(
+              sent.text,
+              sent.start_pos,
+              (context.annotation_spans ?? []).filter(
+                (span) => span.start >= sent.start_pos && span.end <= sent.end_pos
+              ),
+              keywords,
+              (context.current_note_evidence ?? []).filter(
+                (span) => span.start >= sent.start_pos && span.end <= sent.end_pos
+              )
+            )}{" "}
           </span>
         );
       })}
@@ -420,12 +557,14 @@ function PipelineNoteViewer({
   noteText,
   matchPositions,
   keywords,
+  evidenceSpans,
 }: {
   noteText: string;
-  matchPositions: { start: number; end: number; text?: string }[];
+  matchPositions: EvidenceSpan[];
   keywords: string[];
+  evidenceSpans: EvidenceSpan[];
 }) {
-  const firstMatchRef = useRef<HTMLSpanElement>(null);
+  const firstMatchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     firstMatchRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -433,57 +572,13 @@ function PipelineNoteViewer({
 
   const noteFont = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
-  // Build sorted, non-overlapping match ranges
-  const ranges = matchPositions
-    .filter((p) => p.start < p.end)
-    .sort((a, b) => a.start - b.start);
-
-  if (ranges.length === 0) {
-    return (
-      <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/60" style={noteFont}>
-        {highlightKeywords(noteText, keywords)}
-      </div>
-    );
-  }
-
-  const segments: React.ReactNode[] = [];
-  let cursor = 0;
-  let isFirst = true;
-
-  for (const range of ranges) {
-    if (range.start < cursor) continue;
-    if (range.start > cursor) {
-      segments.push(
-        <span key={`pre-${cursor}`} className="text-foreground/50">
-          {highlightKeywords(noteText.slice(cursor, range.start), keywords)}
-        </span>
-      );
-    }
-    const refProp = isFirst ? { ref: firstMatchRef } : {};
-    segments.push(
-      <span
-        key={`match-${range.start}`}
-        {...refProp}
-        className="rounded bg-primary/15 px-0.5 text-foreground ring-1 ring-primary/30"
-      >
-        {highlightKeywords(noteText.slice(range.start, range.end), keywords)}
-      </span>
-    );
-    isFirst = false;
-    cursor = range.end;
-  }
-
-  if (cursor < noteText.length) {
-    segments.push(
-      <span key={`post-${cursor}`} className="text-foreground/50">
-        {highlightKeywords(noteText.slice(cursor), keywords)}
-      </span>
-    );
-  }
-
   return (
-    <div className="whitespace-pre-wrap text-[14px] leading-relaxed" style={noteFont}>
-      {segments}
+    <div
+      ref={firstMatchRef}
+      className="whitespace-pre-wrap text-[14px] leading-relaxed"
+      style={noteFont}
+    >
+      {highlightExactSpans(noteText, 0, matchPositions, keywords, evidenceSpans)}
     </div>
   );
 }
@@ -492,7 +587,6 @@ function PipelineNoteViewer({
 
 function PatientReviewPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [showEventDateInput, setShowEventDateInput] = useState(false);
   const [eventDateValue, setEventDateValue] = useState("");
   const [completionMessage, setCompletionMessage] = useState<string | null>(
@@ -503,6 +597,20 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     null
   );
   const [noteIndex, setNoteIndex] = useState(0);
+  const [reviewDraft, setReviewDraft] = useState<{
+    patientId: string | null;
+    decisions: ReviewDecisionDraft[];
+  }>({ patientId: null, decisions: [] });
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
+  const batchKeyRef = useRef<string | null>(null);
+  const batchPayloadRef = useRef<{
+    idempotency_key: string;
+    decisions: ReviewDecisionDraft[];
+    skip_after_event: boolean;
+  } | null>(null);
+  const jobLockedPatientsRef = useRef(new Set<string>());
+  const [retryRequested, setRetryRequested] = useState(false);
 
   // 1. Get next patient
   const {
@@ -511,6 +619,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     refetch: refetchPatient,
   } = useQuery<PatientInfo>({
     queryKey: ["patient-next", projectId],
+    refetchOnWindowFocus: false,
     queryFn: () =>
       api.get<PatientInfo>(
         `/projects/${projectId}/annotations/patient/next`
@@ -533,6 +642,15 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     enabled: !!patientId,
   });
 
+  const { data: reviewCursor, refetch: refetchCursor } = useQuery<ReviewCursor>({
+    queryKey: ["patient-review-cursor", projectId, patientId],
+    queryFn: () =>
+      api.get<ReviewCursor>(
+        `/projects/${projectId}/annotations/patient/${patientId}/cursor`
+      ),
+    enabled: !!patientId,
+  });
+
   // 3. Get patient stats
   const { data: patientStats, refetch: refetchStats } =
     useQuery<PatientReviewStats>({
@@ -544,10 +662,38 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       enabled: !!patientId,
     });
 
-  const current = annotations?.[currentIndex] ?? null;
+  const sequenceAnnotations = (reviewCursor?.annotation_ids ?? [])
+    .map((id) => annotations?.find((annotation) => annotation.id === id))
+    .filter((annotation): annotation is PatientAnnotation => !!annotation);
+  const draftForPatient = useMemo(
+    () => reviewDraft.patientId === patientId ? reviewDraft.decisions : [],
+    [reviewDraft, patientId]
+  );
+  const localStatuses = getDraftStatuses(
+    sequenceAnnotations,
+    draftForPatient,
+    patientInfo?.skip_after_event ?? false,
+  );
+  const displayAnnotations = sequenceAnnotations.map((annotation) => ({
+    ...annotation,
+    review_status: localStatuses.get(annotation.id) ?? annotation.review_status,
+  }));
+  const currentIndex = displayAnnotations.findIndex(
+    (annotation) => annotation.id === reviewCursor?.current_annotation_id
+      && annotation.review_status === "unreviewed"
+  );
+  const current = displayAnnotations[currentIndex] ?? null;
 
   // 4. Get note context for current annotation
-  const isPipelineAnnotation = !!current && !current.sentence_id;
+  const isManualAnnotation =
+    !!current &&
+    !current.sentence_id &&
+    current.note_start_index !== null &&
+    current.note_end_index !== null &&
+    current.sentence_start !== null &&
+    current.sentence_end !== null;
+  const isPipelineAnnotation =
+    !!current && !current.sentence_id && !isManualAnnotation;
 
   // 4a. Get note context for NLP sentence-level annotations
   const { data: context, isLoading: contextLoading } = useQuery<NoteContext>({
@@ -572,27 +718,20 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   // Reset note index when patient changes
   useEffect(() => {
     setNoteIndex(0);
+    setRetryRequested(false);
+    setBatchError(null);
+    if (patientId) jobLockedPatientsRef.current.delete(patientId);
   }, [patientId]);
-
-  // Navigate to first unreviewed when annotations load
-  useEffect(() => {
-    if (annotations && annotations.length > 0) {
-      const firstUnreviewed = annotations.findIndex(
-        (a) => a.review_status === "unreviewed"
-      );
-      if (firstUnreviewed >= 0) {
-        setCurrentIndex(firstUnreviewed);
-      }
-    }
-  }, [annotations]);
 
   // Prefetch next annotation context
   useEffect(() => {
-    if (!annotations || annotations.length <= 1) return;
-    const nextAnno = annotations.find(
-      (a, i) => i > currentIndex && a.review_status === "unreviewed"
+    const nextAnno = annotations?.find(
+      (annotation) => annotation.id === reviewCursor?.next_annotation_id
     );
-    if (nextAnno) {
+    if (
+      nextAnno &&
+      (nextAnno.sentence_id !== null || nextAnno.note_start_index !== null)
+    ) {
       queryClient.prefetchQuery({
         queryKey: ["annotation-context", nextAnno.id],
         queryFn: () =>
@@ -601,99 +740,163 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           ),
       });
     }
-  }, [annotations, currentIndex, queryClient]);
+  }, [annotations, reviewCursor?.next_annotation_id, queryClient]);
 
-  // After action: refresh and advance
-  const handlePostAction = useCallback(async () => {
-    const { data: freshAnnotations } = await refetchAnnotations();
-    await refetchStats();
-    queryClient.invalidateQueries({
-      queryKey: ["annotation-stats", projectId],
-    });
-
-    if (!freshAnnotations) return;
-
-    const hasUnreviewed = freshAnnotations.some(
-      (a) => a.review_status === "unreviewed"
+  // Keep choices local until the patient is complete, then enqueue one batch.
+  const handlePostAction = useCallback(async (decision: ReviewDecisionDraft) => {
+    if (!patientId || !reviewCursor) return;
+    setBatchError(null);
+    const decisions = mergeReviewDecision(draftForPatient, decision);
+    const statuses = getDraftStatuses(
+      sequenceAnnotations,
+      decisions,
+      patientInfo?.skip_after_event ?? false,
     );
-    if (!hasUnreviewed) {
-      const reviewed = freshAnnotations.filter(
-        (a) => a.review_status === "reviewed"
-      ).length;
-      const skipped = freshAnnotations.filter(
-        (a) => a.review_status === "skipped"
-      ).length;
-      const events = freshAnnotations.filter((a) => a.event_date).length;
-      setCompletionMessage(
-        `Patient ${patientInfo?.patient_id_ext} complete \u2014 ${reviewed} reviewed, ${skipped} skipped, ${events} event${events !== 1 ? "s" : ""}`
+    const complete = sequenceAnnotations.every(
+      (annotation) => (statuses.get(annotation.id) ?? annotation.review_status) !== "unreviewed"
+    );
+    setReviewDraft({ patientId, decisions });
+    setShowEventDateInput(false);
+    setEventDateValue("");
+    if (!complete) {
+      const nextIndex = sequenceAnnotations.findIndex(
+        (annotation, index) => index > currentIndex
+          && (statuses.get(annotation.id) ?? annotation.review_status) === "unreviewed"
       );
-      queryClient.prefetchQuery({
-        queryKey: ["patient-next", projectId],
-        queryFn: () =>
-          api.get<PatientInfo>(
-            `/projects/${projectId}/annotations/patient/next`
-          ),
-      });
-      setTimeout(() => {
-        setCompletionMessage(null);
-        setEarlierNotesBanner(null);
-        setCurrentIndex(0);
-        queryClient.removeQueries({
-          queryKey: ["patient-annotations", projectId, patientId],
-        });
-        queryClient.removeQueries({
-          queryKey: ["patient-stats", projectId, patientId],
-        });
-        refetchPatient();
-      }, 2000);
-    } else {
-      const nextIdx = freshAnnotations.findIndex(
-        (a, i) => a.review_status === "unreviewed" && i > currentIndex
+      const wrappedIndex = nextIndex >= 0 ? nextIndex : sequenceAnnotations.findIndex(
+        (annotation) => (statuses.get(annotation.id) ?? annotation.review_status) === "unreviewed"
       );
-      if (nextIdx >= 0) {
-        setCurrentIndex(nextIdx);
-      } else {
-        const firstUnreviewed = freshAnnotations.findIndex(
-          (a) => a.review_status === "unreviewed"
+      if (wrappedIndex >= 0) {
+        const nextAnnotation = sequenceAnnotations[wrappedIndex];
+        queryClient.setQueryData<ReviewCursor>(
+          ["patient-review-cursor", projectId, patientId],
+          { ...reviewCursor, current_annotation_id: nextAnnotation.id }
         );
-        if (firstUnreviewed >= 0) setCurrentIndex(firstUnreviewed);
       }
+      return;
+    }
+
+    const idempotencyKey = batchKeyRef.current ?? crypto.randomUUID();
+    batchKeyRef.current = idempotencyKey;
+    const batchPayload = batchPayloadRef.current ?? {
+      idempotency_key: idempotencyKey,
+      decisions,
+      skip_after_event: patientInfo?.skip_after_event ?? false,
+    };
+    batchPayloadRef.current = batchPayload;
+    setIsSubmittingBatch(true);
+    try {
+      await api.post<ReviewBatchResponse>(
+        `/projects/${projectId}/annotations/patient/${patientId}/review-batches`,
+        batchPayload
+      );
+      batchKeyRef.current = null;
+      batchPayloadRef.current = null;
+      jobLockedPatientsRef.current.add(patientId);
+      setReviewDraft({ patientId: null, decisions: [] });
+      setCompletionMessage(`Patient ${patientInfo?.patient_id_ext} queued for finalization`);
+      setEarlierNotesBanner(null);
+      queryClient.removeQueries({ queryKey: ["patient-annotations", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-review-cursor", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-stats", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      try {
+        const next = await api.get<PatientInfo>(
+          `/projects/${projectId}/annotations/patient/next`
+        );
+        queryClient.setQueryData(["patient-next", projectId], next);
+      } catch {
+        queryClient.setQueryData(["patient-next", projectId], undefined);
+        void refetchPatient();
+      }
+      setCompletionMessage(null);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not queue patient review");
+    } finally {
+      setIsSubmittingBatch(false);
     }
   }, [
-    refetchAnnotations,
-    refetchStats,
-    queryClient,
-    projectId,
-    patientId,
-    patientInfo,
-    currentIndex,
-    refetchPatient,
+    patientId, reviewCursor, draftForPatient, patientInfo, sequenceAnnotations,
+    currentIndex, projectId, queryClient, refetchPatient,
   ]);
 
-  // Mutations
-  const reviewMutation = useMutation({
-    mutationFn: ({ id, event_date }: { id: string; event_date?: string }) =>
-      api.post<ReviewResult>(
-        `/projects/${projectId}/annotations/${id}/review`,
-        { event_date: event_date || null }
-      ),
-    onSuccess: (data) => {
-      const hadEventDate = showEventDateInput && eventDateValue;
-      setShowEventDateInput(false);
-      setEventDateValue("");
-
-      if (hadEventDate && data.earlier_count > 0) {
-        setEarlierNotesBanner(
-          `${data.earlier_count} earlier note${data.earlier_count > 1 ? "s" : ""} found before the event date \u2014 verify the earliest occurrence.`
+  const retryBatchSubmission = useCallback(async () => {
+    if (!patientId || draftForPatient.length === 0 || isSubmittingBatch) return;
+    const idempotencyKey = batchKeyRef.current ?? crypto.randomUUID();
+    batchKeyRef.current = idempotencyKey;
+    const batchPayload = batchPayloadRef.current ?? {
+      idempotency_key: idempotencyKey,
+      decisions: draftForPatient,
+      skip_after_event: patientInfo?.skip_after_event ?? false,
+    };
+    batchPayloadRef.current = batchPayload;
+    setIsSubmittingBatch(true);
+    setBatchError(null);
+    try {
+      await api.post<ReviewBatchResponse>(
+        `/projects/${projectId}/annotations/patient/${patientId}/review-batches`,
+        batchPayload
+      );
+      batchKeyRef.current = null;
+      batchPayloadRef.current = null;
+      jobLockedPatientsRef.current.add(patientId);
+      setReviewDraft({ patientId: null, decisions: [] });
+      setCompletionMessage(`Patient ${patientInfo.patient_id_ext} queued for finalization`);
+      queryClient.removeQueries({ queryKey: ["patient-annotations", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-review-cursor", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-stats", projectId, patientId] });
+      try {
+        const next = await api.get<PatientInfo>(
+          `/projects/${projectId}/annotations/patient/next`
         );
-      } else if (hadEventDate && data.earlier_count === 0) {
-        setEarlierNotesBanner(null);
+        queryClient.setQueryData(["patient-next", projectId], next);
+      } catch {
+        queryClient.setQueryData(["patient-next", projectId], undefined);
+        void refetchPatient();
       }
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      setCompletionMessage(null);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not queue patient review");
+    } finally {
+      setIsSubmittingBatch(false);
+    }
+  }, [patientId, patientInfo, draftForPatient, isSubmittingBatch, projectId, queryClient, refetchPatient]);
 
-      handlePostAction();
-    },
-  });
+  const navigateAction = useCallback(async (action: string) => {
+    if (!patientId || !reviewCursor) return;
+    const lastIndex = reviewCursor.annotation_ids.length - 1;
+    let nextIndex = currentIndex;
+    if (action === "first_anno") nextIndex = 0;
+    else if (action === "last_anno") nextIndex = lastIndex;
+    else if (action === "prev_1") nextIndex = Math.max(0, currentIndex - 1);
+    else if (action === "next_1") nextIndex = Math.min(lastIndex, currentIndex + 1);
+    else if (action === "prev_10") nextIndex = Math.max(0, currentIndex - 10);
+    else if (action === "next_10") nextIndex = Math.min(lastIndex, currentIndex + 10);
+    const cursor = {
+      ...reviewCursor,
+      current_annotation_id: reviewCursor.annotation_ids[nextIndex] ?? null,
+    };
+    queryClient.setQueryData<ReviewCursor>(
+      ["patient-review-cursor", projectId, patientId],
+      cursor
+    );
+  }, [patientId, projectId, queryClient, reviewCursor, currentIndex]);
 
+  const navigateToIndex = useCallback(async (targetIndex: number) => {
+    if (!patientId || !reviewCursor || targetIndex < 0) return;
+    const index = Math.min(targetIndex, reviewCursor.annotation_ids.length - 1);
+    const cursor = {
+      ...reviewCursor,
+      current_annotation_id: reviewCursor.annotation_ids[index] ?? null,
+    };
+    queryClient.setQueryData<ReviewCursor>(
+      ["patient-review-cursor", projectId, patientId],
+      cursor
+    );
+  }, [patientId, projectId, queryClient, reviewCursor]);
+
+  // Delete-event-date remains an explicit persisted action, outside the draft batch.
   const deleteEventDateMutation = useMutation({
     mutationFn: (annotationId: string) =>
       api.post<DeleteEventDateResult>(
@@ -703,32 +906,28 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     onSuccess: async () => {
       await refetchAnnotations();
       await refetchStats();
+      await refetchCursor();
       queryClient.invalidateQueries({
         queryKey: ["annotation-stats", projectId],
       });
-      if (annotations) {
-        const firstUnreviewed = annotations.findIndex(
-          (a) => a.review_status === "unreviewed"
-        );
-        if (firstUnreviewed >= 0) setCurrentIndex(firstUnreviewed);
-      }
     },
   });
 
-  const total = annotations?.length ?? 0;
+  const total = displayAnnotations.length;
 
   const handleAdjudicate = useCallback(() => {
-    if (!current || reviewMutation.isPending) return;
-    reviewMutation.mutate({ id: current.id });
-  }, [current, reviewMutation]);
+    if (!current || isSubmittingBatch) return;
+    void handlePostAction({ annotation_id: current.id, status: "reviewed", event_date: null });
+  }, [current, handlePostAction, isSubmittingBatch]);
 
   const handleEventDate = useCallback(() => {
-    if (!current || !eventDateValue) return;
-    reviewMutation.mutate({
-      id: current.id,
-      event_date: eventDateValue + "T00:00:00Z",
+    if (!current || !eventDateValue || isSubmittingBatch) return;
+    void handlePostAction({
+      annotation_id: current.id,
+      status: "reviewed",
+      event_date: eventDateValue,
     });
-  }, [current, eventDateValue, reviewMutation]);
+  }, [current, eventDateValue, handlePostAction, isSubmittingBatch]);
 
   const handleDeleteEventDate = useCallback(() => {
     if (
@@ -739,29 +938,25 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     deleteEventDateMutation.mutate(patientStats.event_annotation_id);
   }, [patientStats, deleteEventDateMutation]);
 
-  const handlePrev = useCallback(() => {
-    if (currentIndex > 0) setCurrentIndex((i) => i - 1);
-  }, [currentIndex]);
+  const handleRequestFailedRetry = useCallback(async () => {
+    if (!patientInfo?.failed_review_job_id || retryRequested) return;
+    try {
+      await api.post(
+        `/projects/${projectId}/annotations/review-batches/${patientInfo.failed_review_job_id}/retry-request`,
+        {}
+      );
+      setRetryRequested(true);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not request a retry");
+    }
+  }, [patientInfo?.failed_review_job_id, projectId, retryRequested]);
 
-  const handleNext = useCallback(() => {
-    if (currentIndex < total - 1) setCurrentIndex((i) => i + 1);
-  }, [currentIndex, total]);
-
-  const handlePrevPage = useCallback(() => {
-    setCurrentIndex((i) => Math.max(0, i - 10));
-  }, []);
-
-  const handleNextPage = useCallback(() => {
-    setCurrentIndex((i) => Math.min(total - 1, i + 10));
-  }, [total]);
-
-  const handleFirst = useCallback(() => {
-    setCurrentIndex(0);
-  }, []);
-
-  const handleLast = useCallback(() => {
-    if (total > 0) setCurrentIndex(total - 1);
-  }, [total]);
+  const handlePrev = useCallback(() => navigateAction("prev_1"), [navigateAction]);
+  const handleNext = useCallback(() => navigateAction("next_1"), [navigateAction]);
+  const handlePrevPage = useCallback(() => navigateAction("prev_10"), [navigateAction]);
+  const handleNextPage = useCallback(() => navigateAction("next_10"), [navigateAction]);
+  const handleFirst = useCallback(() => navigateAction("first_anno"), [navigateAction]);
+  const handleLast = useCallback(() => navigateAction("last_anno"), [navigateAction]);
 
   // Default event date to note date
   useEffect(() => {
@@ -834,8 +1029,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   // Unlock patient on unmount
   useEffect(() => {
     const pid = patientId;
+    const jobLockedPatients = jobLockedPatientsRef.current;
     return () => {
-      if (pid) {
+      if (pid && !jobLockedPatients.has(pid)) {
         navigator.sendBeacon(
           `/api/v1/projects/${projectId}/annotations/patient/${pid}/unlock`,
           ""
@@ -845,7 +1041,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   }, [patientId, projectId]);
 
   // Loading
-  if (patientLoading || annotationsLoading) {
+  if (patientLoading || annotationsLoading || (!!patientId && !reviewCursor)) {
     return <ReviewSkeleton />;
   }
 
@@ -906,23 +1102,44 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           No patients available
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          All patients may be locked by other reviewers, or no annotations exist
-          yet.
+          {patientInfo?.pending_review_jobs
+            ? `Finalizing ${patientInfo.pending_review_jobs} patient review${patientInfo.pending_review_jobs === 1 ? "" : "s"}.`
+            : "All patients may be locked by other reviewers, or no annotations exist yet."}
         </p>
       </div>
     );
   }
 
-  if (!current) return null;
+  if (!current) {
+    if (draftForPatient.length > 0) {
+      return (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5" role="status">
+          <p className="text-sm text-foreground">
+            {batchError ?? (isSubmittingBatch ? "Queuing patient review…" : "Patient review is ready to submit.")}
+          </p>
+          {batchError && (
+            <Button onClick={retryBatchSubmission} disabled={isSubmittingBatch} aria-busy={isSubmittingBatch}>
+              {isSubmittingBatch ? "Retrying…" : "Retry submission"}
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return null;
+  }
 
-  const isPending =
-    reviewMutation.isPending || deleteEventDateMutation.isPending;
+  const isPending = isSubmittingBatch || deleteEventDateMutation.isPending;
   const reviewedCount = patientStats
     ? patientStats.reviewed + patientStats.skipped
     : 0;
   const patientTotal = patientStats?.total ?? total;
   const progressPct =
     patientTotal > 0 ? Math.round((reviewedCount / patientTotal) * 100) : 0;
+  const notePrediction = current.note_prediction;
+  const predictionLabel = notePrediction?.label ?? current.predicted_label;
+  const predictionScore = notePrediction?.score ?? current.predicted_score;
+  const predictionReasoning = notePrediction?.reasoning ?? current.reasoning;
+  const predictionModel = notePrediction?.model ?? current.predictor_model;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -931,6 +1148,19 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
         role="region"
         aria-label="Patient annotation review"
       >
+        {batchError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+            {batchError}
+          </div>
+        )}
+        {patientInfo?.failed_review_job_id && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm" role="status">
+            <span>Finalizing the previous review failed. Your decisions are retained for retry.</span>
+            <Button size="sm" variant="outline" onClick={handleRequestFailedRetry} disabled={retryRequested}>
+              {retryRequested ? "Retry requested" : "Request retry"}
+            </Button>
+          </div>
+        )}
         {showShortcuts && (
           <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />
         )}
@@ -970,9 +1200,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           {/* Sequence markers */}
           <div className="min-w-0 flex-1 overflow-x-auto">
             <SequenceMarkers
-              annotations={annotations}
+              annotations={displayAnnotations}
               currentIndex={currentIndex}
-              onNavigate={setCurrentIndex}
+              onNavigate={navigateToIndex}
             />
           </div>
 
@@ -1118,27 +1348,27 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               </div>
 
               <div className="space-y-3">
-                {current.predicted_label === null &&
-                current.predicted_score === null &&
-                !current.predictor_model ? (
+                {predictionLabel === null &&
+                predictionScore === null &&
+                !predictionModel ? (
                   <p className="text-sm text-muted-foreground">SpaCy Match Found</p>
                 ) : (
                   <div className="flex items-center gap-2">
-                    {current.predicted_label !== null && (
+                    {predictionLabel !== null && (
                       <Badge
                         className={
-                          current.predicted_label === 1
+                          predictionLabel === 1
                             ? "bg-emerald-600 text-white hover:bg-emerald-700"
                             : "bg-zinc-500 text-white hover:bg-zinc-600"
                         }
                       >
-                        {current.predicted_label === 1
+                        {predictionLabel === 1
                           ? "Event Detected"
                           : "No Event"}
                       </Badge>
                     )}
                     <span className="text-sm tabular-nums text-muted-foreground">
-                      {formatScore(current.predicted_score)} likely
+                      {formatScore(predictionScore)} likely
                     </span>
                   </div>
                 )}
@@ -1154,23 +1384,23 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                 )}
 
                 {/* Reasoning */}
-                {current.reasoning && (
+                {predictionReasoning && (
                   <div className="rounded-md bg-muted/50 p-3">
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
                       Reasoning
                     </div>
                     <p className="text-sm leading-relaxed text-foreground/80">
-                      {current.reasoning}
+                      {predictionReasoning}
                     </p>
                   </div>
                 )}
 
                 {/* Model tag */}
-                {current.predictor_model && (
+                {predictionModel && (
                   <div className="text-xs text-muted-foreground">
                     Model:{" "}
                     <span className="font-mono">
-                      {current.predictor_model}
+                      {predictionModel}
                     </span>
                   </div>
                 )}
@@ -1182,16 +1412,14 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               <Button
                 onClick={handleAdjudicate}
                 disabled={
-                  isPending || current.review_status !== "unreviewed"
+                  isPending || !!patientInfo?.failed_review_job_id || current.review_status !== "unreviewed"
                 }
                 className="w-full gap-2"
                 size="lg"
-                aria-busy={reviewMutation.isPending}
+                aria-busy={isSubmittingBatch}
               >
                 <CheckCircle2 className="h-4 w-4" />
-                {reviewMutation.isPending && !showEventDateInput
-                  ? "Saving\u2026"
-                  : "No Event"}
+                {isSubmittingBatch ? "Queuing review\u2026" : "No Event"}
                 <kbd className="ml-auto rounded border border-white/20 bg-white/10 px-1.5 py-0.5 text-xs">
                   A
                 </kbd>
@@ -1202,7 +1430,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                   variant="outline"
                   onClick={() => setShowEventDateInput(true)}
                   disabled={
-                    isPending || current.review_status !== "unreviewed"
+                    isPending || !!patientInfo?.failed_review_job_id || current.review_status !== "unreviewed"
                   }
                   className="w-full gap-2"
                   size="lg"
@@ -1264,7 +1492,97 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
           {/* ── RIGHT PANEL: Sentence + Full Note ─────────────── */}
           <div className="space-y-4">
-            {isPipelineAnnotation ? (
+            {isManualAnnotation ? (
+              contextLoading ? (
+                <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-4/6" />
+                </div>
+              ) : context ? (
+                <>
+                  {(() => {
+                    const sentenceStart = current.sentence_start!;
+                    const sentenceEnd = current.sentence_end!;
+                    const sentenceText = context.text.slice(sentenceStart, sentenceEnd);
+                    const sentenceSpans = (context.annotation_spans ?? [])
+                      .filter((span) => span.sentence_number === current.sentence_number)
+                      .map(({ start, end }) => ({ start, end }));
+                    const spans = sentenceSpans.length > 0
+                      ? sentenceSpans
+                      : [{ start: current.note_start_index!, end: current.note_end_index! }];
+
+                    return (
+                      <>
+                        <div className="rounded-lg border border-border bg-card">
+                          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+                            <ArrowRight className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium text-foreground">
+                              Matched Sentence
+                            </span>
+                            <span className="text-muted-foreground">&middot;</span>
+                            <span className="text-xs text-muted-foreground">
+                              {context.text_id}
+                              {context.note_date && ` \u2014 ${formatDate(context.note_date)}`}
+                            </span>
+                            {Object.entries(context.note_tags ?? {})
+                              .filter(([key]) => key.startsWith("text_tag"))
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([key, value]) => (
+                                <Badge
+                                  key={key}
+                                  variant="outline"
+                                  className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-normal text-blue-600 dark:text-blue-400"
+                                >
+                                  {String(value)}
+                                </Badge>
+                              ))}
+                          </div>
+                          <div className="max-h-48 overflow-y-auto px-5 py-4">
+                            <p
+                              className="text-[16px] leading-[1.8] text-foreground"
+                              style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+                            >
+                              {sentenceText || current.sentence_text
+                                ? highlightExactSpans(
+                                    sentenceText || current.sentence_text,
+                                    sentenceStart,
+                                    spans,
+                                    context.search_keywords ?? []
+                                  )
+                                : null}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-border bg-card">
+                          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium text-foreground">Full Note</span>
+                            <span className="text-xs text-muted-foreground">
+                              {context.text_id}
+                              {context.note_date && ` \u2014 ${formatDate(context.note_date)}`}
+                            </span>
+                          </div>
+                          <div className="h-[420px] overflow-y-auto px-5 py-4">
+                            <PipelineNoteViewer
+                              noteText={context.text}
+                              matchPositions={spans}
+                              keywords={context.search_keywords ?? []}
+                              evidenceSpans={context.current_note_evidence ?? []}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <p className="text-sm text-muted-foreground">Note context unavailable.</p>
+                </div>
+              )
+            ) : isPipelineAnnotation ? (
               /* Pipeline annotation: show all matched notes, one at a time */
               matchedNotesLoading ? (
                 <div className="space-y-2 rounded-lg border border-border bg-card p-4">
@@ -1360,6 +1678,11 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                         noteText={matchedNotes[noteIndex].text}
                         matchPositions={matchedNotes[noteIndex].match_positions}
                         keywords={matchedNotes[noteIndex].search_keywords}
+                        evidenceSpans={
+                          matchedNotes[noteIndex].text_id === current.note_text_id
+                            ? current.note_prediction?.evidence_spans ?? current.evidence_spans ?? []
+                            : []
+                        }
                       />
                     </div>
                   </div>
@@ -1451,9 +1774,10 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                     ) : context ? (
                       <NoteViewer
                         context={context}
-                        targetSentenceId={current.sentence_id}
-                        sentenceText={current.sentence_text}
+                        targetSentenceId={current.sentence_id ?? ""}
                         keywords={context.search_keywords ?? []}
+                        targetStart={current.note_start_index}
+                        targetEnd={current.note_end_index}
                       />
                     ) : (
                       <p className="text-sm text-muted-foreground">
@@ -1469,10 +1793,10 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
         {/* Live region for screen readers */}
         <div className="sr-only" aria-live="assertive" aria-atomic="true">
-          {reviewMutation.isSuccess && "Annotation adjudicated"}
+          {draftForPatient.length > 0 && "Review decision recorded for this patient"}
           {deleteEventDateMutation.isSuccess &&
             "Event date deleted, skips reverted"}
-          {(reviewMutation.isError || deleteEventDateMutation.isError) &&
+          {(batchError || deleteEventDateMutation.isError) &&
             "Action failed, please try again"}
         </div>
       </div>

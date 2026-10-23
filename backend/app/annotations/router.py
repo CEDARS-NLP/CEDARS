@@ -2,12 +2,14 @@
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.annotations.query_service import get_patient_matched_notes
+from app.annotations.adjudication_service import AdjudicationConflictError, submit_review_batch
+from app.annotations.query_service import get_patient_matched_notes, serialize_annotation
+from app.annotations.review_jobs import PatientReviewJob
 from app.annotations.schemas import (
     AnnotationResponse,
     AnnotationStatsResponse,
@@ -18,6 +20,8 @@ from app.annotations.schemas import (
     PatientAnnotationResponse,
     PatientReviewStats,
     PredictionJobResponse,
+    ReviewBatchRequest,
+    ReviewBatchResponse,
     ReviewRequest,
     ReviewResultResponse,
 )
@@ -35,6 +39,8 @@ from app.annotations.service import (
     get_patient_review_stats,
     get_prediction_job_status,
     list_annotations,
+    navigate_patient_review,
+    patient_review_cursor,
     reopen_patient,
     review_annotation,
     run_bulk_predictions,
@@ -48,6 +54,10 @@ from app.dependencies import require_project_role
 from app.evaluation.models import EvaluationSession, PatientResult
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/annotations", tags=["annotations"])
+
+
+def _adjudication_conflict(exc: AdjudicationConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
 
 
 def _extract_keywords_from_queries(search_queries: list[dict]) -> list[str]:
@@ -215,6 +225,129 @@ async def next_patient_endpoint(
     return await get_next_patient_for_review(session, project_id, current_user.id)
 
 
+@router.post(
+    "/patient/{patient_id}/review-batches",
+    response_model=ReviewBatchResponse,
+    status_code=202,
+)
+async def submit_patient_review_batch_endpoint(
+    project_id: str,
+    patient_id: str,
+    body: ReviewBatchRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    """Persist a completed client-side review batch and queue atomic finalization."""
+    try:
+        job = await submit_review_batch(
+            session,
+            project_id,
+            patient_id,
+            current_user.id,
+            body.idempotency_key,
+            [decision.model_dump(mode="json") for decision in body.decisions],
+            body.skip_after_event,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+
+    if job.status == "queued":
+        from app.jobs.review import enqueue_review_job
+
+        background_tasks.add_task(enqueue_review_job, job.id, job.attempt_count)
+    return ReviewBatchResponse(
+        job_id=job.id,
+        status=job.status,
+        patient_id=job.patient_uuid,
+        attempt_count=job.attempt_count,
+        last_error=job.last_error,
+    )
+
+
+@router.get("/review-batches/failed")
+async def failed_review_batches_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    jobs = (
+        await session.scalars(
+            select(PatientReviewJob)
+            .where(
+                col(PatientReviewJob.project_id) == project_id,
+                col(PatientReviewJob.status) == "failed",
+            )
+            .order_by(col(PatientReviewJob.created_at))
+        )
+    ).all()
+    return [
+        {
+            "id": job.id,
+            "patient_id": job.patient_uuid,
+            "reviewer_id": job.reviewer_id,
+            "attempt_count": job.attempt_count,
+            "last_error": job.last_error,
+            "retry_requested_by": job.retry_requested_by,
+            "retry_requested_at": job.retry_requested_at,
+            "created_at": job.created_at,
+        }
+        for job in jobs
+    ]
+
+
+@router.post("/review-batches/{job_id}/retry-request")
+async def request_review_batch_retry_endpoint(
+    project_id: str,
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    from app.jobs.review import request_patient_review_retry
+
+    job = await request_patient_review_retry(
+        session, project_id, job_id, current_user.id
+    )
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    return {"job_id": job.id, "status": job.status, "requested": True}
+
+
+@router.post("/review-batches/{job_id}/retry")
+async def retry_review_batch_endpoint(
+    project_id: str,
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    from app.jobs.review import enqueue_review_job, retry_patient_review_job
+
+    try:
+        job = await retry_patient_review_job(session, project_id, job_id)
+    except ValueError as exc:
+        raise _adjudication_conflict(AdjudicationConflictError(str(exc))) from exc
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    background_tasks.add_task(enqueue_review_job, job.id, job.attempt_count)
+    return {"job_id": job.id, "status": job.status, "attempt_count": job.attempt_count}
+
+
+@router.post("/review-batches/{job_id}/discard")
+async def discard_review_batch_endpoint(
+    project_id: str,
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    from app.jobs.review import discard_failed_patient_review_job
+
+    job = await discard_failed_patient_review_job(session, project_id, job_id)
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    return {"job_id": job.id, "status": job.status}
+
+
 @router.get(
     "/patient/{patient_id}/annotations",
     response_model=list[PatientAnnotationResponse],
@@ -227,6 +360,51 @@ async def patient_annotations_endpoint(
 ):
     """Get all annotations for a patient, sorted by note_date and sentence position."""
     return await get_patient_annotations(session, project_id, patient_id)
+
+
+@router.get("/patient/{patient_id}/cursor")
+async def patient_review_cursor_endpoint(
+    project_id: str,
+    patient_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    try:
+        cursor = await patient_review_cursor(session, project_id, patient_id, current_user.id)
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+    if not cursor:
+        raise_not_found("Patient not found")
+    return {
+        "current_annotation_id": cursor["current_annotation_id"],
+        "next_annotation_id": cursor["next_annotation_id"],
+        "annotation_ids": cursor["annotation_ids"],
+    }
+
+
+@router.post("/patient/{patient_id}/navigate/{action}")
+async def navigate_patient_review_endpoint(
+    project_id: str,
+    patient_id: str,
+    action: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    if action not in {"first_anno", "prev_10", "prev_1", "next_1", "next_10", "last_anno"}:
+        raise HTTPException(status_code=422, detail="Unsupported navigation action")
+    try:
+        cursor = await navigate_patient_review(
+            session, project_id, patient_id, current_user.id, action
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+    if not cursor:
+        raise_not_found("Patient not found")
+    return {
+        "current_annotation_id": cursor["current_annotation_id"],
+        "next_annotation_id": cursor["next_annotation_id"],
+        "annotation_ids": cursor["annotation_ids"],
+    }
 
 
 @router.get("/patient/{patient_id}/stats", response_model=PatientReviewStats)
@@ -284,7 +462,7 @@ async def get_annotation_endpoint(
     annotation = await get_annotation(session, project_id, annotation_id)
     if not annotation:
         raise_not_found("Annotation not found")
-    return annotation
+    return await serialize_annotation(session, annotation)
 
 
 @router.get("/{annotation_id}/context")
@@ -299,7 +477,7 @@ async def annotation_context_endpoint(
     if not annotation:
         raise_not_found("Annotation not found")
 
-    context = await get_note_context(session, annotation.note_id)
+    context = await get_note_context(session, annotation.note_id or annotation.text_id)
     if not context:
         raise_not_found("Note not found")
 
@@ -345,12 +523,17 @@ async def review_annotation_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as reviewed, optionally with an event date."""
-    result = await review_annotation(
-        session, project_id, annotation_id, current_user.id,
-        event_date=body.event_date,
-    )
+    try:
+        result = await review_annotation(
+            session, project_id, annotation_id, current_user.id,
+            event_date=body.event_date,
+            skip_after_event=body.skip_after_event,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not result:
         raise_not_found("Annotation not found")
+    result["annotation"] = await serialize_annotation(session, result["annotation"])
     return result
 
 
@@ -365,11 +548,15 @@ async def delete_event_date_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Delete an event date and revert skipped annotations."""
-    result = await delete_event_date(
-        session, project_id, annotation_id, current_user.id,
-    )
+    try:
+        result = await delete_event_date(
+            session, project_id, annotation_id, current_user.id,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not result:
         raise_not_found("Annotation not found or no event date set")
+    result["annotation"] = await serialize_annotation(session, result["annotation"])
     return result
 
 
@@ -384,9 +571,12 @@ async def skip_annotation_endpoint(
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as skipped."""
-    annotation = await skip_annotation(
-        session, project_id, annotation_id, current_user.id,
-    )
+    try:
+        annotation = await skip_annotation(
+            session, project_id, annotation_id, current_user.id,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
     if not annotation:
         raise_not_found("Annotation not found")
-    return annotation
+    return await serialize_annotation(session, annotation)

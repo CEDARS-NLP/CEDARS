@@ -3,18 +3,18 @@
 import logging
 from datetime import timedelta
 
-from sqlalchemy import case, func, select, text, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
-from app.annotations.filters import reviewable_filter as _reviewable_filter
-from app.annotations.models import Annotation, AnnotationPrediction, ReviewStatus
+from app.annotations.models import Annotation
 from app.common.crud import get_scoped, list_scoped, soft_delete
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus, JobType
 from app.nlp.engine import parse_query, process_note
 from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
-from app.predictors.service import get_active_predictor_config
+from app.production.models import NotePrediction
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +40,9 @@ async def create_search_query(
     await session.execute(
         update(SearchQuery)
         .where(
-            SearchQuery.project_id == project_id,
-            SearchQuery.deleted_at.is_(None),
-            SearchQuery.is_active.is_(True),
+            col(SearchQuery.project_id) == project_id,
+            col(SearchQuery.deleted_at).is_(None),
+            col(SearchQuery.is_active).is_(True),
         )
         .values(is_active=False)
     )
@@ -143,74 +143,142 @@ async def delete_search_query(
 # ── NLP Processing ───────────────────────────────────────────────
 
 
-async def dispatch_nlp_job(session: AsyncSession, project_id: str, user_id: str) -> dict:
-    """Create a BackgroundJob and enqueue NLP processing via ARQ.
+async def dispatch_nlp_job(
+    session: AsyncSession,
+    project_id: str,
+    user_id: str,
+    *,
+    confirmed: bool = False,
+) -> dict:
+    """Dispatch keyword production processing through the production coordinator."""
+    from app.production.service import start_run
 
-    Falls back to synchronous execution if Redis/ARQ is unavailable.
-    """
+    try:
+        config = await _active_production_config(session, project_id)
+    except ValueError as exc:
+        if str(exc) != "No active search query configured for this project":
+            raise
+        stats = await _process_notes_into_sentences(
+            session, project_id, create_annotations=False, rebuild=True
+        )
+        bg_job = BackgroundJob(
+            project_id=project_id,
+            job_type=JobType.NLP,
+            status=JobStatus.COMPLETED,
+            progress=100,
+            created_by=user_id,
+            result_summary=stats,
+            started_at=now_utc(),
+            completed_at=now_utc(),
+        )
+        session.add(bg_job)
+        await session.commit()
+        await session.refresh(bg_job)
+        return {
+            "job_id": bg_job.id,
+            "status": bg_job.status.value,
+            "progress": bg_job.progress,
+        }
+
+    production_run = await start_run(
+        session, project_id, user_id, config, confirmed=confirmed
+    )
     bg_job = BackgroundJob(
         project_id=project_id,
         job_type=JobType.NLP,
         status=JobStatus.PENDING,
         created_by=user_id,
+        result_summary={"production_run_id": production_run.id},
     )
     session.add(bg_job)
     await session.commit()
     await session.refresh(bg_job)
 
-    use_sync = True
+    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    factory = async_sessionmaker(session.bind, class_=_AsyncSession, expire_on_commit=False)
     try:
         from arq import create_pool
 
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
-
-        # Check if any ARQ workers are active before enqueuing
-        health_key = await redis.exists(b"arq:queue:health-check")
-        if health_key:
-            arq_job = await redis.enqueue_job("run_nlp_job", project_id, bg_job.id)
-            bg_job.arq_job_id = arq_job.job_id
-            session.add(bg_job)
-            await session.commit()
-            use_sync = False
-        else:
-            logger.warning("No ARQ workers found, running NLP synchronously")
-
-        await redis.aclose()
+        try:
+            await redis.enqueue_job("run_nlp_job", project_id, bg_job.id)
+        finally:
+            await redis.aclose()
     except Exception:
-        logger.warning("ARQ unavailable, running NLP synchronously")
-
-    if use_sync:
-        import asyncio
-
-        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-
-        from app.jobs.nlp import execute_nlp_job
-
-        # Build a session factory from the current session's bind so that
-        # the inline execution uses the same database (important in tests
-        # where the DB is overridden via dependency injection).
-        factory = async_sessionmaker(
-            session.bind, class_=_AsyncSession, expire_on_commit=False
+        logger.info("ARQ unavailable; executing production NLP job synchronously")
+        await _execute_production_nlp_job(
+            project_id, bg_job.id, production_run.id, factory
         )
-        # Run as a background task so the endpoint returns immediately
-        # and the job is cancellable via the cancel endpoint.
-        def _on_done(t: asyncio.Task) -> None:
-            if not t.cancelled() and t.exception():
-                logger.exception("Background NLP task failed", exc_info=t.exception())
-
-        task = asyncio.create_task(
-            execute_nlp_job(project_id, bg_job.id, session_factory=factory)
-        )
-        task.add_done_callback(_on_done)
+        await session.refresh(bg_job)
 
     return {
         "job_id": bg_job.id,
         "status": bg_job.status.value,
         "progress": bg_job.progress,
     }
+
+
+async def _active_production_config(session: AsyncSession, project_id: str) -> dict:
+    result = await session.execute(
+        select(SearchQuery).where(
+            col(SearchQuery.project_id) == project_id,
+            col(SearchQuery.deleted_at).is_(None),
+            col(SearchQuery.is_active).is_(True),
+        )
+    )
+    query = result.scalar_one_or_none()
+    if query is None:
+        raise ValueError("No active search query configured for this project")
+    return {
+        "query": query.query,
+        "hide_duplicates": query.hide_duplicates,
+        "skip_after_event": query.skip_after_event,
+        "exclude_negated": query.exclude_negated,
+    }
+
+
+async def _execute_production_nlp_job(project_id, job_id, run_id, session_factory) -> None:
+    from app.production.models import ProductionRun
+    from app.production.service import cancel_run, execute_run, get_stats
+
+    async with session_factory() as session:
+        job = await session.get(BackgroundJob, job_id)
+        if job is None:
+            return
+        job.status = JobStatus.RUNNING
+        job.started_at = now_utc()
+        await session.commit()
+        try:
+            await _process_notes_into_sentences(
+                session, project_id, create_annotations=False, rebuild=True
+            )
+            run = await execute_run(session, run_id)
+            stats = await get_stats(session, run_id)
+            job.status = (
+                JobStatus.FAILED if run.status == "failed" else JobStatus.COMPLETED
+            )
+            job.progress = 100 if run.status in {"completed", "failed"} else 0
+            job.result_summary = {**(job.result_summary or {}), **stats}
+        except Exception as exc:
+            await session.rollback()
+            run = await session.get(ProductionRun, run_id)
+            if run is not None and run.status in {"queued", "running"}:
+                try:
+                    await cancel_run(session, run_id)
+                except Exception:
+                    await session.rollback()
+            job = await session.get(BackgroundJob, job_id)
+            if job is None:
+                return
+            job.status = JobStatus.FAILED
+            job.error_message = str(exc)[:2000]
+        job.completed_at = now_utc()
+        session.add(job)
+        await session.commit()
 
 
 async def get_nlp_job_status(
@@ -221,10 +289,10 @@ async def get_nlp_job_status(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.NLP,
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.NLP,
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -261,6 +329,11 @@ async def cancel_nlp_job(
     if not bg_job:
         return None
 
+    run_id = (bg_job.result_summary or {}).get("production_run_id")
+    if run_id:
+        from app.production.service import cancel_run
+
+        await cancel_run(session, run_id)
     bg_job.is_cancelled = True
     bg_job.status = JobStatus.CANCELLED
     bg_job.completed_at = now_utc()
@@ -276,14 +349,12 @@ async def _process_notes_into_sentences(
     progress_callback=None,
     *,
     create_annotations: bool = True,
+    rebuild: bool = False,
 ) -> dict:
-    """Core NLP pipeline: fetch queries, find unprocessed notes, create sentences.
+    """Cache sentence processing without writing production annotations."""
+    if rebuild:
+        await session.execute(delete(Sentence).where(Sentence.project_id == project_id))
 
-    Every matched token also becomes an Annotation row, mirroring the v1
-    nlpprocessor record, so review can proceed without any predictor.
-
-    Returns a stats dict with note, annotation and patient counts.
-    """
     # Get active search queries
     queries = await list_search_queries(session, project_id)
     active_queries = [q for q in queries if q.is_active]
@@ -294,7 +365,6 @@ async def _process_notes_into_sentences(
         all_query_groups.extend(groups)
     # Single active query per project is enforced at the DB level; negation
     # exclusion follows that query's setting.
-    exclude_negated = bool(active_queries) and active_queries[0].exclude_negated
 
     # Get notes that haven't been processed yet (no sentences exist)
     notes_stmt = (
@@ -311,7 +381,7 @@ async def _process_notes_into_sentences(
     notes = list(result.scalars().all())
 
     total = len(notes)
-    if not notes:
+    if not notes and not create_annotations and not rebuild:
         return {
             "total_notes": 0,
             "processed_notes": 0,
@@ -320,14 +390,8 @@ async def _process_notes_into_sentences(
             "patients_auto_completed": 0,
         }
 
-    annotations_created = 0
-    match_counts: dict[str, int] = {}
-
     for i, note in enumerate(notes):
         sentences = process_note(note.text, all_query_groups)
-        match_counts.setdefault(note.patient_id, 0)
-        sentence_rows = []
-
         for sent_data in sentences:
             sentence = Sentence(
                 note_id=note.id,
@@ -341,142 +405,65 @@ async def _process_notes_into_sentences(
                 matched_tokens=sent_data["matched_tokens"],
             )
             session.add(sentence)
-            sentence_rows.append((sentence, sent_data))
-
-        await session.flush()
-
-        for sentence, sent_data in sentence_rows if create_annotations else []:
-            for match in sent_data.get("matches", []):
-                auto_excluded = exclude_negated and sent_data["is_negated"]
-                session.add(
-                    Annotation(
-                        project_id=project_id,
-                        patient_id=note.patient_id,
-                        note_id=note.id,
-                        sentence_id=sentence.id,
-                        sentence_text=sent_data["text"],
-                        matched_tokens=",".join(sent_data["matched_tokens"]),
-                        is_negated=sent_data["is_negated"],
-                        token=match["token"],
-                        note_start_index=match["note_start_index"],
-                        note_end_index=match["note_end_index"],
-                        sentence_number=sent_data["sentence_number"],
-                        sentence_start=sent_data["start_pos"],
-                        sentence_end=sent_data["end_pos"],
-                        text_date=note.note_date,
-                        review_status=(
-                            ReviewStatus.REVIEWED if auto_excluded else ReviewStatus.UNREVIEWED
-                        ),
-                        reviewed_at=now_utc() if auto_excluded else None,
-                        review_excluded=auto_excluded,
-                    )
-                )
-                annotations_created += 1
-                match_counts[note.patient_id] += 1
-
-        await session.flush()
 
         if (i + 1) % 50 == 0 or i == total - 1:
             if progress_callback:
                 await progress_callback(i + 1, total)
 
-    if not create_annotations:
-        await session.commit()
+    await session.commit()
+
+    if create_annotations:
+        from app.production.service import execute_run, get_stats, start_run
+
+        production_run = await start_run(
+            session,
+            project_id,
+            None,
+            await _active_production_config(session, project_id),
+            confirmed=False,
+        )
+        await execute_run(session, production_run.id)
+        production_stats = await get_stats(session, production_run.id)
+        patient_count = await session.scalar(
+            select(func.count(func.distinct(Annotation.patient_id))).where(
+                Annotation.project_id == project_id,
+                Annotation.production_run_id == production_run.id,
+            )
+        )
         return {
-            "total_notes": total,
-            "processed_notes": total,
-            "annotations_created": 0,
-            "patients_with_matches": 0,
+            "total_notes": production_run.total_notes,
+            "processed_notes": production_run.completed_notes,
+            "annotations_created": production_stats["annotations_total"],
+            "patients_with_matches": patient_count or 0,
             "patients_auto_completed": 0,
         }
-
-    matched_patients = [pid for pid, count in match_counts.items() if count > 0]
-    patients_with_unreviewed = set()
-
-    active = await get_active_predictor_config(session, project_id)
-    touched_patient_ids = list(match_counts)
-    if touched_patient_ids:
-        pending_result = await session.execute(
-            select(Annotation.patient_id)
-            .where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id.in_(touched_patient_ids),
-                Annotation.review_status == ReviewStatus.UNREVIEWED,
-                Annotation.review_excluded.is_(False),
-                _reviewable_filter(active.id if active else None),
-            )
-            .distinct()
-        )
-        patients_with_unreviewed = set(pending_result.scalars().all())
-
-    auto_completed_patients = []
-    patients_requiring_review = []
-    for pid in touched_patient_ids:
-        if pid not in patients_with_unreviewed:
-            auto_completed_patients.append(pid)
-        else:
-            patients_requiring_review.append(pid)
-
-    if patients_requiring_review:
-        await session.execute(
-            update(Patient)
-            .where(
-                Patient.id.in_(patients_requiring_review),
-                Patient.status != PatientStatus.REVIEWING,
-            )
-            .values(
-                status=PatientStatus.NLP_COMPLETE, updated_at=now_utc(),
-                review_source=None, review_reason=None, reviewed_by=None, reviewed_at=None,
-            )
-        )
-    if auto_completed_patients:
-        annotations_result = await session.execute(
-            select(Annotation).where(
-                Annotation.project_id == project_id,
-                Annotation.patient_id.in_(auto_completed_patients),
-            )
-        )
-        annotations_by_patient: dict[str, list[Annotation]] = {}
-        for annotation in annotations_result.scalars():
-            annotations_by_patient.setdefault(annotation.patient_id, []).append(annotation)
-        for patient_id in auto_completed_patients:
-            patient = await session.get(Patient, patient_id)
-            if patient is None or patient.review_source in ("human", "llm"):
-                continue
-            existing = annotations_by_patient.get(patient_id, [])
-            if existing and not all(
-                annotation.review_excluded and annotation.reviewed_by is None
-                and not annotation.manual_review_override for annotation in existing
-            ):
-                continue
-            patient.status = PatientStatus.REVIEWED
-            patient.review_source = "cedars"
-            patient.review_reason = (
-                "negated_matches_only" if existing else "no_keyword_matches"
-            )
-            patient.reviewed_by = None
-            patient.reviewed_at = now_utc()
-            patient.updated_at = now_utc()
-            session.add(patient)
-    await session.commit()
 
     return {
         "total_notes": total,
         "processed_notes": total,
-        "annotations_created": annotations_created,
-        "patients_with_matches": len(matched_patients),
-        "patients_auto_completed": len(auto_completed_patients),
+        "annotations_created": 0,
+        "patients_with_matches": 0,
+        "patients_auto_completed": 0,
     }
 
 
 async def run_nlp_pipeline(
     session: AsyncSession, project_id: str, *, create_annotations: bool = True,
 ) -> NlpJob:
-    """Run the NLP pipeline for a project: split notes into sentences,
-    match search queries, detect negation.
+    """Run production processing, or cache sentences for evaluation-only callers."""
+    confirmed_run_id = session.info.pop("confirmed_production_run_id", None)
+    if create_annotations and confirmed_run_id is None:
+        from app.production.service import start_run
 
-    Creates sentences for all notes that haven't been processed yet.
-    """
+        production_run = await start_run(
+            session,
+            project_id,
+            None,
+            await _active_production_config(session, project_id),
+            confirmed=False,
+        )
+        confirmed_run_id = production_run.id
+
     job = NlpJob(project_id=project_id)
     session.add(job)
     await session.commit()
@@ -489,6 +476,28 @@ async def run_nlp_pipeline(
         session.add(job)
         await session.commit()
 
+        if create_annotations:
+            from app.production.service import execute_run
+
+            await _process_notes_into_sentences(
+                session, project_id, create_annotations=False, rebuild=True
+            )
+            run_id = confirmed_run_id
+            production_run = await execute_run(session, run_id)
+            job.total_notes = production_run.total_notes
+            job.processed_notes = production_run.completed_notes
+            job.status = (
+                NlpJobStatus.FAILED
+                if production_run.status == "failed"
+                else NlpJobStatus.COMPLETED
+            )
+            job.error_message = production_run.error_summary
+            job.completed_at = now_utc()
+            session.add(job)
+            await session.commit()
+            await session.refresh(job)
+            return job
+
         async def _progress(processed, total):
             job.total_notes = total
             job.processed_notes = processed
@@ -496,7 +505,10 @@ async def run_nlp_pipeline(
             await session.commit()
 
         stats = await _process_notes_into_sentences(
-            session, project_id, _progress, create_annotations=create_annotations,
+            session,
+            project_id,
+            _progress,
+            create_annotations=False,
         )
 
         job.status = NlpJobStatus.COMPLETED
@@ -602,7 +614,7 @@ async def list_target_sentences(
 async def get_reprocess_impact(session: AsyncSession, project_id: str) -> dict:
     counts = {}
     for name, model in (
-        ("annotations", Annotation), ("predictions", AnnotationPrediction),
+        ("annotations", Annotation), ("predictions", NotePrediction),
         ("sentences", Sentence),
     ):
         counts[name] = (
@@ -615,6 +627,7 @@ async def get_reprocess_impact(session: AsyncSession, project_id: str) -> dict:
 
 async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
     from app.pipeline.models import PipelineRun, PipelineRunStatus
+    from app.production.models import ProductionRun
 
     checks = (
         select(BackgroundJob.id).where(
@@ -629,6 +642,10 @@ async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
         select(PipelineRun.id).where(
             PipelineRun.project_id == project_id,
             PipelineRun.status.in_([PipelineRunStatus.QUEUED, PipelineRunStatus.RUNNING]),
+        ),
+        select(ProductionRun.id).where(
+            ProductionRun.project_id == project_id,
+            ProductionRun.status.in_(["queued", "running"]),
         ),
         select(Patient.id).where(
             Patient.project_id == project_id,
@@ -646,29 +663,24 @@ async def reprocess_is_busy(session: AsyncSession, project_id: str) -> bool:
 async def clear_sentences(
     session: AsyncSession, project_id: str, *, commit: bool = True,
 ) -> int:
-    """Delete all sentences (and their annotations) for a project to allow re-processing."""
-    # Delete predictions first (FK dependency on annotations)
-    await session.execute(
-        text("DELETE FROM annotation_predictions WHERE project_id = :pid"),
-        {"pid": project_id},
-    )
-    # Delete annotations next (FK dependency on sentences)
-    await session.execute(
-        text("DELETE FROM annotations WHERE project_id = :pid"),
-        {"pid": project_id},
-    )
-    await session.execute(
-        update(Patient)
-        .where(Patient.project_id == project_id)
-        .values(
-            status=PatientStatus.NLP_COMPLETE, review_source=None, review_reason=None,
-            reviewed_by=None, reviewed_at=None, updated_at=now_utc(),
+    """Clear the sentence cache; confirmed production reset is coordinated separately."""
+    result = await session.execute(delete(Sentence).where(Sentence.project_id == project_id))
+    if commit:
+        from app.production.service import start_run
+
+        config = await _active_production_config(session, project_id)
+        production_run = await start_run(
+            session, project_id, None, config, confirmed=True
         )
-    )
-    result = await session.execute(
-        text("DELETE FROM sentences WHERE project_id = :pid"),
-        {"pid": project_id},
-    )
+        session.info["confirmed_production_run_id"] = production_run.id
+    else:
+        from app.production.service import start_run
+
+        config = await _active_production_config(session, project_id)
+        production_run = await start_run(
+            session, project_id, None, config, confirmed=True
+        )
+        session.info["confirmed_production_run_id"] = production_run.id
     if commit:
         await session.commit()
     return result.rowcount

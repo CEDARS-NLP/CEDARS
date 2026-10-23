@@ -1,4 +1,6 @@
 """Tests for pipeline data models."""
+from datetime import date
+
 import pytest
 
 from tests.conftest import seed_project_and_user
@@ -206,21 +208,29 @@ class TestAnnotationPipelineLinkage:
         ann = Annotation(
             project_id="proj-1",
             patient_id="patient-1",
-            note_id="note-1",
-            sentence_id="sent-1",
-            sentence_text="Troponin elevated",
+            text_id="note-1",
+            text_date=date(2025, 1, 1),
+            sentence="Troponin elevated",
+            token="Troponin",
+            isNegated=False,
+            note_start_index=0,
+            note_end_index=8,
+            sentence_number=0,
+            sentence_start=0,
+            sentence_end=17,
             pipeline_run_id="run-1",
             patient_task_id=1,
-            predicted_reasoning="Troponin level elevated at 2.4",
-            reviewer_label="positive",
+            prediction_id=1,
+            status="R",
+            review_reason="human_event",
             reviewer_notes="Confirmed by Dr. Smith",
-            review_status=ReviewStatus.PENDING,
         )
         assert ann.pipeline_run_id == "run-1"
         assert ann.patient_task_id == 1
-        assert ann.predicted_reasoning == "Troponin level elevated at 2.4"
-        assert ann.reviewer_label == "positive"
-        assert ann.review_status == ReviewStatus.PENDING
+        assert ann.prediction_id == 1
+        assert ann.review_reason == "human_event"
+        assert ann.reviewer_notes == "Confirmed by Dr. Smith"
+        assert ann.review_status == ReviewStatus.REVIEWED
 
     async def test_annotation_without_pipeline_fields(self, app):
         """Existing annotations work without pipeline fields."""
@@ -229,14 +239,23 @@ class TestAnnotationPipelineLinkage:
         ann = Annotation(
             project_id="proj-1",
             patient_id="patient-1",
-            note_id="note-1",
-            sentence_id="sent-1",
-            sentence_text="Some text",
-            review_status=ReviewStatus.UNREVIEWED,
+            text_id="note-1",
+            text_date=date(2025, 1, 1),
+            sentence="Some text",
+            token="text",
+            isNegated=False,
+            note_start_index=5,
+            note_end_index=9,
+            sentence_number=0,
+            sentence_start=0,
+            sentence_end=9,
+            status="U",
         )
         assert ann.pipeline_run_id is None
         assert ann.patient_task_id is None
-        assert ann.predicted_reasoning is None
+        assert ann.prediction_id is None
+        assert ann.review_reason is None
+        assert ann.review_status == ReviewStatus.UNREVIEWED
 
     async def test_review_status_has_pipeline_values(self, app):
         from app.annotations.models import ReviewStatus

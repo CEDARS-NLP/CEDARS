@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation
 from app.audit.models import AuditAction
@@ -23,6 +24,7 @@ from app.connectors.models import (
 )
 from app.connectors.registry import get_connector
 from app.jobs.models import BackgroundJob, JobStatus, JobType
+from app.production.models import NotePrediction, ProductionResult
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +183,8 @@ async def _run_ingestion_pipeline(
     session.add(ds)
     await session.commit()
 
+    inserted_rows = 0
     try:
-        inserted_rows = 0
         offset = 0
         batch_size = 1000
 
@@ -205,6 +207,13 @@ async def _run_ingestion_pipeline(
         ds.error_message = None
 
     except Exception as exc:
+        ds.status = IngestionStatus.FAILED
+        ds.error_message = str(exc)
+
+    try:
+        await _refresh_project_results(session, project_id)
+    except Exception as exc:
+        logger.exception("Failed to refresh production results after ingestion")
         ds.status = IngestionStatus.FAILED
         ds.error_message = str(exc)
 
@@ -268,10 +277,13 @@ async def dispatch_ingestion_job(
                 arq_job = await redis.enqueue_job(
                     "run_ingestion_job", project_id, bg_job.id, data_source_id
                 )
-                bg_job.arq_job_id = arq_job.job_id
-                session.add(bg_job)
-                await session.commit()
-                use_sync = False
+                if arq_job is not None:
+                    bg_job.arq_job_id = arq_job.job_id
+                    session.add(bg_job)
+                    await session.commit()
+                    use_sync = False
+                else:
+                    logger.warning("ARQ did not enqueue the ingestion job")
             else:
                 logger.warning("No ARQ workers found, running ingestion as background task")
     except Exception:
@@ -314,10 +326,10 @@ async def get_ingestion_job_status(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.INGESTION,
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.INGESTION,
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -344,11 +356,11 @@ async def cancel_ingestion_job(
     stmt = (
         select(BackgroundJob)
         .where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.job_type == JobType.INGESTION,
-            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.job_type) == JobType.INGESTION,
+            col(BackgroundJob.status).in_([JobStatus.PENDING, JobStatus.RUNNING]),
         )
-        .order_by(BackgroundJob.created_at.desc())
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     result = await session.execute(stmt)
@@ -462,13 +474,15 @@ async def _upsert_rows(
 
         existing = await session.execute(
             select(Note).where(
-                Note.project_id == project_id,
-                Note.text_id == text_id,
+                col(Note.project_id) == project_id,
+                col(Note.text_id) == text_id,
             )
         )
         existing_note = existing.scalar_one_or_none()
 
         if existing_note:
+            existing_note.patient_id = patient_db_id
+            existing_note.patient_id_ext = patient_id_ext
             existing_note.text = note_text
             existing_note.note_date = note_date
             if source_ref is not None:
@@ -480,6 +494,7 @@ async def _upsert_rows(
             note = Note(
                 project_id=project_id,
                 patient_id=patient_db_id,
+                patient_id_ext=patient_id_ext,
                 text_id=text_id,
                 note_date=note_date,
                 text=note_text,
@@ -512,9 +527,9 @@ async def purge_data_source(
     if not ds:
         raise ValueError("Data source not found")
 
-    note_ids_stmt = select(Note.id).where(
-        Note.project_id == project_id,
-        Note.data_source_id == data_source_id,
+    note_ids_stmt = select(col(Note.id)).where(
+        col(Note.project_id) == project_id,
+        col(Note.data_source_id) == data_source_id,
     )
     note_ids = [r[0] for r in (await session.execute(note_ids_stmt)).all()]
 
@@ -522,43 +537,68 @@ async def purge_data_source(
         return 0
 
     async with session.begin_nested():
-        annotation_ids = select(Annotation.id).where(Annotation.note_id.in_(note_ids))
+        annotation_ids = select(col(Annotation.annotation_id)).where(
+            col(Annotation.note_uuid).in_(note_ids)
+        )
+        await session.execute(
+            update(Patient)
+            .where(
+                col(Patient.project_id) == project_id,
+                col(Patient.event_annotation_id).in_(annotation_ids),
+            )
+            .values(event_date=None, event_annotation_id=None, event_reviewer=None)
+        )
+        await session.execute(
+            update(ProductionResult)
+            .where(
+                col(ProductionResult.project_id) == project_id,
+                col(ProductionResult.event_annotation_id).in_(annotation_ids),
+            )
+            .values(event_date=None, event_annotation_id=None)
+        )
         await session.execute(
             delete(AnnotationPrediction).where(
-                AnnotationPrediction.annotation_id.in_(annotation_ids)
+                col(AnnotationPrediction.annotation_id).in_(annotation_ids)
             )
         )
         await session.execute(
-            delete(Annotation).where(Annotation.note_id.in_(note_ids))
+            delete(NotePrediction).where(col(NotePrediction.note_uuid).in_(note_ids))
         )
         await session.execute(
-            delete(Sentence).where(Sentence.note_id.in_(note_ids))
+            delete(Annotation).where(col(Annotation.note_uuid).in_(note_ids))
         )
         await session.execute(
-            delete(Note).where(Note.id.in_(note_ids))
+            delete(Sentence).where(col(Sentence.note_id).in_(note_ids))
+        )
+        await session.execute(
+            delete(Note).where(col(Note.id).in_(note_ids))
         )
 
         # Delete patients from this data source that have no remaining notes.
         # Uses a single anti-join bulk DELETE instead of a per-patient N+1 loop.
-        patient_ids_subq = select(Patient.id).where(
-            Patient.project_id == project_id,
-            Patient.data_source_id == data_source_id,
-            ~exists(select(Note.id).where(Note.patient_id == Patient.id)),
+        patient_ids_subq = select(col(Patient.id)).where(
+            col(Patient.project_id) == project_id,
+            col(Patient.data_source_id) == data_source_id,
+            ~exists(select(col(Note.id)).where(col(Note.patient_id) == col(Patient.id))),
         ).scalar_subquery()
         # Keep the audit trail: detach its rows from the patients about to be deleted.
         await session.execute(
             update(AuditEntry)
-            .where(AuditEntry.patient_id.in_(patient_ids_subq))
+            .where(col(AuditEntry.patient_id).in_(patient_ids_subq))
             .values(patient_id=None)
         )
         await session.execute(
-            delete(Patient).where(Patient.id.in_(patient_ids_subq))
+            delete(ProductionResult).where(col(ProductionResult.patient_uuid).in_(patient_ids_subq))
+        )
+        await session.execute(
+            delete(Patient).where(col(Patient.id).in_(patient_ids_subq))
         )
 
     ds.status = IngestionStatus.PENDING
     ds.row_count = None
     ds.last_sync = None
     session.add(ds)
+    await _refresh_project_results(session, project_id)
     await session.commit()
 
     await log_action(
@@ -588,9 +628,9 @@ async def _ingest_rows(
     all_text_ids = [str(row.get(text_id_col, "")).strip() for row in rows]
     all_text_ids = [tid for tid in all_text_ids if tid]
     existing_result = await session.execute(
-        select(Note.text_id).where(
-            Note.project_id == project_id,
-            Note.text_id.in_(all_text_ids),
+        select(col(Note.text_id)).where(
+            col(Note.project_id) == project_id,
+            col(Note.text_id).in_(all_text_ids),
         )
     )
     existing_text_ids: set[str] = {r[0] for r in existing_result.all()}
@@ -638,6 +678,7 @@ async def _ingest_rows(
         note = Note(
             project_id=project_id,
             patient_id=patient_db_id,
+            patient_id_ext=patient_id_ext,
             text_id=text_id,
             note_date=note_date,
             text=note_text,
@@ -666,6 +707,87 @@ async def _ingest_rows(
     return inserted
 
 
+async def _refresh_project_results(session: AsyncSession, project_id: str) -> None:
+    """Refresh the per-patient RESULTS projection and create any missing rows."""
+    patients = list(
+        await session.scalars(
+            select(Patient).where(
+                col(Patient.project_id) == project_id,
+                col(Patient.deleted_at).is_(None),
+            )
+        )
+    )
+    if not patients:
+        return
+
+    patient_uuids = [patient.id for patient in patients]
+    note_rows = (
+        await session.execute(
+            select(
+                col(Note.patient_id),
+                func.count(col(Note.id)),
+                func.min(col(Note.note_date)),
+                func.max(col(Note.note_date)),
+            )
+            .where(col(Note.project_id) == project_id, col(Note.deleted_at).is_(None))
+            .group_by(col(Note.patient_id))
+        )
+    ).all()
+    note_stats = {row[0]: (row[1], row[2], row[3]) for row in note_rows}
+    annotation_rows = (
+        await session.execute(
+            select(
+                col(Annotation.patient_id),
+                func.count(col(Annotation.annotation_id)),
+                func.count(case((col(Annotation.status) == "U", 1))),
+                func.count(case((col(Annotation.status) == "R", 1))),
+                func.count(case((col(Annotation.status) == "S", 1))),
+            )
+            .where(col(Annotation.project_id) == project_id)
+            .group_by(col(Annotation.patient_id))
+        )
+    ).all()
+    annotation_stats = {row[0]: row[1:] for row in annotation_rows}
+    existing_results = list(
+        await session.scalars(
+            select(ProductionResult).where(
+                col(ProductionResult.project_id) == project_id,
+                col(ProductionResult.patient_uuid).in_(patient_uuids),
+            )
+        )
+    )
+    result_by_patient = {result.patient_uuid: result for result in existing_results}
+
+    for patient in patients:
+        result = result_by_patient.get(patient.id)
+        if result is None:
+            result = ProductionResult(
+                project_id=project_id,
+                patient_uuid=patient.id,
+                patient_id=patient.patient_id_ext,
+                processing_status="not_started",
+            )
+        count, first_date, last_date = note_stats.get(patient.id, (0, None, None))
+        total, pending, reviewed, skipped = annotation_stats.get(
+            patient.patient_id_ext, (0, 0, 0, 0)
+        )
+        result.patient_id = patient.patient_id_ext
+        result.notes_total = count
+        result.total_notes = count
+        result.first_note_date = first_date
+        result.last_note_date = last_date
+        result.annotations_total = total
+        result.annotations_pending = pending
+        result.annotations_reviewed = reviewed
+        result.annotations_skipped = skipped
+        result.event_date = patient.event_date
+        result.event_annotation_id = patient.event_annotation_id
+        result.reviewer = patient.reviewed_by
+        result.review_status = "completed" if patient.reviewed_at else "pending"
+        result.last_updated_at = now_utc()
+        session.add(result)
+
+
 async def _get_or_create_patient(
     session: AsyncSession,
     project_id: str,
@@ -674,8 +796,8 @@ async def _get_or_create_patient(
 ) -> Patient:
     """Find existing patient or create a new one."""
     stmt = select(Patient).where(
-        Patient.project_id == project_id,
-        Patient.patient_id_ext == patient_id_ext,
+        col(Patient.project_id) == project_id,
+        col(Patient.patient_id_ext) == patient_id_ext,
     )
     result = await session.execute(stmt)
     patient = result.scalar_one_or_none()
@@ -704,12 +826,12 @@ async def list_patients(
     status: str | None = None,
 ) -> dict:
     """List patients with note counts, annotation counts, optional search and status filter."""
-    base_where = [Patient.project_id == project_id, Patient.deleted_at.is_(None)]
+    base_where = [col(Patient.project_id) == project_id, col(Patient.deleted_at).is_(None)]
 
     if search:
-        base_where.append(Patient.patient_id_ext.ilike(f"%{search}%"))
+        base_where.append(col(Patient.patient_id_ext).ilike(f"%{search}%"))
     if status:
-        base_where.append(Patient.status == status)
+        base_where.append(col(Patient.status) == status)
 
     # Count total matching
     count_stmt = select(func.count()).select_from(Patient).where(*base_where)
@@ -718,29 +840,29 @@ async def list_patients(
     # Subquery for note counts
     note_sub = (
         select(
-            Note.patient_id,
-            func.count(Note.id).label("note_count"),
+            col(Note.patient_id),
+            func.count(col(Note.id)).label("note_count"),
         )
-        .where(Note.deleted_at.is_(None))
-        .group_by(Note.patient_id)
+        .where(col(Note.deleted_at).is_(None))
+        .group_by(col(Note.patient_id))
         .subquery()
     )
 
     # Subquery for annotation counts
     ann_sub = (
         select(
-            Annotation.patient_id,
-            func.count(Annotation.id).label("annotation_count"),
+            col(Annotation.patient_id),
+            col(Annotation.project_id),
+            func.count(col(Annotation.annotation_id)).label("annotation_count"),
             func.sum(
                 case(
-                    (Annotation.review_status.in_(["reviewed", "confirmed",
-                                                   "rejected", "skipped"]), 1),
+                    (col(Annotation.status).in_(["R", "S"]), 1),
                     else_=0,
                 )
             ).label("reviewed_count"),
         )
-        .where(Annotation.project_id == project_id)
-        .group_by(Annotation.patient_id)
+        .where(col(Annotation.project_id) == project_id)
+        .group_by(col(Annotation.project_id), col(Annotation.patient_id))
         .subquery()
     )
 
@@ -752,10 +874,14 @@ async def list_patients(
             func.coalesce(ann_sub.c.annotation_count, 0).label("annotation_count"),
             func.coalesce(ann_sub.c.reviewed_count, 0).label("reviewed_count"),
         )
-        .outerjoin(note_sub, note_sub.c.patient_id == Patient.id)
-        .outerjoin(ann_sub, ann_sub.c.patient_id == Patient.id)
+        .outerjoin(note_sub, note_sub.c.patient_id == col(Patient.id))
+        .outerjoin(
+            ann_sub,
+            (ann_sub.c.project_id == col(Patient.project_id))
+            & (ann_sub.c.patient_id == col(Patient.patient_id_ext)),
+        )
         .where(*base_where)
-        .order_by(Patient.updated_at.desc())
+        .order_by(col(Patient.updated_at).desc())
         .offset(offset)
         .limit(limit)
     )
@@ -787,11 +913,11 @@ async def get_patient_notes(
     stmt = (
         select(Note)
         .where(
-            Note.project_id == project_id,
-            Note.patient_id == patient_id,
-            Note.deleted_at.is_(None),
+            col(Note.project_id) == project_id,
+            col(Note.patient_id) == patient_id,
+            col(Note.deleted_at).is_(None),
         )
-        .order_by(Note.note_date.desc(), Note.created_at.desc())
+        .order_by(col(Note.note_date).desc(), col(Note.created_at).desc())
         .offset(offset)
         .limit(limit)
     )

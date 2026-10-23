@@ -19,7 +19,8 @@ dependencies = [
     "asyncpg>=0.30",
     "psycopg2-binary>=2.9",
     "pydantic-settings>=2.7",
-    "python-jose[cryptography]>=3.3",
+    "PyJWT>=2.14,<3",
+    "cryptography>=46.0.5",
     "passlib[bcrypt]>=1.7",
     "bcrypt>=4.0,<4.1",
     "boto3>=1.35",
@@ -56,6 +57,9 @@ line-length = 100
 select = ["E", "F", "I", "W"]
 # Formatting is not enforced yet (44 files would change); long lines are left to a later cleanup.
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/annotations/adjudication_handler.py" = ["E731", "F841"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

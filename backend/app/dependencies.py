@@ -1,7 +1,7 @@
 """Shared FastAPI dependencies for authentication and authorization."""
 
 from fastapi import Depends, HTTPException, Request, status
-from jose import ExpiredSignatureError
+from jwt import ExpiredSignatureError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User, UserRole

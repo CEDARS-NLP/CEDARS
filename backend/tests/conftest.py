@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: F401
+from app.annotations.review_jobs import PatientReviewJob  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
 from app.common.database import get_session
