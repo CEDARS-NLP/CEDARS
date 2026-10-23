@@ -2,7 +2,8 @@
 
 from datetime import timedelta
 
-from jose import ExpiredSignatureError, JWTError, jwt
+import jwt
+from jwt import ExpiredSignatureError, InvalidTokenError
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -58,7 +59,7 @@ def decode_token(token: str) -> dict | None:
         return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     except ExpiredSignatureError:
         raise  # Propagate so callers can surface a specific "token expired" error
-    except JWTError:
+    except InvalidTokenError:
         return None
 
 
