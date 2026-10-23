@@ -4,6 +4,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.annotations.models import Annotation
+from app.annotations.review_jobs import PatientReviewJob
 from app.auth.models import User
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
@@ -317,3 +318,98 @@ async def test_note_context_hides_negated_but_keeps_duplicate_occurrence_spans(c
     spans = context.json()["annotation_spans"]
     assert len(spans) == 2
     assert spans[0]["start"] != spans[1]["start"]
+
+
+async def test_review_batch_keeps_lock_until_worker_applies_complete_batch(client):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+
+    body = {
+        "idempotency_key": "batch-complete-patient-1",
+        "skip_after_event": True,
+        "decisions": [
+            {"annotation_id": str(annotation_id), "action": "negative", "event_date": None}
+            for annotation_id in ids
+        ],
+    }
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    assert response.json()["status"] == "queued"
+
+    app = client._transport.app
+    async with app.state.test_session_factory() as session:
+        job = await session.get(PatientReviewJob, job_id)
+        patient = await session.get(Patient, patient_id)
+        assert job is not None and job.status == "queued"
+        assert patient is not None and patient.locked_by is not None
+        rows = [await session.get(Annotation, annotation_id) for annotation_id in ids]
+        assert all(row.status == "U" for row in rows)
+
+    next_patient = await client.get(
+        f"/api/v1/projects/{project_id}/annotations/patient/next"
+    )
+    assert next_patient.status_code == 200
+    assert next_patient.json()["patient_id"] is None
+    assert next_patient.json()["pending_review_jobs"] == 1
+    assert next_patient.json()["all_complete"] is False
+
+    from app.jobs.review import execute_patient_review_job
+
+    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    assert result["status"] == "completed"
+    async with app.state.test_session_factory() as session:
+        job = await session.get(PatientReviewJob, job_id)
+        patient = await session.get(Patient, patient_id)
+        rows = [await session.get(Annotation, annotation_id) for annotation_id in ids]
+        assert job.status == "completed"
+        assert patient.locked_by is None
+        assert patient.status == PatientStatus.REVIEWED
+        assert all(row.status == "R" and row.review_reason == "human_negative" for row in rows)
+
+
+async def test_review_batch_unlocks_after_third_worker_failure(client, monkeypatch):
+    project_id, patient_id, ids = await _seed_review_data(client)
+    claim = await client.get(f"/api/v1/projects/{project_id}/annotations/patient/next")
+    assert claim.status_code == 200
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/annotations/patient/{patient_id}/review-batches",
+        json={
+            "idempotency_key": "batch-fails-three-times",
+            "decisions": [
+                {"annotation_id": str(annotation_id), "action": "negative", "event_date": None}
+                for annotation_id in ids
+            ],
+        },
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    app = client._transport.app
+
+    async def fail_apply(*_args, **_kwargs):
+        raise RuntimeError("synthetic review write failure")
+
+    async def enqueued(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr("app.annotations.adjudication_service.apply_patient_review_job", fail_apply)
+    monkeypatch.setattr("app.jobs.review.enqueue_review_job", enqueued)
+    from app.jobs.review import execute_patient_review_job
+
+    for expected_attempt in (1, 2, 3):
+        result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+        assert result["attempt_count"] == expected_attempt
+
+    async with app.state.test_session_factory() as session:
+        job = await session.get(PatientReviewJob, job_id)
+        patient = await session.get(Patient, patient_id)
+        rows = [await session.get(Annotation, annotation_id) for annotation_id in ids]
+        assert job.status == "failed"
+        assert job.attempt_count == 3
+        assert job.last_error == "synthetic review write failure"
+        assert patient.locked_by is None
+        assert all(row.status == "U" for row in rows)

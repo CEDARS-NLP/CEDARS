@@ -6,9 +6,11 @@ Run with: arq app.worker.WorkerSettings
 import logging
 from urllib.parse import urlparse
 
+from arq import cron
 from arq.connections import RedisSettings
 
 import app.annotations.models  # noqa: F401
+import app.annotations.review_jobs  # noqa: F401
 
 # Import ALL models at worker startup so SQLAlchemy can resolve foreign keys.
 # The ARQ worker runs in a separate process without the FastAPI app context.
@@ -106,6 +108,21 @@ async def run_eval_pipeline_job(ctx: dict, run_id: str) -> dict:
         return {"processed": run.completed_notes, "failed": run.failed_notes}
 
 
+async def finalize_patient_review_job(ctx: dict, job_id: str) -> dict:
+    """Apply one durable patient-level review batch."""
+    from app.jobs.review import execute_patient_review_job
+
+    return await execute_patient_review_job(job_id)
+
+
+async def recover_patient_review_jobs_task(ctx: dict) -> None:
+    """Periodically re-enqueue durable batches that missed their Redis enqueue."""
+    from app.common.database import async_session
+    from app.jobs.review import recover_patient_review_jobs
+
+    await recover_patient_review_jobs(async_session)
+
+
 async def on_worker_startup(ctx: dict) -> None:
     """Re-enqueue orphaned production runs; legacy pipeline jobs stay fenced."""
     log = logging.getLogger("arq.worker.startup")
@@ -113,6 +130,7 @@ async def on_worker_startup(ctx: dict) -> None:
         from sqlalchemy import select
 
         from app.common.database import async_session
+        from app.jobs.review import recover_patient_review_jobs
         from app.production.models import ProductionRun
 
         async with async_session() as db:
@@ -130,6 +148,8 @@ async def on_worker_startup(ctx: dict) -> None:
                 log.info("Re-enqueued orphaned production run %s", run.id)
             if not orphaned_runs:
                 log.info("No orphaned production runs to recover")
+        recovered_review_jobs = await recover_patient_review_jobs(async_session)
+        log.info("Recovered %s queued or stale patient review jobs", recovered_review_jobs)
     except Exception:
         log.exception("Failed to auto-recover orphaned pipeline runs")
 
@@ -144,6 +164,10 @@ class WorkerSettings:
         run_patient_task,
         run_sample_llm_job,
         run_eval_pipeline_job,
+        finalize_patient_review_job,
+    ]
+    cron_jobs = [
+        cron(recover_patient_review_jobs_task, minute=set(range(0, 60, 5)))
     ]
     on_startup = on_worker_startup
     redis_settings = parse_redis_settings()

@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 from sqlmodel import SQLModel  # noqa: E402
 
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: E402, F401
+from app.annotations.review_jobs import PatientReviewJob  # noqa: E402, F401
 from app.audit.models import AuditEntry  # noqa: E402, F401
 
 # Import all models so their tables are registered in SQLModel.metadata

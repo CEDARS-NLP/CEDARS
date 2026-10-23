@@ -10,6 +10,7 @@ vi.mock("@/api/client", () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 const noteText = "DVT ruled out; DVT confirmed; DVT absent.";
 let currentAnnotationId = "1";
 let annotationRows: Record<string, unknown>[];
+let patientNextCalls: number;
 
 function annotation(id: string, start: number, end: number, reasoning: string) {
   return {
@@ -53,6 +54,7 @@ function showAnnotations() {
 
 beforeEach(() => {
   currentAnnotationId = "1";
+  patientNextCalls = 0;
   annotationRows = [
     annotation("1", 0, 3, "Prediction one"),
     annotation("2", 15, 18, "Prediction two"),
@@ -62,6 +64,18 @@ beforeEach(() => {
       return { total: 2, unreviewed: 2, reviewed: 0, skipped: 0, events_found: 0, is_complete: false };
     }
     if (path.endsWith("/annotations/patient/next")) {
+      patientNextCalls += 1;
+      if (patientNextCalls > 1) {
+        return {
+          patient_id: null,
+          patient_id_ext: null,
+          total_annotations: 0,
+          unreviewed_annotations: 0,
+          all_complete: false,
+          pending_review_jobs: 1,
+          failed_review_job_id: null,
+        };
+      }
       return { patient_id: "patient", patient_id_ext: "P-1", total_annotations: 2, unreviewed_annotations: 2, all_complete: false };
     }
     if (path.endsWith("/annotations/patient/patient/annotations")) return annotationRows;
@@ -92,18 +106,13 @@ beforeEach(() => {
     throw new Error(`Unexpected GET ${path}`);
   });
   vi.mocked(api.post).mockImplementation(async (path) => {
-    if (path.endsWith("/annotations/1/review")) {
-      currentAnnotationId = "2";
-      annotationRows = [
-        { ...annotationRows[0], review_status: "reviewed" },
-        annotationRows[1],
-      ];
+    if (path.endsWith("/review-batches")) {
       return {
-        annotation: annotationRows[0],
-        skipped_count: 0,
-        earlier_count: 0,
-        current_annotation_id: "1",
-        next_annotation_id: "1",
+        job_id: "review-job-1",
+        status: "queued",
+        patient_id: "patient",
+        attempt_count: 0,
+        last_error: null,
       };
     }
     throw new Error(`Unexpected POST ${path}`);
@@ -121,7 +130,7 @@ afterEach(() => {
 });
 
 describe("manual annotation review", () => {
-  it("follows the backend-selected cursor after review", async () => {
+  it("keeps decisions local and submits one batch before switching patients", async () => {
     const { container } = showAnnotations();
 
     expect(await screen.findByText("Prediction one")).toBeInTheDocument();
@@ -139,6 +148,54 @@ describe("manual annotation review", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Prediction two")).toBeInTheDocument());
-    expect(api.get).toHaveBeenCalledWith("/projects/project/annotations/patient/patient/cursor");
+    expect(api.post).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /No Event/ }));
+    });
+
+    await waitFor(() => expect(screen.getByText("Finalizing 1 patient review.")).toBeInTheDocument());
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith(
+      "/projects/project/annotations/patient/patient/review-batches",
+      expect.objectContaining({
+        decisions: [
+          { annotation_id: "1", action: "negative", event_date: null },
+          { annotation_id: "2", action: "negative", event_date: null },
+        ],
+      }),
+    );
+  });
+
+  it("preserves a complete draft and retries submission with the same idempotency key", async () => {
+    vi.mocked(api.post)
+      .mockRejectedValueOnce(new Error("Network unavailable"))
+      .mockResolvedValueOnce({
+        job_id: "review-job-1",
+        status: "queued",
+        patient_id: "patient",
+        attempt_count: 0,
+        last_error: null,
+      });
+    showAnnotations();
+
+    expect(await screen.findByText("Prediction one")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /No Event/ }));
+    });
+    await waitFor(() => expect(screen.getByText("Prediction two")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /No Event/ }));
+    });
+
+    const retryButton = await screen.findByRole("button", { name: "Retry submission" });
+    expect(screen.getByText("Network unavailable")).toBeInTheDocument();
+    await act(async () => fireEvent.click(retryButton));
+
+    await waitFor(() => expect(screen.getByText("Finalizing 1 patient review.")).toBeInTheDocument());
+    expect(api.post).toHaveBeenCalledTimes(2);
+    const firstPayload = vi.mocked(api.post).mock.calls[0][1];
+    const retryPayload = vi.mocked(api.post).mock.calls[1][1];
+    expect(retryPayload).toEqual(firstPayload);
   });
 });

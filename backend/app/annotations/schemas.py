@@ -1,8 +1,9 @@
 """Request/response schemas for annotations."""
 
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AnnotationResponse(BaseModel):
@@ -40,6 +41,26 @@ class ReviewRequest(BaseModel):
 
     event_date: datetime | None = None
     skip_after_event: bool | None = None
+
+
+class ReviewDecision(BaseModel):
+    annotation_id: str
+    action: Literal["negative", "event"]
+    event_date: date | None = None
+
+
+class ReviewBatchRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    decisions: list[ReviewDecision] = Field(min_length=1, max_length=10000)
+    skip_after_event: bool | None = None
+
+
+class ReviewBatchResponse(BaseModel):
+    job_id: str
+    status: str
+    patient_id: str
+    attempt_count: int = 0
+    last_error: str | None = None
 
 
 class BulkRunResponse(BaseModel):
@@ -91,6 +112,9 @@ class NextPatientResponse(BaseModel):
     all_complete: bool = False
     current_annotation_id: str | None = None
     next_annotation_id: str | None = None
+    skip_after_event: bool = False
+    pending_review_jobs: int = 0
+    failed_review_job_id: str | None = None
 
 
 class ReviewResultResponse(BaseModel):

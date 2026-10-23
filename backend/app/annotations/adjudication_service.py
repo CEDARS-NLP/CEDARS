@@ -10,8 +10,9 @@ from app.annotations.adjudication_compat import ReviewStatus
 from app.annotations.adjudication_handler import AdjudicationHandler
 from app.annotations.models import Annotation
 from app.annotations.query_service import _patient_review_ready
+from app.annotations.review_jobs import PatientReviewJob
 from app.annotations.review_state import ReviewStateStore
-from app.audit.models import AuditAction
+from app.audit.models import AuditAction, AuditEntry
 from app.audit.service import log_action
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
@@ -185,6 +186,7 @@ async def _sync_cursor(
     run_id: str,
     generation: int,
     preferred_id: str | None = None,
+    persist: bool = True,
 ) -> dict:
     annotation_query = select(Annotation).where(
         col(Annotation.project_id) == project_id,
@@ -221,6 +223,10 @@ async def _sync_cursor(
         ).scalars().all()
         prediction_labels = {row.text_id: row.label for row in predictions}
 
+    original_fields = {
+        row.annotation_id: (row.status, row.review_reason, row.actor_type, row.duplicate_of)
+        for row in annotations
+    }
     for annotation in annotations:
         if prediction_labels.get(annotation.text_id) == 0 and annotation.review_reason is None:
             annotation.status = "R"
@@ -298,14 +304,20 @@ async def _sync_cursor(
         )
     else:
         current_id = next_id = None
-    await session.flush()
-    await _state_store.save(
-        project_id, user_id, run_id, generation, state["annotation_ids"], current_id
-    )
-    _state_store.save_to_patient(
-        patient, user_id, run_id, generation, state["annotation_ids"], current_id
-    )
-    session.add(patient)
+    if persist:
+        await session.flush()
+        await _state_store.save(
+            project_id, user_id, run_id, generation, state["annotation_ids"], current_id
+        )
+        _state_store.save_to_patient(
+            patient, user_id, run_id, generation, state["annotation_ids"], current_id
+        )
+        session.add(patient)
+    else:
+        for row in annotations:
+            row.status, row.review_reason, row.actor_type, row.duplicate_of = original_fields[
+                row.annotation_id
+            ]
     return {
         "patient_id": patient.id,
         "current_annotation_id": current_id,
@@ -650,3 +662,311 @@ async def delete_patient_event(
         detail={"annotation_id": str(annotation.annotation_id), "reverted_count": len(rows)},
     )
     return {"annotation": annotation, "patient": patient, "reverted_count": len(rows), "cursor": cursor}
+
+
+def _normalize_batch(decisions: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for item in decisions:
+        annotation_id = str(item.get("annotation_id", ""))
+        action = item.get("action")
+        event_date = item.get("event_date")
+        if not annotation_id or action not in {"negative", "event"}:
+            raise AdjudicationConflictError("Review batch contains an invalid decision")
+        if annotation_id in seen:
+            raise AdjudicationConflictError("Review batch contains a duplicate annotation")
+        if (action == "event") != (event_date is not None):
+            raise AdjudicationConflictError("Only an event decision may include an event date")
+        if isinstance(event_date, datetime):
+            event_date = event_date.date()
+        if event_date is not None and not isinstance(event_date, date):
+            try:
+                event_date = date.fromisoformat(str(event_date))
+            except ValueError as exc:
+                raise AdjudicationConflictError("Event date must be an ISO date") from exc
+        seen.add(annotation_id)
+        normalized.append({
+            "annotation_id": annotation_id,
+            "action": action,
+            "event_date": event_date.isoformat() if event_date else None,
+        })
+    return normalized
+
+
+async def _replay_review_batch(
+    session: AsyncSession,
+    project_id: str,
+    patient: Patient,
+    user_id: str,
+    run_id: str,
+    generation: int,
+    decisions: list[dict],
+    skip_after_event: bool | None,
+    persist_cursor: bool = True,
+) -> dict:
+    cursor = await _sync_cursor(
+        session, project_id, patient, user_id, run_id, generation, persist=persist_cursor
+    )
+    handler = cursor["handler"]
+    state = cursor["handler_state"]
+    handler.load_from_patient_data(patient.patient_id_ext, state)
+    rows_by_id = {str(row.annotation_id): row for row in state["annotations"]}
+    index_by_id = {
+        annotation_id: index for index, annotation_id in enumerate(state["annotation_ids"])
+    }
+    action_reasons: dict[str, str] = {}
+    skipped_by_event: dict[str, str] = {}
+    current_event_id: str | None = None
+    current_event_date: date | None = None
+    skip_enabled = await _skip_after_event_enabled(
+        session, project_id, skip_after_event
+    )
+
+    for decision in decisions:
+        target_id = decision["annotation_id"]
+        if target_id not in index_by_id:
+            raise AdjudicationConflictError("Review batch contains an ineligible annotation")
+        target_index = index_by_id[target_id]
+        if cursor["current_annotation_id"] != target_id:
+            raise AdjudicationConflictError("Review batch is not in adjudication order")
+        if state["review_statuses"][target_index] != ReviewStatus.UNREVIEWED:
+            raise AdjudicationConflictError("Review batch repeats an already reviewed annotation")
+
+        handler.load_from_patient_data(patient.patient_id_ext, state)
+        if decision["action"] == "negative":
+            handler._adjudicate_annotation()
+            state = handler.get_patient_data()
+            action_reasons[target_id] = "human_negative"
+            cursor["current_annotation_id"] = state["annotation_ids"][state["current_index"]]
+            continue
+
+        event_date = date.fromisoformat(decision["event_date"])
+        # A replacement event reopens only annotations skipped by a previous event.
+        for skipped_id in list(skipped_by_event):
+            state["review_statuses"][index_by_id[skipped_id]] = ReviewStatus.UNREVIEWED
+            skipped_by_event.pop(skipped_id, None)
+        for index, row_id in enumerate(state["annotation_ids"]):
+            row = rows_by_id[row_id]
+            if (
+                row.review_reason == "event_date_skip"
+                and state["review_statuses"][index] == ReviewStatus.SKIPPED
+            ):
+                state["review_statuses"][index] = ReviewStatus.UNREVIEWED
+
+        handler.load_from_patient_data(patient.patient_id_ext, state)
+        state["current_index"] = target_index
+        event_skip_ids = []
+        if skip_enabled:
+            for index, row_id in enumerate(state["annotation_ids"]):
+                row = rows_by_id[row_id]
+                if (
+                    row_id != target_id
+                    and state["review_statuses"][index] == ReviewStatus.UNREVIEWED
+                    and row.text_date >= event_date
+                ):
+                    event_skip_ids.append(row_id)
+        handler.mark_event_date(
+            event_date,
+            int(target_id),
+            [int(annotation_id) for annotation_id in event_skip_ids],
+        )
+        state = handler.get_patient_data()
+        action_reasons[target_id] = "human_event"
+        current_event_id = target_id
+        current_event_date = event_date
+        for skipped_id in event_skip_ids:
+            skipped_by_event[skipped_id] = target_id
+        cursor["current_annotation_id"] = state["annotation_ids"][state["current_index"]]
+
+    handler.load_from_patient_data(patient.patient_id_ext, state)
+    if not handler.is_patient_reviewed():
+        raise AdjudicationConflictError("Review batch leaves annotations unreviewed")
+    return {
+        "cursor": cursor,
+        "handler": handler,
+        "state": state,
+        "rows_by_id": rows_by_id,
+        "action_reasons": action_reasons,
+        "skipped_by_event": skipped_by_event,
+        "event_annotation_id": current_event_id,
+        "event_date": current_event_date,
+        "skip_enabled": skip_enabled,
+    }
+
+
+async def submit_review_batch(
+    session: AsyncSession,
+    project_id: str,
+    patient_id: str,
+    user_id: str,
+    idempotency_key: str,
+    decisions: list[dict],
+    skip_after_event: bool | None = None,
+) -> PatientReviewJob:
+    payload = _normalize_batch(decisions)
+    existing = await session.scalar(
+        select(PatientReviewJob).where(
+            col(PatientReviewJob.project_id) == project_id,
+            col(PatientReviewJob.reviewer_id) == user_id,
+            col(PatientReviewJob.idempotency_key) == idempotency_key,
+        )
+    )
+    if existing:
+        if existing.payload != payload:
+            raise AdjudicationConflictError("Idempotency key was reused for another review batch")
+        return existing
+
+    patient = await session.scalar(
+        select(Patient)
+        .where(
+            col(Patient.project_id) == project_id,
+            or_(col(Patient.id) == patient_id, col(Patient.patient_id_ext) == patient_id),
+        )
+        .with_for_update()
+    )
+    if not patient:
+        raise AdjudicationConflictError("Patient not found")
+    if patient.locked_by != user_id:
+        raise AdjudicationConflictError("Patient is not locked by this reviewer")
+
+    run_id, generation = await _lock_run_identity(session, project_id)
+    if not run_id:
+        raise AdjudicationConflictError("No active production run")
+    active_job = await session.scalar(
+        select(PatientReviewJob.id).where(
+            col(PatientReviewJob.patient_uuid) == patient.id,
+            col(PatientReviewJob.status).in_(("queued", "running")),
+        ).limit(1)
+    )
+    if active_job:
+        raise AdjudicationConflictError("A patient review batch is already processing")
+
+    replay = await _replay_review_batch(
+        session, project_id, patient, user_id, run_id, generation, payload,
+        skip_after_event, persist_cursor=False,
+    )
+    patient.locked_at = now_utc()
+    session.add(patient)
+    job = PatientReviewJob(
+        project_id=project_id,
+        patient_uuid=patient.id,
+        reviewer_id=user_id,
+        production_run_id=run_id,
+        idempotency_key=idempotency_key,
+        payload=payload,
+        skip_after_event=replay["skip_enabled"],
+        status="queued",
+    )
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def enqueue_patient_review_job(job_id: str) -> None:
+    """Best-effort enqueue; worker startup recovers durable queued jobs."""
+    from app.jobs.review import enqueue_review_job
+
+    await enqueue_review_job(job_id, attempt=0)
+
+
+async def apply_patient_review_job(session: AsyncSession, job_id: str) -> PatientReviewJob:
+    job = await session.scalar(
+        select(PatientReviewJob)
+        .where(col(PatientReviewJob.id) == job_id)
+        .with_for_update()
+    )
+    if not job or job.status != "running":
+        raise AdjudicationConflictError("Patient review job is not running")
+    patient = await session.scalar(
+        select(Patient)
+        .where(
+            col(Patient.id) == job.patient_uuid,
+            col(Patient.project_id) == job.project_id,
+        )
+        .with_for_update()
+    )
+    if not patient or patient.locked_by != job.reviewer_id:
+        raise AdjudicationConflictError("Patient lock no longer belongs to this review job")
+
+    run_id, generation = await _lock_run_identity(session, job.project_id)
+    if run_id != job.production_run_id:
+        raise AdjudicationConflictError("Review job belongs to a stale production run")
+
+    replay = await _replay_review_batch(
+        session,
+        job.project_id,
+        patient,
+        job.reviewer_id,
+        run_id,
+        generation,
+        job.payload,
+        job.skip_after_event,
+    )
+    state = replay["state"]
+    rows_by_id = replay["rows_by_id"]
+    now = now_utc()
+    for index, annotation_id in enumerate(state["annotation_ids"]):
+        annotation = rows_by_id[annotation_id]
+        status = state["review_statuses"][index]
+        annotation.status = {
+            ReviewStatus.UNREVIEWED: "U",
+            ReviewStatus.REVIEWED: "R",
+            ReviewStatus.SKIPPED: "S",
+        }[status]
+        action_reason = replay["action_reasons"].get(annotation_id)
+        event_id = replay["skipped_by_event"].get(annotation_id)
+        if action_reason:
+            annotation.review_reason = action_reason
+            annotation.reviewed_by = job.reviewer_id
+            annotation.reviewed_at = now
+            annotation.actor_type = "human"
+        elif event_id:
+            annotation.review_reason = "event_date_skip"
+            annotation.skipped_by_event_annotation_id = int(event_id)
+            annotation.reviewed_by = job.reviewer_id
+            annotation.reviewed_at = now
+            annotation.actor_type = "human"
+        elif annotation.review_reason == "event_date_skip" and annotation.status == "U":
+            annotation.review_reason = None
+            annotation.skipped_by_event_annotation_id = None
+            annotation.reviewed_by = None
+            annotation.reviewed_at = None
+            annotation.actor_type = None
+        session.add(annotation)
+
+    if replay["event_annotation_id"] is not None:
+        patient.event_annotation_id = int(replay["event_annotation_id"])
+        patient.event_date = replay["event_date"]
+        patient.event_reviewer = job.reviewer_id
+
+    await _update_patient_completion(
+        session, job.project_id, patient, job.reviewer_id, run_id, replay["handler"]
+    )
+    await _refresh_result(session, job.project_id, patient.id)
+    for decision in job.payload:
+        action = (
+            AuditAction.EVENT_DATE_SET
+            if decision["action"] == "event"
+            else AuditAction.ANNOTATION_REVIEWED
+        )
+        session.add(AuditEntry(
+            project_id=job.project_id,
+            patient_id=patient.id,
+            user_id=job.reviewer_id,
+            action=action,
+            detail={
+                "annotation_id": decision["annotation_id"],
+                "review_job_id": job.id,
+                "review_reason": replay["action_reasons"][decision["annotation_id"]],
+                "event_date": decision["event_date"],
+            },
+        ))
+    job.status = "completed"
+    job.last_error = None
+    job.completed_at = now
+    job.updated_at = now
+    session.add_all([job, patient])
+    await session.commit()
+    await session.refresh(job)
+    return job

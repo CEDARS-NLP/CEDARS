@@ -1,8 +1,8 @@
 """Patient-first annotation review adapters for the production schema."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from sqlalchemy import Integer, func, or_, select, update
+from sqlalchemy import Integer, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -10,6 +10,7 @@ from app.annotations.adjudication_compat import ReviewStatus
 from app.annotations.adjudication_service import (
     _lock_run_identity,
     _refresh_result,
+    _skip_after_event_enabled,
     _sync_cursor,
     _update_patient_completion,
     apply_review_action,
@@ -19,12 +20,15 @@ from app.annotations.adjudication_service import (
 )
 from app.annotations.models import Annotation
 from app.annotations.query_service import _patient_review_ready, _production_search_finished
+from app.annotations.review_jobs import PatientReviewJob
 from app.annotations.schemas import NextPatientResponse, PatientReviewStats
 from app.audit.models import AuditAction
 from app.audit.service import log_action
 from app.common.utils import now_utc
 from app.connectors.models import Patient, PatientStatus
 from app.production.models import NotePrediction
+
+_REVIEW_LEASE = timedelta(minutes=15)
 
 
 class ReopenConflictError(ValueError):
@@ -101,6 +105,41 @@ async def get_next_patient_for_review(
     session: AsyncSession, project_id: str, user_id: str
 ) -> NextPatientResponse:
     run_id, generation = await _lock_run_identity(session, project_id)
+    stale_before = now_utc() - _REVIEW_LEASE
+    active_job_for_patient = exists(
+        select(PatientReviewJob.id).where(
+            col(PatientReviewJob.patient_uuid) == col(Patient.id),
+            col(PatientReviewJob.status).in_(("queued", "running")),
+        )
+    )
+    await session.execute(
+        update(Patient)
+        .where(
+            col(Patient.project_id) == project_id,
+            col(Patient.locked_by).is_not(None),
+            col(Patient.locked_at) < stale_before,
+            ~active_job_for_patient,
+        )
+        .values(locked_by=None, locked_at=None)
+    )
+
+    # Refetching patient/next (including React Query focus behavior) returns the
+    # reviewer’s existing display lease instead of silently claiming another.
+    patient = await session.scalar(
+        select(Patient)
+        .where(
+            col(Patient.project_id) == project_id,
+            col(Patient.locked_by) == user_id,
+            ~active_job_for_patient,
+        )
+        .order_by(col(Patient.locked_at).desc())
+        .limit(1)
+    )
+    if patient and not await _patient_review_ready(
+        session, project_id, patient.patient_id_ext, run_id
+    ):
+        patient = None
+        was_claimed = patient is None
     candidate_query = (
         select(Patient)
         .join(
@@ -120,7 +159,8 @@ async def get_next_patient_for_review(
                     ("llm_negative", "duplicate", "negated")
                 ),
             ),
-            or_(col(Patient.locked_by).is_(None), col(Patient.locked_by) == user_id),
+            col(Patient.locked_by).is_(None),
+            ~active_job_for_patient,
         )
         .order_by(col(Patient.created_at))
     )
@@ -128,26 +168,26 @@ async def get_next_patient_for_review(
         candidate_query = candidate_query.where(
             col(Annotation.production_run_id) == run_id
         )
-    candidates = (
-        await session.execute(candidate_query)
-    ).scalars().unique().all()
-    patient = None
-    for candidate in candidates:
-        if not await _patient_review_ready(
-            session, project_id, candidate.patient_id_ext, run_id
-        ):
-            continue
-        claim = await session.execute(
-            update(Patient)
-            .where(
-                col(Patient.id) == candidate.id,
-                or_(col(Patient.locked_by).is_(None), col(Patient.locked_by) == user_id),
+    if patient is None:
+        candidates = (
+            await session.execute(candidate_query)
+        ).scalars().unique().all()
+        for candidate in candidates:
+            if not await _patient_review_ready(
+                session, project_id, candidate.patient_id_ext, run_id
+            ):
+                continue
+            claim = await session.execute(
+                update(Patient)
+                .where(
+                    col(Patient.id) == candidate.id,
+                    col(Patient.locked_by).is_(None),
+                )
+                .values(locked_by=user_id, locked_at=now_utc())
             )
-            .values(locked_by=user_id, locked_at=now_utc())
-        )
-        if claim.rowcount == 1:
-            patient = candidate
-            break
+            if claim.rowcount == 1:
+                patient = candidate
+                break
     if not patient:
         pending = bool(
             (
@@ -178,11 +218,31 @@ async def get_next_patient_for_review(
                     col(NotePrediction.status) != "succeeded",
                 ).limit(1)
             ))
+        pending_job_count = await session.scalar(
+            select(func.count()).select_from(PatientReviewJob).where(
+                col(PatientReviewJob.project_id) == project_id,
+                col(PatientReviewJob.status).in_(("queued", "running")),
+            )
+        ) or 0
         await session.rollback()
-        return NextPatientResponse(all_complete=not pending)
-    patient.status = PatientStatus.REVIEWING
+        return NextPatientResponse(
+            all_complete=not pending and pending_job_count == 0,
+            pending_review_jobs=pending_job_count,
+        )
+    was_claimed = patient.locked_by is None
+    patient.locked_by = user_id
+    patient.locked_at = now_utc()
+    if was_claimed:
+        patient.status = PatientStatus.REVIEWING
     session.add(patient)
     cursor = await _sync_cursor(session, project_id, patient, user_id, run_id, generation)
+    skip_after_event = await _skip_after_event_enabled(session, project_id, None)
+    pending_jobs = await session.scalar(
+        select(func.count()).select_from(PatientReviewJob).where(
+            col(PatientReviewJob.project_id) == project_id,
+            col(PatientReviewJob.status).in_(("queued", "running")),
+        )
+    ) or 0
     total, pending = (
         await session.execute(
             select(
@@ -197,10 +257,21 @@ async def get_next_patient_for_review(
         )
     ).one()
     await session.commit()
-    await log_action(
-        session, project_id, AuditAction.PATIENT_LOCKED,
-        user_id=user_id, patient_id=patient.id,
+    if was_claimed:
+        await log_action(
+            session, project_id, AuditAction.PATIENT_LOCKED,
+            user_id=user_id, patient_id=patient.id,
+        )
+    failed_job_id = await session.scalar(
+        select(PatientReviewJob.id)
+        .where(
+            col(PatientReviewJob.patient_uuid) == patient.id,
+            col(PatientReviewJob.status) == "failed",
+        )
+        .order_by(col(PatientReviewJob.created_at).desc())
+        .limit(1)
     )
+    skip_after_event = await _skip_after_event_enabled(session, project_id, None)
     return NextPatientResponse(
         patient_id=patient.id,
         patient_id_ext=patient.patient_id_ext,
@@ -208,6 +279,9 @@ async def get_next_patient_for_review(
         unreviewed_annotations=pending or 0,
         current_annotation_id=cursor["current_annotation_id"],
         next_annotation_id=cursor["next_annotation_id"],
+        skip_after_event=skip_after_event,
+        pending_review_jobs=pending_jobs,
+        failed_review_job_id=failed_job_id,
     )
 
 

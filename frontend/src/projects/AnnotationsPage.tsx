@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import WorkflowBreadcrumb from "@/components/WorkflowBreadcrumb";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -84,20 +84,59 @@ interface PatientInfo extends ReviewMetadata {
   total_annotations: number;
   unreviewed_annotations: number;
   all_complete: boolean;
+  skip_after_event: boolean;
+  pending_review_jobs: number;
+  failed_review_job_id: string | null;
 }
 
-interface ReviewResult {
-  annotation: Annotation;
-  skipped_count: number;
-  earlier_count: number;
-  current_annotation_id: string | null;
-  next_annotation_id: string | null;
+interface ReviewDecisionDraft {
+  annotation_id: string;
+  action: "negative" | "event";
+  event_date: string | null;
+}
+
+interface ReviewBatchResponse {
+  job_id: string;
+  status: string;
+  patient_id: string;
+  attempt_count: number;
+  last_error: string | null;
 }
 
 interface ReviewCursor {
   current_annotation_id: string | null;
   next_annotation_id: string | null;
   annotation_ids: string[];
+}
+
+function getDraftStatuses(
+  annotations: PatientAnnotation[],
+  decisions: ReviewDecisionDraft[],
+  skipAfterEvent: boolean,
+): Map<string, string> {
+  const statuses = new Map<string, string>();
+  let eventSkipped = new Set<string>();
+  for (const decision of decisions) {
+    if (decision.action === "event") {
+      for (const annotationId of eventSkipped) statuses.delete(annotationId);
+      eventSkipped = new Set<string>();
+    }
+    statuses.set(decision.annotation_id, "reviewed");
+    if (decision.action !== "event" || !decision.event_date || !skipAfterEvent) continue;
+    const eventDate = decision.event_date.slice(0, 10);
+    for (const annotation of annotations) {
+      const status = statuses.get(annotation.id) ?? annotation.review_status;
+      if (
+        annotation.id !== decision.annotation_id &&
+        status === "unreviewed" &&
+        (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
+      ) {
+        statuses.set(annotation.id, "skipped");
+        eventSkipped.add(annotation.id);
+      }
+    }
+  }
+  return statuses;
 }
 
 interface DeleteEventDateResult {
@@ -534,6 +573,20 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     null
   );
   const [noteIndex, setNoteIndex] = useState(0);
+  const [reviewDraft, setReviewDraft] = useState<{
+    patientId: string | null;
+    decisions: ReviewDecisionDraft[];
+  }>({ patientId: null, decisions: [] });
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
+  const batchKeyRef = useRef<string | null>(null);
+  const batchPayloadRef = useRef<{
+    idempotency_key: string;
+    decisions: ReviewDecisionDraft[];
+    skip_after_event: boolean;
+  } | null>(null);
+  const jobLockedPatientsRef = useRef(new Set<string>());
+  const [retryRequested, setRetryRequested] = useState(false);
 
   // 1. Get next patient
   const {
@@ -542,6 +595,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     refetch: refetchPatient,
   } = useQuery<PatientInfo>({
     queryKey: ["patient-next", projectId],
+    refetchOnWindowFocus: false,
     queryFn: () =>
       api.get<PatientInfo>(
         `/projects/${projectId}/annotations/patient/next`
@@ -587,10 +641,42 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   const sequenceAnnotations = (reviewCursor?.annotation_ids ?? [])
     .map((id) => annotations?.find((annotation) => annotation.id === id))
     .filter((annotation): annotation is PatientAnnotation => !!annotation);
-  const currentIndex = sequenceAnnotations.findIndex(
-    (annotation) => annotation.id === reviewCursor?.current_annotation_id
+  const draftForPatient = useMemo(
+    () => reviewDraft.patientId === patientId ? reviewDraft.decisions : [],
+    [reviewDraft, patientId]
   );
-  const current = sequenceAnnotations[currentIndex] ?? null;
+  const localStatuses = new Map<string, string>();
+  let skippedByDraftEvent = new Set<string>();
+  for (const decision of draftForPatient) {
+    if (decision.action === "event") {
+      for (const annotationId of skippedByDraftEvent) localStatuses.delete(annotationId);
+      skippedByDraftEvent = new Set<string>();
+    }
+    localStatuses.set(decision.annotation_id, "reviewed");
+    if (decision.action === "event" && decision.event_date && patientInfo?.skip_after_event) {
+      const eventDate = decision.event_date.slice(0, 10);
+      for (const annotation of sequenceAnnotations) {
+        const currentStatus = localStatuses.get(annotation.id) ?? annotation.review_status;
+        if (
+          annotation.id !== decision.annotation_id &&
+          currentStatus === "unreviewed" &&
+          (annotation.note_date?.slice(0, 10) ?? "") >= eventDate
+        ) {
+          localStatuses.set(annotation.id, "skipped");
+          skippedByDraftEvent.add(annotation.id);
+        }
+      }
+    }
+  }
+  const displayAnnotations = sequenceAnnotations.map((annotation) => ({
+    ...annotation,
+    review_status: localStatuses.get(annotation.id) ?? annotation.review_status,
+  }));
+  const currentIndex = displayAnnotations.findIndex(
+    (annotation) => annotation.id === reviewCursor?.current_annotation_id
+      && annotation.review_status === "unreviewed"
+  );
+  const current = displayAnnotations[currentIndex] ?? null;
 
   // 4. Get note context for current annotation
   const isManualAnnotation =
@@ -626,6 +712,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   // Reset note index when patient changes
   useEffect(() => {
     setNoteIndex(0);
+    setRetryRequested(false);
+    setBatchError(null);
+    if (patientId) jobLockedPatientsRef.current.delete(patientId);
   }, [patientId]);
 
   // Prefetch next annotation context
@@ -647,127 +736,161 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     }
   }, [annotations, reviewCursor?.next_annotation_id, queryClient]);
 
-  // After action: refresh and advance
-  const handlePostAction = useCallback(async () => {
-    const { data: freshAnnotations } = await refetchAnnotations();
-    await refetchStats();
-    const { data: freshCursor } = await refetchCursor();
-    queryClient.invalidateQueries({
-      queryKey: ["annotation-stats", projectId],
-    });
-
-    if (!freshAnnotations) return;
-
-    if (!freshCursor?.current_annotation_id) {
-      const reviewed = freshAnnotations.filter(
-        (a) => a.review_status === "reviewed"
-      ).length;
-      const skipped = freshAnnotations.filter(
-        (a) => a.review_status === "skipped"
-      ).length;
-      const events = freshAnnotations.filter((a) => a.event_date).length;
-      setCompletionMessage(
-        `Patient ${patientInfo?.patient_id_ext} complete \u2014 ${reviewed} reviewed, ${skipped} skipped, ${events} event${events !== 1 ? "s" : ""}`
+  // Keep choices local until the patient is complete, then enqueue one batch.
+  const handlePostAction = useCallback(async (decision: ReviewDecisionDraft) => {
+    if (!patientId || !reviewCursor) return;
+    setBatchError(null);
+    const decisions = [...draftForPatient, decision];
+    const statuses = getDraftStatuses(
+      sequenceAnnotations,
+      decisions,
+      patientInfo?.skip_after_event ?? false,
+    );
+    const complete = sequenceAnnotations.every(
+      (annotation) => (statuses.get(annotation.id) ?? annotation.review_status) !== "unreviewed"
+    );
+    setReviewDraft({ patientId, decisions });
+    setShowEventDateInput(false);
+    setEventDateValue("");
+    if (!complete) {
+      const nextIndex = sequenceAnnotations.findIndex(
+        (annotation, index) => index > currentIndex
+          && (statuses.get(annotation.id) ?? annotation.review_status) === "unreviewed"
       );
-      queryClient.prefetchQuery({
-        queryKey: ["patient-next", projectId],
-        queryFn: () =>
-          api.get<PatientInfo>(
-            `/projects/${projectId}/annotations/patient/next`
-          ),
-      });
-      setTimeout(() => {
-        setCompletionMessage(null);
-        setEarlierNotesBanner(null);
-        queryClient.removeQueries({
-          queryKey: ["patient-annotations", projectId, patientId],
-        });
-        queryClient.removeQueries({
-          queryKey: ["patient-review-cursor", projectId, patientId],
-        });
-        queryClient.removeQueries({
-          queryKey: ["patient-stats", projectId, patientId],
-        });
-        refetchPatient();
-      }, 2000);
+      const wrappedIndex = nextIndex >= 0 ? nextIndex : sequenceAnnotations.findIndex(
+        (annotation) => (statuses.get(annotation.id) ?? annotation.review_status) === "unreviewed"
+      );
+      if (wrappedIndex >= 0) {
+        const nextAnnotation = sequenceAnnotations[wrappedIndex];
+        queryClient.setQueryData<ReviewCursor>(
+          ["patient-review-cursor", projectId, patientId],
+          { ...reviewCursor, current_annotation_id: nextAnnotation.id }
+        );
+      }
+      return;
+    }
+
+    const idempotencyKey = batchKeyRef.current ?? crypto.randomUUID();
+    batchKeyRef.current = idempotencyKey;
+    const batchPayload = batchPayloadRef.current ?? {
+      idempotency_key: idempotencyKey,
+      decisions,
+      skip_after_event: patientInfo?.skip_after_event ?? false,
+    };
+    batchPayloadRef.current = batchPayload;
+    setIsSubmittingBatch(true);
+    try {
+      await api.post<ReviewBatchResponse>(
+        `/projects/${projectId}/annotations/patient/${patientId}/review-batches`,
+        batchPayload
+      );
+      batchKeyRef.current = null;
+      batchPayloadRef.current = null;
+      jobLockedPatientsRef.current.add(patientId);
+      setReviewDraft({ patientId: null, decisions: [] });
+      setCompletionMessage(`Patient ${patientInfo?.patient_id_ext} queued for finalization`);
+      setEarlierNotesBanner(null);
+      queryClient.removeQueries({ queryKey: ["patient-annotations", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-review-cursor", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-stats", projectId, patientId] });
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      try {
+        const next = await api.get<PatientInfo>(
+          `/projects/${projectId}/annotations/patient/next`
+        );
+        queryClient.setQueryData(["patient-next", projectId], next);
+      } catch {
+        queryClient.setQueryData(["patient-next", projectId], undefined);
+        void refetchPatient();
+      }
+      setCompletionMessage(null);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not queue patient review");
+    } finally {
+      setIsSubmittingBatch(false);
     }
   }, [
-    refetchAnnotations,
-    refetchStats,
-    refetchCursor,
-    queryClient,
-    projectId,
-    patientId,
-    patientInfo,
-    refetchPatient,
+    patientId, reviewCursor, draftForPatient, patientInfo, sequenceAnnotations,
+    currentIndex, projectId, queryClient, refetchPatient,
   ]);
 
+  const retryBatchSubmission = useCallback(async () => {
+    if (!patientId || draftForPatient.length === 0 || isSubmittingBatch) return;
+    const idempotencyKey = batchKeyRef.current ?? crypto.randomUUID();
+    batchKeyRef.current = idempotencyKey;
+    const batchPayload = batchPayloadRef.current ?? {
+      idempotency_key: idempotencyKey,
+      decisions: draftForPatient,
+      skip_after_event: patientInfo?.skip_after_event ?? false,
+    };
+    batchPayloadRef.current = batchPayload;
+    setIsSubmittingBatch(true);
+    setBatchError(null);
+    try {
+      await api.post<ReviewBatchResponse>(
+        `/projects/${projectId}/annotations/patient/${patientId}/review-batches`,
+        batchPayload
+      );
+      batchKeyRef.current = null;
+      batchPayloadRef.current = null;
+      jobLockedPatientsRef.current.add(patientId);
+      setReviewDraft({ patientId: null, decisions: [] });
+      setCompletionMessage(`Patient ${patientInfo.patient_id_ext} queued for finalization`);
+      queryClient.removeQueries({ queryKey: ["patient-annotations", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-review-cursor", projectId, patientId] });
+      queryClient.removeQueries({ queryKey: ["patient-stats", projectId, patientId] });
+      try {
+        const next = await api.get<PatientInfo>(
+          `/projects/${projectId}/annotations/patient/next`
+        );
+        queryClient.setQueryData(["patient-next", projectId], next);
+      } catch {
+        queryClient.setQueryData(["patient-next", projectId], undefined);
+        void refetchPatient();
+      }
+      queryClient.invalidateQueries({ queryKey: ["annotation-stats", projectId] });
+      setCompletionMessage(null);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not queue patient review");
+    } finally {
+      setIsSubmittingBatch(false);
+    }
+  }, [patientId, patientInfo, draftForPatient, isSubmittingBatch, projectId, queryClient, refetchPatient]);
+
   const navigateAction = useCallback(async (action: string) => {
-    if (!patientId) return;
-    const cursor = await api.post<ReviewCursor>(
-      `/projects/${projectId}/annotations/patient/${patientId}/navigate/${action}`,
-      {}
-    );
+    if (!patientId || !reviewCursor) return;
+    const lastIndex = reviewCursor.annotation_ids.length - 1;
+    let nextIndex = currentIndex;
+    if (action === "first_anno") nextIndex = 0;
+    else if (action === "last_anno") nextIndex = lastIndex;
+    else if (action === "prev_1") nextIndex = Math.max(0, currentIndex - 1);
+    else if (action === "next_1") nextIndex = Math.min(lastIndex, currentIndex + 1);
+    else if (action === "prev_10") nextIndex = Math.max(0, currentIndex - 10);
+    else if (action === "next_10") nextIndex = Math.min(lastIndex, currentIndex + 10);
+    const cursor = {
+      ...reviewCursor,
+      current_annotation_id: reviewCursor.annotation_ids[nextIndex] ?? null,
+    };
     queryClient.setQueryData<ReviewCursor>(
       ["patient-review-cursor", projectId, patientId],
       cursor
     );
-  }, [patientId, projectId, queryClient]);
+  }, [patientId, projectId, queryClient, reviewCursor, currentIndex]);
 
   const navigateToIndex = useCallback(async (targetIndex: number) => {
     if (!patientId || !reviewCursor || targetIndex < 0) return;
-    let cursor = reviewCursor;
-    let index = cursor.annotation_ids.indexOf(cursor.current_annotation_id ?? "");
-    if (targetIndex === 0) {
-      cursor = await api.post<ReviewCursor>(
-        `/projects/${projectId}/annotations/patient/${patientId}/navigate/first_anno`,
-        {}
-      );
-    } else if (targetIndex === cursor.annotation_ids.length - 1) {
-      cursor = await api.post<ReviewCursor>(
-        `/projects/${projectId}/annotations/patient/${patientId}/navigate/last_anno`,
-        {}
-      );
-    } else {
-      if (index < 0) index = 0;
-      const action = targetIndex > index ? "next_1" : "prev_1";
-      for (let step = 0; step < Math.abs(targetIndex - index); step += 1) {
-        cursor = await api.post<ReviewCursor>(
-          `/projects/${projectId}/annotations/patient/${patientId}/navigate/${action}`,
-          {}
-        );
-      }
-    }
+    const index = Math.min(targetIndex, reviewCursor.annotation_ids.length - 1);
+    const cursor = {
+      ...reviewCursor,
+      current_annotation_id: reviewCursor.annotation_ids[index] ?? null,
+    };
     queryClient.setQueryData<ReviewCursor>(
       ["patient-review-cursor", projectId, patientId],
       cursor
     );
   }, [patientId, projectId, queryClient, reviewCursor]);
 
-  // Mutations
-  const reviewMutation = useMutation({
-    mutationFn: ({ id, event_date }: { id: string; event_date?: string }) =>
-      api.post<ReviewResult>(
-        `/projects/${projectId}/annotations/${id}/review`,
-        { event_date: event_date || null }
-      ),
-    onSuccess: (data) => {
-      const hadEventDate = showEventDateInput && eventDateValue;
-      setShowEventDateInput(false);
-      setEventDateValue("");
-
-      if (hadEventDate && data.earlier_count > 0) {
-        setEarlierNotesBanner(
-          `${data.earlier_count} earlier note${data.earlier_count > 1 ? "s" : ""} found before the event date \u2014 verify the earliest occurrence.`
-        );
-      } else if (hadEventDate && data.earlier_count === 0) {
-        setEarlierNotesBanner(null);
-      }
-
-      handlePostAction();
-    },
-  });
-
+  // Delete-event-date remains an explicit persisted action, outside the draft batch.
   const deleteEventDateMutation = useMutation({
     mutationFn: (annotationId: string) =>
       api.post<DeleteEventDateResult>(
@@ -784,20 +907,21 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
     },
   });
 
-  const total = sequenceAnnotations.length;
+  const total = displayAnnotations.length;
 
   const handleAdjudicate = useCallback(() => {
-    if (!current || reviewMutation.isPending) return;
-    reviewMutation.mutate({ id: current.id });
-  }, [current, reviewMutation]);
+    if (!current || isSubmittingBatch) return;
+    void handlePostAction({ annotation_id: current.id, action: "negative", event_date: null });
+  }, [current, handlePostAction, isSubmittingBatch]);
 
   const handleEventDate = useCallback(() => {
-    if (!current || !eventDateValue) return;
-    reviewMutation.mutate({
-      id: current.id,
-      event_date: eventDateValue + "T00:00:00Z",
+    if (!current || !eventDateValue || isSubmittingBatch) return;
+    void handlePostAction({
+      annotation_id: current.id,
+      action: "event",
+      event_date: eventDateValue,
     });
-  }, [current, eventDateValue, reviewMutation]);
+  }, [current, eventDateValue, handlePostAction, isSubmittingBatch]);
 
   const handleDeleteEventDate = useCallback(() => {
     if (
@@ -807,6 +931,19 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
       return;
     deleteEventDateMutation.mutate(patientStats.event_annotation_id);
   }, [patientStats, deleteEventDateMutation]);
+
+  const handleRequestFailedRetry = useCallback(async () => {
+    if (!patientInfo?.failed_review_job_id || retryRequested) return;
+    try {
+      await api.post(
+        `/projects/${projectId}/annotations/review-batches/${patientInfo.failed_review_job_id}/retry-request`,
+        {}
+      );
+      setRetryRequested(true);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : "Could not request a retry");
+    }
+  }, [patientInfo?.failed_review_job_id, projectId, retryRequested]);
 
   const handlePrev = useCallback(() => navigateAction("prev_1"), [navigateAction]);
   const handleNext = useCallback(() => navigateAction("next_1"), [navigateAction]);
@@ -886,8 +1023,9 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
   // Unlock patient on unmount
   useEffect(() => {
     const pid = patientId;
+    const jobLockedPatients = jobLockedPatientsRef.current;
     return () => {
-      if (pid) {
+      if (pid && !jobLockedPatients.has(pid)) {
         navigator.sendBeacon(
           `/api/v1/projects/${projectId}/annotations/patient/${pid}/unlock`,
           ""
@@ -958,17 +1096,33 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           No patients available
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          All patients may be locked by other reviewers, or no annotations exist
-          yet.
+          {patientInfo?.pending_review_jobs
+            ? `Finalizing ${patientInfo.pending_review_jobs} patient review${patientInfo.pending_review_jobs === 1 ? "" : "s"}.`
+            : "All patients may be locked by other reviewers, or no annotations exist yet."}
         </p>
       </div>
     );
   }
 
-  if (!current) return null;
+  if (!current) {
+    if (draftForPatient.length > 0) {
+      return (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5" role="status">
+          <p className="text-sm text-foreground">
+            {batchError ?? (isSubmittingBatch ? "Queuing patient review…" : "Patient review is ready to submit.")}
+          </p>
+          {batchError && (
+            <Button onClick={retryBatchSubmission} disabled={isSubmittingBatch} aria-busy={isSubmittingBatch}>
+              {isSubmittingBatch ? "Retrying…" : "Retry submission"}
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return null;
+  }
 
-  const isPending =
-    reviewMutation.isPending || deleteEventDateMutation.isPending;
+  const isPending = isSubmittingBatch || deleteEventDateMutation.isPending;
   const reviewedCount = patientStats
     ? patientStats.reviewed + patientStats.skipped
     : 0;
@@ -988,6 +1142,19 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
         role="region"
         aria-label="Patient annotation review"
       >
+        {batchError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+            {batchError}
+          </div>
+        )}
+        {patientInfo?.failed_review_job_id && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm" role="status">
+            <span>Finalizing the previous review failed. Your decisions are retained for retry.</span>
+            <Button size="sm" variant="outline" onClick={handleRequestFailedRetry} disabled={retryRequested}>
+              {retryRequested ? "Retry requested" : "Request retry"}
+            </Button>
+          </div>
+        )}
         {showShortcuts && (
           <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />
         )}
@@ -1027,7 +1194,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
           {/* Sequence markers */}
           <div className="min-w-0 flex-1 overflow-x-auto">
             <SequenceMarkers
-              annotations={sequenceAnnotations}
+              annotations={displayAnnotations}
               currentIndex={currentIndex}
               onNavigate={navigateToIndex}
             />
@@ -1239,16 +1406,14 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
               <Button
                 onClick={handleAdjudicate}
                 disabled={
-                  isPending || current.review_status !== "unreviewed"
+                  isPending || !!patientInfo?.failed_review_job_id || current.review_status !== "unreviewed"
                 }
                 className="w-full gap-2"
                 size="lg"
-                aria-busy={reviewMutation.isPending}
+                aria-busy={isSubmittingBatch}
               >
                 <CheckCircle2 className="h-4 w-4" />
-                {reviewMutation.isPending && !showEventDateInput
-                  ? "Saving\u2026"
-                  : "No Event"}
+                {isSubmittingBatch ? "Queuing review\u2026" : "No Event"}
                 <kbd className="ml-auto rounded border border-white/20 bg-white/10 px-1.5 py-0.5 text-xs">
                   A
                 </kbd>
@@ -1259,7 +1424,7 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
                   variant="outline"
                   onClick={() => setShowEventDateInput(true)}
                   disabled={
-                    isPending || current.review_status !== "unreviewed"
+                    isPending || !!patientInfo?.failed_review_job_id || current.review_status !== "unreviewed"
                   }
                   className="w-full gap-2"
                   size="lg"
@@ -1622,10 +1787,10 @@ function PatientReviewPanel({ projectId }: { projectId: string }) {
 
         {/* Live region for screen readers */}
         <div className="sr-only" aria-live="assertive" aria-atomic="true">
-          {reviewMutation.isSuccess && "Annotation adjudicated"}
+          {draftForPatient.length > 0 && "Review decision recorded for this patient"}
           {deleteEventDateMutation.isSuccess &&
             "Event date deleted, skips reverted"}
-          {(reviewMutation.isError || deleteEventDateMutation.isError) &&
+          {(batchError || deleteEventDateMutation.isError) &&
             "Action failed, please try again"}
         </div>
       </div>

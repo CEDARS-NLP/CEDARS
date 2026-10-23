@@ -2,13 +2,14 @@
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.annotations.adjudication_service import AdjudicationConflictError
+from app.annotations.adjudication_service import AdjudicationConflictError, submit_review_batch
 from app.annotations.query_service import get_patient_matched_notes, serialize_annotation
+from app.annotations.review_jobs import PatientReviewJob
 from app.annotations.schemas import (
     AnnotationResponse,
     AnnotationStatsResponse,
@@ -19,6 +20,8 @@ from app.annotations.schemas import (
     PatientAnnotationResponse,
     PatientReviewStats,
     PredictionJobResponse,
+    ReviewBatchRequest,
+    ReviewBatchResponse,
     ReviewRequest,
     ReviewResultResponse,
 )
@@ -220,6 +223,129 @@ async def next_patient_endpoint(
 ):
     """Get and lock the next patient with unreviewed annotations."""
     return await get_next_patient_for_review(session, project_id, current_user.id)
+
+
+@router.post(
+    "/patient/{patient_id}/review-batches",
+    response_model=ReviewBatchResponse,
+    status_code=202,
+)
+async def submit_patient_review_batch_endpoint(
+    project_id: str,
+    patient_id: str,
+    body: ReviewBatchRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    """Persist a completed client-side review batch and queue atomic finalization."""
+    try:
+        job = await submit_review_batch(
+            session,
+            project_id,
+            patient_id,
+            current_user.id,
+            body.idempotency_key,
+            [decision.model_dump(mode="json") for decision in body.decisions],
+            body.skip_after_event,
+        )
+    except AdjudicationConflictError as exc:
+        raise _adjudication_conflict(exc) from exc
+
+    if job.status == "queued":
+        from app.jobs.review import enqueue_review_job
+
+        background_tasks.add_task(enqueue_review_job, job.id, job.attempt_count)
+    return ReviewBatchResponse(
+        job_id=job.id,
+        status=job.status,
+        patient_id=job.patient_uuid,
+        attempt_count=job.attempt_count,
+        last_error=job.last_error,
+    )
+
+
+@router.get("/review-batches/failed")
+async def failed_review_batches_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    jobs = (
+        await session.scalars(
+            select(PatientReviewJob)
+            .where(
+                col(PatientReviewJob.project_id) == project_id,
+                col(PatientReviewJob.status) == "failed",
+            )
+            .order_by(col(PatientReviewJob.created_at))
+        )
+    ).all()
+    return [
+        {
+            "id": job.id,
+            "patient_id": job.patient_uuid,
+            "reviewer_id": job.reviewer_id,
+            "attempt_count": job.attempt_count,
+            "last_error": job.last_error,
+            "retry_requested_by": job.retry_requested_by,
+            "retry_requested_at": job.retry_requested_at,
+            "created_at": job.created_at,
+        }
+        for job in jobs
+    ]
+
+
+@router.post("/review-batches/{job_id}/retry-request")
+async def request_review_batch_retry_endpoint(
+    project_id: str,
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_project_role("admin", "annotator")),
+):
+    from app.jobs.review import request_patient_review_retry
+
+    job = await request_patient_review_retry(
+        session, project_id, job_id, current_user.id
+    )
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    return {"job_id": job.id, "status": job.status, "requested": True}
+
+
+@router.post("/review-batches/{job_id}/retry")
+async def retry_review_batch_endpoint(
+    project_id: str,
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    from app.jobs.review import enqueue_review_job, retry_patient_review_job
+
+    try:
+        job = await retry_patient_review_job(session, project_id, job_id)
+    except ValueError as exc:
+        raise _adjudication_conflict(AdjudicationConflictError(str(exc))) from exc
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    background_tasks.add_task(enqueue_review_job, job.id, job.attempt_count)
+    return {"job_id": job.id, "status": job.status, "attempt_count": job.attempt_count}
+
+
+@router.post("/review-batches/{job_id}/discard")
+async def discard_review_batch_endpoint(
+    project_id: str,
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    _current_user: User = Depends(require_project_role("admin")),
+):
+    from app.jobs.review import discard_failed_patient_review_job
+
+    job = await discard_failed_patient_review_job(session, project_id, job_id)
+    if job is None:
+        raise_not_found("Failed review batch not found")
+    return {"job_id": job.id, "status": job.status}
 
 
 @router.get(
