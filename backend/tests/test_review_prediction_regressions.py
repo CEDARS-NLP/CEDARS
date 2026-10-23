@@ -371,7 +371,7 @@ async def test_cedars_processing_creates_excluded_negated_annotation_and_keeps_n
         assert negated_patient.review_reason == "production_complete"
 
 
-async def test_reopening_reviewed_patient_without_annotations_conflicts(session_factory):
+async def test_reopening_reviewed_patient_without_annotations_conflict(session_factory):
     async with session_factory() as session:
         seeded = await _seed_project(
             session,
