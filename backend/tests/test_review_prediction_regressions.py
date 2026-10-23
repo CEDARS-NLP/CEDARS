@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.annotations.completion_service import complete_negative_llm_patients
@@ -866,6 +867,17 @@ async def test_reviewable_filter_ignores_inactive_predictors(session_factory):
             )
         ).scalars().all()
         assert len(rows) == 1
+
+
+def test_reviewable_filter_correlates_active_run_lookup_for_postgresql():
+    statement = select(Annotation).where(reviewable_filter())
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+
+    assert (
+        'FROM production_states WHERE production_states.project_id = "Annotations".project_id'
+        in sql
+    )
+    assert 'FROM production_states, "Annotations"' not in sql
 
 
 async def test_reviewable_filter_no_active_predictor_keeps_legacy_behavior(session_factory):

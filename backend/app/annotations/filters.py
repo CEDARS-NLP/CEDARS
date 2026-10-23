@@ -12,6 +12,7 @@ def reviewable_filter(active_predictor_id: str | None = None):
     active_run_id = (
         select(col(ProductionState.active_run_id))
         .where(col(ProductionState.project_id) == col(Annotation.project_id))
+        .correlate(Annotation)
         .scalar_subquery()
     )
     ruled_out_by_note = (
