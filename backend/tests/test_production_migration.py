@@ -14,6 +14,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
@@ -32,7 +33,7 @@ from app.production.models import ProductionResult
 ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "c1d2e3f4a5b6"
 PRODUCTION_REVISION = "d4e5f6a7b8c9"
-HEAD_REVISION = "f2b3c4d5e6a7"
+HEAD_REVISION = "a8d4c6e2f109"
 
 
 def _alembic_config(database_url: str, output_buffer=None) -> Config:
@@ -98,6 +99,35 @@ def _create_pre_revision_schema(engine) -> None:
         Column("created_by", String, ForeignKey("users.id"), nullable=False),
         Column("created_at", DateTime, nullable=False),
         Column("updated_at", DateTime, nullable=False),
+    )
+    Table("predictor_configs", metadata, Column("id", String, primary_key=True))
+    Table(
+        "evaluation_sessions",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("project_id", String, ForeignKey("projects.id"), nullable=False),
+        Column("predictor_config_id", String, ForeignKey("predictor_configs.id"), nullable=False),
+        Column("created_by", String, ForeignKey("users.id"), nullable=False),
+        Column("created_at", DateTime, nullable=False),
+        Index("ix_evaluation_sessions_project_id", "project_id"),
+    )
+    Table(
+        "validated_predictors",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("project_id", String, ForeignKey("projects.id"), nullable=False),
+        Column("predictor_config_id", String, ForeignKey("predictor_configs.id"), nullable=False),
+        Column("session_id", String, ForeignKey("evaluation_sessions.id"), nullable=False),
+        Column("validated_by", String, ForeignKey("users.id"), nullable=False),
+        Index("ix_validated_predictors_project_id", "project_id"),
+    )
+    Table(
+        "evaluation_judgments",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("session_id", String, ForeignKey("evaluation_sessions.id"), nullable=False),
+        Column("note_id", String, ForeignKey("notes.id"), nullable=False),
+        Index("ix_evaluation_judgments_session_id", "session_id"),
     )
     Table(
         "audit_log", metadata,
@@ -218,7 +248,12 @@ def test_production_migration_preserves_source_rows_and_enforces_constraints(tmp
             "RESULTS",
         } <= tables
         assert "annotations" not in tables
-        assert "annotation_predictions" not in tables
+        assert "annotation_predictions" in tables
+        assert not {
+            "evaluation_sessions",
+            "evaluation_judgments",
+            "validated_predictors",
+        } & tables
         assert connection.execute(
             text("SELECT patient_id_ext FROM notes WHERE id = 'note-1'")
         ).scalar_one() == "external-1"
@@ -314,6 +349,17 @@ def test_production_migration_preserves_source_rows_and_enforces_constraints(tmp
                     "'{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '2025-04-03')"
                 )
             )
+
+    command.downgrade(config, "f2b3c4d5e6a7")
+    with engine.connect() as connection:
+        tables = set(inspect(connection).get_table_names())
+        assert {
+            "evaluation_sessions",
+            "evaluation_judgments",
+            "validated_predictors",
+        } <= tables
+        assert "annotation_predictions" not in tables
+    command.upgrade(config, HEAD_REVISION)
 
     engine.dispose()
 

@@ -16,6 +16,8 @@ class Sentence(SQLModel, table=True):
     __tablename__ = "sentences"
     __table_args__ = (
         UniqueConstraint("note_id", "sentence_number", name="uq_sentence_note_pos"),
+        Index("ix_sentences_project_target_created", "project_id", "is_target", "created_at"),
+        Index("ix_sentences_project_target_negated", "project_id", "is_target", "is_negated"),
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     Text,
     UniqueConstraint,
     func,
@@ -149,6 +150,8 @@ class Note(SQLModel, table=True):
         UniqueConstraint(
             "project_id", "text_id", "patient_id_ext", name="uq_note_project_text_patient"
         ),
+        Index("ix_notes_project_patient_deleted", "project_id", "patient_id", "deleted_at"),
+        Index("ix_notes_patient_notedate", "patient_id", "note_date"),
         ForeignKeyConstraint(
             ["project_id", "patient_id_ext"],
             ["patients.project_id", "patients.patient_id_ext"],
