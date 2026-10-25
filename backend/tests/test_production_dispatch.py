@@ -34,6 +34,7 @@ async def test_dispatch_uses_production_without_copying_sample_results(app):
         note = Note(
             project_id=project_id,
             patient_id=patient.id,
+            patient_id_ext=patient.patient_id_ext,
             text_id="production-note",
             text="Troponin elevated.",
             note_date=now_utc(),
