@@ -371,20 +371,6 @@ async def test_cedars_processing_creates_excluded_negated_annotation_and_keeps_n
         assert negated_patient.review_reason == "production_complete"
 
 
-async def test_reopening_reviewed_patient_without_annotations_conflicts(session_factory):
-    async with session_factory() as session:
-        seeded = await _seed_project(
-            session,
-            annotation_count=0,
-            patient_status=PatientStatus.REVIEWED,
-            review_source="llm",
-        )
-        with pytest.raises(ReopenConflictError):
-            await reopen_patient(
-                session, seeded["project_id"], seeded["patient_id"], seeded["user_id"]
-            )
-
-
 async def test_reopening_patient_restores_excluded_rows_and_preserves_predictions(
     session_factory,
 ):
@@ -437,6 +423,20 @@ async def test_reopening_patient_restores_excluded_rows_and_preserves_prediction
             "R",
             "duplicate",
         )
+
+
+async def test_reopening_reviewed_patient_without_annotations_conflicts(session_factory):
+    async with session_factory() as session:
+        seeded = await _seed_project(
+            session,
+            annotation_count=0,
+            patient_status=PatientStatus.REVIEWED,
+            review_source="llm",
+        )
+        with pytest.raises(ReopenConflictError):
+            await reopen_patient(
+                session, seeded["project_id"], seeded["patient_id"], seeded["user_id"]
+            )
 
 
 async def test_export_includes_manual_override_and_patient_review_attribution(session_factory):
