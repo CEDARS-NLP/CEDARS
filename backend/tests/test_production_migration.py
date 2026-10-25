@@ -396,7 +396,7 @@ def test_production_migration_matches_model_on_postgresql():
         engine = create_engine(isolated_url)
         try:
             _create_pre_revision_schema(engine)
-            config = _alembic_config(str(isolated_url))
+            config = _alembic_config(isolated_url.render_as_string(hide_password=False))
             command.stamp(config, PREVIOUS_HEAD)
             command.upgrade(config, HEAD_REVISION)
             with engine.connect() as connection:

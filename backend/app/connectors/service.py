@@ -344,6 +344,7 @@ async def get_ingestion_job_status(
         "status": bg_job.status.value,
         "progress": bg_job.progress,
         "result_summary": bg_job.result_summary,
+        "error_message": bg_job.error_message,
     }
 
 
