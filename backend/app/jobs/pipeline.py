@@ -17,8 +17,8 @@ import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import col
 
-from app.annotations.models import Annotation, ReviewStatus
 from app.common.utils import now_utc
 from app.config import settings
 from app.connectors.models import Note
@@ -32,6 +32,7 @@ from app.pipeline.models import (
     PipelineRunStatus,
 )
 from app.pipeline.search import search_patient_notes
+from app.production.models import ProductionResult, ProductionRun
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,13 @@ async def process_single_patient(
         if run.is_cancelled:
             return {"status": "cancelled"}
 
+        if run.run_type == "full":
+            return {
+                "status": "delegated",
+                "patient_id": task.patient_id,
+                "production_run_id": (run.result_summary or {}).get("production_run_id"),
+            }
+
         config = run.config_snapshot
         keywords = config.get("search_patterns", {}).get("keywords", [])
         regex_patterns = config.get("search_patterns", {}).get("regex_patterns", [])
@@ -123,9 +131,9 @@ async def process_single_patient(
 
                 # Load patient notes
                 note_stmt = select(Note).where(
-                    Note.patient_id == task.patient_id,
-                    Note.project_id == run.project_id,
-                    Note.deleted_at.is_(None),
+                    col(Note.patient_id) == task.patient_id,
+                    col(Note.project_id) == run.project_id,
+                    col(Note.deleted_at).is_(None),
                 )
                 notes = list((await db.execute(note_stmt)).scalars().all())
 
@@ -174,22 +182,11 @@ async def process_single_patient(
 
                 classification = await classify_patient(excerpts, proxy)
 
-                # Create annotation
-                db.add(Annotation(
-                    project_id=run.project_id,
-                    patient_id=task.patient_id,
-                    note_id=matches[0].note_id,
-                    sentence_text="; ".join(m.matched_text for m in matches[:5]),
-                    predicted_score=classification.score,
-                    predicted_label=1 if classification.label == "positive" else 0,
-                    predictor_model=config["llm_model"],
-                    reasoning=classification.reasoning,
-                    review_status=ReviewStatus.PENDING,
-                    pipeline_run_id=run.id,
-                    patient_task_id=task.id,
-                    predicted_reasoning=classification.reasoning,
-                ))
-
+                task.finding_label = classification.label
+                task.finding_reasoning = classification.reasoning
+                task.finding_evidence = getattr(classification, "evidence", None)
+                task.predicted_score = classification.score
+                task.token_usage = classification.token_usage
                 task.transition_status(PatientTaskStatus.COMPLETED)
                 task.completed_at = now_utc()
                 db.add(task)
@@ -240,6 +237,11 @@ async def execute_pipeline_run(
     if session_factory is None:
         session_factory = _make_session_factory()
 
+    async with session_factory() as check_session:
+        run = await check_session.get(PipelineRun, pipeline_run_id)
+        if run and run.run_type == "full":
+            return await _execute_production_pipeline_run(pipeline_run_id, session_factory)
+
     async with session_factory() as db:
         run = await db.get(PipelineRun, pipeline_run_id)
         if not run:
@@ -255,10 +257,10 @@ async def execute_pipeline_run(
         stmt = (
             select(PatientTask)
             .where(
-                PatientTask.pipeline_run_id == pipeline_run_id,
-                PatientTask.status == PatientTaskStatus.QUEUED,
+                col(PatientTask.pipeline_run_id) == pipeline_run_id,
+                col(PatientTask.status) == PatientTaskStatus.QUEUED,
             )
-            .order_by(PatientTask.id)
+            .order_by(col(PatientTask.id))
         )
         tasks = list((await db.execute(stmt)).scalars().all())
 
@@ -398,4 +400,135 @@ async def execute_pipeline_run(
         db.add(run)
         await db.commit()
         await _sync_eval_session_status(db, run.id, run.status)
+        return stats
+
+
+async def _execute_production_pipeline_run(
+    pipeline_run_id: str,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> dict:
+    from app.production.service import cancel_run, execute_run, retry_run
+
+    async with session_factory() as db:
+        pipeline_run = await db.get(PipelineRun, pipeline_run_id)
+        if pipeline_run is None:
+            return {"error": "Run not found"}
+        production_run_id = (pipeline_run.result_summary or {}).get("production_run_id")
+        if not production_run_id:
+            pipeline_run.status = PipelineRunStatus.FAILED
+            pipeline_run.result_summary = {"error": "No coordinated production run is linked"}
+            pipeline_run.completed_at = now_utc()
+            await db.commit()
+            return pipeline_run.result_summary
+        pipeline_run.status = PipelineRunStatus.RUNNING
+        pipeline_run.started_at = pipeline_run.started_at or now_utc()
+        pipeline_run.updated_at = now_utc()
+        await db.commit()
+
+    async def _execute() -> None:
+        async with session_factory() as db:
+            production_run = await db.get(ProductionRun, production_run_id)
+            if production_run is None:
+                raise ValueError("Linked production run was not found")
+            if production_run.status == "queued":
+                await execute_run(db, production_run_id)
+            elif production_run.status == "failed":
+                await retry_run(db, production_run_id)
+            elif production_run.status not in {"completed", "cancelled"}:
+                raise ValueError(f"Production run is already {production_run.status}")
+
+    execution = asyncio.create_task(_execute())
+    cancellation_requested = False
+    while not execution.done():
+        await asyncio.sleep(POLL_INTERVAL)
+        async with session_factory() as db:
+            pipeline_run = await db.get(PipelineRun, pipeline_run_id)
+            production_run = await db.get(ProductionRun, production_run_id)
+            if pipeline_run is None or production_run is None:
+                break
+            if pipeline_run.is_cancelled and not cancellation_requested:
+                await cancel_run(db, production_run_id)
+                cancellation_requested = True
+            pipeline_run.progress = (
+                min(99, int(100 * production_run.completed_notes / production_run.total_notes))
+                if production_run.total_notes
+                else 99
+            )
+            pipeline_run.updated_at = now_utc()
+            db.add(pipeline_run)
+            await db.commit()
+
+    try:
+        await execution
+    except Exception:
+        if not cancellation_requested:
+            logger.exception("Production-backed pipeline run %s failed", pipeline_run_id)
+
+    async with session_factory() as db:
+        pipeline_run = await db.get(PipelineRun, pipeline_run_id)
+        production_run = await db.get(ProductionRun, production_run_id)
+        if pipeline_run is None or production_run is None:
+            return {"error": "Pipeline or production run disappeared"}
+
+        results = {
+            item.patient_uuid: item
+            for item in await db.scalars(
+                select(ProductionResult).where(
+                    ProductionResult.project_id == pipeline_run.project_id
+                )
+            )
+        }
+        tasks = list(
+            await db.scalars(
+                select(PatientTask).where(PatientTask.pipeline_run_id == pipeline_run_id)
+            )
+        )
+        for task in tasks:
+            result = results.get(task.patient_id)
+            if result is None or result.processing_status not in {"completed", "failed"}:
+                continue
+            task.status = (
+                PatientTaskStatus.FAILED
+                if result.processing_status == "failed"
+                else PatientTaskStatus.NO_MATCH
+                if result.annotations_total == 0
+                else PatientTaskStatus.COMPLETED
+            )
+            task.error_message = result.last_error
+            task.completed_at = now_utc()
+            db.add(task)
+
+        status_counts = {status.value: 0 for status in PatientTaskStatus}
+        for task in tasks:
+            task_status = task.status.value if hasattr(task.status, "value") else task.status
+            status_counts[task_status] = status_counts.get(task_status, 0) + 1
+        processed = sum(
+            status_counts.get(key, 0) for key in ("completed", "no_match", "failed")
+        )
+        stats = {
+            "patients_processed": processed,
+            "patients_completed": status_counts.get("completed", 0),
+            "patients_no_match": status_counts.get("no_match", 0),
+            "patients_failed": status_counts.get("failed", 0),
+            "patients_queued": status_counts.get("queued", 0),
+            "patients_processing": status_counts.get("processing", 0),
+            "production_run_id": production_run_id,
+        }
+        is_cancelled = pipeline_run.is_cancelled or production_run.status == "cancelled"
+        pipeline_run.status = (
+            PipelineRunStatus.CANCELLED
+            if is_cancelled
+            else PipelineRunStatus.FAILED
+            if production_run.status == "failed"
+            else PipelineRunStatus.COMPLETED
+        )
+        pipeline_run.processed_patients = processed
+        pipeline_run.failed_patients = stats["patients_failed"]
+        pipeline_run.progress = int(100 * processed / len(tasks)) if tasks else 100
+        pipeline_run.completed_at = now_utc()
+        pipeline_run.updated_at = now_utc()
+        pipeline_run.result_summary = {**(pipeline_run.result_summary or {}), **stats}
+        db.add(pipeline_run)
+        await db.commit()
+        await _sync_eval_session_status(db, pipeline_run.id, pipeline_run.status)
         return stats

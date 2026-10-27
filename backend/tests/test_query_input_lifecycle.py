@@ -15,8 +15,19 @@ from app.evaluation.models import (
     SessionStatus,
 )
 from app.nlp.engine import parse_query, process_note
-from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
-from tests.test_eval_service import db, seeded_db  # noqa: F401
+from app.nlp.models import SearchQuery, Sentence
+from tests.test_eval_service import db as _shared_db  # noqa: F401
+from tests.test_eval_service import seeded_db as _shared_seeded_db  # noqa: F401
+
+
+@pytest.fixture
+async def db(_shared_db):  # noqa: F811
+    return _shared_db
+
+
+@pytest.fixture
+async def seeded_db(_shared_seeded_db):  # noqa: F811
+    return _shared_seeded_db
 
 
 @pytest.fixture(autouse=True)
@@ -75,12 +86,13 @@ async def test_create_raw_literal_and_exclusion_execute_without_changing_section
 ):
     texts = await literal_notes(literal)
     sections = raw_sections(literal)
+    escaped_literal = literal.replace("!", "\\!")
     session = await eval_service.create_session(
         seeded_db, "proj-1", "user-1", search_queries=sections,
     )
     assert await eval_service.get_query_sections(seeded_db, session.id) == sections
     assert session.search_queries == [{
-        "query": f"({literal.replace('!', r'\!')}) AND !((family history))",
+        "query": f"({escaped_literal}) AND !((family history))",
         "type": "include",
     }]
     await eval_service.update_queries(
@@ -192,7 +204,9 @@ async def test_run_all_and_final_commit_preserve_literal_meaning_and_keep_negati
     canonical = [dict(row) for row in session.search_queries]
     with patch("app.nlp.service.dispatch_nlp_job", new_callable=AsyncMock) as dispatch:
         await eval_service.run_session_queries(seeded_db, session, "user-1")
-        dispatch.assert_awaited_once_with(seeded_db, "proj-1", "user-1")
+        dispatch.assert_awaited_once_with(
+            seeded_db, "proj-1", "user-1", confirmed=False,
+        )
     active = (await seeded_db.execute(select(SearchQuery).where(SearchQuery.is_active))).scalar_one()
     assert active.query == canonical[0]["query"]
     assert active.exclude_negated is False
@@ -213,8 +227,21 @@ async def test_run_all_and_final_commit_preserve_literal_meaning_and_keep_negati
     active = (await seeded_db.execute(select(SearchQuery).where(SearchQuery.is_active))).scalar_one()
     assert active.query == canonical[0]["query"]
     assert active.exclude_negated is False
-    sentences = (await seeded_db.execute(select(Sentence).where(Sentence.is_target))).scalars().all()
-    assert {sentence.note_id for sentence in sentences} == {"note-1-1", "note-4-1"}
-    assert any(sentence.is_negated for sentence in sentences)
-    job = (await seeded_db.execute(select(NlpJob))).scalar_one()
-    assert job.status == NlpJobStatus.COMPLETED
+    cached_sentences = (
+        await seeded_db.execute(select(Sentence).where(Sentence.is_target))
+    ).scalars().all()
+    assert cached_sentences == []
+    engine_matches = {
+        note_id: process_note(text, groups)
+        for note_id, text in texts.items()
+    }
+    assert {
+        note_id for note_id, sentences in engine_matches.items()
+        if any(sentence["is_target"] for sentence in sentences)
+    } == {"note-1-1", "note-4-1"}
+    assert any(
+        sentence["is_negated"]
+        for sentences in engine_matches.values()
+        for sentence in sentences
+        if sentence["is_target"]
+    )

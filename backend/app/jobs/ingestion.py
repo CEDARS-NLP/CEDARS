@@ -76,6 +76,7 @@ async def execute_ingestion_job(
 
             def _summary() -> dict:
                 return {
+                    "data_source_id": data_source_id,
                     "total_rows": file_rows,
                     "inserted_rows": inserted_rows,
                     "skipped_rows": file_rows - inserted_rows,

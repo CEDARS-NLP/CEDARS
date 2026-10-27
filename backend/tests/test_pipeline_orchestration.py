@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
 from httpx import AsyncClient
 
 from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_and_login
@@ -24,6 +23,7 @@ async def _seed_patients(app, project_id: str, count: int = 3) -> list[str]:
             n = Note(
                 project_id=project_id,
                 patient_id=p.id,
+                patient_id_ext=p.patient_id_ext,
                 text_id=f"N{i:03d}",
                 note_date=datetime(2025, 1, i + 1, tzinfo=UTC),
                 text=f"Patient P{i:03d} presents with troponin elevation at {i + 1}.0 ng/mL and chest pain.",

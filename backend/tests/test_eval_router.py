@@ -1,5 +1,6 @@
 """Tests for the unified evaluation session router."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -10,12 +11,16 @@ from app.annotations.models import Annotation, AnnotationPrediction
 from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.evaluation.models import (
-    EvaluationSession, PatientResult, PatientResultStatus, SearchMatch, SessionStatus,
+    EvaluationSession,
+    PatientResult,
+    PatientResultStatus,
+    SearchMatch,
+    SessionStatus,
 )
 from app.jobs.models import BackgroundJob, JobStatus, JobType
-from app.jobs.nlp import execute_nlp_job
-from app.nlp.models import NlpJob, NlpJobStatus, SearchQuery, Sentence
+from app.nlp.models import NlpJob, SearchQuery, Sentence
 from app.nlp.service import _process_notes_into_sentences, get_reprocess_impact
+from app.production.models import NotePrediction, ProductionRun
 from app.projects.models import Project, ProjectMember, ProjectRole
 
 
@@ -340,105 +345,131 @@ class TestCommit:
     async def test_commit_rebuilds_before_dispatch_without_keyword_annotations(
         self, client, app, exclude_negated, processed,
     ):
-        from app.nlp.service import run_nlp_pipeline
+        from app.production import service as production_service
+        from app.production.models import NotePrediction, ProductionResult, ProductionRun
 
         project_id, session_id, endpoint, old_id, impact = await setup_guarded_commit(
             client, app, processed=processed, exclude_negated=exclude_negated,
         )
         async with app.state.test_session_factory() as db:
-            old_sentences = set((await db.execute(select(Sentence.id))).scalars())
-            before_results = (await commit_state(db, session_id))[PatientResult.__tablename__]
-            before_matches = (await commit_state(db, session_id))[SearchMatch.__tablename__]
-        body = {"reprocess": exact_confirmation(impact)} if processed else {}
-
-        async def dispatch_after_rebuild(db, session, **kwargs):
-            assert session.status == SessionStatus.COMMITTED
-            job = (await db.execute(select(NlpJob))).scalar_one()
-            assert job.status == NlpJobStatus.COMPLETED
-            assert job.processed_notes == 1
-            sentences = (await db.execute(select(Sentence))).scalars().all()
-            assert len(sentences) == 3
-            assert not old_sentences.intersection(sentence.id for sentence in sentences)
-            assert {sentence.text for sentence in sentences if sentence.is_target} == {
-                "Troponin elevated.", "Confirmed DVT.",
-            }
-            assert await get_reprocess_impact(db, project_id) == {
-                "annotations": 0, "predictions": 0, "sentences": 3,
-            }
+            if processed:
+                for sentence in (await db.execute(select(Sentence))).scalars():
+                    await db.delete(sentence)
+                await db.commit()
+                impact = await get_reprocess_impact(db, project_id)
             patient = (await db.execute(select(Patient))).scalar_one()
-            assert patient.status == (
-                PatientStatus.NLP_COMPLETE if processed else PatientStatus.NEW
-            )
-            assert patient.reviewed_by is None
-            assert patient.reviewed_at is None
-            state = await commit_state(db, session_id)
-            assert state[PatientResult.__tablename__] == before_results
-            assert state[SearchMatch.__tablename__] == before_matches
-            return SimpleNamespace(id="guarded-run", total_patients=1)
+            note = (await db.execute(select(Note))).scalar_one()
+            before_result_ids = set((await db.execute(select(PatientResult.id))).scalars())
+            before_match_ids = set((await db.execute(select(SearchMatch.id))).scalars())
+            before_annotation_ids = set((await db.execute(select(Annotation.annotation_id))).scalars())
+            before_prediction_ids = set((await db.execute(
+                select(AnnotationPrediction.id)
+            )).scalars())
+            before_sentence_ids = set((await db.execute(select(Sentence.id))).scalars())
+        body = {"reprocess": exact_confirmation(impact)} if processed else {}
+        original_start_run = production_service.start_run
 
-        with patch("app.nlp.service.run_nlp_pipeline", wraps=run_nlp_pipeline) as rebuild, \
-             patch("app.evaluation.service.dispatch_full_pipeline_run", side_effect=dispatch_after_rebuild) as dispatch, \
-             patch("litellm.acompletion", new_callable=AsyncMock) as llm:
+        async def start_production_run(**kwargs):
+            db = kwargs["db"]
+            committed = await db.get(EvaluationSession, session_id)
+            assert committed.status == SessionStatus.COMMITTED
+            assert committed.committed_config["search_queries"] == committed.search_queries
+            assert set((await db.execute(select(Sentence.id))).scalars()) == before_sentence_ids
+            assert set((await db.execute(select(PatientResult.id))).scalars()) == before_result_ids
+            assert set((await db.execute(select(SearchMatch.id))).scalars()) == before_match_ids
+            assert set((await db.execute(select(Annotation.annotation_id))).scalars()) == before_annotation_ids
+            assert set((await db.execute(
+                select(AnnotationPrediction.id)
+            )).scalars()) == before_prediction_ids
+            assert (await db.get(Patient, patient.id)).patient_id_ext == patient.patient_id_ext
+            assert (await db.get(Note, note.id)).text == note.text
+            assert kwargs["config"]["evaluation_session_id"] == session_id
+            assert kwargs["confirmed"] is processed
+            return await original_start_run(**kwargs)
+
+        with patch("app.nlp.service.run_nlp_pipeline", new_callable=AsyncMock) as rebuild, \
+             patch("app.production.service.start_run", new_callable=AsyncMock,
+                   side_effect=start_production_run) as dispatch, \
+             patch("app.evaluation.service._enqueue_eval_pipeline_run", new_callable=AsyncMock):
             response = await client.post(endpoint, json=body)
             assert response.status_code == 200, response.text
-            assert response.json()["pipeline_run_id"] == "guarded-run"
-            rebuild.assert_awaited_once()
-            assert rebuild.call_args.kwargs == {"create_annotations": False}
+            run_id = response.json()["pipeline_run_id"]
+            assert run_id
             dispatch.assert_awaited_once()
-            llm.assert_not_awaited()
+            rebuild.assert_not_awaited()
         async with app.state.test_session_factory() as db:
             session = await db.get(EvaluationSession, session_id)
             active = (await db.execute(select(SearchQuery).where(SearchQuery.is_active))).scalar_one()
-            assert active.id != old_id
-            assert active.exclude_negated is exclude_negated
-            assert active.nlp_apply is False
-            assert active.query == session.search_queries[0]["query"]
+            assert active.id == old_id
+            assert active.exclude_negated is False
             assert session.committed_config["exclude_negated"] is exclude_negated
             assert session.committed_config["search_queries"] == session.search_queries
             assert session.committed_at is not None
             assert session.committed_by == session.created_by
+            run = await db.get(ProductionRun, run_id)
+            assert run.config_snapshot["evaluation_session_id"] == session_id
+            results = (await db.execute(select(ProductionResult))).scalars().all()
+            assert len(results) == 1 and results[0].patient_uuid == patient.id
+            assert (await db.execute(select(NotePrediction))).scalars().all() == []
+            assert set((await db.execute(select(PatientResult.id))).scalars()) == before_result_ids
+            assert set((await db.execute(select(SearchMatch.id))).scalars()) == before_match_ids
+            assert set((await db.execute(select(Sentence.id))).scalars()) == before_sentence_ids
+            assert (await db.execute(select(Annotation))).scalars().all() == []
+
+            with patch("app.production.service._llm_enabled", return_value=False):
+                completed = await production_service.execute_run(db, run_id)
+            assert completed.status == "completed"
+            annotations = (await db.execute(
+                select(Annotation).where(Annotation.production_run_id == run_id)
+            )).scalars().all()
+            assert {annotation.token for annotation in annotations} == {
+                "Troponin", "elevated", "DVT",
+            }
+            assert all(annotation.patient_task_id is None for annotation in annotations)
+            assert (await db.execute(select(Sentence))).scalars().all() == []
+            assert set((await db.execute(select(PatientResult.id))).scalars()) == before_result_ids
+            assert set((await db.execute(select(SearchMatch.id))).scalars()) == before_match_ids
 
     async def test_failed_rebuild_remains_editable_and_can_retry(self, client, app):
         project_id, session_id, endpoint, _, impact = await setup_guarded_commit(
             client, app, processed=True,
         )
-        with patch("app.nlp.service._process_notes_into_sentences", side_effect=RuntimeError("test failure")), \
-             patch("app.evaluation.service.dispatch_full_pipeline_run", new_callable=AsyncMock) as dispatch:
+        with patch("app.production.service.start_run", new_callable=AsyncMock,
+                   side_effect=ValueError("production dispatch failed")) as dispatch:
             response = await client.post(endpoint, json={"reprocess": exact_confirmation(impact)})
             assert response.status_code == 409, response.text
-            assert "Sentence rebuild failed. Retry" in response.json()["detail"]
-            dispatch.assert_not_awaited()
-        async with app.state.test_session_factory() as db:
-            session = await db.get(EvaluationSession, session_id)
-            assert session.status == SessionStatus.REVIEWING
-            assert session.committed_config is None
-            assert session.committed_at is None
-            assert session.committed_by is None
-            job = (await db.execute(select(NlpJob))).scalar_one()
-            assert job.status == NlpJobStatus.FAILED
-            assert job.error_message
-            assert await get_reprocess_impact(db, project_id) == {
-                "annotations": 0, "predictions": 0, "sentences": 0,
-            }
-            results = (await db.execute(select(PatientResult))).scalars().all()
-            assert len(results) == 1 and results[0].review_judgment == "correct"
-            assert (await db.execute(select(func.count()).select_from(BackgroundJob))).scalar() == 0
-        updated = await client.put(endpoint.removesuffix("/commit") + "/queries", json={
-            "search_queries": [{"query": "DVT", "type": "include"}],
-        })
-        assert updated.status_code == 200, updated.text
-        run = SimpleNamespace(id="retry-run", total_patients=1)
-        with patch("app.evaluation.service.dispatch_full_pipeline_run", new_callable=AsyncMock, return_value=run) as dispatch:
-            retried = await client.post(endpoint, json={})
-            assert retried.status_code == 200, retried.text
+            assert "production dispatch failed" in response.json()["detail"]
             dispatch.assert_awaited_once()
         async with app.state.test_session_factory() as db:
+            session = await db.get(EvaluationSession, session_id)
+            assert session.status == SessionStatus.COMMITTED
+            assert session.committed_config is not None
+            assert session.committed_at is not None
+            assert session.committed_by == session.created_by
+            assert (await db.execute(select(NlpJob))).scalars().all() == []
+            results = (await db.execute(select(PatientResult))).scalars().all()
+            assert len(results) == 1 and results[0].review_judgment == "correct"
+            assert await get_reprocess_impact(db, project_id) == impact
+            assert (await db.execute(select(SearchMatch))).scalars().all()
+            assert (await db.execute(select(Sentence))).scalars().all()
+
+        run = SimpleNamespace(id="retry-run")
+        with patch("app.production.service.start_run", new_callable=AsyncMock,
+                   return_value=run) as dispatch, \
+             patch("app.evaluation.service._enqueue_eval_pipeline_run", new_callable=AsyncMock):
+            retried = await client.post(
+                endpoint.removesuffix("/commit") + "/pipeline/rerun", json={},
+            )
+            assert retried.status_code == 200, retried.text
+            assert retried.json()["run_id"] == "retry-run"
+            dispatch.assert_awaited_once()
+            assert dispatch.call_args.kwargs["confirmed"] is True
+            assert dispatch.call_args.kwargs["config"]["evaluation_session_id"] == session_id
+        async with app.state.test_session_factory() as db:
             assert (await db.get(EvaluationSession, session_id)).status == SessionStatus.COMMITTED
-            jobs = (await db.execute(select(NlpJob))).scalars().all()
-            assert {job.status for job in jobs} == {NlpJobStatus.FAILED, NlpJobStatus.COMPLETED}
-            assert await get_reprocess_impact(db, project_id) == {
-                "annotations": 0, "predictions": 0, "sentences": 3,
-            }
+            assert (await db.execute(select(NlpJob))).scalars().all() == []
+            assert (await db.execute(select(PatientResult))).scalars().all()
+            assert (await db.execute(select(SearchMatch))).scalars().all()
 
     async def test_commit_requires_reviewing_status(self, client):
         """DRAFT session cannot be committed."""
@@ -465,7 +496,11 @@ async def commit_state(db, session_id):
     )
     state = {
         model.__tablename__: [row.model_dump(warnings=False) for row in (
-            await db.execute(select(model).order_by(model.id).execution_options(populate_existing=True))
+            await db.execute(
+                select(model)
+                .order_by(*model.__table__.primary_key.columns)
+                .execution_options(populate_existing=True)
+            )
         ).scalars()]
         for model in models
     }
@@ -518,7 +553,8 @@ async def setup_query_run(client, app, *, processed=False):
         db.add(patient)
         await db.flush()
         db.add(Note(
-            project_id=project_id, patient_id=patient.id, text_id="synthetic-note",
+            project_id=project_id, patient_id=patient.id,
+            patient_id_ext=patient.patient_id_ext, text_id="synthetic-note",
             note_date=now_utc(),
             text="Troponin elevated. Suspected DVT. Confirmed DVT.",
         ))
@@ -529,7 +565,26 @@ async def setup_query_run(client, app, *, processed=False):
         if processed:
             await _process_notes_into_sentences(db, project_id)
             annotation = (await db.execute(select(Annotation).limit(1))).scalar_one()
-            db.add(AnnotationPrediction(annotation_id=annotation.id, project_id=project_id))
+            production_run = ProductionRun(
+                project_id=project_id,
+                status="completed",
+                config_snapshot={},
+                total_notes=1,
+            )
+            db.add(production_run)
+            await db.flush()
+            note = await db.get(Note, annotation.note_uuid)
+            patient = await db.get(Patient, annotation.patient_uuid)
+            db.add(NotePrediction(
+                project_id=project_id,
+                run_id=production_run.id,
+                text_id=note.text_id,
+                patient_id=patient.patient_id_ext,
+                note_uuid=note.id,
+                patient_uuid=patient.id,
+                status="succeeded",
+                label=1,
+            ))
             await db.commit()
         impact = await get_reprocess_impact(db, project_id)
     return project_id, evaluation["id"], endpoint + "/run-all", old_id, impact
@@ -551,16 +606,23 @@ class TestRunAllQueries:
     @pytest.mark.parametrize("body", [{}, None])
     async def test_fresh_keyword_run_without_event_or_provider(self, client, app, body):
         project_id, session_id, endpoint, old_id, _ = await setup_query_run(client, app)
-        with patch("app.jobs.nlp.execute_nlp_job", new_callable=AsyncMock) as scheduled, \
-             patch("litellm.acompletion", new_callable=AsyncMock) as llm:
+        with patch("litellm.acompletion", new_callable=AsyncMock) as llm:
             response = await client.post(endpoint, json=body)
             assert response.status_code == 200, response.text
             data = response.json()
             assert data["job_id"]
-            await execute_nlp_job(project_id, data["job_id"], app.state.test_session_factory)
+            async with asyncio.timeout(10):
+                while True:
+                    async with app.state.test_session_factory() as db:
+                        job = await db.get(BackgroundJob, data["job_id"])
+                        if job and job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+                            break
+                    await asyncio.sleep(0)
             llm.assert_not_called()
-            assert scheduled.call_count == 1
+            assert job.status == JobStatus.COMPLETED, job.error_message
         async with app.state.test_session_factory() as db:
+            from app.production.models import NotePrediction, ProductionRun, ProductionState
+
             queries = (await db.execute(select(SearchQuery))).scalars().all()
             assert len(queries) == 2
             active = [query for query in queries if query.is_active]
@@ -573,9 +635,31 @@ class TestRunAllQueries:
             assert session.committed_config is None
             assert active[0].query == session.search_queries[0]["query"]
             annotations = (await db.execute(select(Annotation))).scalars().all()
-            assert {annotation.token for annotation in annotations} == {"Troponin", "elevated", "DVT"}
-            assert all(annotation.predicted_label is None for annotation in annotations)
+            assert {annotation.token for annotation in annotations} == {
+                "Troponin", "elevated", "DVT",
+            }, job.result_summary
+            assert all(
+                annotation.status == (
+                    "R" if annotation.review_reason in {"duplicate", "negated"} else "U"
+                )
+                for annotation in annotations
+            ), [
+                (annotation.token, annotation.sentence, annotation.isNegated,
+                 annotation.status, annotation.review_reason)
+                for annotation in annotations
+            ]
+            assert all(
+                annotation.review_reason in {None, "duplicate", "negated"}
+                for annotation in annotations
+            )
+            assert any(annotation.review_reason == "duplicate" for annotation in annotations)
             assert (await db.execute(select(func.count()).select_from(AnnotationPrediction))).scalar() == 0
+            assert (await db.execute(select(NotePrediction))).scalars().all() == []
+            run = await db.get(ProductionRun, (job.result_summary or {}).get("production_run_id"))
+            assert run is not None and run.status == "completed"
+            state = await db.get(ProductionState, project_id)
+            assert state is not None and state.active_run_id == run.id
+            assert (await db.execute(select(PatientResult))).scalars().all() == []
         status = await client.get(f"/api/v1/projects/{project_id}/nlp/job/status")
         assert status.json()["job_id"] == data["job_id"]
         assert status.json()["status"] == "completed"
@@ -634,10 +718,11 @@ class TestRunAllQueries:
             assert response.status_code == 200, response.text
             llm.assert_not_called()
         data = response.json()
-        assert data["id"] and data["status"] == "completed"
-        assert data["processed_notes"] == 1
-        job = await client.get(f"/api/v1/projects/{project_id}/nlp/job")
-        assert job.json()["id"] == data["id"]
+        assert data["job_id"] and data["status"] == "completed"
+        assert data["progress"] == 100
+        job = await client.get(f"/api/v1/projects/{project_id}/nlp/job/status")
+        assert job.json()["job_id"] == data["job_id"]
+        assert job.json()["result_summary"]["completed_notes"] == 1
         async with app.state.test_session_factory() as db:
             assert (await db.get(SearchQuery, old_id)).is_active is False
             session = await db.get(EvaluationSession, session_id)

@@ -1,10 +1,23 @@
 """Annotation models for clinical event adjudication."""
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlmodel import Field, SQLModel
 
 from app.common.utils import now_utc
@@ -22,83 +35,133 @@ class ReviewStatus(str, enum.Enum):
     REJECTED = "rejected"
 
 
+class ReviewType(str, enum.Enum):
+    """How a patient, note, or annotation came to be reviewed."""
+
+    NO_ANNOTATION = "no_annotation"
+    NEGATION = "negation"
+    LLM = "llm"
+    HUMAN = "human"
+
+
 class Annotation(SQLModel, table=True):
-    """A clinical annotation linking a target sentence to a prediction result.
+    """A production match row using the physical v1 Annotations contract."""
 
-    Created during bulk prediction runs. Reviewed by human annotators.
-    """
-
-    __tablename__ = "annotations"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
-    patient_id: str = Field(foreign_key="patients.id", index=True)
-    note_id: str = Field(foreign_key="notes.id", index=True)
-    sentence_id: str | None = Field(default=None, foreign_key="sentences.id", index=True)
-
-    # Denormalized from sentence for fast access during review
-    sentence_text: str = Field(sa_column=Column(Text, nullable=False))
-    matched_tokens: str = Field(default="")  # comma-separated
-    is_negated: bool = Field(default=False)
-    review_excluded: bool = Field(
-        default=False,
-        sa_column=Column(
-            Boolean, nullable=False, default=False, server_default="false", index=True
+    __tablename__ = "Annotations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id", "patient_id"],
+            ["patients.project_id", "patients.patient_id_ext"],
+            name="fk_annotations_patient_external",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "text_id", "patient_id"],
+            ["notes.project_id", "notes.text_id", "notes.patient_id_ext"],
+            name="fk_annotations_note_patient_external",
+        ),
+        UniqueConstraint("project_id", "patient_id", "annotation_id",
+                         name="uq_annotations_project_patient_id"),
+        CheckConstraint("status IN ('U', 'R', 'S')", name="ck_annotations_status"),
+        Index("ix_annotations_project_patient_text", "project_id", "patient_id", "text_id"),
+        Index(
+            "ix_annotations_project_patient_status_date",
+            "project_id", "patient_id", "status", "text_date",
+        ),
+        Index(
+            "ix_annotations_project_text_negated_sentence",
+            "project_id", "text_id", "isNegated", "sentence_number", "note_start_index",
         ),
     )
-    manual_review_override: bool = Field(
-        default=False,
-        sa_column=Column(Boolean, nullable=False, default=False, server_default="false"),
-    )
 
-    # Match detail, mirroring the v1 nlpprocessor annotation record.
-    # Nullable because pipeline/LLM-created annotations are sentence-level only.
-    token: str | None = Field(default=None)
-    note_start_index: int | None = Field(default=None)
-    note_end_index: int | None = Field(default=None)
-    sentence_number: int | None = Field(default=None)
-    sentence_start: int | None = Field(default=None)
-    sentence_end: int | None = Field(default=None)
-    text_date: datetime | None = Field(
+    annotation_id: int | None = Field(
         default=None,
-        sa_column=Column(DateTime(timezone=True), nullable=True),
+        sa_column=Column(Integer, primary_key=True, autoincrement=True),
+    )
+    project_id: str = Field(foreign_key="projects.id", index=True)
+    text_id: str = Field(max_length=100)
+    patient_id: str = Field(max_length=100)
+    text_date: date = Field(sa_column=Column(Date, nullable=False))
+    sentence: str = Field(sa_column=Column(Text, nullable=False))
+    token: str = Field(max_length=200)
+    isNegated: bool = Field(sa_column=Column(Boolean, nullable=False))
+    note_start_index: int = Field(sa_column=Column(Integer, nullable=False))
+    note_end_index: int = Field(sa_column=Column(Integer, nullable=False))
+    sentence_number: int = Field(sa_column=Column(Integer, nullable=False))
+    sentence_start: int = Field(sa_column=Column(Integer, nullable=False))
+    sentence_end: int = Field(sa_column=Column(Integer, nullable=False))
+    status: str = Field(
+        default="U",
+        sa_column=Column(String(1), nullable=False, default="U", server_default="U"),
     )
 
-    # Legacy inline prediction result — still written by the LLM pipeline path.
-    # New predictions are stored in AnnotationPrediction.
-    predicted_score: float | None = Field(default=None)
-    predicted_label: int | None = Field(default=None)  # 0 or 1
-    predictor_model: str = Field(default="")
-    reasoning: str = Field(sa_column=Column(Text, nullable=False, server_default=""))
-
-    # Review state — stored as VARCHAR to avoid PG enum conflicts
-    review_status: ReviewStatus = Field(
-        default=ReviewStatus.UNREVIEWED,
-        sa_column=Column(String(20), nullable=False, default=ReviewStatus.UNREVIEWED.value),
-    )
+    # UUID links are internal compatibility references, not external identity.
+    patient_uuid: str | None = Field(default=None, foreign_key="patients.id", index=True)
+    note_uuid: str | None = Field(default=None, foreign_key="notes.id", index=True)
+    review_reason: str | None = Field(default=None, max_length=80)
     reviewed_by: str | None = Field(default=None, foreign_key="users.id")
     reviewed_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
-
-    # Pipeline linkage (optional — set when created by pipeline runs)
-    pipeline_run_id: str | None = Field(default=None, foreign_key="pipeline_runs.id", index=True)
-    patient_task_id: int | None = Field(default=None, foreign_key="patient_tasks.id", index=True)
-    predicted_reasoning: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    reviewer_label: str | None = Field(default=None, max_length=20)
-    reviewer_notes: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-
-    # Event tracking
-    event_date: datetime | None = Field(
-        default=None,
-        sa_column=Column(DateTime(timezone=True), nullable=True),
+    review_type: str | None = Field(default=None, max_length=20)
+    actor_type: str | None = Field(default=None, max_length=20)
+    prediction_id: int | None = Field(default=None)
+    duplicate_of: int | None = Field(default=None, foreign_key="Annotations.annotation_id")
+    skipped_by_event_annotation_id: int | None = Field(
+        default=None, foreign_key="Annotations.annotation_id"
     )
-
+    pipeline_run_id: str | None = Field(default=None, foreign_key="pipeline_runs.id", index=True)
+    production_run_id: str | None = Field(default=None, foreign_key="production_runs.id")
+    patient_task_id: int | None = Field(default=None, foreign_key="patient_tasks.id")
+    reviewer_notes: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+    @property
+    def id(self) -> int | None:
+        return self.annotation_id
+
+    @property
+    def note_id(self) -> str | None:
+        return self.note_uuid
+
+    @property
+    def sentence_text(self) -> str:
+        return self.sentence
+
+    @sentence_text.setter
+    def sentence_text(self, value: str) -> None:
+        self.sentence = value
+
+    @property
+    def is_negated(self) -> bool:
+        return self.isNegated
+
+    @is_negated.setter
+    def is_negated(self, value: bool) -> None:
+        self.isNegated = value
+
+    @property
+    def review_status(self) -> ReviewStatus:
+        return {
+            "U": ReviewStatus.UNREVIEWED,
+            "R": ReviewStatus.REVIEWED,
+            "S": ReviewStatus.SKIPPED,
+        }[self.status]
+
+    @review_status.setter
+    def review_status(self, value: ReviewStatus | str) -> None:
+        normalized = value.value if isinstance(value, ReviewStatus) else value
+        self.status = {
+            ReviewStatus.UNREVIEWED.value: "U",
+            ReviewStatus.PENDING.value: "U",
+            ReviewStatus.REVIEWED.value: "R",
+            ReviewStatus.CONFIRMED.value: "R",
+            ReviewStatus.REJECTED.value: "R",
+            ReviewStatus.SKIPPED.value: "S",
+        }[normalized]
 
 
 class AnnotationPrediction(SQLModel, table=True):
@@ -116,7 +179,7 @@ class AnnotationPrediction(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    annotation_id: str = Field(foreign_key="annotations.id", index=True)
+    annotation_id: int = Field(foreign_key="Annotations.annotation_id", index=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
     predictor_config_id: str | None = Field(
         default=None, foreign_key="predictor_configs.id", index=True

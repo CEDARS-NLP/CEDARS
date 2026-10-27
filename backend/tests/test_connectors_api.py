@@ -143,16 +143,28 @@ class TestIngestion:
         # Mock S3 download
         csv_data = b"MRN,text_id,note_text,date\nP001,N001,Note one,2024-01-01\nP001,N002,Note two,2024-01-02\nP002,N003,Note three,2024-01-03"
         import asyncio
+        import time
+
         with patch("app.connectors.file_upload.download_file", return_value=csv_data):
             resp = await client.post(
                 f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
             )
-            # Wait for background ingestion task to complete
-            await asyncio.sleep(0.5)
+            assert resp.status_code == 200
+            job_id = resp.json()["job_id"]
+            deadline = time.monotonic() + 10
+            while True:
+                status_resp = await client.get(
+                    f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest/status",
+                )
+                assert status_resp.status_code == 200
+                job_status = status_resp.json()
+                if job_status is not None and job_status["job_id"] == job_id:
+                    if job_status["status"] in ("completed", "failed"):
+                        break
+                assert time.monotonic() < deadline, "Ingestion job did not finish within 10 seconds"
+                await asyncio.sleep(0.05)
         assert resp.status_code == 200
-        data = resp.json()
-        assert "job_id" in data
-        assert data["status"] in ("pending", "running", "completed")
+        assert job_status["status"] == "completed", job_status.get("error_message")
 
         # Verify patients created
         patients_resp = await client.get(

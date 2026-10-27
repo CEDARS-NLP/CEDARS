@@ -1,11 +1,11 @@
 """API tests for prediction job dispatch, status, and cancellation."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from httpx import AsyncClient
 
-from app.predictors.base import PredictionResult
+from app.production.classifier import NoteClassification
 
 
 async def register_and_login(client: AsyncClient, email: str = "admin@test.com") -> None:
@@ -38,8 +38,6 @@ async def setup_notes_and_nlp(client: AsyncClient, pid: str):
         await client.post(f"/api/v1/projects/{pid}/data/sources/{ds_id}/ingest")
         await asyncio.sleep(0.5)
     await client.post(f"/api/v1/projects/{pid}/nlp/queries", json={"query": "troponin OR myocardial"})
-    await client.post(f"/api/v1/projects/{pid}/nlp/run")
-    await asyncio.sleep(0.5)
 
 
 async def add_predictor(client: AsyncClient, pid: str) -> str:
@@ -54,6 +52,18 @@ async def add_predictor(client: AsyncClient, pid: str) -> str:
     return pred_id
 
 
+async def _wait_for_prediction_job(client: AsyncClient, pid: str) -> dict:
+    tasks = [
+        task for task in asyncio.all_tasks()
+        if getattr(task.get_coro(), "__name__", "") == "_execute_production_prediction_job"
+    ]
+    if tasks:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+    response = await client.get(f"/api/v1/projects/{pid}/annotations/predictions/status")
+    assert response.status_code == 200
+    return response.json()
+
+
 class TestPredictionJobDispatch:
     async def test_run_dispatches_job(self, client):
         """POST /annotations/predictions/run creates a background job."""
@@ -62,17 +72,23 @@ class TestPredictionJobDispatch:
         await setup_notes_and_nlp(client, pid)
         await add_predictor(client, pid)
 
-        mock_result = PredictionResult(score=0.9, label=1, model="test", reasoning="ok")
-        with patch("app.jobs.prediction.create_predictor") as mock_factory:
-            mock_predictor = AsyncMock()
-            mock_predictor.predict.return_value = mock_result
-            mock_factory.return_value = mock_predictor
+        mock_result = NoteClassification(score=0.9, label=1, reasoning="ok", evidence_spans=[])
+        with patch(
+            "app.production.service.classify_note", new=AsyncMock(return_value=mock_result)
+        ) as classify:
             resp = await client.post(f"/api/v1/projects/{pid}/annotations/predictions/run")
+            assert resp.status_code == 200, resp.text
+            completed = await _wait_for_prediction_job(client, pid)
 
-        assert resp.status_code == 200
         data = resp.json()
         assert "job_id" in data
         assert data["status"] in ("pending", "running", "completed")
+        assert completed["status"] == "completed", completed
+        assert completed["job_id"] == data["job_id"]
+        assert {call.args[0] for call in classify.await_args_list} == {
+            "Patient presents with troponin elevation.",
+            "Confirmed myocardial infarction.",
+        }
 
     async def test_status_returns_job_info(self, client):
         """GET /annotations/predictions/status returns latest job info."""
@@ -81,19 +97,22 @@ class TestPredictionJobDispatch:
         await setup_notes_and_nlp(client, pid)
         await add_predictor(client, pid)
 
-        mock_result = PredictionResult(score=0.9, label=1, model="test", reasoning="ok")
-        with patch("app.jobs.prediction.create_predictor") as mock_factory:
-            mock_predictor = AsyncMock()
-            mock_predictor.predict.return_value = mock_result
-            mock_factory.return_value = mock_predictor
-            await client.post(f"/api/v1/projects/{pid}/annotations/predictions/run")
-
-        resp = await client.get(f"/api/v1/projects/{pid}/annotations/predictions/status")
+        mock_result = NoteClassification(score=0.9, label=1, reasoning="ok", evidence_spans=[])
+        with patch(
+            "app.production.service.classify_note", new=AsyncMock(return_value=mock_result)
+        ):
+            dispatch = await client.post(f"/api/v1/projects/{pid}/annotations/predictions/run")
+            assert dispatch.status_code == 200, dispatch.text
+            completed = await _wait_for_prediction_job(client, pid)
+            resp = await client.get(f"/api/v1/projects/{pid}/annotations/predictions/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert "job_id" in data
+        assert data["job_id"] == dispatch.json()["job_id"]
         assert "status" in data
         assert "progress" in data
+        assert completed["status"] == data["status"] == "completed"
+        assert data["progress"] == 100
+        assert data["result_summary"]["production_run_id"]
 
     async def test_cancel_returns_404_when_no_running_job(self, client):
         """POST /annotations/predictions/cancel returns 404 when no running job."""

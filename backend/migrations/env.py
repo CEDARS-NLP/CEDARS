@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 from sqlmodel import SQLModel  # noqa: E402
 
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: E402, F401
+from app.annotations.review_jobs import PatientReviewJob  # noqa: E402, F401
 from app.audit.models import AuditEntry  # noqa: E402, F401
 
 # Import all models so their tables are registered in SQLModel.metadata
@@ -32,18 +33,15 @@ from app.evaluation.models import (  # noqa: E402, F401
 from app.jobs.models import BackgroundJob  # noqa: E402, F401
 from app.llm.usage import LlmUsage  # noqa: E402, F401
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: E402, F401
+from app.pipeline.models import EventConfig, Evidence, PatientTask, PipelineRun  # noqa: E402, F401
 from app.predictors.models import PredictorConfig  # noqa: E402, F401
-from app.projects.models import Project, ProjectMember  # noqa: E402, F401
-from app.connectors.models import DataSource, Patient, Note  # noqa: E402, F401
-from app.predictors.models import PredictorConfig  # noqa: E402, F401
-from app.nlp.models import Sentence, SearchQuery, NlpJob  # noqa: E402, F401
-from app.annotations.models import Annotation  # noqa: E402, F401
-from app.evaluation.models import (  # noqa: E402, F401
-    EvaluationSession, EvaluationSessionQuerySection, SearchMatch, PatientResult
+from app.production.models import (  # noqa: E402, F401
+    NotePrediction,
+    ProductionResult,
+    ProductionRun,
+    ProductionState,
 )
-from app.jobs.models import BackgroundJob  # noqa: E402, F401
-from app.pipeline.models import EventConfig, PipelineRun, PatientTask, Evidence  # noqa: E402, F401
-from app.audit.models import AuditEntry  # noqa: E402, F401
+from app.projects.models import Project, ProjectMember  # noqa: E402, F401
 
 target_metadata = SQLModel.metadata
 
@@ -53,7 +51,7 @@ def get_sync_url() -> str:
 
     Alembic runs migrations synchronously, so we swap asyncpg for psycopg2.
     """
-    url = settings.database_url
+    url = config.get_main_option("sqlalchemy.url") or settings.database_url
     return url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
 
 

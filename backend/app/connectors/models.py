@@ -1,12 +1,24 @@
 """Data models for connectors, patients, and clinical notes."""
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlmodel import Field, SQLModel
 
+import app.production.models  # noqa: F401
 from app.common.utils import now_utc
 
 
@@ -72,6 +84,18 @@ class Patient(SQLModel, table=True):
     __tablename__ = "patients"
     __table_args__ = (
         UniqueConstraint("project_id", "patient_id_ext", name="uq_patient_ext_id"),
+        CheckConstraint(
+            "(event_date IS NULL AND event_annotation_id IS NULL AND event_reviewer IS NULL) "
+            "OR (event_date IS NOT NULL AND event_annotation_id IS NOT NULL "
+            "AND event_reviewer IS NOT NULL)",
+            name="ck_patient_event_all_or_none",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "patient_id_ext", "event_annotation_id"],
+            ["Annotations.project_id", "Annotations.patient_id", "Annotations.annotation_id"],
+            name="fk_patient_event_annotation_same_patient",
+            use_alter=True,
+        ),
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
@@ -80,6 +104,7 @@ class Patient(SQLModel, table=True):
     status: PatientStatus = Field(default=PatientStatus.NEW)
     review_source: str | None = Field(default=None, max_length=20)
     review_reason: str | None = Field(default=None, max_length=80)
+    review_type: str | None = Field(default=None, max_length=20)
     reviewed_by: str | None = Field(default=None, foreign_key="users.id")
     reviewed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True),
@@ -89,6 +114,9 @@ class Patient(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    event_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
+    event_annotation_id: int | None = Field(default=None)
+    event_reviewer: str | None = Field(default=None, foreign_key="users.id")
     metadata_: dict = Field(
         default_factory=dict,
         sa_column=Column("metadata", JSON, nullable=False, server_default="{}"),
@@ -119,12 +147,23 @@ class Note(SQLModel, table=True):
     __tablename__ = "notes"
     __table_args__ = (
         UniqueConstraint("project_id", "text_id", name="uq_note_text_id"),
+        UniqueConstraint(
+            "project_id", "text_id", "patient_id_ext", name="uq_note_project_text_patient"
+        ),
+        Index("ix_notes_project_patient_deleted", "project_id", "patient_id", "deleted_at"),
+        Index("ix_notes_patient_notedate", "patient_id", "note_date"),
+        ForeignKeyConstraint(
+            ["project_id", "patient_id_ext"],
+            ["patients.project_id", "patients.patient_id_ext"],
+            name="fk_notes_patient_external",
+        ),
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
     patient_id: str = Field(foreign_key="patients.id", index=True)
     text_id: str = Field(index=True)
+    patient_id_ext: str | None = Field(default=None, max_length=100)
     note_date: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
@@ -135,6 +174,13 @@ class Note(SQLModel, table=True):
     )
     source_ref: str | None = Field(default=None)
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
+    review_status: str | None = Field(default=None, max_length=20)
+    review_type: str | None = Field(default=None, max_length=20)
+    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),

@@ -15,9 +15,16 @@ from app.export.schemas import (
     DatabricksExportRequest,
     DatabricksExportResponse,
     ExportAnnotationRow,
+    ExportResultRow,
     ExportStatsResponse,
 )
-from app.export.service import export_annotations, format_csv, get_export_stats
+from app.export.service import (
+    export_annotations,
+    export_results,
+    format_csv,
+    format_results_csv,
+    get_export_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +69,32 @@ async def export_annotations_csv_endpoint(
         content=csv_content,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=annotations-{project_id[:8]}.csv"},
+    )
+
+
+@router.get("/results", response_model=list[ExportResultRow])
+async def export_results_json_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "viewer")),
+):
+    """Export patient-level production results as JSON."""
+    return await export_results(session, project_id)
+
+
+@router.get("/results/csv")
+async def export_results_csv_endpoint(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_project_role("admin", "viewer")),
+):
+    """Export patient-level production results as a CSV download."""
+    results = await export_results(session, project_id)
+    csv_content = format_results_csv(results)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=results-{project_id[:8]}.csv"},
     )
 
 

@@ -1,5 +1,8 @@
 """Tests for auth models and service."""
 
+import jwt
+import pytest
+
 from app.auth.models import User, UserRole
 from app.auth.service import (
     create_access_token,
@@ -8,6 +11,7 @@ from app.auth.service import (
     hash_password,
     verify_password,
 )
+from app.config import settings
 
 
 def test_user_role_enum():
@@ -94,6 +98,49 @@ def test_create_and_decode_refresh_token():
 def test_decode_invalid_token():
     payload = decode_token("invalid-token")
     assert payload is None
+
+
+def test_decode_existing_python_jose_token(monkeypatch):
+    """Accept an HS256 token issued by python-jose before the migration."""
+    monkeypatch.setattr(settings, "secret_key", "legacy-token-test-key-with-at-least-32-bytes")
+    token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiJsZWdhY3ktdXNlciIsInJvbGUiOiJ1c2VyIiwidHlwZSI6ImFjY2VzcyIs"
+        "ImV4cCI6NDEwMjQ0NDgwMH0.EI5p-mn3Y9GnwjWgAMCJkbMQ5nWg3WJE2hAsz2lQJ_U"
+    )
+    payload = decode_token(token)
+    assert payload is not None
+    assert payload["sub"] == "legacy-user"
+    assert payload["type"] == "access"
+
+
+def test_decode_expired_token_preserves_expiry_error():
+    token = jwt.encode(
+        {"sub": "user-123", "type": "access", "exp": 1},
+        settings.secret_key,
+        algorithm="HS256",
+    )
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode_token(token)
+
+
+@pytest.mark.parametrize("algorithm", ["HS384", "HS512", "none"])
+def test_decode_rejects_unexpected_algorithm(algorithm):
+    token = jwt.encode(
+        {"sub": "user-123", "type": "access"},
+        "" if algorithm == "none" else settings.secret_key,
+        algorithm=algorithm,
+    )
+    assert decode_token(token) is None
+
+
+def test_decode_rejects_wrong_signing_key():
+    token = jwt.encode(
+        {"sub": "user-123", "type": "access"},
+        "a-different-signing-key-for-tests-only",
+        algorithm="HS256",
+    )
+    assert decode_token(token) is None
 
 
 def test_decode_tampered_token():

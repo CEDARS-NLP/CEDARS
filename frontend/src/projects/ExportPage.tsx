@@ -18,9 +18,11 @@ interface ExportStats {
 
 type Format = "csv" | "json";
 type Filter = "all" | "reviewed" | "events";
+type Dataset = "results" | "annotations";
 
 export default function ExportPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [dataset, setDataset] = useState<Dataset>("results");
   const [format, setFormat] = useState<Format>("csv");
   const [filter, setFilter] = useState<Filter>("all");
   const [downloading, setDownloading] = useState(false);
@@ -44,10 +46,13 @@ export default function ExportPage() {
     setDownloading(true);
     setFeedback(null);
     try {
-      const statusParam = filter !== "all" ? `?status=${filter}` : "";
+      const isResults = dataset === "results";
+      const statusParam = !isResults && filter !== "all" ? `?status=${filter}` : "";
+      const resource = isResults ? "results" : "annotations";
+      const filename = `${resource}-${projectId?.slice(0, 8) ?? "project"}`;
       if (format === "csv") {
         const res = await fetch(
-          `/api/v1/projects/${projectId}/export/annotations/csv${statusParam}`,
+          `/api/v1/projects/${projectId}/export/${resource}/csv${statusParam}`,
           { credentials: "include" }
         );
         if (!res.ok) throw new Error("Export failed");
@@ -55,12 +60,12 @@ export default function ExportPage() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `annotations-${projectId!.slice(0, 8)}.csv`;
+        a.download = `${filename}.csv`;
         a.click();
         URL.revokeObjectURL(url);
       } else {
         const data = await api.get<unknown[]>(
-          `/projects/${projectId}/export/annotations${statusParam}`
+          `/projects/${projectId}/export/${resource}${statusParam}`
         );
         const blob = new Blob([JSON.stringify(data, null, 2)], {
           type: "application/json",
@@ -68,13 +73,15 @@ export default function ExportPage() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `annotations-${projectId!.slice(0, 8)}.json`;
+        a.download = `${filename}.json`;
         a.click();
         URL.revokeObjectURL(url);
       }
       setFeedback({
         type: "success",
-        message: `Downloaded ${exportCount} annotations as ${format.toUpperCase()}`,
+        message: isResults
+          ? `Downloaded patient RESULTS as ${format.toUpperCase()}`
+          : `Downloaded ${exportCount} annotations as ${format.toUpperCase()}`,
       });
     } catch (err) {
       setFeedback({
@@ -93,7 +100,7 @@ export default function ExportPage() {
       <div>
         <h2 className="text-lg font-semibold text-foreground">Export</h2>
         <p className="text-sm text-muted-foreground">
-          Download annotated data as CSV or JSON
+          Download patient RESULTS or individual annotations as CSV or JSON
         </p>
       </div>
 
@@ -149,6 +156,33 @@ export default function ExportPage() {
           <CardTitle className="text-base">Export options</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
+          {/* Dataset */}
+          <div>
+            <Label className="mb-2 block text-sm">Dataset</Label>
+            <div className="flex gap-3" role="radiogroup" aria-label="Export dataset">
+              {(
+                [
+                  { value: "results", label: "Patient RESULTS" },
+                  { value: "annotations", label: "Annotations" },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  role="radio"
+                  aria-checked={dataset === option.value}
+                  onClick={() => setDataset(option.value)}
+                  className={`rounded-md border px-4 py-2.5 text-sm transition-colors ${
+                    dataset === option.value
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-accent/40"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Format */}
           <div>
             <Label className="mb-2 block text-sm">Format</Label>
@@ -183,44 +217,48 @@ export default function ExportPage() {
           </div>
 
           {/* Filter */}
-          <div>
-            <Label className="mb-2 block text-sm">Include</Label>
-            <div className="flex gap-3" role="radiogroup" aria-label="Annotation filter">
-              {(
-                [
-                  { value: "all", label: "All annotations" },
-                  { value: "reviewed", label: "Reviewed only" },
-                  { value: "events", label: "Events only" },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.value}
-                  role="radio"
-                  aria-checked={filter === opt.value}
-                  onClick={() => setFilter(opt.value)}
-                  className={`rounded-md border px-4 py-2 text-sm transition-colors ${
-                    filter === opt.value
-                      ? "border-accent bg-accent/10 text-foreground"
-                      : "border-border text-muted-foreground hover:border-accent/40"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+          {dataset === "annotations" && (
+            <div>
+              <Label className="mb-2 block text-sm">Include</Label>
+              <div className="flex gap-3" role="radiogroup" aria-label="Annotation filter">
+                {(
+                  [
+                    { value: "all", label: "All annotations" },
+                    { value: "reviewed", label: "Reviewed only" },
+                    { value: "events", label: "Events only" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    role="radio"
+                    aria-checked={filter === opt.value}
+                    onClick={() => setFilter(opt.value)}
+                    className={`rounded-md border px-4 py-2 text-sm transition-colors ${
+                      filter === opt.value
+                        ? "border-accent bg-accent/10 text-foreground"
+                        : "border-border text-muted-foreground hover:border-accent/40"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Download */}
           <div className="flex items-center gap-4 pt-2">
             <Button
               onClick={handleDownload}
-              disabled={downloading || exportCount === 0}
+              disabled={downloading || (dataset === "annotations" && exportCount === 0)}
               aria-busy={downloading}
             >
               <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
               {downloading
                 ? "Downloading..."
-                : `Download ${exportCount} annotations`}
+                : dataset === "results"
+                  ? "Download patient RESULTS"
+                  : `Download ${exportCount} annotations`}
             </Button>
           </div>
 

@@ -31,10 +31,29 @@ async def execute_nlp_job(
     Called from ARQ worker (separate process) -- creates its own DB session.
     When called inline (sync fallback), an existing session_factory can be passed.
     """
-    from app.nlp.service import _process_notes_into_sentences
+    from app.nlp.service import _execute_production_nlp_job, _process_notes_into_sentences
 
     if session_factory is None:
         session_factory = _make_session_factory()
+
+    async with session_factory() as session:
+        bg_job = await session.get(BackgroundJob, job_db_id)
+        if not bg_job:
+            logger.error("BackgroundJob %s not found", job_db_id)
+            return {"error": "Job not found"}
+        production_run_id = (bg_job.result_summary or {}).get("production_run_id")
+
+    # The API already created and confirmed the production run for this job.
+    # Reuse it instead of starting a second, unconfirmed run (which would raise
+    # ProductionConfirmationRequired once production data exists).
+    if production_run_id:
+        await _execute_production_nlp_job(
+            project_id, job_db_id, production_run_id, session_factory
+        )
+        async with session_factory() as session:
+            completed = await session.get(BackgroundJob, job_db_id)
+            summary = completed.result_summary if completed else None
+            return summary if isinstance(summary, dict) else {"error": "Job not found"}
 
     async with session_factory() as session:
         bg_job = await session.get(BackgroundJob, job_db_id)

@@ -8,9 +8,10 @@ from tests.test_pipeline_orchestration import _seed_patients
 
 async def _setup_run_with_annotations(app, client, reviewed=True):
     """Create a project, seed patients, run sample, inject reviewed annotations."""
-    from app.annotations.models import Annotation, ReviewStatus
+    from app.annotations.models import Annotation
     from app.common.database import get_session
     from app.pipeline.models import PatientTask, PatientTaskStatus, PipelineRun, PipelineRunStatus
+    from app.production.models import NotePrediction, ProductionRun
 
     await register_and_login(client)
     pid = await create_project(client)
@@ -32,6 +33,9 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
         run = await session.get(PipelineRun, run_id)
         run.status = PipelineRunStatus.COMPLETED
         session.add(run)
+        production_run = ProductionRun(project_id=pid, status="completed", config_snapshot={})
+        session.add(production_run)
+        await session.flush()
 
         from sqlalchemy import select
         stmt = select(PatientTask).where(PatientTask.pipeline_run_id == run_id)
@@ -49,15 +53,15 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
             (0, 0.2, "negative", "rejected"),    # TN (reviewer agrees negative)
         ]
 
-        from app.connectors.models import Note
+        from app.connectors.models import Note, Patient
+        from app.projects.models import Project
+
+        project = await session.get(Project, pid)
 
         for i, task in enumerate(tasks[:4]):
             task.status = PatientTaskStatus.COMPLETED
             session.add(task)
 
-            # Use a real note for this patient — Postgres enforces the
-            # annotations.note_id FK (SQLite did not). sentence_id is a nullable
-            # FK, so leave it None rather than a fake id.
             note = (
                 await session.execute(
                     select(Note).where(Note.patient_id == task.patient_id).limit(1)
@@ -65,21 +69,56 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
             ).scalars().first()
 
             pred_label, score, _, review_status = predictions[i]
+            prediction = NotePrediction(
+                project_id=pid,
+                run_id=production_run.id,
+                text_id=note.text_id,
+                patient_id=note.patient_id_ext,
+                patient_uuid=task.patient_id,
+                note_uuid=note.id,
+                status="succeeded",
+                label=pred_label,
+                score=score,
+                reasoning="Calibration fixture",
+                evidence_spans=[],
+            )
+            session.add(prediction)
+            await session.flush()
+            token_start = note.text.index("troponin")
             ann = Annotation(
                 project_id=pid,
-                patient_id=task.patient_id,
-                note_id=note.id,
-                sentence_id=None,
-                sentence_text="test",
-                predicted_score=score,
-                predicted_label=pred_label,
-                predictor_model="llama3",
+                patient_id=note.patient_id_ext,
+                patient_uuid=task.patient_id,
+                note_uuid=note.id,
+                text_id=note.text_id,
+                text_date=note.note_date.date(),
+                sentence=note.text,
+                token="troponin",
+                isNegated=False,
+                note_start_index=token_start,
+                note_end_index=token_start + len("troponin"),
+                sentence_number=0,
+                sentence_start=0,
+                sentence_end=len(note.text),
                 pipeline_run_id=run_id,
                 patient_task_id=task.id,
-                review_status=ReviewStatus(review_status) if reviewed else ReviewStatus.PENDING,
-                reviewer_label="positive" if review_status == "confirmed" else "negative",
+                production_run_id=production_run.id,
+                prediction_id=prediction.id,
+                status="R" if reviewed else "U",
+                review_reason=(
+                    "human_event" if review_status == "confirmed" else "human_negative"
+                ) if reviewed else None,
+                reviewed_by=project.owner_id if reviewed else None,
+                actor_type="human" if reviewed else None,
             )
             session.add(ann)
+            await session.flush()
+            if reviewed and review_status == "confirmed":
+                patient = await session.get(Patient, task.patient_id)
+                patient.event_date = note.note_date.date()
+                patient.event_annotation_id = ann.annotation_id
+                patient.event_reviewer = project.owner_id
+                session.add(patient)
 
         await session.commit()
 

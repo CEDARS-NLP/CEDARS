@@ -2,6 +2,7 @@
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.annotations.models import Annotation, ReviewStatus
 from app.auth.models import User
@@ -15,9 +16,9 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
 
     # --- Patients ---
     patient_q = await session.execute(
-        select(Patient.status, func.count(Patient.id))
-        .where(Patient.project_id == project_id, Patient.deleted_at.is_(None))
-        .group_by(Patient.status)
+        select(col(Patient.status), func.count(col(Patient.id)))
+        .where(col(Patient.project_id) == project_id, col(Patient.deleted_at).is_(None))
+        .group_by(col(Patient.status))
     )
     patient_rows = patient_q.all()
     patient_total = sum(row[1] for row in patient_rows)
@@ -28,8 +29,8 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
 
     # --- Notes ---
     notes_q = await session.execute(
-        select(func.count(Note.id)).where(
-            Note.project_id == project_id, Note.deleted_at.is_(None)
+        select(func.count(col(Note.id))).where(
+            col(Note.project_id) == project_id, col(Note.deleted_at).is_(None)
         )
     )
     notes_total = notes_q.scalar_one()
@@ -37,31 +38,36 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
     # --- Sentences ---
     sentences_q = await session.execute(
         select(
-            func.count(Sentence.id),
-            func.count(case((Sentence.is_target.is_(True), 1))),
-            func.count(case((Sentence.is_negated.is_(True), 1))),
-        ).where(Sentence.project_id == project_id)
+            func.count(col(Sentence.id)),
+            func.count(case((col(Sentence.is_target).is_(True), 1))),
+            func.count(case((col(Sentence.is_negated).is_(True), 1))),
+        ).where(col(Sentence.project_id) == project_id)
     )
     sent_row = sentences_q.one()
     sentences_total, sentences_target, sentences_negated = sent_row
 
     # --- Annotations ---
     ann_q = await session.execute(
-        select(Annotation.review_status, func.count(Annotation.id))
-        .where(Annotation.project_id == project_id)
-        .group_by(Annotation.review_status)
+        select(col(Annotation.status), func.count(col(Annotation.annotation_id)))
+        .where(col(Annotation.project_id) == project_id)
+        .group_by(col(Annotation.status))
     )
     ann_rows = ann_q.all()
     ann_total = sum(row[1] for row in ann_rows)
     ann_by_status: dict[str, int] = {}
     for status_val, count in ann_rows:
-        key = status_val.value if hasattr(status_val, "value") else status_val
+        key = {
+            "U": ReviewStatus.UNREVIEWED.value,
+            "R": ReviewStatus.REVIEWED.value,
+            "S": ReviewStatus.SKIPPED.value,
+        }.get(status_val, status_val)
         ann_by_status[key] = count
 
     events_q = await session.execute(
-        select(func.count(Annotation.id)).where(
-            Annotation.project_id == project_id,
-            Annotation.event_date.isnot(None),
+        select(func.count(col(Patient.id))).where(
+            col(Patient.project_id) == project_id,
+            col(Patient.deleted_at).is_(None),
+            col(Patient.event_date).is_not(None),
         )
     )
     events_found = events_q.scalar_one()
@@ -69,56 +75,79 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
     # --- Annotators ---
     annotator_q = await session.execute(
         select(
-            Annotation.reviewed_by,
-            User.email,
-            User.name,
-            func.count(Annotation.id),
-            func.count(case((Annotation.event_date.isnot(None), 1))),
+            col(Annotation.reviewed_by),
+            col(User.email),
+            col(User.name),
+            func.count(col(Annotation.annotation_id)),
         )
-        .join(User, Annotation.reviewed_by == User.id)
+        .join(User, col(Annotation.reviewed_by) == col(User.id))
         .where(
-            Annotation.project_id == project_id,
-            Annotation.reviewed_by.isnot(None),
+            col(Annotation.project_id) == project_id,
+            col(Annotation.reviewed_by).isnot(None),
         )
-        .group_by(Annotation.reviewed_by, User.email, User.name)
+        .group_by(col(Annotation.reviewed_by), col(User.email), col(User.name))
     )
-    annotators = [
-        {
+    annotator_by_id = {
+        row[0]: {
             "user_id": row[0],
             "email": row[1],
             "name": row[2],
             "reviewed_count": row[3],
-            "events_found": row[4],
+            "events_found": 0,
         }
         for row in annotator_q.all()
-    ]
+    }
+    event_reviewer_q = await session.execute(
+        select(col(Patient.event_reviewer), col(User.email), col(User.name), func.count(col(Patient.id)))
+        .join(User, col(Patient.event_reviewer) == col(User.id))
+        .where(
+            col(Patient.project_id) == project_id,
+            col(Patient.deleted_at).is_(None),
+            col(Patient.event_date).is_not(None),
+            col(Patient.event_reviewer).is_not(None),
+        )
+        .group_by(col(Patient.event_reviewer), col(User.email), col(User.name))
+    )
+    for row in event_reviewer_q.all():
+        annotator = annotator_by_id.setdefault(
+            row[0],
+            {
+                "user_id": row[0],
+                "email": row[1],
+                "name": row[2],
+                "reviewed_count": 0,
+                "events_found": 0,
+            },
+        )
+        annotator["events_found"] = row[3]
+    annotators = list(annotator_by_id.values())
 
     # --- Jobs ---
     latest_job_q = await session.execute(
         select(BackgroundJob)
-        .where(BackgroundJob.project_id == project_id)
-        .order_by(BackgroundJob.created_at.desc())
+        .where(col(BackgroundJob.project_id) == project_id)
+        .order_by(col(BackgroundJob.created_at).desc())
         .limit(1)
     )
     latest_job = latest_job_q.scalar_one_or_none()
 
     active_q = await session.execute(
-        select(func.count(BackgroundJob.id)).where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+        select(func.count(col(BackgroundJob.id))).where(
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.status).in_([JobStatus.PENDING, JobStatus.RUNNING]),
         )
     )
     active_count = active_q.scalar_one()
 
     failed_q = await session.execute(
-        select(func.count(BackgroundJob.id)).where(
-            BackgroundJob.project_id == project_id,
-            BackgroundJob.status == JobStatus.FAILED,
+        select(func.count(col(BackgroundJob.id))).where(
+            col(BackgroundJob.project_id) == project_id,
+            col(BackgroundJob.status) == JobStatus.FAILED,
         )
     )
     failed_count = failed_q.scalar_one()
 
-    if latest_job:
+    if latest_job and latest_job.completed_at:
         completed_at = latest_job.completed_at.isoformat()
     else:
         completed_at = None
