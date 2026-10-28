@@ -16,9 +16,11 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
 import app.production.models  # noqa: F401
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -48,13 +50,13 @@ class PatientStatus(str, enum.Enum):
     REVIEWED = "reviewed"
 
 
-class DataSource(SQLModel, table=True):
+class DataSource(ProjectSQLModel, table=True):
     """A configured data source connection for a project."""
 
     __tablename__ = "data_sources"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     name: str
     connector_type: ConnectorType
     config: dict = Field(
@@ -78,7 +80,7 @@ class DataSource(SQLModel, table=True):
     )
 
 
-class Patient(SQLModel, table=True):
+class Patient(ProjectSQLModel, table=True):
     """A patient record within a project."""
 
     __tablename__ = "patients"
@@ -99,24 +101,24 @@ class Patient(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     patient_id_ext: str = Field(index=True)
     status: PatientStatus = Field(default=PatientStatus.NEW)
     review_source: str | None = Field(default=None, max_length=20)
     review_reason: str | None = Field(default=None, max_length=80)
     review_type: str | None = Field(default=None, max_length=20)
-    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     reviewed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True),
     )
-    locked_by: str | None = Field(default=None, foreign_key="users.id")
+    locked_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     locked_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     event_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     event_annotation_id: int | None = Field(default=None)
-    event_reviewer: str | None = Field(default=None, foreign_key="users.id")
+    event_reviewer: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     metadata_: dict = Field(
         default_factory=dict,
         sa_column=Column("metadata", JSON, nullable=False, server_default="{}"),
@@ -141,7 +143,7 @@ class Patient(SQLModel, table=True):
     )
 
 
-class Note(SQLModel, table=True):
+class Note(ProjectSQLModel, table=True):
     """A clinical note belonging to a patient."""
 
     __tablename__ = "notes"
@@ -160,7 +162,7 @@ class Note(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     patient_id: str = Field(foreign_key="patients.id", index=True)
     text_id: str = Field(index=True)
     patient_id_ext: str | None = Field(default=None, max_length=100)
@@ -176,7 +178,7 @@ class Note(SQLModel, table=True):
     data_source_id: str | None = Field(default=None, foreign_key="data_sources.id")
     review_status: str | None = Field(default=None, max_length=20)
     review_type: str | None = Field(default=None, max_length=20)
-    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     reviewed_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

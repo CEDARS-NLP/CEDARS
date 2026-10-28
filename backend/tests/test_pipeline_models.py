@@ -7,8 +7,8 @@ from tests.conftest import seed_project_and_user
 
 
 async def _get_session(app):
-    from app.common.database import get_session
-    gen = app.dependency_overrides[get_session]()
+    from app.dependencies import get_project_db_session
+    gen = app.dependency_overrides[get_project_db_session]()
     session = await gen.__anext__()
     yield session
     try:

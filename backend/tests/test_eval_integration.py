@@ -20,11 +20,11 @@ async def project_with_data(auth_client, app):
     project_id = resp.json()["id"]
 
     # Get the overridden test database session from the app fixture
-    from app.common.database import get_session
     from app.connectors.models import Note, Patient
+    from app.dependencies import get_project_db_session
 
     # Access the dependency override directly from the app
-    override_func = app.dependency_overrides[get_session]
+    override_func = app.dependency_overrides[get_project_db_session]
     async for db in override_func():
         for i in range(5):
             p = Patient(
@@ -137,10 +137,10 @@ class TestUnifiedEvalSessionWorkflow:
         mock_pool.enqueue_job.assert_awaited_once()
 
         # Drive the worker job inline using the test database session.
-        from app.common.database import get_session
+        from app.dependencies import get_project_db_session
         from app.evaluation import service as eval_service
 
-        override_func = app.dependency_overrides[get_session]
+        override_func = app.dependency_overrides[get_project_db_session]
         async for db in override_func():
             with patch.object(
                 eval_service, "classify_patient", new_callable=AsyncMock, return_value=mock_result

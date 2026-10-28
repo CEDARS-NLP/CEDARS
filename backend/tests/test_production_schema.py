@@ -3,10 +3,10 @@ from datetime import date
 import pytest
 from sqlalchemy import ForeignKeyConstraint
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation, ReviewStatus
 from app.auth.models import User
+from app.common.model_registry import global_metadata, project_metadata
 from app.connectors.models import Patient
 from app.production.models import (
     NotePrediction,
@@ -19,8 +19,9 @@ from app.projects.models import Project
 
 def test_production_models_are_registered_and_annotation_matches_physical_contract():
     assert {"production_runs", "production_states", "note_predictions", "RESULTS"} <= set(
-        SQLModel.metadata.tables
+        project_metadata.tables
     )
+    assert set(global_metadata.tables) == {"users", "projects", "project_members"}
     table = Annotation.__table__
     assert table.name == "Annotations"
     assert table.primary_key.columns.keys() == ["annotation_id"]

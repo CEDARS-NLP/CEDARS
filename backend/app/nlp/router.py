@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
+from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.jobs.schemas import BackgroundJobResponse
@@ -53,7 +53,7 @@ router = APIRouter(prefix="/api/v1/projects/{project_id}/nlp", tags=["nlp"])
 async def create_query_endpoint(
     project_id: str,
     body: CreateSearchQueryRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     try:
@@ -82,7 +82,7 @@ async def create_query_endpoint(
 @router.get("/queries", response_model=list[SearchQueryResponse])
 async def list_queries_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await list_search_queries(session, project_id)
@@ -92,7 +92,7 @@ async def list_queries_endpoint(
 async def get_query_endpoint(
     project_id: str,
     query_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     sq = await get_search_query(session, project_id, query_id)
@@ -106,7 +106,7 @@ async def update_query_endpoint(
     project_id: str,
     query_id: str,
     body: UpdateSearchQueryRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     updates = body.model_dump(exclude_none=True)
@@ -120,7 +120,7 @@ async def update_query_endpoint(
 async def delete_query_endpoint(
     project_id: str,
     query_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     deleted = await delete_search_query(session, project_id, query_id)
@@ -132,7 +132,7 @@ async def delete_query_endpoint(
 async def activate_query_endpoint(
     project_id: str,
     query_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     try:
@@ -156,7 +156,7 @@ async def activate_query_endpoint(
 @router.post("/run")
 async def run_nlp_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Trigger NLP processing for all unprocessed notes in the project."""
@@ -166,7 +166,7 @@ async def run_nlp_endpoint(
 @router.get("/job/status", response_model=BackgroundJobResponse | None)
 async def nlp_job_status_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get the latest NLP background job status."""
@@ -176,7 +176,7 @@ async def nlp_job_status_endpoint(
 @router.post("/cancel")
 async def cancel_nlp_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Cancel a running NLP job."""
@@ -189,7 +189,7 @@ async def cancel_nlp_endpoint(
 @router.get("/reprocess-impact", response_model=ReprocessImpact)
 async def reprocess_impact_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     return await get_reprocess_impact(session, project_id)
@@ -199,7 +199,7 @@ async def reprocess_impact_endpoint(
 async def reprocess_nlp_endpoint(
     project_id: str,
     body: ReprocessRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Clear all sentences and re-run the NLP pipeline from scratch."""
@@ -231,7 +231,7 @@ async def reprocess_nlp_endpoint(
 @router.get("/stats", response_model=NlpStatsResponse)
 async def nlp_stats_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await get_nlp_stats(session, project_id)
@@ -240,7 +240,7 @@ async def nlp_stats_endpoint(
 @router.get("/job", response_model=NlpJobResponse | None)
 async def latest_job_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await get_latest_job(session, project_id)
@@ -255,7 +255,7 @@ async def list_sentences_endpoint(
     include_negated: bool = False,
     limit: int = 50,
     offset: int = 0,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """List target sentences (matched by search queries)."""

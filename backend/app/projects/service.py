@@ -5,6 +5,7 @@ from sqlmodel import select
 
 from app.auth.models import User
 from app.common.crud import soft_delete
+from app.common.utils import now_utc
 from app.projects.models import Project, ProjectMember, ProjectRole
 
 # --- Project CRUD ---
@@ -37,6 +38,8 @@ async def create_project(
         project_id=project.id,
         user_id=user.id,
         role=ProjectRole.ADMIN,
+        added_by_kind="user",
+        added_by_user_id=user.id,
     )
     session.add(member)
     await session.commit()
@@ -53,6 +56,7 @@ async def list_user_projects(
         select(Project, ProjectMember.role)
         .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(ProjectMember.user_id == user_id)
+        .where(ProjectMember.is_active.is_(True))
         .where(Project.deleted_at.is_(None))  # type: ignore[union-attr]
     )
     results = await session.execute(stmt)
@@ -133,6 +137,7 @@ async def get_user_project_role(
     stmt = select(ProjectMember).where(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id,
+        ProjectMember.is_active.is_(True),
     )
     result = await session.execute(stmt)
     member = result.scalar_one_or_none()
@@ -143,12 +148,16 @@ async def get_member(
     session: AsyncSession,
     project_id: str,
     user_id: str,
+    include_inactive: bool = False,
 ) -> ProjectMember | None:
     """Return the ProjectMember record or None."""
-    stmt = select(ProjectMember).where(
+    conditions = [
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == user_id,
-    )
+    ]
+    if not include_inactive:
+        conditions.append(ProjectMember.is_active.is_(True))
+    stmt = select(ProjectMember).where(*conditions)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -158,6 +167,7 @@ async def add_member(
     project_id: str,
     user_email: str,
     role: str = "annotator",
+    added_by_user_id: str | None = None,
 ) -> ProjectMember | None:
     """Add a user to a project by email. Returns the membership or None if user not found."""
     # Look up user by email
@@ -168,15 +178,28 @@ async def add_member(
         return None
 
     # Check if already a member
-    existing = await get_member(session, project_id, user.id)
-    if existing:
+    existing = await get_member(session, project_id, user.id, include_inactive=True)
+    if existing and existing.is_active:
         return existing
 
-    member = ProjectMember(
-        project_id=project_id,
-        user_id=user.id,
-        role=ProjectRole(role),
-    )
+    if existing:
+        existing.role = ProjectRole(role)
+        existing.is_active = True
+        existing.revoked_at = None
+        existing.added_by_kind = "user" if added_by_user_id else "unknown"
+        existing.added_by_user_id = added_by_user_id
+        existing.membership_revision += 1
+        member = existing
+    else:
+        member = ProjectMember(
+            project_id=project_id,
+            user_id=user.id,
+            role=ProjectRole(role),
+            added_by_kind="user" if added_by_user_id else "unknown",
+            added_by_user_id=added_by_user_id,
+        )
+        session.add(member)
+
     session.add(member)
     await session.commit()
     await session.refresh(member)
@@ -192,6 +215,7 @@ async def list_members(
         select(ProjectMember, User)
         .join(User, ProjectMember.user_id == User.id)
         .where(ProjectMember.project_id == project_id)
+        .where(ProjectMember.is_active.is_(True))
     )
     result = await session.execute(stmt)
     return list(result.all())
@@ -207,6 +231,9 @@ async def remove_member(
     if not member:
         return False
 
-    await session.delete(member)
+    member.is_active = False
+    member.revoked_at = now_utc()
+    member.membership_revision += 1
+    session.add(member)
     await session.commit()
     return True

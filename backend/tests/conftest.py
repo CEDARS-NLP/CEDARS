@@ -5,15 +5,15 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: F401
 from app.annotations.review_jobs import PatientReviewJob  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
-from app.common.database import get_session
+from app.common.database import get_global_session
+from app.common.model_registry import create_all_metadata, drop_all_metadata
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
+from app.dependencies import get_project_db_session
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
     EvaluationSessionQuerySection,
@@ -30,9 +30,7 @@ from app.pipeline.models import (  # noqa: F401 — register pipeline tables in 
     PipelineRun,
 )
 from app.predictors.models import PredictorConfig  # noqa: F401
-from app.projects.models import Project, ProjectMember  # noqa: F401
-
-TEST_DATABASE_URL = "sqlite+aiosqlite://"
+from app.projects.models import Project, ProjectMember, ProjectUser  # noqa: F401
 
 # When CEDARS_TEST_POSTGRES=1, the whole suite runs against a throwaway Postgres
 # container built from Alembic migrations (not create_all). This catches the
@@ -96,23 +94,45 @@ def _force_sync_nlp_dispatch():
 
 
 @pytest.fixture
-async def app(_postgres_url):
+async def app(_postgres_url, monkeypatch, tmp_path):
     if _USE_POSTGRES:
         # Build schema from Alembic migrations (matches production), then create
         # a per-test schema by truncating between tests via drop/create all.
         _run_migrations(_postgres_url)
         engine = create_async_engine(_postgres_url, echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(create_all_metadata)
     else:
         engine = create_async_engine(
-            TEST_DATABASE_URL,
+            f"sqlite+aiosqlite:///{tmp_path / 'cedars-test.db'}",
             echo=False,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
         )
         async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+            await conn.run_sync(create_all_metadata)
 
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    monkeypatch.setattr("app.common.database.global_session_factory", test_session)
+    monkeypatch.setattr("app.common.project_registry.global_session_factory", test_session)
+
+    async def test_project_session_factory(_project_id: str):
+        return test_session
+
+    for module_name in (
+        "app.jobs.ingestion",
+        "app.jobs.nlp",
+        "app.jobs.pipeline",
+        "app.jobs.prediction",
+        "app.jobs.review",
+    ):
+        monkeypatch.setattr(
+            f"{module_name}.get_project_session_factory_for_id",
+            test_project_session_factory,
+        )
+    monkeypatch.setattr(
+        "app.common.project_registry.get_project_session_factory_for_id",
+        test_project_session_factory,
+    )
 
     application = create_app()
     application.state.test_session_factory = test_session
@@ -121,7 +141,8 @@ async def app(_postgres_url):
         async with test_session() as session:
             yield session
 
-    application.dependency_overrides[get_session] = override_get_session
+    application.dependency_overrides[get_global_session] = override_get_session
+    application.dependency_overrides[get_project_db_session] = override_get_session
     yield application
 
     # Drain fire-and-forget background tasks (e.g. the ARQ-unavailable sync
@@ -154,7 +175,7 @@ async def app(_postgres_url):
             await conn.exec_driver_sql("CREATE SCHEMA public")
     else:
         async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.drop_all)
+            await conn.run_sync(drop_all_metadata)
     await engine.dispose()
 
 
@@ -202,10 +223,10 @@ async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
     Postgres enforces the FKs those rows depend on (SQLite did not), so tests
     must seed real parent rows first. Returns (project_id, user_id).
     """
-    from app.common.database import get_session
+    from app.common.database import get_global_session
     from app.projects.models import ProjectRole
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_global_session]():
         session.add(
             User(id=user_id, email=f"{user_id}@test.com", name="Test", password_hash="x")
         )

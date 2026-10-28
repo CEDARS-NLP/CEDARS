@@ -1,8 +1,8 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 
+from app.common.model_registry import create_all_metadata, drop_all_metadata
 from app.evaluation.models import (
     EvaluationSession,
     PatientResult,
@@ -20,12 +20,12 @@ async def session():
         poolclass=StaticPool,
     )
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(create_all_metadata)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         yield s
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+        await conn.run_sync(drop_all_metadata)
     await engine.dispose()
 
 

@@ -5,9 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
 from app.common.errors import raise_not_found
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.evaluation.schemas import (
     CommitRequest,
     CommitResponse,
@@ -89,7 +88,7 @@ async def _session_response(db: AsyncSession, eval_session):
 async def create_session_endpoint(
     project_id: str,
     body: CreateSessionRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Create a new evaluation session with patient sampling."""
@@ -114,7 +113,7 @@ async def create_session_endpoint(
 @router.get("/sessions", response_model=list[SessionListResponse])
 async def list_sessions_endpoint(
     project_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """List all sessions for a project."""
@@ -125,7 +124,7 @@ async def list_sessions_endpoint(
 async def get_session_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get a single evaluation session."""
@@ -137,7 +136,7 @@ async def get_session_endpoint(
 async def discard_session_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Discard an evaluation session."""
@@ -157,7 +156,7 @@ async def discard_session_endpoint(
 async def clone_session_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Clone a new session from a previous one, copying queries and LLM config."""
@@ -182,7 +181,7 @@ async def update_queries_endpoint(
     project_id: str,
     session_id: str,
     body: UpdateQueriesRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Update search queries on a session."""
@@ -207,7 +206,7 @@ async def run_all_queries_endpoint(
     project_id: str,
     session_id: str,
     body: RunAllRequest = None,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     eval_session = await _get_session_or_404(db, project_id, session_id)
@@ -227,7 +226,7 @@ async def suggest_queries_endpoint(
     project_id: str,
     session_id: str,
     body: SuggestQueriesRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Use LLM to suggest search queries from a natural language description."""
@@ -266,7 +265,7 @@ async def suggest_queries_endpoint(
 async def execute_queries_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Execute search queries against sample notes."""
@@ -289,7 +288,7 @@ async def get_query_matches_endpoint(
     query_index: int,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get paginated note previews with match highlights for a specific query."""
@@ -351,7 +350,7 @@ async def update_event_config_endpoint(
     project_id: str,
     session_id: str,
     body: EventConfigRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Update event definition on a session."""
@@ -374,7 +373,7 @@ async def update_event_config_endpoint(
 async def run_llm_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Enqueue LLM classification on matched patients in the sample."""
@@ -393,7 +392,7 @@ async def next_unreviewed_endpoint(
     project_id: str,
     session_id: str,
     after_id: int | None = Query(default=None),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Get the next unreviewed patient result for sequential review.
@@ -413,7 +412,7 @@ async def list_results_endpoint(
     reviewed: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """List patient results with optional filtering."""
@@ -433,7 +432,7 @@ async def result_notes_endpoint(
     project_id: str,
     session_id: str,
     result_id: int,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get full note context for a patient result (for clinical review)."""
@@ -450,7 +449,7 @@ async def submit_judgment_endpoint(
     session_id: str,
     result_id: int,
     body: SubmitJudgmentRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Submit clinician judgment on a patient result."""
@@ -476,7 +475,7 @@ async def submit_judgment_endpoint(
 async def metrics_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get accuracy metrics for a session."""
@@ -492,7 +491,7 @@ async def metrics_endpoint(
 async def funnel_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get funnel statistics for a session."""
@@ -505,7 +504,7 @@ async def funnel_endpoint(
 async def cost_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Actual LLM spend so far and a projected cost for the whole project."""
@@ -521,7 +520,7 @@ async def commit_endpoint(
     project_id: str,
     session_id: str,
     body: CommitRequest,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Commit an evaluation session and dispatch a full pipeline run."""
@@ -554,7 +553,7 @@ async def commit_endpoint(
 async def pipeline_stats_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get full pipeline run progress for a committed session."""
@@ -570,7 +569,7 @@ async def pipeline_stats_endpoint(
 async def cancel_pipeline_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Cancel a running full pipeline."""
@@ -586,7 +585,7 @@ async def cancel_pipeline_endpoint(
 async def retry_failed_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Retry failed patients in the full pipeline run."""
@@ -602,7 +601,7 @@ async def retry_failed_endpoint(
 async def resume_pipeline_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Resume a stuck pipeline run (resets processing rows and re-enqueues)."""
@@ -618,7 +617,7 @@ async def resume_pipeline_endpoint(
 async def rerun_pipeline_endpoint(
     project_id: str,
     session_id: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Re-run the pipeline for a committed session (after cancel/completion)."""

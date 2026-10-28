@@ -13,21 +13,23 @@ from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Index
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 from app.llm.pricing import estimate_cost
 
 
-class LlmUsage(SQLModel, table=True):
+class LlmUsage(ProjectSQLModel, table=True):
     """One model call (or one patient's call) and what it cost in tokens."""
 
     __tablename__ = "llm_usage"
     __table_args__ = (Index("ix_llm_usage_project_created", "project_id", "created_at"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
-    user_id: str | None = Field(default=None, foreign_key="users.id")
+    project_id: str = Field(index=True)
+    user_id: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     # What triggered the call: query_suggestion, evaluation_sample, pipeline_run,
     # predictor_test, bulk_prediction, pattern_generation.
     source: str = Field(max_length=40)

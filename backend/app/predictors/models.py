@@ -5,8 +5,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Column, DateTime
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -17,13 +19,13 @@ class PredictorType(str, enum.Enum):
     PINES = "pines"
 
 
-class PredictorConfig(SQLModel, table=True):
+class PredictorConfig(ProjectSQLModel, table=True):
     """A configured predictor for a project."""
 
     __tablename__ = "predictor_configs"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     predictor_type: PredictorType
     name: str
     config: dict = Field(
@@ -31,7 +33,7 @@ class PredictorConfig(SQLModel, table=True):
         sa_column=Column(JSON, nullable=False, server_default="{}"),
     )
     is_active: bool = Field(default=False)
-    created_by: str = Field(foreign_key="users.id")
+    created_by: str = Field(foreign_key="ProjectUsers.global_user_id")
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),

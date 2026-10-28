@@ -18,7 +18,7 @@ from app.nlp.service import (
 from app.predictors.models import PredictorConfig, PredictorType
 from app.production.classifier import NoteClassification
 from app.production.models import NotePrediction, ProductionResult, ProductionRun
-from app.projects.models import Project
+from app.projects.models import Project, ProjectUser
 from app.projects.stats import get_project_stats
 
 
@@ -29,6 +29,15 @@ async def _seed_project(session):
     project = Project(name="Entrypoint test", owner_id=user.id)
     session.add(project)
     await session.flush()
+    session.add(
+        ProjectUser(
+            global_user_id=user.id,
+            project_id=project.id,
+            email=user.email,
+            name=user.name,
+            is_active=True,
+        )
+    )
     patient = Patient(project_id=project.id, patient_id_ext="patient-ext")
     session.add(patient)
     await session.flush()

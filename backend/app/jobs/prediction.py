@@ -4,21 +4,20 @@ import asyncio
 import logging
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
+from app.common.project_registry import get_project_session_factory_for_id
 from app.common.utils import now_utc
-from app.config import settings
 from app.jobs.models import BackgroundJob, JobStatus
 from app.production.models import NotePrediction, ProductionResult, ProductionRun
 
 logger = logging.getLogger(__name__)
 
 
-def _make_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Create a standalone session factory for worker processes."""
-    engine = create_async_engine(settings.database_url, echo=False)
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def _make_session_factory(project_id: str) -> async_sessionmaker[AsyncSession]:
+    """Create a tenant session factory for worker processes."""
+    return await get_project_session_factory_for_id(project_id)
 
 
 async def execute_prediction_job(
@@ -28,7 +27,7 @@ async def execute_prediction_job(
 ) -> dict:
     """Run the staged production coordinator while retaining the legacy job shape."""
     if session_factory is None:
-        session_factory = _make_session_factory()
+        session_factory = await _make_session_factory(project_id)
 
     stats: dict = {
         "total_sentences": 0,

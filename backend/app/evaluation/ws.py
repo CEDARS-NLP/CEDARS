@@ -5,7 +5,8 @@ import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.common.database import async_session
+from app.common.database import get_project_session_factory
+from app.common.project_registry import require_ready_project_context
 from app.evaluation.models import EvaluationSession, SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,13 @@ async def eval_pipeline_progress_ws(websocket: WebSocket, project_id: str, sessi
     Polls PatientResult aggregate counts every 1s and pushes updates.
     Closes when the session reaches COMPLETED state or all work is done.
     """
+    context = await require_ready_project_context(project_id)
+    session_factory = await get_project_session_factory(context)
     await websocket.accept()
     last_stats: dict = {}
 
     try:
-        async with async_session() as db:
+        async with session_factory() as db:
             while True:
                 eval_sess = await db.get(EvaluationSession, session_id)
                 if not eval_sess or eval_sess.project_id != project_id:

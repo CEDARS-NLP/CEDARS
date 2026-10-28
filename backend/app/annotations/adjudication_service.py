@@ -19,7 +19,6 @@ from app.common.utils import now_utc
 from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.models import SearchQuery
 from app.production.models import NotePrediction, ProductionState
-from app.projects.models import Project
 
 _state_store = ReviewStateStore()
 _EXCLUDED_REASONS = {"llm_negative", "duplicate", "negated"}
@@ -232,7 +231,9 @@ async def _skip_after_event_enabled(
 ) -> bool:
     if explicit_value is not None:
         return explicit_value
-    project = await session.get(Project, project_id)
+    from app.common.project_registry import load_project
+
+    project = await load_project(project_id)
     enabled = bool((project.settings or {}).get("skip_after_event_date", False)) if project else False
     if enabled:
         return True
@@ -1011,11 +1012,11 @@ async def submit_review_batch(
     return job
 
 
-async def enqueue_patient_review_job(job_id: str) -> None:
+async def enqueue_patient_review_job(project_id: str, job_id: str) -> None:
     """Best-effort enqueue; worker startup recovers durable queued jobs."""
     from app.jobs.review import enqueue_review_job
 
-    await enqueue_review_job(job_id, attempt=0)
+    await enqueue_review_job(project_id, job_id, attempt=0)
 
 
 async def apply_patient_review_job(session: AsyncSession, job_id: str) -> PatientReviewJob:

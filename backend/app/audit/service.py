@@ -42,11 +42,11 @@ async def get_patient_activity(
     limit: int = 100,
 ) -> dict:
     """Get activity timeline for a specific patient."""
-    from app.auth.models import User
+    from app.projects.models import ProjectUser
 
     stmt = (
-        select(AuditEntry, User.name)
-        .outerjoin(User, AuditEntry.user_id == User.id)
+        select(AuditEntry, ProjectUser.name)
+        .outerjoin(ProjectUser, AuditEntry.user_id == ProjectUser.global_user_id)
         .where(
             AuditEntry.project_id == project_id,
             AuditEntry.patient_id == patient_id,
@@ -94,7 +94,7 @@ async def query_audit_log(
     offset: int = 0,
 ) -> dict:
     """Query audit log with filters. Admin use."""
-    from app.auth.models import User
+    from app.projects.models import ProjectUser
 
     conditions = [AuditEntry.project_id == project_id]
     if patient_id:
@@ -112,8 +112,8 @@ async def query_audit_log(
     total = (await session.execute(count_stmt)).scalar() or 0
 
     stmt = (
-        select(AuditEntry, User.name)
-        .outerjoin(User, AuditEntry.user_id == User.id)
+        select(AuditEntry, ProjectUser.name)
+        .outerjoin(ProjectUser, AuditEntry.user_id == ProjectUser.global_user_id)
         .where(*conditions)
         .order_by(AuditEntry.created_at.desc())
         .offset(offset)

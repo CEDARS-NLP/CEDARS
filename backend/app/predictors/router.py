@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
+from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.llm.usage import add_usage
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api/v1/projects/{project_id}/predictors", tags=["pre
 async def create_predictor_endpoint(
     project_id: str,
     body: CreatePredictorRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     pc = await create_predictor_config(
@@ -47,7 +47,7 @@ async def create_predictor_endpoint(
 @router.get("", response_model=list[PredictorResponse])
 async def list_predictors_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await list_predictor_configs(session, project_id)
@@ -57,7 +57,7 @@ async def list_predictors_endpoint(
 async def get_predictor_endpoint(
     project_id: str,
     predictor_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     pc = await get_predictor_config(session, project_id, predictor_id)
@@ -71,7 +71,7 @@ async def update_predictor_endpoint(
     project_id: str,
     predictor_id: str,
     body: UpdatePredictorRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     pc = await update_predictor_config(
@@ -86,7 +86,7 @@ async def update_predictor_endpoint(
 async def delete_predictor_endpoint(
     project_id: str,
     predictor_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     deleted = await delete_predictor_config(session, project_id, predictor_id)
@@ -98,7 +98,7 @@ async def delete_predictor_endpoint(
 async def activate_predictor_endpoint(
     project_id: str,
     predictor_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     pc = await activate_predictor(session, project_id, predictor_id)
@@ -112,7 +112,7 @@ async def test_predictor_endpoint(
     project_id: str,
     predictor_id: str,
     body: TestPredictionRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Run a single test prediction against a configured predictor."""

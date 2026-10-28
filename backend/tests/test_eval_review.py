@@ -55,11 +55,11 @@ async def test_next_unreviewed_returns_result(client, app):
     session = await create_eval_session(client, project_id)
 
     # Inject a PatientResult using the test database session
-    from app.common.database import get_session
+    from app.dependencies import get_project_db_session
     from app.evaluation.models import PatientResult, PatientResultStatus
 
     # Get the overridden test session from the app fixture
-    async for db in app.dependency_overrides[get_session]():
+    async for db in app.dependency_overrides[get_project_db_session]():
         pr = PatientResult(
             session_id=session["id"],
             patient_id="fake-patient-1",
@@ -120,12 +120,12 @@ async def test_result_notes_returns_full_context(client, app):
 
     from datetime import UTC, datetime
 
-    from app.common.database import get_session
     from app.connectors.models import Note, Patient
+    from app.dependencies import get_project_db_session
     from app.evaluation.models import PatientResult, PatientResultStatus, SearchMatch
 
     # Use the test's overridden database session
-    async for db in app.dependency_overrides[get_session]():
+    async for db in app.dependency_overrides[get_project_db_session]():
         patient = Patient(project_id=project_id, patient_id_ext="MRN001")
         db.add(patient)
         await db.flush()

@@ -90,8 +90,14 @@ async def lifespan(app: FastAPI):
     # Startup
     _validate_settings()
     _ensure_s3_bucket()
+    from app.common.database import dispose_project_engines, get_global_engine
+    from app.common.project_database import configure_project_database_routing
+
+    configure_project_database_routing()
     yield
     # Shutdown
+    await dispose_project_engines()
+    await get_global_engine().dispose()
 
 
 def create_app() -> FastAPI:

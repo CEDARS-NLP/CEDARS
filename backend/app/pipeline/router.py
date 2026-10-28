@@ -4,9 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
 from app.common.errors import raise_not_found
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.llm.usage import UsageScope
 from app.pipeline.schemas import (
     CommitEventConfigRequest,
@@ -42,7 +41,7 @@ router = APIRouter(
 async def create_event_config_endpoint(
     project_id: str,
     body: CreateEventConfigRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     ec = await create_event_config(
@@ -64,7 +63,7 @@ async def create_event_config_endpoint(
 @router.get("/events", response_model=list[EventConfigResponse])
 async def list_event_configs_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await list_event_configs(session, project_id)
@@ -74,7 +73,7 @@ async def list_event_configs_endpoint(
 async def get_event_config_endpoint(
     project_id: str,
     event_config_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     ec = await get_event_config(session, project_id, event_config_id)
@@ -88,7 +87,7 @@ async def update_event_config_endpoint(
     project_id: str,
     event_config_id: str,
     body: UpdateEventConfigRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     try:
@@ -107,7 +106,7 @@ async def update_event_config_endpoint(
 async def delete_event_config_endpoint(
     project_id: str,
     event_config_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     try:
@@ -123,7 +122,7 @@ async def commit_event_config_endpoint(
     project_id: str,
     event_config_id: str,
     body: CommitEventConfigRequest = CommitEventConfigRequest(),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     try:
@@ -142,7 +141,7 @@ async def commit_event_config_endpoint(
 async def generate_patterns_endpoint(
     project_id: str,
     event_config_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     ec = await get_event_config(session, project_id, event_config_id)
@@ -186,7 +185,7 @@ async def run_sample_endpoint(
     project_id: str,
     event_config_id: str,
     body: RunSampleRequest = RunSampleRequest(),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import dispatch_sample_run
@@ -206,7 +205,7 @@ async def run_sample_endpoint(
 async def run_full_endpoint(
     project_id: str,
     event_config_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import dispatch_full_run
@@ -224,7 +223,7 @@ async def run_full_endpoint(
 @router.get("/queue", response_model=QueueOverviewResponse)
 async def queue_overview_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import get_queue_overview
@@ -236,7 +235,7 @@ async def queue_overview_endpoint(
 async def list_runs_endpoint(
     project_id: str,
     event_config_id: str | None = None,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import list_runs
@@ -248,7 +247,7 @@ async def list_runs_endpoint(
 async def get_run_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import get_run
@@ -263,7 +262,7 @@ async def get_run_endpoint(
 async def get_run_stats_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import get_run, get_run_stats
@@ -278,7 +277,7 @@ async def get_run_stats_endpoint(
 async def get_run_metrics_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import get_run
@@ -297,7 +296,7 @@ async def list_tasks_endpoint(
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     from app.pipeline.orchestrator import get_run, list_tasks
@@ -312,7 +311,7 @@ async def list_tasks_endpoint(
 async def cancel_run_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import cancel_run
@@ -330,7 +329,7 @@ async def cancel_run_endpoint(
 async def rerun_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import rerun
@@ -346,7 +345,7 @@ async def rerun_endpoint(
 async def retry_failed_endpoint(
     project_id: str,
     run_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import retry_failed
@@ -365,7 +364,7 @@ async def retry_stalled_endpoint(
     project_id: str,
     run_id: str,
     stale_minutes: int = Query(default=10, ge=1, le=1440),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     from app.pipeline.orchestrator import retry_stalled

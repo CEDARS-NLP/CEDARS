@@ -5,8 +5,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Column, DateTime, Index
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -34,7 +36,7 @@ class AuditAction(str, enum.Enum):
     DATA_RESYNCED = "data_resynced"
 
 
-class AuditEntry(SQLModel, table=True):
+class AuditEntry(ProjectSQLModel, table=True):
     """Append-only audit log entry."""
 
     __tablename__ = "audit_log"
@@ -44,9 +46,9 @@ class AuditEntry(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     patient_id: str | None = Field(default=None, foreign_key="patients.id")
-    user_id: str | None = Field(default=None, foreign_key="users.id")
+    user_id: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     action: AuditAction
     detail: dict = Field(
         default_factory=dict,

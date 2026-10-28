@@ -2,10 +2,10 @@
 
 import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.common.project_registry import get_project_session_factory_for_id
 from app.common.utils import now_utc
-from app.config import settings
 from app.jobs.models import BackgroundJob, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,9 @@ class _NlpCancelledError(Exception):
     """Raised when the NLP job detects the is_cancelled flag."""
 
 
-def _make_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Create a standalone session factory for worker processes."""
-    engine = create_async_engine(settings.database_url, echo=False)
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def _make_session_factory(project_id: str) -> async_sessionmaker[AsyncSession]:
+    """Create a tenant session factory for worker processes."""
+    return await get_project_session_factory_for_id(project_id)
 
 
 async def execute_nlp_job(
@@ -34,7 +33,7 @@ async def execute_nlp_job(
     from app.nlp.service import _execute_production_nlp_job, _process_notes_into_sentences
 
     if session_factory is None:
-        session_factory = _make_session_factory()
+        session_factory = await _make_session_factory(project_id)
 
     async with session_factory() as session:
         bg_job = await session.get(BackgroundJob, job_db_id)

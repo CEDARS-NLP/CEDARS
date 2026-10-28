@@ -56,10 +56,10 @@ async def test_dispatch_creates_background_job(app, auth_client):
     await asyncio.sleep(0.5)
 
     # Verify the BackgroundJob exists via DB
-    from app.common.database import get_session
+    from app.dependencies import get_project_db_session
     from app.jobs.models import BackgroundJob
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         bg_job = await session.get(BackgroundJob, job_id)
         assert bg_job is not None
         assert bg_job.project_id == project_id
@@ -112,10 +112,12 @@ async def test_eval_worker_uses_boolean_truth_and_session_query(app):
         reasoning="Match",
         evidence_spans=[],
     )
-    with patch("app.common.database.async_session", app.state.test_session_factory), \
-         patch("app.production.service.classify_note", new_callable=AsyncMock,
-               return_value=classification) as classify:
-        await run_eval_pipeline_job({}, run_id)
+    with patch(
+        "app.production.service.classify_note",
+        new_callable=AsyncMock,
+        return_value=classification,
+    ) as classify:
+        await run_eval_pipeline_job({}, project_id, run_id)
         assert classify.await_count == 2
         assert {
             call.args[1]["text_id"] for call in classify.await_args_list

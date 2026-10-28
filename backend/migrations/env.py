@@ -14,15 +14,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import SQLModel so that all model metadata is registered
-from sqlmodel import SQLModel  # noqa: E402
-
+# Import the independent metadata registries. Model imports below register
+# tables before Alembic receives either target.
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: E402, F401
 from app.annotations.review_jobs import PatientReviewJob  # noqa: E402, F401
 from app.audit.models import AuditEntry  # noqa: E402, F401
 
 # Import all models so their tables are registered in SQLModel.metadata
 from app.auth.models import User  # noqa: E402, F401
+from app.common.model_registry import global_metadata, project_metadata  # noqa: E402
 from app.connectors.models import DataSource, Note, Patient  # noqa: E402, F401
 from app.evaluation.models import (  # noqa: E402, F401
     EvaluationSession,
@@ -43,7 +43,7 @@ from app.production.models import (  # noqa: E402, F401
 )
 from app.projects.models import Project, ProjectMember  # noqa: E402, F401
 
-target_metadata = SQLModel.metadata
+target_metadata = [global_metadata, project_metadata]
 
 
 def get_sync_url() -> str:

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import JobListItem, QueuesResponse, WorkersResponse
-from app.admin.service import get_queue_stats, get_worker_info, list_jobs
+from app.admin.service import get_all_queue_stats, get_worker_info, list_all_jobs
 from app.auth.models import User, UserRole
-from app.common.database import get_session
+from app.common.database import get_global_session
 from app.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -30,11 +30,11 @@ def require_platform_admin():
 
 @router.get("/queues", response_model=QueuesResponse)
 async def queues_endpoint(
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
     _admin: User = Depends(require_platform_admin()),
 ):
     """Get queue statistics."""
-    stats = await get_queue_stats(session)
+    stats = await get_all_queue_stats(session)
     return {"queues": stats}
 
 
@@ -52,9 +52,9 @@ async def list_jobs_endpoint(
     job_status: str | None = Query(None, alias="status"),
     limit: int = 50,
     offset: int = 0,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
     _admin: User = Depends(require_platform_admin()),
 ):
     """List background jobs."""
-    jobs = await list_jobs(session, status=job_status, limit=limit, offset=offset)
+    jobs = await list_all_jobs(session, status=job_status, limit=limit, offset=offset)
     return jobs

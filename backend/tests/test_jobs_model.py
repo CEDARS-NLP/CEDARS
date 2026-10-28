@@ -8,10 +8,10 @@ from tests.conftest import seed_project_and_user
 @pytest.mark.asyncio
 async def test_create_background_job(app):
     """BackgroundJob can be created and persisted."""
-    from app.common.database import get_session
+    from app.dependencies import get_project_db_session
 
     await seed_project_and_user(app)
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         job = BackgroundJob(
             project_id="proj-1",
             job_type=JobType.NLP,

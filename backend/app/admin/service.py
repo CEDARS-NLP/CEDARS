@@ -6,9 +6,61 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.common.context import ProjectContext
+from app.common.database import get_project_session_factory
 from app.jobs.models import BackgroundJob
+from app.projects.models import Project
 
 logger = logging.getLogger(__name__)
+
+
+async def _ready_project_contexts(session: AsyncSession) -> list[ProjectContext]:
+    result = await session.execute(
+        select(Project).where(
+            Project.deleted_at.is_(None),
+            Project.database_status == "ready",
+            Project.database_secret_ref.is_not(None),
+        )
+    )
+    projects = result.scalars().all()
+    return [
+        ProjectContext(project_id=project.id, routing_version=project.routing_version)
+        for project in projects
+    ]
+
+
+async def get_all_queue_stats(global_session: AsyncSession) -> list[dict]:
+    """Aggregate job counts across ready project databases."""
+    totals: dict[str, dict[str, int]] = {}
+    for context in await _ready_project_contexts(global_session):
+        factory = await get_project_session_factory(context)
+        async with factory() as session:
+            for item in await get_queue_stats(session):
+                stats = totals.setdefault(
+                    item["name"], {"pending": 0, "active": 0, "complete": 0, "failed": 0}
+                )
+                for key in ("pending", "active", "complete", "failed"):
+                    stats[key] += item[key]
+    return [{"name": name, **stats} for name, stats in sorted(totals.items())]
+
+
+async def list_all_jobs(
+    global_session: AsyncSession,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[BackgroundJob]:
+    """List jobs across ready project databases, ordered newest first."""
+    candidates: list[BackgroundJob] = []
+    fetch_limit = offset + limit
+    for context in await _ready_project_contexts(global_session):
+        factory = await get_project_session_factory(context)
+        async with factory() as session:
+            candidates.extend(
+                await list_jobs(session, status=status, limit=fetch_limit, offset=0)
+            )
+    candidates.sort(key=lambda job: job.created_at, reverse=True)
+    return candidates[offset : offset + limit]
 
 
 async def get_queue_stats(session: AsyncSession) -> list[dict]:

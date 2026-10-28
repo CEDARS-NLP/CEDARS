@@ -5,12 +5,14 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Text, UniqueConstraint, text
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
-class Sentence(SQLModel, table=True):
+class Sentence(ProjectSQLModel, table=True):
     """A sentence extracted from a clinical note by the NLP pipeline."""
 
     __tablename__ = "sentences"
@@ -22,7 +24,7 @@ class Sentence(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     note_id: str = Field(foreign_key="notes.id", index=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     sentence_number: int
     text: str = Field(sa_column=Column(Text, nullable=False))
     start_pos: int  # character offset in the note
@@ -39,7 +41,7 @@ class Sentence(SQLModel, table=True):
     )
 
 
-class SearchQuery(SQLModel, table=True):
+class SearchQuery(ProjectSQLModel, table=True):
     """A search query pattern configured for a project.
 
     Queries use the CEDARS syntax: OR/AND operators, ! for negation, * and ? wildcards.
@@ -58,7 +60,7 @@ class SearchQuery(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     name: str = Field(default="")
     query: str  # CEDARS query syntax
     is_active: bool = Field(default=True)
@@ -69,7 +71,7 @@ class SearchQuery(SQLModel, table=True):
         default=False,
         sa_column=Column(Boolean, nullable=False, default=False, server_default="false"),
     )
-    created_by: str | None = Field(default=None, foreign_key="users.id")
+    created_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -89,13 +91,13 @@ class NlpJobStatus(str, enum.Enum):
     FAILED = "failed"
 
 
-class NlpJob(SQLModel, table=True):
+class NlpJob(ProjectSQLModel, table=True):
     """Tracks NLP processing jobs for a project."""
 
     __tablename__ = "nlp_jobs"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     status: NlpJobStatus = Field(default=NlpJobStatus.PENDING)
     total_notes: int = Field(default=0)
     processed_notes: int = Field(default=0)

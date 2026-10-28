@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
+from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
 from app.dependencies import require_project_role
 from app.export.databricks import ExportType, export_to_databricks
@@ -37,7 +37,7 @@ router = APIRouter(
 @router.get("/stats", response_model=ExportStatsResponse)
 async def export_stats_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "viewer")),
 ):
     """Get export statistics for the project."""
@@ -48,7 +48,7 @@ async def export_stats_endpoint(
 async def export_annotations_json_endpoint(
     project_id: str,
     status: str | None = Query(None, description="Filter: reviewed, events, or all"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "viewer")),
 ):
     """Export annotations as JSON."""
@@ -59,7 +59,7 @@ async def export_annotations_json_endpoint(
 async def export_annotations_csv_endpoint(
     project_id: str,
     status: str | None = Query(None, description="Filter: reviewed, events, or all"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "viewer")),
 ):
     """Export annotations as CSV file download."""
@@ -75,7 +75,7 @@ async def export_annotations_csv_endpoint(
 @router.get("/results", response_model=list[ExportResultRow])
 async def export_results_json_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "viewer")),
 ):
     """Export patient-level production results as JSON."""
@@ -85,7 +85,7 @@ async def export_results_json_endpoint(
 @router.get("/results/csv")
 async def export_results_csv_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "viewer")),
 ):
     """Export patient-level production results as a CSV download."""
@@ -102,7 +102,7 @@ async def export_results_csv_endpoint(
 async def export_to_databricks_endpoint(
     project_id: str,
     body: DatabricksExportRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     user: User = Depends(require_project_role("admin")),
 ):
     """Export project results to a Databricks table."""

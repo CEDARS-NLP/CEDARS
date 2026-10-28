@@ -1,5 +1,6 @@
 """Application configuration using Pydantic Settings."""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://cedars:cedars@localhost:5432/cedars"
+    project_engine_cache_size: int = Field(default=20, ge=1)
+    project_db_pool_size: int = Field(default=1, ge=1)
+    project_db_max_overflow: int = Field(default=0, ge=0)
+    aws_region: str | None = None
+    project_database_secret_prefix: str = "cedars/project-databases"
 
     # Redis
     redis_url: str = "redis://localhost:6379"

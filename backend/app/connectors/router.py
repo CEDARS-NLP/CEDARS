@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
+from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
 from app.connectors.registry import get_connector
 from app.connectors.schemas import (
@@ -41,7 +41,7 @@ router = APIRouter(prefix="/api/v1/projects/{project_id}/data", tags=["data"])
 async def create_data_source_endpoint(
     project_id: str,
     body: CreateDataSourceRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     ds = await create_data_source(
@@ -53,7 +53,7 @@ async def create_data_source_endpoint(
 @router.get("/sources", response_model=list[DataSourceResponse])
 async def list_data_sources_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await list_data_sources(session, project_id)
@@ -63,7 +63,7 @@ async def list_data_sources_endpoint(
 async def get_data_source_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     ds = await get_data_source(session, project_id, data_source_id)
@@ -76,7 +76,7 @@ async def get_data_source_endpoint(
 async def delete_data_source_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     deleted = await delete_data_source(session, project_id, data_source_id)
@@ -152,7 +152,7 @@ async def upload_file_endpoint(
     project_id: str,
     file: UploadFile,
     column_mapping: str | None = Form(None),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Upload a CSV or JSON file to S3 and create a data source.
@@ -185,7 +185,7 @@ async def preview_data_source_endpoint(
     project_id: str,
     data_source_id: str,
     limit: int = 10,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     ds = await get_data_source(session, project_id, data_source_id)
@@ -208,7 +208,7 @@ async def preview_data_source_endpoint(
 async def ingest_data_source_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Trigger ingestion of a data source as a background job."""
@@ -223,7 +223,7 @@ async def ingest_data_source_endpoint(
 async def ingestion_job_status_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get the latest ingestion job status for a data source."""
@@ -234,7 +234,7 @@ async def ingestion_job_status_endpoint(
 async def cancel_ingestion_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Cancel a running ingestion job."""
@@ -248,7 +248,7 @@ async def cancel_ingestion_endpoint(
 async def resync_data_source_endpoint(
     project_id: str,
     data_source_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Re-sync a data source: update existing notes, add new ones."""
@@ -276,7 +276,7 @@ async def purge_data_source_endpoint(
     project_id: str,
     data_source_id: str,
     confirm: bool = False,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Purge all data (patients, notes, sentences, annotations) from a data source."""
@@ -304,7 +304,7 @@ async def list_patients_endpoint(
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
     status: str | None = None,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     result = await list_patients(
@@ -340,7 +340,7 @@ async def list_patient_notes_endpoint(
     patient_id: str,
     limit: int = 100,
     offset: int = 0,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     notes = await get_patient_notes(session, project_id, patient_id, limit=limit, offset=offset)

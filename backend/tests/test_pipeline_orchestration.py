@@ -9,11 +9,11 @@ from tests.test_pipeline_api import EVENT_CONFIG_BODY, create_project, register_
 
 async def _seed_patients(app, project_id: str, count: int = 3) -> list[str]:
     """Insert patients + notes directly into the database."""
-    from app.common.database import get_session
     from app.connectors.models import Note, Patient
+    from app.dependencies import get_project_db_session
 
     patient_ids = []
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         for i in range(count):
             p = Patient(project_id=project_id, patient_id_ext=f"P{i:03d}")
             session.add(p)
@@ -218,7 +218,7 @@ class TestRunManagement:
 
     async def test_retry_stalled(self, app, client):
         """Re-queue tasks stuck in 'processing' for too long."""
-        from app.common.database import get_session
+        from app.dependencies import get_project_db_session
         from app.pipeline.models import PatientTask, PatientTaskStatus
 
         await register_and_login(client)
@@ -235,7 +235,7 @@ class TestRunManagement:
         # Simulate one task stuck in processing with old started_at
         from sqlalchemy import select
 
-        async for session in app.dependency_overrides[get_session]():
+        async for session in app.dependency_overrides[get_project_db_session]():
             stmt = select(PatientTask).where(PatientTask.pipeline_run_id == run_id)
             result = await session.execute(stmt)
             tasks = list(result.scalars().all())

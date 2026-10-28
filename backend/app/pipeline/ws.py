@@ -5,7 +5,8 @@ import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.common.database import async_session
+from app.common.database import get_project_session_factory
+from app.common.project_registry import require_ready_project_context
 from app.pipeline.models import PipelineRun, PipelineRunStatus
 from app.pipeline.orchestrator import get_run_stats
 
@@ -20,11 +21,13 @@ async def pipeline_progress_ws(websocket: WebSocket, project_id: str, run_id: st
     Polls PatientTask aggregate counts every 1s and pushes updates.
     Closes when the run reaches a terminal state.
     """
+    context = await require_ready_project_context(project_id)
+    session_factory = await get_project_session_factory(context)
     await websocket.accept()
     last_stats: dict = {}
 
     try:
-        async with async_session() as session:
+        async with session_factory() as session:
             while True:
                 run = await session.get(PipelineRun, run_id)
                 if not run or run.project_id != project_id:

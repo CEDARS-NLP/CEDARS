@@ -17,9 +17,9 @@ async def _make_admin(client, app):
     from sqlalchemy import update
 
     from app.auth.models import User
-    from app.common.database import get_session
+    from app.common.database import get_global_session
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_global_session]():
         await session.execute(
             update(User)
             .where(User.email == "admin@test.com")

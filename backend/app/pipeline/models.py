@@ -18,9 +18,10 @@ from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, Index, Text
 from sqlalchemy.types import JSON
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
 from app.common.db_types import enum_column as _enum_column
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ _PATIENT_TASK_TRANSITIONS: dict[PatientTaskStatus, set[PatientTaskStatus]] = {
 # ── Models ───────────────────────────────────────────────────────
 
 
-class EventConfig(SQLModel, table=True):
+class EventConfig(ProjectSQLModel, table=True):
     """Configuration for a clinical event detection pipeline.
 
     Combines event semantics (what to detect) with LLM config (how to detect).
@@ -75,7 +76,7 @@ class EventConfig(SQLModel, table=True):
     __tablename__ = "event_configs"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
 
     # Event definition
     name: str = Field(max_length=200)
@@ -112,13 +113,13 @@ class EventConfig(SQLModel, table=True):
     )
 
 
-class PipelineRun(SQLModel, table=True):
+class PipelineRun(ProjectSQLModel, table=True):
     """A single execution of a pipeline (sample or full)."""
 
     __tablename__ = "pipeline_runs"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     event_config_id: str = Field(foreign_key="event_configs.id", index=True)
 
     run_type: str = Field(max_length=20)  # "sample" or "full"
@@ -163,7 +164,7 @@ class PipelineRun(SQLModel, table=True):
     )
 
 
-class PatientTask(SQLModel, table=True):
+class PatientTask(ProjectSQLModel, table=True):
     """Per-patient work unit within a pipeline run.
 
     Workers claim tasks via SKIP LOCKED (PostgreSQL) or CAS update (SQLite).
@@ -227,7 +228,7 @@ class PatientTask(SQLModel, table=True):
         self.status = new_status
 
 
-class Evidence(SQLModel, table=True):
+class Evidence(ProjectSQLModel, table=True):
     """A matched text span within a note, linking a PatientTask to specific evidence."""
 
     __tablename__ = "evidence"
