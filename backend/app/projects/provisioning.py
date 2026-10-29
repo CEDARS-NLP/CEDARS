@@ -5,12 +5,12 @@ import asyncio
 import json
 from uuid import UUID
 
-import boto3
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.auth.models import User
+from app.common.secrets import get_secrets_manager_client
 from app.config import settings
 from app.projects.models import Project, ProjectMember, ProjectUser
 
@@ -38,6 +38,8 @@ async def create_database(project_id: str) -> str:
         raise ProvisioningError("Provisioning and runtime databases must use the same cluster")
     if not runtime_url.username:
         raise ProvisioningError("A runtime database user is required")
+    if admin_url.username == runtime_url.username:
+        raise ProvisioningError("Project provisioning requires a separate database identity")
     admin_engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
         async with admin_engine.connect() as connection:
@@ -56,7 +58,7 @@ async def create_database(project_id: str) -> str:
 
 
 def store_database_secret(project_id: str, database_url: str) -> str:
-    client = boto3.client("secretsmanager", region_name=settings.aws_region)
+    client = get_secrets_manager_client()
     name = f"{settings.project_database_secret_prefix.rstrip('/')}/{UUID(project_id).hex}"
     payload = json.dumps({"database_url": database_url})
     try:

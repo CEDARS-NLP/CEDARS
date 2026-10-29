@@ -25,7 +25,7 @@ def test_migration_check_script(tmp_path, scenario, allowed, expected_code, expe
     if os.name == "nt" and git_bash.is_file():
         bash = str(git_bash)
     if bash is None:
-        pytest.skip("Bash is required to exercise the migration check script")
+        raise RuntimeError("Bash is required to exercise the migration check script")
 
     backend_dir = tmp_path / "backend"
     backend_dir.mkdir()

@@ -52,7 +52,8 @@ data "aws_iam_policy_document" "execution_secrets" {
     sid     = "ReadInjectedSecrets"
     actions = ["secretsmanager:GetSecretValue"]
     resources = [
-      aws_secretsmanager_secret.db_url.arn,
+      var.runtime_database_url_secret_arn,
+      var.provisioning_database_url_secret_arn,
       aws_secretsmanager_secret.app_secret_key.arn,
     ]
   }
@@ -116,6 +117,25 @@ data "aws_iam_policy_document" "task" {
       var.bedrock_inference_profile_arns,
       var.bedrock_foundation_model_arns,
     )
+  }
+
+  statement {
+    sid       = "CreateProjectDatabaseSecrets"
+    actions   = ["secretsmanager:CreateSecret"]
+    resources = ["*"]
+    condition {
+      test     = "StringLike"
+      variable = "secretsmanager:Name"
+      values   = ["${local.project_database_secret_prefix}/*"]
+    }
+  }
+
+  statement {
+    sid       = "ReadProjectDatabaseSecrets"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [
+      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${local.project_database_secret_prefix}/*"
+    ]
   }
 }
 

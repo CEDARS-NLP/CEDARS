@@ -80,24 +80,8 @@ resource "aws_rds_cluster_instance" "reader" {
   db_subnet_group_name = aws_db_subnet_group.aurora.name
 }
 
-# Full asyncpg DSN (with password) stored as a secret and injected whole into
-# CEDARS_DATABASE_URL. The app config expects a complete URL, so we can't split
-# out just the password. random_password uses special=false so no URL-encoding.
-resource "aws_secretsmanager_secret" "db_url" {
-  name        = "user-${local.prefix}-database-url"
-  description = "CEDARS v2 full asyncpg DATABASE_URL"
+# Runtime and provisioning DSN secret ARNs are external so their values stay out of Terraform state.
+# Supply both ARNs through runtime_database_url_secret_arn and provisioning_database_url_secret_arn.
 
-  # Hard-delete on destroy so the name frees immediately.
-  recovery_window_in_days = 0
-}
 
-resource "aws_secretsmanager_secret_version" "db_url" {
-  secret_id = aws_secretsmanager_secret.db_url.id
-  secret_string = format(
-    "postgresql+asyncpg://%s:%s@%s:5432/%s",
-    var.db_master_username,
-    random_password.db_master.result,
-    aws_rds_cluster.aurora.endpoint,
-    var.db_name,
-  )
-}
+

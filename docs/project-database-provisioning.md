@@ -1,28 +1,66 @@
 # Project database provisioning
 
 Project creation uses the existing PostgreSQL cluster and backend process. It does
-not create AWS infrastructure or launch another ECS task. No Terraform changes
-are included.
+not create AWS infrastructure or launch another ECS task. Terraform injects the
+externally managed runtime and provisioning secret ARNs; it does not store their
+values.
 
 ## Configuration prerequisites
 
-- `CEDARS_DATABASE_URL`: global database URL for the shared runtime database user.
-- `CEDARS_PROJECT_PROVISIONING_DATABASE_URL`: PostgreSQL administrative connection
-  to the same writer endpoint. This identity must have CREATEDB and permission to
-  create a database owned by the runtime user. It is not inferred from the runtime
-  URL and is never returned through the API.
+- `CEDARS_DATABASE_URL`: global database URL for the non-superuser runtime login.
+- `CEDARS_PROJECT_PROVISIONING_DATABASE_URL`: connection to the same PostgreSQL
+  writer endpoint using a separate login. It must have `CREATEDB` and membership
+  in the runtime role so it can create a tenant database owned by that role. The
+  URL is injected into the backend only; it is not inferred from the runtime URL
+  or returned through the API.
 - `CEDARS_PROJECT_DATABASE_SECRET_PREFIX`: defaults to
   `user-cedars/project-databases`.
 - `CEDARS_PROJECT_PROVISIONING_TIMEOUT_SECONDS`: defaults to 120 seconds. Configure
   upstream HTTP timeouts to allow this bounded operation.
 - `CEDARS_AWS_REGION`: Secrets Manager region, or the normal AWS region configuration.
 
-The existing backend task credentials must already permit Secrets Manager
-CreateSecret and GetSecretValue on the chosen prefix. Backend, worker, and
-migration credentials need GetSecretValue on tenant secrets and any required KMS
-permissions. This code does not add those privileges or alter AWS architecture.
-The shared runtime PostgreSQL identity can access every tenant database; this is
-application routing isolation, not per-tenant credential isolation.
+Create the runtime and provisioning DSN secrets in AWS Secrets Manager outside
+Terraform, using secret names that begin with `user-`. Pass their ARNs as the
+`runtime_database_url_secret_arn` and `provisioning_database_url_secret_arn`
+Terraform variables. Secret values are intentionally not Terraform-managed, so
+they do not enter Terraform state. The ECS execution role needs
+`secretsmanager:GetSecretValue` on those exact ARNs to inject them. The backend,
+worker, and migration task role needs `secretsmanager:GetSecretValue` on the
+tenant-secret prefix; project provisioning additionally needs
+`secretsmanager:CreateSecret` restricted by `secretsmanager:Name` to that prefix.
+Add the same actions to any externally managed task role and any required KMS
+permissions if a customer-managed key is used.
+
+Provision the PostgreSQL roles through the approved database administration
+process, not Terraform variables or migration SQL. The intended privilege shape
+is equivalent to:
+
+```sql
+CREATE ROLE cedars_runtime LOGIN PASSWORD '<runtime-secret-value>';
+CREATE ROLE cedars_project_provisioner LOGIN CREATEDB PASSWORD '<provisioner-secret-value>';
+GRANT cedars_runtime TO cedars_project_provisioner;
+GRANT CONNECT ON DATABASE cedars TO cedars_runtime;
+GRANT CREATE ON SCHEMA public TO cedars_runtime;
+```
+
+The provisioner role is not a superuser and is not the runtime login. The runtime
+login owns tenant databases and performs their Alembic DDL. Keep the existing
+Aurora master credential for controlled administration only. The runtime login
+can access every tenant database; this is application routing isolation, not
+per-tenant credential isolation.
+
+For an existing deployment whose application currently connects as the Aurora
+master, this is a credential cutover, not just a secret replacement. Before
+rolling out the new task definitions, rehearse a maintenance-window ownership and
+grant transition for the global database and every registered tenant database.
+The runtime login must be able to read/write the existing application tables and
+own objects that future migrations alter. Do not switch ECS to the new runtime
+secret until that transition is verified; do not run ownership changes from this
+application migration.
+
+`CEDARS_SECRETS_MANAGER_ENDPOINT_URL` is an optional SDK endpoint override. Leave
+it unset in AWS. The parity stack points it at LocalStack and bootstraps distinct
+local-only PostgreSQL roles from `stack/postgres-init.sql`.
 
 ## Creation and recovery
 

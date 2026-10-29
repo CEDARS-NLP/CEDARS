@@ -77,3 +77,6 @@ def downgrade() -> None:
     op.drop_table("projects")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
+    if op.get_context().dialect.name == "postgresql":
+        op.execute("DROP TYPE projectrole")
+        op.execute("DROP TYPE userrole")

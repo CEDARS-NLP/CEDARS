@@ -3,19 +3,17 @@
 import asyncio
 import json
 
-import boto3
-
 from app.common.context import ProjectContext
 from app.common.database import (
     configure_project_database_url_resolver,
     global_session_factory,
 )
-from app.config import settings
+from app.common.secrets import get_secrets_manager_client
 from app.projects.models import Project
 
 
 def _get_secret(secret_id: str) -> str:
-    client = boto3.client("secretsmanager", region_name=settings.aws_region)
+    client = get_secrets_manager_client()
     response = client.get_secret_value(SecretId=secret_id)
     secret_string = response.get("SecretString")
     if not secret_string:

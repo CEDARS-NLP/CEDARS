@@ -223,9 +223,20 @@ def test_baseline_postgresql_ddl_has_unique_enums_and_all_named_constraints(
             "ALTER TABLE patients ADD CONSTRAINT "
             "fk_patient_event_annotation_same_patient FOREIGN KEY"
         )
-        assert deferred_fk in ddl
+        assert ddl.count(deferred_fk) == 1
         assert ddl.index("CREATE TABLE patients") < ddl.index(deferred_fk)
         assert ddl.index('CREATE TABLE "Annotations"') < ddl.index(deferred_fk)
+
+
+def test_global_postgresql_downgrade_drops_enum_types_after_tables():
+    output = StringIO()
+    config = _migration_config("global-alembic.ini", output_buffer=output)
+    config.set_main_option("sqlalchemy.url", "postgresql://cedars:unused@localhost/cedars")
+    command.downgrade(config, "g0001_global_baseline:base", sql=True)
+    ddl = output.getvalue()
+
+    assert ddl.index("DROP TABLE project_members") < ddl.index("DROP TYPE projectrole")
+    assert ddl.index("DROP TABLE users") < ddl.index("DROP TYPE userrole")
 
 
 @pytest.mark.parametrize("histories", [("global", "project"), ("project", "global")])

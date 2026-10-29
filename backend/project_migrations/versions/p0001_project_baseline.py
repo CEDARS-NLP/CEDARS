@@ -838,16 +838,6 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_annotation_predictions_project_id"), "annotation_predictions", ["project_id"]
     )
-    if op.get_bind().dialect.name == "postgresql":
-        op.create_foreign_key(
-            "fk_patient_event_annotation_same_patient",
-            "patients",
-            "Annotations",
-            ["project_id", "patient_id_ext", "event_annotation_id"],
-            ["project_id", "patient_id", "annotation_id"],
-        )
-
-
 def downgrade() -> None:
     if op.get_context().dialect.name == "sqlite":
         with op.batch_alter_table("patients") as batch_op:

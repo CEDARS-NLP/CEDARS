@@ -5,7 +5,12 @@ import pytest
 from sqlalchemy import select
 
 from app.projects.models import Project, ProjectMember, ProjectUser
-from app.projects.provisioning import ProvisioningError, project_database_name, provision_project
+from app.projects.provisioning import (
+    ProvisioningError,
+    create_database,
+    project_database_name,
+    provision_project,
+)
 from tests.conftest import seed_project_and_user
 
 
@@ -14,6 +19,17 @@ def test_database_name_rejects_sql_identifiers():
         project_database_name('"; DROP DATABASE postgres; --')
     identity = uuid4()
     assert project_database_name(str(identity)) == f"cedars_project_{identity.hex}"
+
+
+async def test_create_database_rejects_runtime_identity_for_provisioning(monkeypatch):
+    database_url = "postgresql+asyncpg://cedars_runtime:secret@db.example:5432/cedars"
+    monkeypatch.setattr("app.projects.provisioning.settings.database_url", database_url)
+    monkeypatch.setattr(
+        "app.projects.provisioning.settings.project_provisioning_database_url", database_url
+    )
+
+    with pytest.raises(ProvisioningError, match="separate database identity"):
+        await create_database(str(uuid4()))
 
 
 async def test_failure_retains_global_rows_and_redacts_error(app, monkeypatch):

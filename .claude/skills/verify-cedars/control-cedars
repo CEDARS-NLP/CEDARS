@@ -824,6 +824,9 @@ def cmd_parity_check(args) -> int:
     # env: names and literal values from ecs.tf local.app_environment/app_secrets
     tf_env = dict(re.findall(r'\{\s*name\s*=\s*"(CEDARS_\w+)",\s*value\s*=\s*(.+?)\s*\}', ecs))
     tf_secrets = re.findall(r'\{\s*name\s*=\s*"(CEDARS_\w+)",\s*valueFrom', ecs)
+    backend_only_secrets = {"CEDARS_PROJECT_PROVISIONING_DATABASE_URL"}
+    parity_only_env = {"CEDARS_SECRETS_MANAGER_ENDPOINT_URL"}
+    shared_names = set(tf_env) | (set(tf_secrets) - backend_only_secrets) | parity_only_env
 
     def tf_value(expr: str):
         expr = expr.strip()
@@ -831,6 +834,10 @@ def cmd_parity_check(args) -> int:
             return expr.strip('"')
         if expr == "var.region":
             return var.get("region")
+        if expr == "local.project_database_secret_prefix":
+            custom_prefix = var.get("project_database_secret_prefix", "")
+            prefix = f"{var.get('name_prefix', 'cedars-v2')}-{var.get('environment', 'dev')}"
+            return custom_prefix or f"user-{prefix}/project-databases"
         if expr == "local.cookie_secure" and 'cookie_secure = var.enable_https ? "true" : "false"' in main_tf:
             return "true" if var.get("enable_https") == "true" else "false"
         if expr == "local.cors_origins" and '"http://localhost:5173"' in main_tf and var.get("app_hostname", "") == "":
@@ -840,8 +847,9 @@ def cmd_parity_check(args) -> int:
     for name in ("backend", "worker", "migrate"):
         env = svc[name].get("environment", {})
         names = {k for k in env if k.startswith("CEDARS_")}
+        expected_names = shared_names | (backend_only_secrets if name == "backend" else set())
         check("env", f"{name}: CEDARS_* names == ecs.tf app_environment + app_secrets",
-              sorted(set(tf_env) | set(tf_secrets)), sorted(names))
+              sorted(expected_names), sorted(names))
     benv = svc["backend"]["environment"]
     for k, expr in tf_env.items():
         expected = tf_value(expr)
@@ -852,13 +860,25 @@ def cmd_parity_check(args) -> int:
     check("env", "CEDARS_S3_BUCKET shape", "user-<prefix>-storage", benv.get("CEDARS_S3_BUCKET"),
           ok='bucket = "user-${local.prefix}-storage"' in (infra / "s3.tf").read_text()
           and re.fullmatch(r"user-[\w-]+-storage", benv.get("CEDARS_S3_BUCKET", "")) is not None)
-    check("env", "CEDARS_DATABASE_URL shape", "postgresql+asyncpg://cedars:<pw>@<host>:5432/cedars",
+    check("env", "CEDARS_DATABASE_URL shape", "postgresql+asyncpg://cedars_runtime:<pw>@<host>:5432/cedars",
           re.sub(r":[^:@/]+@", ":<pw>@", benv.get("CEDARS_DATABASE_URL", "")),
-          ok=re.fullmatch(r"postgresql\+asyncpg://cedars:[^@]+@[\w.-]+:5432/cedars", benv.get("CEDARS_DATABASE_URL", "")) is not None)
+          ok=re.fullmatch(r"postgresql\+asyncpg://cedars_runtime:[^@]+@[\w.-]+:5432/cedars", benv.get("CEDARS_DATABASE_URL", "")) is not None)
+    runtime_match = re.fullmatch(
+        r"postgresql\+asyncpg://cedars_runtime:[^@]+@([\w.-]+):5432/cedars",
+        benv.get("CEDARS_DATABASE_URL", ""),
+    )
+    provisioning_match = re.fullmatch(
+        r"postgresql\+asyncpg://cedars_project_provisioner:[^@]+@([\w.-]+):5432/cedars",
+        benv.get("CEDARS_PROJECT_PROVISIONING_DATABASE_URL", ""),
+    )
+    check("env", "project provisioning DSN uses separate login on same PostgreSQL host",
+          "cedars_project_provisioner and cedars_runtime on same host",
+          "valid" if runtime_match and provisioning_match and runtime_match.group(1) == provisioning_match.group(1) else "invalid",
+          ok=bool(runtime_match and provisioning_match and runtime_match.group(1) == provisioning_match.group(1)))
 
     # settings wiring
     fields = settings_fields(repo)
-    for k in sorted(set(tf_env) | set(tf_secrets)):
+    for k in sorted(set(tf_env) | set(tf_secrets) | parity_only_env):
         f = k.removeprefix("CEDARS_").lower()
         check("settings", f"{k} maps to a Settings field", f, f if f in fields else "(missing)")
     for f, default in fields.items():

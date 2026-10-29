@@ -43,7 +43,12 @@ output "migrate_task_definition" {
   value       = aws_ecs_task_definition.migrate.family
 }
 
-output "database_url_secret_arn" {
-  description = "Secrets Manager ARN holding the full CEDARS_DATABASE_URL"
-  value       = aws_secretsmanager_secret.db_url.arn
+output "runtime_database_url_secret_arn" {
+  description = "Externally managed Secrets Manager ARN supplied through runtime_database_url_secret_arn"
+  value       = var.runtime_database_url_secret_arn
+}
+
+output "provisioning_database_url_secret_arn" {
+  description = "Externally managed Secrets Manager ARN supplied through provisioning_database_url_secret_arn"
+  value       = var.provisioning_database_url_secret_arn
 }

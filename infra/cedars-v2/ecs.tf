@@ -42,6 +42,9 @@ locals {
     { name = "CEDARS_S3_SECRET_KEY", value = "" },
     { name = "CEDARS_S3_REGION", value = var.region },
     { name = "CEDARS_S3_BUCKET", value = aws_s3_bucket.storage.bucket },
+    { name = "CEDARS_AWS_REGION", value = var.region },
+    { name = "CEDARS_SECRETS_MANAGER_ENDPOINT_URL", value = var.secrets_manager_endpoint_url },
+    { name = "CEDARS_PROJECT_DATABASE_SECRET_PREFIX", value = local.project_database_secret_prefix },
     { name = "CEDARS_COOKIE_SECURE", value = local.cookie_secure },
     { name = "CEDARS_CORS_ORIGINS", value = local.cors_origins },
     { name = "CEDARS_ALLOW_CLOUD_LLM", value = "true" },
@@ -49,9 +52,13 @@ locals {
 
   # Secrets injected from Secrets Manager (full-value secrets).
   app_secrets = [
-    { name = "CEDARS_DATABASE_URL", valueFrom = aws_secretsmanager_secret.db_url.arn },
+    { name = "CEDARS_DATABASE_URL", valueFrom = var.runtime_database_url_secret_arn },
     { name = "CEDARS_SECRET_KEY", valueFrom = aws_secretsmanager_secret.app_secret_key.arn },
   ]
+
+  backend_secrets = concat(local.app_secrets, [
+    { name = "CEDARS_PROJECT_PROVISIONING_DATABASE_URL", valueFrom = var.provisioning_database_url_secret_arn },
+  ])
 }
 
 # ---- Backend task definition ----
@@ -69,7 +76,7 @@ resource "aws_ecs_task_definition" "backend" {
     image        = local.backend_image
     essential    = true
     environment  = local.app_environment
-    secrets      = local.app_secrets
+    secrets      = local.backend_secrets
     portMappings = [{ containerPort = 8000, protocol = "tcp" }]
     logConfiguration = {
       logDriver = "awslogs"
