@@ -1,6 +1,10 @@
 """Alembic environment configuration for async SQLAlchemy."""
 
+import os
+import subprocess
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -78,6 +82,24 @@ def run_migrations_online() -> None:
 
     Creates a sync engine and runs migrations against a live database.
     """
+    if context.get_x_argument(as_dictionary=True).get("legacy") != "true":
+        if context.get_revision_argument() != context.get_head_revision():
+            raise RuntimeError(
+                "Use alembic upgrade head for all databases; use global-alembic.ini "
+                "for global schema inspection and revision authoring"
+            )
+        environment = dict(os.environ)
+        environment["CEDARS_DATABASE_URL"] = (
+            config.get_main_option("sqlalchemy.url") or settings.database_url
+        )
+        subprocess.run(
+            [sys.executable, "-m", "app.common.migrations"],
+            cwd=Path(__file__).resolve().parents[1],
+            env=environment,
+            check=True,
+        )
+        return
+
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = get_sync_url()
 

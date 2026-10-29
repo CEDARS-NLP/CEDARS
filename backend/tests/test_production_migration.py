@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from argparse import Namespace
 from io import StringIO
 from pathlib import Path
 from uuid import uuid4
@@ -40,6 +41,7 @@ def _alembic_config(database_url: str, output_buffer=None) -> Config:
     config = Config(str(ROOT / "alembic.ini"), output_buffer=output_buffer)
     config.set_main_option("script_location", str(ROOT / "migrations"))
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    config.cmd_opts = Namespace(x=["legacy=true"])
     return config
 
 

@@ -68,8 +68,7 @@ def _postgres_url():
 
 def _run_migrations(async_url: str) -> None:
     """Run Alembic migrations against the target DB (sync engine under the hood)."""
-    from alembic import command
-    from alembic.config import Config
+    from app.common.migrations import migrate_global_database, migrate_project_database
 
     # Alembic env reads settings.database_url; point it at the test DB.
     os.environ["CEDARS_DATABASE_URL"] = async_url
@@ -77,8 +76,8 @@ def _run_migrations(async_url: str) -> None:
 
     settings.database_url = async_url  # in case settings was already instantiated
 
-    cfg = Config(str(__import__("pathlib").Path(__file__).parent.parent / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    migrate_global_database(async_url)
+    migrate_project_database(async_url)
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +110,16 @@ async def app(_postgres_url, monkeypatch, tmp_path):
             await conn.run_sync(create_all_metadata)
 
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def provision_test_project(session, project):
+        from app.projects.provisioning import seed_project_identities
+
+        await seed_project_identities(session, session, project)
+        project.database_status = "ready"
+        project.database_secret_ref = f"test/{project.id}"
+        await session.commit()
+
+    monkeypatch.setattr("app.projects.service.provision_project", provision_test_project)
 
     monkeypatch.setattr("app.common.database.global_session_factory", test_session)
     monkeypatch.setattr("app.common.project_registry.global_session_factory", test_session)

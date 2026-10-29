@@ -1,0 +1,447 @@
+import re
+from io import StringIO
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
+
+from app.auth.models import User, UserRole
+from app.common.migrations import (
+    _metadata_differences,
+    get_project_migration_head,
+    migrate_all_databases,
+    migrate_global_database,
+    migrate_project_database,
+)
+from app.common.model_registry import global_metadata, project_metadata
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser
+
+
+def _sqlite_url(path) -> str:
+    return f"sqlite:///{path.as_posix()}"
+
+
+def test_default_alembic_upgrade_runs_all_databases(tmp_path):
+    database_url = _sqlite_url(tmp_path / "deployment-global.db")
+    config = _migration_config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    try:
+        assert "global_alembic_version" in inspect(engine).get_table_names()
+        assert "patients" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def _migration_config(ini_name: str, *, connection=None, output_buffer=None) -> Config:
+    backend_dir = Path(__file__).resolve().parents[1]
+    return Config(
+        str(backend_dir / ini_name),
+        output_buffer=output_buffer,
+        attributes={"connection": connection} if connection is not None else {},
+    )
+
+
+def test_project_migration_creates_only_tenant_schema(tmp_path):
+    database_url = _sqlite_url(tmp_path / "tenant.db")
+    head = migrate_project_database(database_url)
+    engine = create_engine(database_url)
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert "ProjectUsers" in tables
+        assert "Annotations" in tables
+        assert not {"users", "projects", "project_members"}.intersection(tables)
+        assert "project_alembic_version" in tables
+        assert head == "p0001_project_baseline"
+        with engine.connect() as connection:
+            assert _metadata_differences(connection, project_metadata) == []
+        assert migrate_project_database(database_url) == head == get_project_migration_head()
+    finally:
+        engine.dispose()
+
+
+def test_global_migration_creates_only_global_schema(tmp_path):
+    database_url = _sqlite_url(tmp_path / "global.db")
+    head = migrate_global_database(database_url)
+    engine = create_engine(database_url)
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert {"users", "projects", "project_members"}.issubset(tables)
+        assert "global_alembic_version" in tables
+        assert "ProjectUsers" not in tables
+        assert head == "g0001_global_baseline"
+        assert get_project_migration_head() == "p0001_project_baseline"
+        with engine.connect() as connection:
+            assert _metadata_differences(connection, global_metadata) == []
+    finally:
+        engine.dispose()
+
+
+def test_unversioned_partial_project_schema_is_not_stamped(tmp_path):
+    database_url = _sqlite_url(tmp_path / "partial.db")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text('CREATE TABLE "ProjectUsers" (global_user_id VARCHAR PRIMARY KEY)')
+            )
+        try:
+            migrate_project_database(database_url)
+        except RuntimeError as error:
+            assert "missing tables" in str(error)
+        else:
+            raise AssertionError("partial tenant schema should not be stamped")
+        assert "project_alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_unversioned_complete_project_schema_is_adopted_without_data_loss(tmp_path):
+    database_url = _sqlite_url(tmp_path / "existing.db")
+    migrate_project_database(database_url)
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            session.add(
+                ProjectUser(
+                    global_user_id="existing-user",
+                    project_id="existing-project",
+                    email="existing@example.test",
+                    name="Existing user",
+                    role=ProjectRole.ANNOTATOR,
+                    is_investigator=False,
+                    is_active=True,
+                    added_by_kind="unknown",
+                    membership_revision=1,
+                )
+            )
+            session.commit()
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE project_alembic_version"))
+        migrate_project_database(database_url)
+        with Session(engine) as session:
+            assert session.get(ProjectUser, "existing-user") is not None
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("ini_name", "version_table", "domain_table", "expected_revision"),
+    [
+        (
+            "project-alembic.ini",
+            "project_alembic_version",
+            "ProjectUsers",
+            "p0001_project_baseline",
+        ),
+        (
+            "global-alembic.ini",
+            "global_alembic_version",
+            "users",
+            "g0001_global_baseline",
+        ),
+    ],
+)
+def test_baseline_can_downgrade_and_upgrade_on_sqlite(
+    tmp_path, ini_name, version_table, domain_table, expected_revision
+):
+    database_url = _sqlite_url(tmp_path / f"roundtrip-{version_table}.db")
+    if version_table == "project_alembic_version":
+        migrate_project_database(database_url)
+    else:
+        migrate_global_database(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            config = _migration_config(ini_name, connection=connection)
+            command.downgrade(config, "base")
+            assert domain_table not in inspect(connection).get_table_names()
+            command.upgrade(config, "head")
+            assert domain_table in inspect(connection).get_table_names()
+            revision = connection.execute(
+                text(f"SELECT version_num FROM {version_table}")
+            ).scalar_one()
+            assert revision == expected_revision
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("ini_name", "version_table", "metadata", "expected_enum_names"),
+    [
+        (
+            "project-alembic.ini",
+            "project_alembic_version",
+            project_metadata,
+            {
+                "connectortype",
+                "ingestionstatus",
+                "nlpjobstatus",
+                "jobtype",
+                "jobstatus",
+                "patientstatus",
+                "pipelinerunstatus",
+                "predictortype",
+                "auditaction",
+                "patienttaskstatus",
+            },
+        ),
+        (
+            "global-alembic.ini",
+            "global_alembic_version",
+            global_metadata,
+            {"userrole", "projectrole"},
+        ),
+    ],
+)
+def test_baseline_postgresql_ddl_has_unique_enums_and_all_named_constraints(
+    ini_name, version_table, metadata, expected_enum_names
+):
+    output = StringIO()
+    config = _migration_config(ini_name, output_buffer=output)
+    config.set_main_option("sqlalchemy.url", "postgresql://cedars:unused@localhost/cedars")
+    command.upgrade(config, "head", sql=True)
+    ddl = output.getvalue()
+
+    enum_names = re.findall(r"CREATE TYPE ([A-Za-z_][A-Za-z0-9_]*) AS ENUM", ddl)
+    assert len(enum_names) == len(set(enum_names))
+    assert set(enum_names) == expected_enum_names
+    assert f"CREATE TABLE {version_table}" in ddl
+    for table in metadata.tables.values():
+        for constraint in table.constraints:
+            if constraint.name:
+                assert constraint.name in ddl
+
+    if version_table == "project_alembic_version":
+        deferred_fk = (
+            "ALTER TABLE patients ADD CONSTRAINT "
+            "fk_patient_event_annotation_same_patient FOREIGN KEY"
+        )
+        assert deferred_fk in ddl
+        assert ddl.index("CREATE TABLE patients") < ddl.index(deferred_fk)
+        assert ddl.index('CREATE TABLE "Annotations"') < ddl.index(deferred_fk)
+
+
+def test_all_project_migrations_backfill_members_and_record_head(tmp_path, monkeypatch):
+    global_url = _sqlite_url(tmp_path / "fanout-global.db")
+    tenant_urls = {
+        "secret-ref-a": _sqlite_url(tmp_path / "tenant-a.db"),
+        "secret-ref-b": _sqlite_url(tmp_path / "tenant-b.db"),
+    }
+    migrate_global_database(global_url)
+
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            for suffix in ("a", "b"):
+                user_id = f"user-{suffix}"
+                project_id = f"project-{suffix}"
+                user = User(
+                    id=user_id,
+                    email=f"annotator-{suffix}@example.test",
+                    name=f"Annotator {suffix}",
+                    password_hash="unused",
+                    role=UserRole.USER,
+                )
+                project = Project(
+                    id=project_id,
+                    name=f"Project {suffix}",
+                    owner_id=user_id,
+                    database_secret_ref=f"secret-ref-{suffix}",
+                    database_status="provisioning",
+                )
+                member = ProjectMember(
+                    id=f"member-{suffix}",
+                    project_id=project_id,
+                    user_id=user_id,
+                    role=ProjectRole.ADMIN,
+                    added_by_kind="owner",
+                )
+                session.add_all([user, project, member])
+            session.commit()
+    finally:
+        engine.dispose()
+
+    monkeypatch.setattr("app.common.migrations._resolve_database_secret", tenant_urls.__getitem__)
+    migrate_all_databases(global_url)
+
+    for suffix in ("a", "b"):
+        engine = create_engine(tenant_urls[f"secret-ref-{suffix}"])
+        try:
+            with Session(engine) as session:
+                local_user = session.get(ProjectUser, f"user-{suffix}")
+                assert local_user is not None
+                assert local_user.project_id == f"project-{suffix}"
+                assert local_user.email == f"annotator-{suffix}@example.test"
+                assert local_user.role == ProjectRole.ADMIN
+                assert local_user.is_investigator is True
+        finally:
+            engine.dispose()
+
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            for suffix in ("a", "b"):
+                project = session.get(Project, f"project-{suffix}")
+                assert project is not None
+                assert project.database_schema_version == get_project_migration_head()
+    finally:
+        engine.dispose()
+
+
+def test_missing_secret_reference_preflights_before_any_tenant_migration(tmp_path, monkeypatch):
+    global_url = _sqlite_url(tmp_path / "global-preflight.db")
+    migrate_global_database(global_url)
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            session.add(
+                User(
+                    id="owner-1",
+                    email="owner@example.test",
+                    name="Owner",
+                    password_hash="unused",
+                    role=UserRole.USER,
+                )
+            )
+            session.flush()
+            session.add_all(
+                [
+                    Project(
+                        id="with-ref",
+                        name="Project with ref",
+                        owner_id="owner-1",
+                        database_secret_ref="secret-ref",
+                    ),
+                    Project(
+                        id="without-ref",
+                        name="Project without ref",
+                        owner_id="owner-1",
+                    ),
+                ]
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+
+    def unexpected_secret_resolution(_secret_ref: str) -> str:
+        raise AssertionError("preflight must happen before resolving or migrating tenants")
+
+    monkeypatch.setattr(
+        "app.common.migrations._resolve_database_secret", unexpected_secret_resolution
+    )
+    try:
+        migrate_all_databases(global_url)
+    except RuntimeError as error:
+        assert "without-ref" in str(error)
+    else:
+        raise AssertionError("missing database_secret_ref should fail preflight")
+    assert not (tmp_path / "must-not-be-created.db").exists()
+
+
+def test_partial_project_failure_preserves_fanout_progress_and_retries(tmp_path, monkeypatch):
+    global_url = _sqlite_url(tmp_path / "retryable-global.db")
+    tenant_urls = {
+        "retry-secret-a": _sqlite_url(tmp_path / "retryable-tenant-a.db"),
+        "retry-secret-b": _sqlite_url(tmp_path / "retryable-tenant-b.db"),
+    }
+    migrate_global_database(global_url)
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            for suffix in ("a", "b"):
+                user_id = f"retry-owner-{suffix}"
+                project_id = f"retry-project-{suffix}"
+                session.add(
+                    User(
+                        id=user_id,
+                        email=f"owner-{suffix}@example.test",
+                        name=f"Owner {suffix}",
+                        password_hash="unused",
+                        role=UserRole.USER,
+                    )
+                )
+                session.add(
+                    Project(
+                        id=project_id,
+                        name=f"Retry project {suffix}",
+                        owner_id=user_id,
+                        database_secret_ref=f"retry-secret-{suffix}",
+                        database_status="failed",
+                    )
+                )
+                session.add(
+                    ProjectMember(
+                        id=f"retry-member-{suffix}",
+                        project_id=project_id,
+                        user_id=user_id,
+                        role=ProjectRole.ADMIN,
+                        added_by_kind="owner",
+                    )
+                )
+            session.commit()
+    finally:
+        engine.dispose()
+
+    tenant_engine = create_engine(tenant_urls["retry-secret-b"])
+    try:
+        with tenant_engine.begin() as connection:
+            connection.execute(
+                text('CREATE TABLE "ProjectUsers" (global_user_id VARCHAR PRIMARY KEY)')
+            )
+    finally:
+        tenant_engine.dispose()
+    monkeypatch.setattr("app.common.migrations._resolve_database_secret", tenant_urls.__getitem__)
+
+    try:
+        migrate_all_databases(global_url)
+    except RuntimeError as error:
+        assert "retry-project-b" in str(error)
+    else:
+        raise AssertionError("partial second tenant schema should fail migration")
+
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            first = session.get(Project, "retry-project-a")
+            second = session.get(Project, "retry-project-b")
+            assert first is not None and second is not None
+            assert first.database_schema_version == get_project_migration_head()
+            assert second.database_schema_version is None
+    finally:
+        engine.dispose()
+
+    tenant_engine = create_engine(tenant_urls["retry-secret-b"])
+    try:
+        with tenant_engine.begin() as connection:
+            connection.execute(text('DROP TABLE "ProjectUsers"'))
+    finally:
+        tenant_engine.dispose()
+
+    migrate_all_databases(global_url)
+    engine = create_engine(global_url)
+    try:
+        with Session(engine) as session:
+            for suffix in ("a", "b"):
+                project = session.get(Project, f"retry-project-{suffix}")
+                assert project is not None
+                assert project.database_schema_version == get_project_migration_head()
+    finally:
+        engine.dispose()
+
+    for suffix in ("a", "b"):
+        engine = create_engine(tenant_urls[f"retry-secret-{suffix}"])
+        try:
+            with Session(engine) as session:
+                local_user = session.get(ProjectUser, f"retry-owner-{suffix}")
+                assert local_user is not None
+                assert local_user.project_id == f"retry-project-{suffix}"
+                assert local_user.role == ProjectRole.ADMIN
+                assert local_user.is_investigator is True
+        finally:
+            engine.dispose()

@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     project_db_pool_size: int = Field(default=1, ge=1)
     project_db_max_overflow: int = Field(default=0, ge=0)
     aws_region: str | None = None
-    project_database_secret_prefix: str = "cedars/project-databases"
+    project_database_secret_prefix: str = "user-cedars/project-databases"
+    project_provisioning_database_url: str | None = None
+    project_provisioning_timeout_seconds: int = Field(default=120, ge=1)
 
     # Redis
     redis_url: str = "redis://localhost:6379"

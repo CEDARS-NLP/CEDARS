@@ -1,6 +1,6 @@
 """Project API router: CRUD and membership endpoints."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -8,6 +8,7 @@ from app.common.database import get_global_session
 from app.common.errors import raise_not_found
 from app.dependencies import get_current_user, get_project_db_session, require_project_role
 from app.projects.models import ProjectRole
+from app.projects.provisioning import ProvisioningError
 from app.projects.schemas import (
     AddMemberRequest,
     CreateProjectRequest,
@@ -45,6 +46,8 @@ def _project_response(project, role: str | None = None) -> dict:
         "llm_api_key_set": bool(project.llm_api_key),
         "created_at": project.created_at.isoformat() if project.created_at else "",
         "role": role,
+        "database_status": project.database_status,
+        "provisioning_error": project.provisioning_error,
     }
 
 
@@ -58,13 +61,16 @@ async def create_project_endpoint(
     session: AsyncSession = Depends(get_global_session),
 ):
     """Create a new project. The authenticated user becomes the admin."""
-    project = await create_project(
-        session, current_user, body.name, body.description,
-        llm_provider=body.llm_provider,
-        llm_model=body.llm_model,
-        llm_api_base=body.llm_api_base,
-        llm_api_key=body.llm_api_key,
-    )
+    try:
+        project = await create_project(
+            session, current_user, body.name, body.description,
+            llm_provider=body.llm_provider,
+            llm_model=body.llm_model,
+            llm_api_base=body.llm_api_base,
+            llm_api_key=body.llm_api_key,
+        )
+    except ProvisioningError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     return _project_response(project, role=ProjectRole.ADMIN.value)
 
 

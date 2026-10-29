@@ -7,6 +7,7 @@ from app.auth.models import User
 from app.common.crud import soft_delete
 from app.common.utils import now_utc
 from app.projects.models import Project, ProjectMember, ProjectRole
+from app.projects.provisioning import provision_project
 
 # --- Project CRUD ---
 
@@ -30,6 +31,7 @@ async def create_project(
         llm_model=llm_model,
         llm_api_base=llm_api_base,
         llm_api_key=llm_api_key,
+        database_status="provisioning",
     )
     session.add(project)
     await session.flush()
@@ -44,6 +46,7 @@ async def create_project(
     session.add(member)
     await session.commit()
     await session.refresh(project)
+    await provision_project(session, project)
     return project
 
 
