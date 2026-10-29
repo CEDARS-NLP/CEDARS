@@ -40,6 +40,10 @@ from app.projects.models import ProjectUser  # noqa: E402, F401
 target_metadata = project_metadata
 
 
+def _include_name(name: str | None, object_type: str, parent_names: dict[str, str]) -> bool:
+    return object_type != "table" or name != "global_alembic_version"
+
+
 def _sync_url(url: str) -> str:
     parsed = make_url(url)
     if parsed.drivername.endswith("+asyncpg"):
@@ -68,6 +72,7 @@ def run_migrations_online() -> None:
             connection=supplied_connection,
             target_metadata=target_metadata,
             version_table="project_alembic_version",
+            include_name=_include_name,
         )
         with context.begin_transaction():
             context.run_migrations()
@@ -83,6 +88,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             version_table="project_alembic_version",
+            include_name=_include_name,
         )
         with context.begin_transaction():
             context.run_migrations()
