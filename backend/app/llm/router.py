@@ -8,9 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.dependencies import get_project_db_session
 from app.common.utils import now_utc
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.llm.usage import LlmUsage
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/llm-usage", tags=["llm-usage"])

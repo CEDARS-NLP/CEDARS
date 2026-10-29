@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
 from app.connectors.registry import get_connector
 from app.connectors.schemas import (
@@ -28,7 +27,7 @@ from app.connectors.service import (
     list_patients,
     upload_and_create_data_source,
 )
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.jobs.schemas import BackgroundJobResponse
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/data", tags=["data"])

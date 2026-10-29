@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.llm.usage import add_usage
 from app.predictors.factory import create_predictor
 from app.predictors.schemas import (

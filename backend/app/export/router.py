@@ -7,9 +7,8 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.dependencies import get_project_db_session
 from app.common.errors import raise_not_found
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.export.databricks import ExportType, export_to_databricks
 from app.export.schemas import (
     DatabricksExportRequest,

@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.schemas import AuditLogResponse, PatientActivityResponse
 from app.audit.service import get_patient_activity, query_audit_log
 from app.auth.models import User
-from app.dependencies import get_project_db_session
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}",
