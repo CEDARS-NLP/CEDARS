@@ -14,7 +14,7 @@ from app.production.models import (
     ProductionRun,
     ProductionState,
 )
-from app.projects.models import Project
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser
 
 
 def test_production_models_are_registered_and_annotation_matches_physical_contract():
@@ -86,13 +86,25 @@ async def test_patient_event_requires_date_annotation_and_reviewer(session_facto
         session.add(project)
         await session.flush()
         session.add(
+            ProjectUser(
+                global_user_id=user.id,
+                project_id=project.id,
+                email=user.email,
+                name=user.name,
+                role=ProjectRole.ADMIN,
+                is_investigator=True,
+            )
+        )
+        session.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.ADMIN))
+        await session.flush()
+        session.add(
             Patient(
                 project_id=project.id,
                 patient_id_ext="external-patient",
                 event_date=date(2025, 4, 3),
             )
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError, match="ck_patient_event_all_or_none"):
             await session.commit()
 
 

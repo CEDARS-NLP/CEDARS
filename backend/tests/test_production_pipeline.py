@@ -14,7 +14,7 @@ from app.production.service import (
     execute_run,
     start_run,
 )
-from app.projects.models import Project
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser
 
 
 async def _seed(session):
@@ -24,6 +24,17 @@ async def _seed(session):
     project = Project(name="Production test", owner_id=user.id)
     session.add(project)
     await session.flush()
+    session.add(
+        ProjectUser(
+            global_user_id=user.id,
+            project_id=project.id,
+            email=user.email,
+            name=user.name,
+            role=ProjectRole.ADMIN,
+            is_investigator=True,
+        )
+    )
+    session.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.ADMIN))
     patient = Patient(project_id=project.id, patient_id_ext="patient-ext")
     session.add(patient)
     await session.flush()

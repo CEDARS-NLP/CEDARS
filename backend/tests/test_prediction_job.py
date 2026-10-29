@@ -19,7 +19,7 @@ from app.predictors.base import PredictorError
 from app.predictors.models import PredictorConfig, PredictorType  # noqa: F401
 from app.production.classifier import NoteClassification
 from app.production.models import NotePrediction
-from app.projects.models import Project, ProjectMember  # noqa: F401
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser  # noqa: F401
 
 
 def _assert_all_unreviewed(annotations: list[Annotation]) -> None:
@@ -36,6 +36,18 @@ async def _seed_data(session: AsyncSession, is_cancelled: bool = False):
     # Project
     project = Project(id="proj-1", name="Test Project", owner_id="user-1")
     session.add(project)
+    await session.flush()
+    session.add(
+        ProjectUser(
+            global_user_id="user-1",
+            project_id="proj-1",
+            email="test@test.com",
+            name="Test",
+            role=ProjectRole.ADMIN,
+            is_investigator=True,
+        )
+    )
+    session.add(ProjectMember(project_id="proj-1", user_id="user-1", role=ProjectRole.ADMIN))
     await session.flush()
 
     # Patients

@@ -226,11 +226,11 @@ def client_factory(app):
 
 
 async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
-    """Insert a User and Project (+ membership) with the given IDs.
+    """Insert global and project-local user rows with their project.
 
     Model-level unit tests historically used bare placeholder IDs like "proj-1";
-    Postgres enforces the FKs those rows depend on (SQLite did not), so tests
-    must seed real parent rows first. Returns (project_id, user_id).
+    PostgreSQL enforces the global and tenant identity foreign keys that SQLite
+    does not, so tests must seed both identity projections. Returns the IDs.
     """
     from app.common.database import get_global_session
     from app.projects.models import ProjectRole
@@ -243,6 +243,18 @@ async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
         await session.flush()
         session.add(
             ProjectMember(project_id=project_id, user_id=user_id, role=ProjectRole.ADMIN)
+        )
+        session.add(
+            ProjectUser(
+                global_user_id=user_id,
+                project_id=project_id,
+                email=f"{user_id}@test.com",
+                name="Test",
+                role=ProjectRole.ADMIN,
+                is_investigator=True,
+                is_active=True,
+                added_by_kind="owner",
+            )
         )
         await session.commit()
         break

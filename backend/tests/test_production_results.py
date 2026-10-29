@@ -9,7 +9,7 @@ from app.connectors.models import Note, Patient
 from app.export.service import export_annotations, export_results, format_results_csv
 from app.production.models import NotePrediction, ProductionRun, ProductionState
 from app.production.results import refresh_patient_result, refresh_project_results
-from app.projects.models import Project
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser
 
 
 @pytest.mark.asyncio
@@ -21,6 +21,17 @@ async def test_refresh_and_export_production_results(session_factory):
         project = Project(name="Results", owner_id=user.id)
         db.add(project)
         await db.flush()
+        db.add(
+            ProjectUser(
+                global_user_id=user.id,
+                project_id=project.id,
+                email=user.email,
+                name=user.name,
+                role=ProjectRole.ADMIN,
+                is_investigator=True,
+            )
+        )
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.ADMIN))
 
         patient = Patient(
             project_id=project.id,
