@@ -131,8 +131,8 @@ data "aws_iam_policy_document" "task" {
   }
 
   statement {
-    sid       = "ReadProjectDatabaseSecrets"
-    actions   = ["secretsmanager:GetSecretValue"]
+    sid     = "ReadProjectDatabaseSecrets"
+    actions = ["secretsmanager:GetSecretValue"]
     resources = [
       "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${local.project_database_secret_prefix}/*"
     ]

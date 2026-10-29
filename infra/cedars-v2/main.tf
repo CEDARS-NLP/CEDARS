@@ -6,8 +6,8 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  name   = var.name_prefix
-  prefix = "${var.name_prefix}-${var.environment}"
+  name                           = var.name_prefix
+  prefix                         = "${var.name_prefix}-${var.environment}"
   project_database_secret_prefix = var.project_database_secret_prefix != "" ? var.project_database_secret_prefix : "user-${local.prefix}/project-databases"
 
   # Scheme follows enable_https. In the HTTP spike there's no hostname/cert, so
