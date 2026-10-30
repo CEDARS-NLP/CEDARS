@@ -6,23 +6,22 @@ import logging
 from datetime import timedelta
 
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
+from app.common.project_registry import get_project_session_factory_for_id
 from app.common.utils import now_utc
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 MAX_REVIEW_ATTEMPTS = 3
 STALE_REVIEW_JOB_AGE = timedelta(hours=1)
 
 
-def _make_session_factory() -> async_sessionmaker[AsyncSession]:
-    engine = create_async_engine(settings.database_url, echo=False)
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def _make_session_factory(project_id: str) -> async_sessionmaker[AsyncSession]:
+    return await get_project_session_factory_for_id(project_id)
 
 
-async def enqueue_review_job(job_id: str, attempt: int = 0) -> bool:
+async def enqueue_review_job(project_id: str, job_id: str, attempt: int = 0) -> bool:
     """Enqueue one attempt idempotently; the database remains the source of truth."""
     redis = None
     try:
@@ -33,6 +32,7 @@ async def enqueue_review_job(job_id: str, attempt: int = 0) -> bool:
         redis = await create_pool(parse_redis_settings())
         queued = await redis.enqueue_job(
             "finalize_patient_review_job",
+            project_id,
             job_id,
             _job_id=f"patient-review-{job_id}-{attempt}",
         )
@@ -120,6 +120,7 @@ async def _record_failure(
 
 
 async def execute_patient_review_job(
+    project_id: str,
     job_id: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> dict:
@@ -127,7 +128,7 @@ async def execute_patient_review_job(
     from app.annotations.adjudication_service import apply_patient_review_job
     from app.annotations.review_jobs import PatientReviewJob
 
-    factory = session_factory or _make_session_factory()
+    factory = session_factory or await _make_session_factory(project_id)
     async with factory() as session:
         claimed = await _claim_job(session, job_id)
         if not claimed:
@@ -146,11 +147,12 @@ async def execute_patient_review_job(
         logger.exception("Patient review batch %s failed", job_id)
         status, attempt = await _record_failure(factory, job_id, error)
         if status == "queued":
-            await enqueue_review_job(job_id, attempt)
+            await enqueue_review_job(project_id, job_id, attempt)
         return {"status": status or "missing", "job_id": job_id, "attempt_count": attempt}
 
 
 async def recover_patient_review_jobs(
+    project_id: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> int:
     """Re-enqueue queued work and recover jobs abandoned by a worker crash."""
@@ -158,7 +160,7 @@ async def recover_patient_review_jobs(
     from app.connectors.models import Patient, PatientStatus
     from app.production.results import refresh_patient_result
 
-    factory = session_factory or _make_session_factory()
+    factory = session_factory or await _make_session_factory(project_id)
     stale_before = now_utc() - STALE_REVIEW_JOB_AGE
     async with factory() as session:
         stale_jobs = list(
@@ -203,7 +205,7 @@ async def recover_patient_review_jobs(
 
     enqueued = 0
     for job in queued:
-        if await enqueue_review_job(job.id, job.attempt_count):
+        if await enqueue_review_job(project_id, job.id, job.attempt_count):
             enqueued += 1
     return enqueued
 

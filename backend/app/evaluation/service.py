@@ -45,7 +45,7 @@ _LLM_PATIENT_BATCH_SIZE = 100
 _STALLED_LLM_RUN = timedelta(minutes=15)
 
 
-async def _enqueue_eval_pipeline_run(run_id: str) -> None:
+async def _enqueue_eval_pipeline_run(project_id: str, run_id: str) -> None:
     """Enqueue the eval-specific pipeline job (processes PatientResult rows)."""
     try:
         from arq import create_pool
@@ -53,7 +53,7 @@ async def _enqueue_eval_pipeline_run(run_id: str) -> None:
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
-        await redis.enqueue_job("run_eval_pipeline_job", run_id)
+        await redis.enqueue_job("run_eval_pipeline_job", project_id, run_id)
         await redis.aclose()
         logger.info("Enqueued eval pipeline run %s to ARQ", run_id)
     except Exception:
@@ -513,14 +513,14 @@ async def get_cost_summary(db: AsyncSession, session_id: str) -> dict:
     column. The projection scales the sample's measured tokens per classified
     patient by the sample's match rate times the project's patient count.
     """
-    from app.projects.models import Project
+    from app.common.project_registry import load_project
 
     session = (
         await db.execute(select(EvaluationSession).where(EvaluationSession.id == session_id))
     ).scalar_one()
-    project = (
-        await db.execute(select(Project).where(Project.id == session.project_id))
-    ).scalar_one()
+    project = await load_project(session.project_id)
+    if project is None:
+        raise ValueError("Project not found")
     provider, model = project.llm_provider, project.llm_model
 
     # Spend comes from the ledger. PatientResult.token_usage is copied into the
@@ -680,11 +680,11 @@ async def get_funnel_stats(
         round((1 - matched_notes / sample_notes) * 100, 1) if sample_notes > 0 else 0.0
     )
 
-    from app.projects.models import Project
+    from app.common.project_registry import load_project
 
-    project = (
-        await db.execute(select(Project).where(Project.id == session.project_id))
-    ).scalar_one()
+    project = await load_project(session.project_id)
+    if project is None:
+        raise ValueError("Project not found")
     estimated_cost = estimate_cost(
         project.llm_provider,
         project.llm_model,
@@ -844,8 +844,11 @@ async def run_llm_on_sample(
         )
 
     # Validate LLM config
-    from app.projects.models import Project
-    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
+    from app.common.project_registry import load_project
+
+    project = await load_project(project_id)
+    if project is None:
+        raise ValueError("Project not found")
 
     if not project.llm_provider or not project.llm_model:
         raise ValueError(
@@ -926,8 +929,12 @@ async def execute_sample_llm(
     if db_session is not None:
         return await _execute_sample_llm_impl(db_session, session_id, project_id)
 
-    from app.common.database import async_session
-    async with async_session() as db:
+    from app.common.database import get_project_session_factory
+    from app.common.project_registry import require_ready_project_context
+
+    context = await require_ready_project_context(project_id)
+    session_factory = await get_project_session_factory(context)
+    async with session_factory() as db:
         return await _execute_sample_llm_impl(db, session_id, project_id)
 
 
@@ -936,7 +943,7 @@ async def _execute_sample_llm_impl(
     session_id: str,
     project_id: str,
 ) -> dict:
-    from app.projects.models import Project
+    from app.common.project_registry import load_project
 
     session = (
         await db.execute(
@@ -961,7 +968,9 @@ async def _execute_sample_llm_impl(
     matched_patient_ids = {r[0] for r in result.all()}
 
     # Read LLM config from project
-    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
+    project = await load_project(project_id)
+    if project is None:
+        raise ValueError("Project not found")
 
     config = SimpleNamespace(
         name=session.event_name or "",
@@ -1434,10 +1443,11 @@ async def commit_session(
         )
 
     # Read LLM config from project
-    from app.projects.models import Project
-    project = (
-        await db.execute(select(Project).where(Project.id == session.project_id))
-    ).scalar_one()
+    from app.common.project_registry import load_project
+
+    project = await load_project(session.project_id)
+    if project is None:
+        raise ValueError("Project not found")
 
     if not project.llm_provider or not project.llm_model:
         raise ValueError(
@@ -1584,7 +1594,7 @@ async def dispatch_full_pipeline_run(
         config=production_config,
         confirmed=confirmation["confirmed"],
     )
-    await _enqueue_eval_pipeline_run(run.id)
+    await _enqueue_eval_pipeline_run(eval_session.project_id, run.id)
     return SimpleNamespace(id=run.id, total_patients=total_patients)
 
 
@@ -1759,7 +1769,7 @@ async def rerun_pipeline(
         config=production_config,
         confirmed=True,
     )
-    await _enqueue_eval_pipeline_run(run.id)
+    await _enqueue_eval_pipeline_run(project_id, run.id)
     total_patients = await db.scalar(
         select(func.count(Patient.id)).where(
             Patient.project_id == project_id,

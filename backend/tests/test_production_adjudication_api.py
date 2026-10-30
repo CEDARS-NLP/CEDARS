@@ -13,6 +13,7 @@ from app.production.models import (
     ProductionRun,
     ProductionState,
 )
+from app.projects.models import ProjectRole, ProjectUser
 
 
 async def _login_and_project(client: AsyncClient) -> tuple[str, str]:
@@ -258,6 +259,15 @@ async def test_manual_write_rejects_patient_locked_by_another_user(client):
             password_hash="x",
         )
         session.add(other)
+        session.add(
+            ProjectUser(
+                global_user_id=other.id,
+                project_id=project_id,
+                email=other.email,
+                name=other.name,
+                role=ProjectRole.ADMIN,
+            )
+        )
         await session.flush()
         patient.locked_by = other.id
         await session.commit()
@@ -360,7 +370,7 @@ async def test_review_batch_keeps_lock_until_worker_applies_complete_batch(clien
 
     from app.jobs.review import execute_patient_review_job
 
-    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
     assert result["status"] == "completed"
     async with app.state.test_session_factory() as session:
         job = await session.get(PatientReviewJob, job_id)
@@ -401,7 +411,7 @@ async def test_review_batch_unlocks_after_third_worker_failure(client, monkeypat
     from app.jobs.review import execute_patient_review_job
 
     for expected_attempt in (1, 2, 3):
-        result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+        result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
         assert result["attempt_count"] == expected_attempt
 
     async with app.state.test_session_factory() as session:
@@ -439,7 +449,7 @@ async def test_review_batch_accepts_out_of_order_snapshot(client):
     from app.jobs.review import execute_patient_review_job
 
     app = client._transport.app
-    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
     assert result["status"] == "completed"
     async with app.state.test_session_factory() as session:
         patient = await session.get(Patient, patient_id)
@@ -470,7 +480,7 @@ async def test_review_batch_accepts_incomplete_snapshot(client):
     from app.jobs.review import execute_patient_review_job
 
     app = client._transport.app
-    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
     assert result["status"] == "completed"
     async with app.state.test_session_factory() as session:
         patient = await session.get(Patient, patient_id)
@@ -505,7 +515,7 @@ async def test_review_batch_records_note_review_type_and_results(client):
     from app.production.models import ProductionResult
 
     app = client._transport.app
-    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
     assert result["status"] == "completed"
     async with app.state.test_session_factory() as session:
         patient = await session.get(Patient, patient_id)
@@ -553,7 +563,7 @@ async def test_review_batch_marks_llm_negative_note_reviewed(client):
 
     from app.jobs.review import execute_patient_review_job
 
-    result = await execute_patient_review_job(job_id, app.state.test_session_factory)
+    result = await execute_patient_review_job(project_id, job_id, app.state.test_session_factory)
     assert result["status"] == "completed"
     async with app.state.test_session_factory() as session:
         patient = await session.get(Patient, patient_id)

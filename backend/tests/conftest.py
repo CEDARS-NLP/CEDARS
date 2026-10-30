@@ -5,15 +5,15 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation, AnnotationPrediction  # noqa: F401
 from app.annotations.review_jobs import PatientReviewJob  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 from app.auth.models import User  # noqa: F401 — ensure table is registered in metadata
-from app.common.database import get_session
+from app.common.database import get_global_session
+from app.common.model_registry import create_all_metadata, drop_all_metadata
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
+from app.dependencies import get_project_db_session
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
     EvaluationSessionQuerySection,
@@ -30,9 +30,7 @@ from app.pipeline.models import (  # noqa: F401 — register pipeline tables in 
     PipelineRun,
 )
 from app.predictors.models import PredictorConfig  # noqa: F401
-from app.projects.models import Project, ProjectMember  # noqa: F401
-
-TEST_DATABASE_URL = "sqlite+aiosqlite://"
+from app.projects.models import Project, ProjectMember, ProjectUser  # noqa: F401
 
 # When CEDARS_TEST_POSTGRES=1, the whole suite runs against a throwaway Postgres
 # container built from Alembic migrations (not create_all). This catches the
@@ -70,8 +68,7 @@ def _postgres_url():
 
 def _run_migrations(async_url: str) -> None:
     """Run Alembic migrations against the target DB (sync engine under the hood)."""
-    from alembic import command
-    from alembic.config import Config
+    from app.common.migrations import migrate_global_database, migrate_project_database
 
     # Alembic env reads settings.database_url; point it at the test DB.
     os.environ["CEDARS_DATABASE_URL"] = async_url
@@ -79,8 +76,8 @@ def _run_migrations(async_url: str) -> None:
 
     settings.database_url = async_url  # in case settings was already instantiated
 
-    cfg = Config(str(__import__("pathlib").Path(__file__).parent.parent / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    migrate_global_database(async_url)
+    migrate_project_database(async_url)
 
 
 @pytest.fixture(autouse=True)
@@ -96,23 +93,55 @@ def _force_sync_nlp_dispatch():
 
 
 @pytest.fixture
-async def app(_postgres_url):
+async def app(_postgres_url, monkeypatch, tmp_path):
     if _USE_POSTGRES:
         # Build schema from Alembic migrations (matches production), then create
         # a per-test schema by truncating between tests via drop/create all.
         _run_migrations(_postgres_url)
         engine = create_async_engine(_postgres_url, echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(create_all_metadata)
     else:
         engine = create_async_engine(
-            TEST_DATABASE_URL,
+            f"sqlite+aiosqlite:///{tmp_path / 'cedars-test.db'}",
             echo=False,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
         )
         async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+            await conn.run_sync(create_all_metadata)
 
     test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def provision_test_project(session, project):
+        from app.projects.provisioning import seed_project_identities
+
+        await seed_project_identities(session, session, project)
+        project.database_status = "ready"
+        project.database_secret_ref = f"test/{project.id}"
+        await session.commit()
+
+    monkeypatch.setattr("app.projects.service.provision_project", provision_test_project)
+
+    monkeypatch.setattr("app.common.database.global_session_factory", test_session)
+    monkeypatch.setattr("app.common.project_registry.global_session_factory", test_session)
+
+    async def test_project_session_factory(_project_id: str):
+        return test_session
+
+    for module_name in (
+        "app.jobs.ingestion",
+        "app.jobs.nlp",
+        "app.jobs.pipeline",
+        "app.jobs.prediction",
+        "app.jobs.review",
+    ):
+        monkeypatch.setattr(
+            f"{module_name}.get_project_session_factory_for_id",
+            test_project_session_factory,
+        )
+    monkeypatch.setattr(
+        "app.common.project_registry.get_project_session_factory_for_id",
+        test_project_session_factory,
+    )
 
     application = create_app()
     application.state.test_session_factory = test_session
@@ -121,7 +150,8 @@ async def app(_postgres_url):
         async with test_session() as session:
             yield session
 
-    application.dependency_overrides[get_session] = override_get_session
+    application.dependency_overrides[get_global_session] = override_get_session
+    application.dependency_overrides[get_project_db_session] = override_get_session
     yield application
 
     # Drain fire-and-forget background tasks (e.g. the ARQ-unavailable sync
@@ -154,7 +184,7 @@ async def app(_postgres_url):
             await conn.exec_driver_sql("CREATE SCHEMA public")
     else:
         async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.drop_all)
+            await conn.run_sync(drop_all_metadata)
     await engine.dispose()
 
 
@@ -196,16 +226,16 @@ def client_factory(app):
 
 
 async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
-    """Insert a User and Project (+ membership) with the given IDs.
+    """Insert global and project-local user rows with their project.
 
     Model-level unit tests historically used bare placeholder IDs like "proj-1";
-    Postgres enforces the FKs those rows depend on (SQLite did not), so tests
-    must seed real parent rows first. Returns (project_id, user_id).
+    PostgreSQL enforces the global and tenant identity foreign keys that SQLite
+    does not, so tests must seed both identity projections. Returns the IDs.
     """
-    from app.common.database import get_session
+    from app.common.database import get_global_session
     from app.projects.models import ProjectRole
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_global_session]():
         session.add(
             User(id=user_id, email=f"{user_id}@test.com", name="Test", password_hash="x")
         )
@@ -213,6 +243,18 @@ async def seed_project_and_user(app, *, project_id="proj-1", user_id="user-1"):
         await session.flush()
         session.add(
             ProjectMember(project_id=project_id, user_id=user_id, role=ProjectRole.ADMIN)
+        )
+        session.add(
+            ProjectUser(
+                global_user_id=user_id,
+                project_id=project_id,
+                email=f"{user_id}@test.com",
+                name="Test",
+                role=ProjectRole.ADMIN,
+                is_investigator=True,
+                is_active=True,
+                added_by_kind="owner",
+            )
         )
         await session.commit()
         break

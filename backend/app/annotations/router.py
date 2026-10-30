@@ -48,9 +48,8 @@ from app.annotations.service import (
     unlock_patient,
 )
 from app.auth.models import User
-from app.common.database import get_session
 from app.common.errors import raise_not_found
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.evaluation.models import EvaluationSession, PatientResult
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/annotations", tags=["annotations"])
@@ -108,7 +107,7 @@ async def _get_search_keywords(
 @router.get("/estimate", response_model=BulkEstimateResponse)
 async def estimate_predictions_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Estimate token usage for bulk predictions on unprocessed target sentences."""
@@ -121,7 +120,7 @@ async def estimate_predictions_endpoint(
 @router.post("/run", response_model=BulkRunResponse)
 async def run_predictions_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Run the active predictor on all unprocessed target sentences."""
@@ -138,7 +137,7 @@ async def run_predictions_endpoint(
 @router.post("/predictions/run", response_model=PredictionJobResponse)
 async def dispatch_predictions_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Dispatch a background prediction job for all unprocessed target sentences."""
@@ -152,7 +151,7 @@ async def dispatch_predictions_endpoint(
 @router.get("/predictions/status", response_model=PredictionJobResponse | None)
 async def prediction_status_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get the latest prediction job status for this project."""
@@ -162,7 +161,7 @@ async def prediction_status_endpoint(
 @router.post("/predictions/cancel")
 async def cancel_predictions_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     """Cancel the running prediction job."""
@@ -182,7 +181,7 @@ async def list_annotations_endpoint(
     patient_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await list_annotations(
@@ -194,7 +193,7 @@ async def list_annotations_endpoint(
 @router.get("/stats", response_model=AnnotationStatsResponse)
 async def annotation_stats_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     return await get_annotation_stats(session, project_id)
@@ -204,7 +203,7 @@ async def annotation_stats_endpoint(
 async def next_unreviewed_endpoint(
     project_id: str,
     patient_id: str | None = None,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Get the next unreviewed annotation for the review queue."""
@@ -218,7 +217,7 @@ async def next_unreviewed_endpoint(
 @router.get("/patient/next", response_model=NextPatientResponse)
 async def next_patient_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Get and lock the next patient with unreviewed annotations."""
@@ -235,7 +234,7 @@ async def submit_patient_review_batch_endpoint(
     patient_id: str,
     body: ReviewBatchRequest,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Persist a completed client-side review batch and queue atomic finalization."""
@@ -255,7 +254,9 @@ async def submit_patient_review_batch_endpoint(
     if job.status == "queued":
         from app.jobs.review import enqueue_review_job
 
-        background_tasks.add_task(enqueue_review_job, job.id, job.attempt_count)
+        background_tasks.add_task(
+            enqueue_review_job, project_id, job.id, job.attempt_count
+        )
     return ReviewBatchResponse(
         job_id=job.id,
         status=job.status,
@@ -268,7 +269,7 @@ async def submit_patient_review_batch_endpoint(
 @router.get("/review-batches/failed")
 async def failed_review_batches_endpoint(
     project_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     jobs = (
@@ -300,7 +301,7 @@ async def failed_review_batches_endpoint(
 async def request_review_batch_retry_endpoint(
     project_id: str,
     job_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     from app.jobs.review import request_patient_review_retry
@@ -318,7 +319,7 @@ async def retry_review_batch_endpoint(
     project_id: str,
     job_id: str,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     from app.jobs.review import enqueue_review_job, retry_patient_review_job
@@ -337,7 +338,7 @@ async def retry_review_batch_endpoint(
 async def discard_review_batch_endpoint(
     project_id: str,
     job_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin")),
 ):
     from app.jobs.review import discard_failed_patient_review_job
@@ -355,7 +356,7 @@ async def discard_review_batch_endpoint(
 async def patient_annotations_endpoint(
     project_id: str,
     patient_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get all annotations for a patient, sorted by note_date and sentence position."""
@@ -366,7 +367,7 @@ async def patient_annotations_endpoint(
 async def patient_review_cursor_endpoint(
     project_id: str,
     patient_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     try:
@@ -387,7 +388,7 @@ async def navigate_patient_review_endpoint(
     project_id: str,
     patient_id: str,
     action: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     if action not in {"first_anno", "prev_10", "prev_1", "next_1", "next_10", "last_anno"}:
@@ -411,7 +412,7 @@ async def navigate_patient_review_endpoint(
 async def patient_stats_endpoint(
     project_id: str,
     patient_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get review stats for a specific patient."""
@@ -422,7 +423,7 @@ async def patient_stats_endpoint(
 async def unlock_patient_endpoint(
     project_id: str,
     patient_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Unlock a patient (release review lock)."""
@@ -434,7 +435,7 @@ async def unlock_patient_endpoint(
 async def reopen_patient_endpoint(
     project_id: str,
     patient_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin")),
 ):
     """Re-queue a reviewed patient. Admin only. Preserves annotation decisions."""
@@ -456,7 +457,7 @@ async def reopen_patient_endpoint(
 async def get_annotation_endpoint(
     project_id: str,
     annotation_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     annotation = await get_annotation(session, project_id, annotation_id)
@@ -469,7 +470,7 @@ async def get_annotation_endpoint(
 async def annotation_context_endpoint(
     project_id: str,
     annotation_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get the full note context for an annotation (for review UI)."""
@@ -494,7 +495,7 @@ async def patient_matched_notes_endpoint(
     project_id: str,
     patient_id: str,
     annotation_id: str = Query(..., description="Annotation ID to trace pipeline run"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
 ):
     """Get all notes with keyword matches for a patient (for pipeline annotations)."""
@@ -519,7 +520,7 @@ async def review_annotation_endpoint(
     project_id: str,
     annotation_id: str,
     body: ReviewRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as reviewed, optionally with an event date."""
@@ -544,7 +545,7 @@ async def review_annotation_endpoint(
 async def delete_event_date_endpoint(
     project_id: str,
     annotation_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Delete an event date and revert skipped annotations."""
@@ -567,7 +568,7 @@ async def delete_event_date_endpoint(
 async def skip_annotation_endpoint(
     project_id: str,
     annotation_id: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     current_user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Mark an annotation as skipped."""

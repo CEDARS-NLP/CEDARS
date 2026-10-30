@@ -18,8 +18,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -44,7 +46,7 @@ class ReviewType(str, enum.Enum):
     HUMAN = "human"
 
 
-class Annotation(SQLModel, table=True):
+class Annotation(ProjectSQLModel, table=True):
     """A production match row using the physical v1 Annotations contract."""
 
     __tablename__ = "Annotations"
@@ -77,7 +79,7 @@ class Annotation(SQLModel, table=True):
         default=None,
         sa_column=Column(Integer, primary_key=True, autoincrement=True),
     )
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     text_id: str = Field(max_length=100)
     patient_id: str = Field(max_length=100)
     text_date: date = Field(sa_column=Column(Date, nullable=False))
@@ -98,7 +100,7 @@ class Annotation(SQLModel, table=True):
     patient_uuid: str | None = Field(default=None, foreign_key="patients.id", index=True)
     note_uuid: str | None = Field(default=None, foreign_key="notes.id", index=True)
     review_reason: str | None = Field(default=None, max_length=80)
-    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     reviewed_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
@@ -164,7 +166,7 @@ class Annotation(SQLModel, table=True):
         }[normalized]
 
 
-class AnnotationPrediction(SQLModel, table=True):
+class AnnotationPrediction(ProjectSQLModel, table=True):
     """An optional predictor (LLM/PINES) verdict layered on top of an annotation.
 
     Keyword/spaCy matching alone produces annotations; running a predictor adds
@@ -180,7 +182,7 @@ class AnnotationPrediction(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     annotation_id: int = Field(foreign_key="Annotations.annotation_id", index=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     predictor_config_id: str | None = Field(
         default=None, foreign_key="predictor_configs.id", index=True
     )

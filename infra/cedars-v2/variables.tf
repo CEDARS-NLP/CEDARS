@@ -113,6 +113,26 @@ variable "db_master_username" {
   default     = "cedars"
 }
 
+variable "runtime_database_url_secret_arn" {
+  description = "Externally managed user-prefixed secret ARN containing the least-privilege runtime database URL. Secret values must not be stored in Terraform state."
+  type        = string
+
+  validation {
+    condition     = can(regex(":secret:user-[^:]+$", var.runtime_database_url_secret_arn))
+    error_message = "runtime_database_url_secret_arn must reference a Secrets Manager secret whose name starts with user-."
+  }
+}
+
+variable "provisioning_database_url_secret_arn" {
+  description = "Externally managed user-prefixed secret ARN containing the project database provisioning URL. Secret values must not be stored in Terraform state."
+  type        = string
+
+  validation {
+    condition     = can(regex(":secret:user-[^:]+$", var.provisioning_database_url_secret_arn))
+    error_message = "provisioning_database_url_secret_arn must reference a Secrets Manager secret whose name starts with user-."
+  }
+}
+
 variable "db_engine_version" {
   description = "Aurora PostgreSQL engine version (matches in-account 16.11)"
   type        = string
@@ -249,6 +269,23 @@ variable "bedrock_foundation_model_arns" {
   description = "Bedrock foundation-model ARNs referenced by inference profiles (cross-region invoke needs the underlying model ARNs too)."
   type        = list(string)
   default     = ["arn:aws:bedrock:*::foundation-model/anthropic.*"]
+}
+
+variable "secrets_manager_endpoint_url" {
+  description = "Optional Secrets Manager endpoint override for local parity only; leave empty in AWS."
+  type        = string
+  default     = ""
+}
+
+variable "project_database_secret_prefix" {
+  description = "Optional user-prefixed Secrets Manager path for tenant database URLs; defaults to this environment's CEDARS path."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.project_database_secret_prefix == "" || startswith(var.project_database_secret_prefix, "user-")
+    error_message = "project_database_secret_prefix must be empty or start with user-."
+  }
 }
 
 variable "log_retention_days" {

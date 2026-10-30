@@ -37,6 +37,8 @@ class ProjectResponse(BaseModel):
     llm_api_key_set: bool = False
     created_at: str
     role: str | None = None  # User's role in this project
+    database_status: str = "provisioning"
+    provisioning_error: str | None = None
 
 
 class ProjectMemberResponse(BaseModel):

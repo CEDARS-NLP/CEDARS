@@ -8,9 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
 from app.common.utils import now_utc
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 from app.llm.usage import LlmUsage
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/llm-usage", tags=["llm-usage"])
@@ -68,7 +67,7 @@ def _totals(row) -> dict:
 async def llm_usage_report(
     project_id: str,
     days: int = Query(30, ge=1, le=365),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Tokens and estimated cost for every LLM call the project made in the window."""

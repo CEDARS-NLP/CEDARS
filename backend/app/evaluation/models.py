@@ -11,8 +11,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Column, DateTime, Index, String, Text, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -46,11 +48,11 @@ PATIENT_RESULT_TRANSITIONS = {
 }
 
 
-class EvaluationSession(SQLModel, table=True):
+class EvaluationSession(ProjectSQLModel, table=True):
     __tablename__ = "evaluation_sessions_v2"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
 
     # Status — stored as VARCHAR to avoid PG enum conflicts with old migrations
     status: SessionStatus = Field(
@@ -82,13 +84,13 @@ class EvaluationSession(SQLModel, table=True):
     committed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-    committed_by: str | None = Field(default=None, foreign_key="users.id")
+    committed_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
 
     # Clone
     cloned_from_id: str | None = Field(default=None, foreign_key="evaluation_sessions_v2.id")
 
     # Audit
-    created_by: str = Field(foreign_key="users.id")
+    created_by: str = Field(foreign_key="ProjectUsers.global_user_id")
     created_at: datetime = Field(
         default_factory=now_utc,
         sa_column=Column(DateTime(timezone=True), default=lambda: now_utc()),
@@ -99,7 +101,7 @@ class EvaluationSession(SQLModel, table=True):
     )
 
 
-class EvaluationSessionQuerySection(SQLModel, table=True):
+class EvaluationSessionQuerySection(ProjectSQLModel, table=True):
     __tablename__ = "evaluation_session_query_sections"
     __table_args__ = (
         UniqueConstraint("session_id", "position", name="uq_eval_query_section_position"),
@@ -112,7 +114,7 @@ class EvaluationSessionQuerySection(SQLModel, table=True):
     type: str = Field(sa_column=Column(String(10), nullable=False))
 
 
-class SearchMatch(SQLModel, table=True):
+class SearchMatch(ProjectSQLModel, table=True):
     __tablename__ = "search_matches"
     __table_args__ = (
         Index("ix_search_matches_session_query", "session_id", "query_index"),
@@ -133,7 +135,7 @@ class SearchMatch(SQLModel, table=True):
     )
 
 
-class PatientResult(SQLModel, table=True):
+class PatientResult(ProjectSQLModel, table=True):
     __tablename__ = "patient_results"
     __table_args__ = (
         Index("ix_patient_results_session_status", "session_id", "status"),
@@ -160,7 +162,7 @@ class PatientResult(SQLModel, table=True):
     # Clinician review
     review_judgment: str | None = Field(default=None, max_length=20)
     reviewer_date_override: str | None = Field(default=None, max_length=10)
-    reviewed_by: str | None = Field(default=None, foreign_key="users.id")
+    reviewed_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     reviewed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )

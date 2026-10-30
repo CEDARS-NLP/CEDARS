@@ -5,8 +5,9 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+from app.common.model_registry import GlobalSQLModel
 from app.common.utils import now_utc
 
 
@@ -17,7 +18,7 @@ class UserRole(str, enum.Enum):
     USER = "user"
 
 
-class User(SQLModel, table=True):
+class User(GlobalSQLModel, table=True):
     """Platform user account."""
 
     __tablename__ = "users"

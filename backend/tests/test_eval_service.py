@@ -1,23 +1,21 @@
 """Tests for evaluation service: session CRUD and search execution."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation  # noqa: F401
 from app.audit.models import AuditEntry  # noqa: F401
 
 # Import ALL models so SQLModel.metadata.create_all creates all tables
 from app.auth.models import User  # noqa: F401
+from app.common.model_registry import create_all_metadata, drop_all_metadata
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation import service as eval_service
 from app.evaluation.models import (
-    EvaluationSession,
-    EvaluationSessionQuerySection,
     PatientResult,
     PatientResultStatus,
     SearchMatch,
@@ -27,17 +25,15 @@ from app.evaluation.query_expression import normalize_queries
 from app.jobs.models import BackgroundJob  # noqa: F401
 from app.llm.usage import add_usage
 from app.nlp.models import NlpJob, SearchQuery, Sentence  # noqa: F401
+from app.pipeline.classifier import ClassificationResult
 from app.pipeline.models import EventConfig as _EC  # noqa: F401
-from app.pipeline.models import Evidence as _Ev
-from app.pipeline.models import PatientTask as _PT
-from app.pipeline.models import PipelineRun as _PR
-from app.production.models import NotePrediction, ProductionRun
 from app.predictors.models import PredictorConfig  # noqa: F401
+from app.production.models import NotePrediction, ProductionRun
 from app.projects.models import Project, ProjectMember  # noqa: F401
 
 
 @pytest.fixture
-async def db():
+async def db(monkeypatch):
     """In-memory SQLite database with all tables created."""
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -45,12 +41,18 @@ async def db():
         poolclass=StaticPool,
     )
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(create_all_metadata)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
+        async def load_project_from_test_db(project_id: str):
+            return await session.get(Project, project_id)
+
+        monkeypatch.setattr(
+            "app.common.project_registry.load_project", load_project_from_test_db
+        )
         yield session
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+        await conn.run_sync(drop_all_metadata)
     await engine.dispose()
 
 
@@ -826,13 +828,6 @@ class TestUpdateLlmConfig:
         assert not hasattr(updated, "bogus_field") or getattr(updated, "bogus_field", None) is None
 
 
-# ── Helpers for LLM tests ────────────────────────────────────────
-
-from unittest.mock import AsyncMock
-
-from app.pipeline.classifier import ClassificationResult
-
-
 def _mock_parse_query(query_str):
     """Return a fake query group matching 'troponin'."""
     return [[{"pattern": [{"LOWER": "troponin"}], "negated": False, "text": "troponin"}]]
@@ -1392,6 +1387,7 @@ class TestCommit:
     @pytest.mark.parametrize("exclude_negated", [True, False])
     async def test_commit_activates_one_merged_legacy_expression(self, seeded_db, exclude_negated):
         from sqlalchemy import select
+
         from app.nlp.schemas import ReprocessRequest
 
         session = await eval_service.create_session(seeded_db, "proj-1", "user-1")

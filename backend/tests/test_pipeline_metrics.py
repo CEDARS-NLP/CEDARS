@@ -9,7 +9,7 @@ from tests.test_pipeline_orchestration import _seed_patients
 async def _setup_run_with_annotations(app, client, reviewed=True):
     """Create a project, seed patients, run sample, inject reviewed annotations."""
     from app.annotations.models import Annotation
-    from app.common.database import get_session
+    from app.dependencies import get_project_db_session
     from app.pipeline.models import PatientTask, PatientTaskStatus, PipelineRun, PipelineRunStatus
     from app.production.models import NotePrediction, ProductionRun
 
@@ -29,7 +29,7 @@ async def _setup_run_with_annotations(app, client, reviewed=True):
     run_id = run_resp.json()["id"]
 
     # Simulate completed tasks with annotations
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         run = await session.get(PipelineRun, run_id)
         run.status = PipelineRunStatus.COMPLETED
         session.add(run)

@@ -5,7 +5,8 @@ import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.common.database import async_session
+from app.common.database import get_project_session_factory
+from app.common.project_registry import require_ready_project_context
 from app.jobs.models import BackgroundJob, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ async def job_progress_ws(websocket: WebSocket, project_id: str, job_id: str):
     Polls the BackgroundJob table every 1s and pushes updates to the client.
     Closes when the job reaches a terminal state (completed, failed, cancelled).
     """
+    context = await require_ready_project_context(project_id)
+    session_factory = await get_project_session_factory(context)
     await websocket.accept()
 
     terminal_statuses = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
@@ -24,7 +27,7 @@ async def job_progress_ws(websocket: WebSocket, project_id: str, job_id: str):
 
     try:
         while True:
-            async with async_session() as session:
+            async with session_factory() as session:
                 job = await session.get(BackgroundJob, job_id)
 
             if not job or job.project_id != project_id:

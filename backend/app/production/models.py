@@ -16,12 +16,14 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
-class ProductionRun(SQLModel, table=True):
+class ProductionRun(ProjectSQLModel, table=True):
     """Immutable run identity plus mutable lifecycle and progress metadata."""
 
     __tablename__ = "production_runs"
@@ -31,8 +33,8 @@ class ProductionRun(SQLModel, table=True):
     )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str = Field(foreign_key="projects.id", index=True)
-    created_by: str | None = Field(default=None, foreign_key="users.id")
+    project_id: str = Field(index=True)
+    created_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     status: str = Field(default="queued", max_length=20, index=True)
     config_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     config_fingerprint: str | None = Field(default=None, max_length=128)
@@ -51,12 +53,12 @@ class ProductionRun(SQLModel, table=True):
     cancelled_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
 
 
-class ProductionState(SQLModel, table=True):
+class ProductionState(ProjectSQLModel, table=True):
     """One project-scoped pointer to its active run; run history remains unrestricted."""
 
     __tablename__ = "production_states"
 
-    project_id: str = Field(primary_key=True, foreign_key="projects.id")
+    project_id: str = Field(primary_key=True)
     active_run_id: str | None = Field(default=None, foreign_key="production_runs.id", unique=True)
     generation: int = Field(default=0)
     updated_at: datetime = Field(
@@ -65,7 +67,7 @@ class ProductionState(SQLModel, table=True):
     )
 
 
-class NotePrediction(SQLModel, table=True):
+class NotePrediction(ProjectSQLModel, table=True):
     """The active production verdict and execution record for one source note."""
 
     __tablename__ = "note_predictions"
@@ -85,7 +87,7 @@ class NotePrediction(SQLModel, table=True):
     )
 
     id: int | None = Field(default=None, sa_column=Column(Integer, primary_key=True))
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     run_id: str = Field(foreign_key="production_runs.id", index=True)
     text_id: str = Field(max_length=100)
     patient_id: str = Field(max_length=100)
@@ -113,7 +115,7 @@ class NotePrediction(SQLModel, table=True):
     )
 
 
-class ProductionResult(SQLModel, table=True):
+class ProductionResult(ProjectSQLModel, table=True):
     """One project-level production summary row per source patient (physical RESULTS)."""
 
     __tablename__ = "RESULTS"
@@ -139,7 +141,7 @@ class ProductionResult(SQLModel, table=True):
     )
 
     id: int | None = Field(default=None, sa_column=Column(Integer, primary_key=True))
-    project_id: str = Field(foreign_key="projects.id", index=True)
+    project_id: str = Field(index=True)
     patient_uuid: str = Field(foreign_key="patients.id", index=True)
     patient_id: str = Field(max_length=100)
     processing_status: str = Field(default="queued", max_length=20)
@@ -168,7 +170,7 @@ class ProductionResult(SQLModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     max_score_note_id: str | None = Field(default=None, max_length=100)
-    reviewer: str | None = Field(default=None, foreign_key="users.id")
+    reviewer: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     reviewed_notes: int = Field(default=0)
     reviewed_sentences: int = Field(default=0)
     total_notes: int = Field(default=0)

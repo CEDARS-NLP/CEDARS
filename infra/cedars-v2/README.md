@@ -77,8 +77,8 @@ Consequence, split by role:
 
 | Role | Provisioned by | How |
 |------|---------------|-----|
-| **Execution** (ECR pull, logs, read `user-cedars-v2-*` secrets) | **this module** | `create_execution_role = true` (default) — self-service |
-| **Task** (S3 to CEDARS bucket + `bedrock:InvokeModel`) | **IAM admin / automation** | pre-created; set `task_role_arn` |
+| **Execution** (ECR pull, logs, inject runtime/provisioning DSNs and app key) | **this module** | `create_execution_role = true` (default) — self-service |
+| **Task** (S3, Bedrock, and tenant Secrets Manager access) | **IAM admin / automation** | pre-created; set `task_role_arn` |
 
 **Ask the IAM admin to create the task role** (mirrors the existing
 `bedrockServiceAccess-clinical-trials-research-backend-task`):
@@ -91,6 +91,23 @@ Consequence, split by role:
   - `kms:Decrypt`,`kms:GenerateDataKey` (via `s3.us-east-1.amazonaws.com`)
   - `bedrock:InvokeModel`,`bedrock:InvokeModelWithResponseStream` on the Anthropic
     inference-profile + foundation-model ARNs
+  - `secretsmanager:GetSecretValue` on
+    `arn:aws:secretsmanager:<region>:<account>:secret:user-cedars-v2-<env>/project-databases/*`
+  - `secretsmanager:CreateSecret` on `*`, conditioned on
+    `secretsmanager:Name` matching `user-cedars-v2-<env>/project-databases/*`
+
+The ECS execution role also needs `secretsmanager:GetSecretValue` on the exact
+runtime database URL, provisioning database URL, and application-key secret ARNs.
+Set `runtime_database_url_secret_arn` and
+`provisioning_database_url_secret_arn` to externally managed, `user-`-prefixed
+Secrets Manager ARNs before planning. Terraform deliberately does not manage
+their secret values. The provisioning DSN is injected only into the backend task;
+the worker and migration tasks receive only the runtime DSN.
+
+Create the runtime and project-provisioner PostgreSQL roles through the approved
+database bootstrap process. The runtime user must be a non-superuser owner of
+tenant databases; the separate provisioner requires `CREATEDB` and membership in
+the runtime role. Keep the Aurora master login out of application task definitions.
 
 (If you later get elevated IAM rights, set `create_task_role = true` and the module
 builds this exact policy itself — see `iam.tf`.)

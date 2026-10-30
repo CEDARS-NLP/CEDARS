@@ -69,14 +69,13 @@ async def test_dispatch_uses_production_without_copying_sample_results(app):
             "app.evaluation.service._enqueue_eval_pipeline_run", new_callable=AsyncMock
         ) as enqueue:
             run_adapter = await dispatch_full_pipeline_run(db, session)
-        enqueue.assert_awaited_once_with(run_adapter.id)
+        enqueue.assert_awaited_once_with(project_id, run_adapter.id)
 
     def match_note(text, query_groups):
         return process_note(text, query_groups)
 
-    with patch("app.common.database.async_session", app.state.test_session_factory), \
-         patch("app.production.service.process_note", side_effect=match_note) as matcher:
-        result = await run_eval_pipeline_job({}, run_adapter.id)
+    with patch("app.production.service.process_note", side_effect=match_note) as matcher:
+        result = await run_eval_pipeline_job({}, project_id, run_adapter.id)
 
     assert result["failed"] == 0
     matcher.assert_called_once()

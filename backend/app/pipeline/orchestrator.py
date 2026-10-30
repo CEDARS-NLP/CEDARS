@@ -42,7 +42,7 @@ async def _check_no_active_run(session: AsyncSession, event_config_id: str) -> N
         raise ValueError("An active pipeline run already exists for this event config")
 
 
-async def _enqueue_pipeline_run(run_id: str) -> None:
+async def _enqueue_pipeline_run(project_id: str, run_id: str) -> None:
     """Enqueue a pipeline run to the ARQ worker queue."""
     try:
         from arq import create_pool
@@ -50,7 +50,7 @@ async def _enqueue_pipeline_run(run_id: str) -> None:
         from app.worker import parse_redis_settings
 
         redis = await create_pool(parse_redis_settings())
-        await redis.enqueue_job("run_pipeline_job", run_id)
+        await redis.enqueue_job("run_pipeline_job", project_id, run_id)
         await redis.aclose()
         logger.info("Enqueued pipeline run %s to ARQ", run_id)
     except Exception:
@@ -156,7 +156,7 @@ async def dispatch_sample_run(
 
     await session.commit()
     await session.refresh(run)
-    await _enqueue_pipeline_run(run.id)
+    await _enqueue_pipeline_run(project_id, run.id)
     return run
 
 
@@ -237,7 +237,7 @@ async def dispatch_full_run(
     session.add(run)
     await session.commit()
     await session.refresh(run)
-    await _enqueue_pipeline_run(run.id)
+    await _enqueue_pipeline_run(project_id, run.id)
     return run
 
 
@@ -361,7 +361,7 @@ async def rerun(
 
     await session.commit()
     await session.refresh(new_run)
-    await _enqueue_pipeline_run(new_run.id)
+    await _enqueue_pipeline_run(project_id, new_run.id)
     return new_run
 
 
@@ -396,7 +396,7 @@ async def retry_failed(
     session.add(run)
     await session.commit()
     await session.refresh(run)
-    await _enqueue_pipeline_run(run.id)
+    await _enqueue_pipeline_run(project_id, run.id)
     return run
 
 

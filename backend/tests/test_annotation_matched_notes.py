@@ -10,7 +10,6 @@ from datetime import UTC, date, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 
 from app.annotations.models import Annotation, ReviewStatus  # noqa: F401
 from app.annotations.query_service import get_patient_matched_notes
@@ -18,6 +17,7 @@ from app.audit.models import AuditEntry  # noqa: F401
 
 # Import ALL models so SQLModel.metadata.create_all creates every table.
 from app.auth.models import User  # noqa: F401
+from app.common.model_registry import create_all_metadata, drop_all_metadata
 from app.connectors.models import DataSource, Note, Patient  # noqa: F401
 from app.evaluation.models import (  # noqa: F401
     EvaluationSession,
@@ -40,12 +40,12 @@ async def db():
         poolclass=StaticPool,
     )
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(create_all_metadata)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         yield session
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+        await conn.run_sync(drop_all_metadata)
     await engine.dispose()
 
 

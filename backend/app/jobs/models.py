@@ -5,8 +5,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import JSON, Column, DateTime, Text
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
+import app.projects.models  # noqa: F401
+from app.common.model_registry import ProjectSQLModel
 from app.common.utils import now_utc
 
 
@@ -29,13 +31,13 @@ class JobStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
-class BackgroundJob(SQLModel, table=True):
+class BackgroundJob(ProjectSQLModel, table=True):
     """Tracks background jobs dispatched via ARQ."""
 
     __tablename__ = "background_jobs"
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
+    project_id: str | None = Field(default=None, index=True)
     job_type: JobType
     arq_job_id: str | None = Field(default=None, index=True)
     status: JobStatus = Field(default=JobStatus.PENDING)
@@ -49,7 +51,7 @@ class BackgroundJob(SQLModel, table=True):
         sa_column=Column(Text, nullable=True),
     )
     is_cancelled: bool = Field(default=False)
-    created_by: str | None = Field(default=None, foreign_key="users.id")
+    created_by: str | None = Field(default=None, foreign_key="ProjectUsers.global_user_id")
     started_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

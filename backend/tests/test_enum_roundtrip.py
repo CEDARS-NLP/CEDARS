@@ -24,7 +24,6 @@ import pytest
 from app.annotations.models import Annotation, ReviewStatus
 from app.audit.models import AuditAction, AuditEntry
 from app.auth.models import User, UserRole
-from app.common.database import get_session
 from app.common.utils import now_utc
 from app.connectors.models import (
     ConnectorType,
@@ -34,6 +33,7 @@ from app.connectors.models import (
     Patient,
     PatientStatus,
 )
+from app.dependencies import get_project_db_session
 from app.evaluation.models import (
     EvaluationSession,
     PatientResult,
@@ -190,7 +190,7 @@ async def test_all_enums_roundtrip_identically(app):
     """
     pid, uid = await seed_project_and_user(app)
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         parents = await _seed_parents(session, pid, uid)
         specs = _build_specs(pid, uid, parents)
 
@@ -269,7 +269,7 @@ async def test_patient_task_no_match_roundtrips(app):
     """
     pid, uid = await seed_project_and_user(app)
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         parents = await _seed_parents(session, pid, uid)
         task = PatientTask(
             pipeline_run_id=parents["run_id"],
@@ -291,7 +291,7 @@ async def test_job_status_cancelled_roundtrips(app):
     (b5f066242811). BackgroundJob binds the enum NAME (native uppercase type),
     so this confirms the ALTER used the matching representation.
     """
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         job = BackgroundJob(job_type=JobType.NLP, status=JobStatus.CANCELLED)
         session.add(job)
         await session.commit()

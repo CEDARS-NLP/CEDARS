@@ -42,11 +42,11 @@ async def test_project_stats_with_data(app, client):
 
     from datetime import UTC, datetime
 
-    from app.common.database import get_session
     from app.connectors.models import Note, Patient, PatientStatus
+    from app.dependencies import get_project_db_session
     from app.nlp.models import Sentence
 
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         p = Patient(
             project_id=project_id, patient_id_ext="P001", status=PatientStatus.NLP_COMPLETE
         )

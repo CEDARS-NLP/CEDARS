@@ -1,10 +1,9 @@
 """API integration tests for data source endpoints."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 # -- Helpers ───────────────────────────────────────────────────────
 
@@ -332,11 +331,26 @@ class TestPatientSearch:
             b"MRN003,N003,Note three,2024-01-03\n"
         )
         import asyncio
+        import time
+
         with patch("app.connectors.file_upload.download_file", return_value=csv_data):
-            await client.post(
+            ingest_resp = await client.post(
                 f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest",
             )
-            await asyncio.sleep(0.5)
+            assert ingest_resp.status_code == 200
+            deadline = time.monotonic() + 10
+            while True:
+                status_resp = await client.get(
+                    f"/api/v1/projects/{project_id}/data/sources/{ds_id}/ingest/status",
+                )
+                assert status_resp.status_code == 200
+                job_status = status_resp.json()
+                if job_status and job_status["job_id"] == ingest_resp.json()["job_id"]:
+                    if job_status["status"] in ("completed", "failed"):
+                        break
+                assert time.monotonic() < deadline, "Ingestion job did not finish within 10 seconds"
+                await asyncio.sleep(0.05)
+            assert job_status["status"] == "completed", job_status.get("error_message")
         return project_id
 
     async def test_search_patients_by_ext_id(self, client):

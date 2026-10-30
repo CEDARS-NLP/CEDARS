@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.annotations.models import Annotation, ReviewStatus
-from app.auth.models import User
 from app.connectors.models import Note, Patient, PatientStatus
 from app.jobs.models import BackgroundJob, JobStatus
 from app.nlp.models import Sentence
+from app.projects.models import ProjectUser
 
 
 async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
@@ -76,16 +76,16 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
     annotator_q = await session.execute(
         select(
             col(Annotation.reviewed_by),
-            col(User.email),
-            col(User.name),
+            col(ProjectUser.email),
+            col(ProjectUser.name),
             func.count(col(Annotation.annotation_id)),
         )
-        .join(User, col(Annotation.reviewed_by) == col(User.id))
+        .join(ProjectUser, col(Annotation.reviewed_by) == col(ProjectUser.global_user_id))
         .where(
             col(Annotation.project_id) == project_id,
             col(Annotation.reviewed_by).isnot(None),
         )
-        .group_by(col(Annotation.reviewed_by), col(User.email), col(User.name))
+        .group_by(col(Annotation.reviewed_by), col(ProjectUser.email), col(ProjectUser.name))
     )
     annotator_by_id = {
         row[0]: {
@@ -98,15 +98,20 @@ async def get_project_stats(session: AsyncSession, project_id: str) -> dict:
         for row in annotator_q.all()
     }
     event_reviewer_q = await session.execute(
-        select(col(Patient.event_reviewer), col(User.email), col(User.name), func.count(col(Patient.id)))
-        .join(User, col(Patient.event_reviewer) == col(User.id))
+        select(
+            col(Patient.event_reviewer),
+            col(ProjectUser.email),
+            col(ProjectUser.name),
+            func.count(col(Patient.id)),
+        )
+        .join(ProjectUser, col(Patient.event_reviewer) == col(ProjectUser.global_user_id))
         .where(
             col(Patient.project_id) == project_id,
             col(Patient.deleted_at).is_(None),
             col(Patient.event_date).is_not(None),
             col(Patient.event_reviewer).is_not(None),
         )
-        .group_by(col(Patient.event_reviewer), col(User.email), col(User.name))
+        .group_by(col(Patient.event_reviewer), col(ProjectUser.email), col(ProjectUser.name))
     )
     for row in event_reviewer_q.all():
         annotator = annotator_by_id.setdefault(

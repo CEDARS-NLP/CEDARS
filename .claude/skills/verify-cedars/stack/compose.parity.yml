@@ -22,11 +22,14 @@ x-app-env: &app-env
   CEDARS_S3_SECRET_KEY: ""
   CEDARS_S3_REGION: us-east-1
   CEDARS_S3_BUCKET: ${CV_BUCKET}
+  CEDARS_AWS_REGION: us-east-1
+  CEDARS_SECRETS_MANAGER_ENDPOINT_URL: http://localstack:4566
+  CEDARS_PROJECT_DATABASE_SECRET_PREFIX: user-cedars-v2-dev/project-databases
   CEDARS_COOKIE_SECURE: "false"
   CEDARS_CORS_ORIGINS: http://localhost:5173
   CEDARS_ALLOW_CLOUD_LLM: "true"
   # ecs.tf local.app_secrets. Same DSN shape as rds.tf aws_secretsmanager_secret_version.db_url.
-  CEDARS_DATABASE_URL: postgresql+asyncpg://cedars:${CV_DB_PASSWORD}@postgres:5432/cedars
+  CEDARS_DATABASE_URL: postgresql+asyncpg://cedars_runtime:runtime-local-only@postgres:5432/cedars
   CEDARS_SECRET_KEY: ${CV_SECRET_KEY}
   # Stand-ins for what Fargate and the task role supply implicitly. The app never
   # sees these through Settings. They feed boto3's default chain, just as the task
@@ -39,9 +42,11 @@ x-app-env: &app-env
 
 x-app-depends: &app-depends
   postgres: { condition: service_healthy }
+  postgres-roles: { condition: service_completed_successfully }
   redis: { condition: service_healthy }
   s3-init: { condition: service_completed_successfully }
   migrate: { condition: service_completed_successfully }
+  localstack: { condition: service_healthy }
 
 services:
   alb:  # aws_lb.main + listener rules + target groups (alb.tf)
@@ -64,7 +69,9 @@ services:
   backend:  # aws_ecs_service.backend: 2 tasks, 1024 CPU / 2048 MiB, image CMD (no command override)
     image: ${CV_BACKEND_IMAGE}
     platform: ${CV_PLATFORM}
-    environment: *app-env
+    environment:
+      <<: *app-env
+      CEDARS_PROJECT_PROVISIONING_DATABASE_URL: postgresql+asyncpg://cedars_project_provisioner:provisioner-local-only@postgres:5432/cedars
     depends_on: *app-depends
     deploy:
       replicas: 2
@@ -97,6 +104,7 @@ services:
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }
+      postgres-roles: { condition: service_completed_successfully }
     restart: "no"
     deploy:
       resources: { limits: { cpus: "0.5", memory: 1024M } }
@@ -108,12 +116,27 @@ services:
       POSTGRES_DB: cedars
       POSTGRES_USER: cedars
       POSTGRES_PASSWORD: ${CV_DB_PASSWORD}
-    volumes: [pgdata:/var/lib/postgresql/data]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cedars -d cedars"]
       interval: 2s
       timeout: 5s
       retries: 30
+    networks: [data]
+
+  postgres-roles:  # Local-only runtime/provisioner role bootstrap; safe on reused volumes.
+    image: postgres:16.11-alpine
+    entrypoint: ["psql"]
+    command: ["-h", "postgres", "-U", "cedars", "-d", "cedars", "-v", "ON_ERROR_STOP=1", "-f", "/stack/postgres-init.sql"]
+    environment:
+      PGPASSWORD: ${CV_DB_PASSWORD}
+    volumes:
+      - ./postgres-init.sql:/stack/postgres-init.sql:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+    restart: "no"
     networks: [data]
 
   redis:  # aws_elasticache_replication_group.redis: 7.1, TLS off, no persistence.
@@ -122,6 +145,20 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [data]
+
+  localstack:  # AWS Secrets Manager stand-in for project routing secrets.
+    image: localstack/localstack:3.8.1
+    environment:
+      SERVICES: secretsmanager
+      DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -fsS http://127.0.0.1:4566/_localstack/health | grep -q secretsmanager"]
       interval: 2s
       timeout: 5s
       retries: 30

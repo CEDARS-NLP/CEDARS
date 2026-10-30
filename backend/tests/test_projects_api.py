@@ -1,6 +1,9 @@
 """Tests for project CRUD, membership, and permission endpoints."""
 
 import pytest
+from sqlmodel import select
+
+from app.auth.models import User, UserRole
 
 
 async def register_and_login(client, email, name="Test User", password="pass1234"):
@@ -90,6 +93,30 @@ async def test_get_project_as_non_member_returns_403(client_factory):
 
         resp = await client_other.get(f"/api/v1/projects/{project_id}")
         assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_platform_admin_without_membership_cannot_access_project(
+    client_factory, session_factory
+):
+    async with client_factory() as client_owner, client_factory() as client_admin:
+        await register_and_login(client_owner, "owner-platform-check@test.com")
+        await register_and_login(client_admin, "admin-platform-check@test.com")
+
+        async with session_factory() as session:
+            user = await session.scalar(
+                select(User).where(User.email == "admin-platform-check@test.com")
+            )
+            user.role = UserRole.PLATFORM_ADMIN
+            await session.commit()
+
+        create_response = await client_owner.post(
+            "/api/v1/projects", json={"name": "Private to members"}
+        )
+        project_id = create_response.json()["id"]
+
+        response = await client_admin.get(f"/api/v1/projects/{project_id}")
+        assert response.status_code == 403
 
 
 @pytest.mark.asyncio

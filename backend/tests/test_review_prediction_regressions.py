@@ -27,7 +27,7 @@ from app.predictors.models import PredictorConfig, PredictorType
 from app.production.classifier import NoteClassification
 from app.production.models import NotePrediction, ProductionRun, ProductionState
 from app.production.service import execute_run, start_run
-from app.projects.models import Project, ProjectMember, ProjectRole
+from app.projects.models import Project, ProjectMember, ProjectRole, ProjectUser
 
 
 def _id() -> str:
@@ -51,6 +51,17 @@ async def _seed_project(
     session.add(project)
     await session.flush()
     session.add(ProjectMember(project_id=project_id, user_id=user_id, role=ProjectRole.ADMIN))
+    session.add(
+        ProjectUser(
+            global_user_id=user_id,
+            project_id=project_id,
+            email=user.email,
+            name=user.name,
+            role=ProjectRole.ADMIN,
+            is_investigator=True,
+        )
+    )
+    await session.flush()
     patient = Patient(
         id=patient_id,
         project_id=project_id,

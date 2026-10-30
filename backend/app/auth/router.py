@@ -12,7 +12,7 @@ from app.auth.service import (
     refresh_access_token,
     register_user,
 )
-from app.common.database import get_session
+from app.common.database import get_global_session
 from app.config import settings
 from app.dependencies import get_current_user
 
@@ -42,7 +42,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, session: AsyncSession = Depends(get_session)):
+async def register(body: RegisterRequest, session: AsyncSession = Depends(get_global_session)):
     """Create a new user account."""
     try:
         user = await register_user(session, body.email, body.name, body.password)
@@ -53,7 +53,7 @@ async def register(body: RegisterRequest, session: AsyncSession = Depends(get_se
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, response: Response,
-                session: AsyncSession = Depends(get_session)):
+                session: AsyncSession = Depends(get_global_session)):
     """Authenticate and set httpOnly auth cookies."""
     try:
         user = await authenticate_user(session, body.email, body.password)
@@ -77,7 +77,7 @@ async def login(body: LoginRequest, response: Response,
 
 @router.post("/refresh")
 async def refresh(request: Request, response: Response,
-                  session: AsyncSession = Depends(get_session)):
+                  session: AsyncSession = Depends(get_global_session)):
     """Refresh the access token using the refresh token cookie."""
     token = request.cookies.get("refresh_token")
     if not token:

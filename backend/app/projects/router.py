@@ -1,13 +1,14 @@
 """Project API router: CRUD and membership endpoints."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.common.database import get_session
+from app.common.database import get_global_session
 from app.common.errors import raise_not_found
-from app.dependencies import get_current_user, require_project_role
+from app.dependencies import get_current_user, get_project_db_session, require_project_role
 from app.projects.models import ProjectRole
+from app.projects.provisioning import ProvisioningError
 from app.projects.schemas import (
     AddMemberRequest,
     CreateProjectRequest,
@@ -45,6 +46,8 @@ def _project_response(project, role: str | None = None) -> dict:
         "llm_api_key_set": bool(project.llm_api_key),
         "created_at": project.created_at.isoformat() if project.created_at else "",
         "role": role,
+        "database_status": project.database_status,
+        "provisioning_error": project.provisioning_error,
     }
 
 
@@ -55,23 +58,26 @@ def _project_response(project, role: str | None = None) -> dict:
 async def create_project_endpoint(
     body: CreateProjectRequest,
     current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Create a new project. The authenticated user becomes the admin."""
-    project = await create_project(
-        session, current_user, body.name, body.description,
-        llm_provider=body.llm_provider,
-        llm_model=body.llm_model,
-        llm_api_base=body.llm_api_base,
-        llm_api_key=body.llm_api_key,
-    )
+    try:
+        project = await create_project(
+            session, current_user, body.name, body.description,
+            llm_provider=body.llm_provider,
+            llm_model=body.llm_model,
+            llm_api_base=body.llm_api_base,
+            llm_api_key=body.llm_api_key,
+        )
+    except ProvisioningError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     return _project_response(project, role=ProjectRole.ADMIN.value)
 
 
 @router.get("", response_model=list[ProjectResponse])
 async def list_projects_endpoint(
     current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """List all projects the authenticated user is a member of."""
     results = await list_user_projects(session, current_user.id)
@@ -82,7 +88,7 @@ async def list_projects_endpoint(
 async def get_project_endpoint(
     project_id: str,
     current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Get project details. Requires project membership."""
     project = await get_project(session, project_id)
@@ -96,7 +102,7 @@ async def get_project_endpoint(
 async def project_stats_endpoint(
     project_id: str,
     current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
 ):
     """Get comprehensive project statistics."""
     return await get_project_stats(session, project_id)
@@ -107,7 +113,7 @@ async def update_project_endpoint(
     project_id: str,
     body: UpdateProjectRequest,
     current_user: User = Depends(require_project_role("admin")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Update project details. Requires admin role."""
     updates = body.model_dump(exclude_none=True)
@@ -122,7 +128,7 @@ async def update_project_endpoint(
 async def delete_project_endpoint(
     project_id: str,
     current_user: User = Depends(require_project_role("admin")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Soft-delete a project. Requires admin role."""
     deleted = await delete_project(session, project_id)
@@ -143,10 +149,16 @@ async def add_member_endpoint(
     project_id: str,
     body: AddMemberRequest,
     current_user: User = Depends(require_project_role("admin")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Add a member to the project by email. Requires admin role."""
-    member = await add_member(session, project_id, body.email, body.role)
+    member = await add_member(
+        session,
+        project_id,
+        body.email,
+        body.role,
+        added_by_user_id=current_user.id,
+    )
     if not member:
         raise_not_found("User not found")
     # Fetch user info for the response
@@ -169,7 +181,7 @@ async def add_member_endpoint(
 async def list_members_endpoint(
     project_id: str,
     current_user: User = Depends(require_project_role("admin", "annotator", "viewer")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """List all members of the project. Requires project membership."""
     members = await list_members(session, project_id)
@@ -192,7 +204,7 @@ async def remove_member_endpoint(
     project_id: str,
     user_id: str,
     current_user: User = Depends(require_project_role("admin")),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_global_session),
 ):
     """Remove a member from the project. Requires admin role."""
     removed = await remove_member(session, project_id, user_id)

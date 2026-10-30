@@ -16,11 +16,11 @@ import asyncio
 import logging
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
+from app.common.project_registry import get_project_session_factory_for_id
 from app.common.utils import now_utc
-from app.config import settings
 from app.connectors.models import Note
 from app.evaluation.models import EvaluationSession, PatientResult, SessionStatus
 from app.pipeline.classifier import classify_patient
@@ -45,9 +45,8 @@ POLL_INTERVAL = 2
 # ── Shared helpers ────────────────────────────────────────────────
 
 
-def _make_session_factory() -> async_sessionmaker[AsyncSession]:
-    engine = create_async_engine(settings.database_url, echo=False)
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def _make_session_factory(project_id: str) -> async_sessionmaker[AsyncSession]:
+    return await get_project_session_factory_for_id(project_id)
 
 
 async def _sync_eval_session_status(
@@ -85,6 +84,7 @@ async def _sync_eval_session_status(
 
 
 async def process_single_patient(
+    project_id: str,
     pipeline_run_id: str,
     patient_task_id: int,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
@@ -94,7 +94,7 @@ async def process_single_patient(
     This is the unit of work per ARQ message. Returns a dict with outcome.
     """
     if session_factory is None:
-        session_factory = _make_session_factory()
+        session_factory = await _make_session_factory(project_id)
 
     async with session_factory() as db:
         task = await db.get(PatientTask, patient_task_id)
@@ -222,6 +222,7 @@ async def process_single_patient(
 
 
 async def execute_pipeline_run(
+    project_id: str,
     pipeline_run_id: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> dict:
@@ -235,7 +236,7 @@ async def execute_pipeline_run(
     5. Finalize run status
     """
     if session_factory is None:
-        session_factory = _make_session_factory()
+        session_factory = await _make_session_factory(project_id)
 
     async with session_factory() as check_session:
         run = await check_session.get(PipelineRun, pipeline_run_id)
@@ -282,6 +283,7 @@ async def execute_pipeline_run(
             for task in tasks:
                 await redis.enqueue_job(
                     "run_patient_task",
+                    project_id,
                     pipeline_run_id,
                     task.id,
                     _job_id=f"patient-{pipeline_run_id}-{task.id}",

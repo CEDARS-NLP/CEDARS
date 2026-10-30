@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 
 from app.annotations.models import Annotation, AnnotationPrediction
-from app.common.database import get_session
 from app.connectors.models import Patient
+from app.dependencies import get_project_db_session
 from app.pipeline.models import PipelineRun
 from app.pipeline.service import compute_run_metrics
 from app.production.classifier import NoteClassification
@@ -52,10 +52,12 @@ async def test_legacy_full_run_uses_production_coordinator_and_requires_reset_co
     ):
         from app.jobs.pipeline import execute_pipeline_run
 
-        stats = await execute_pipeline_run(legacy_run["id"], app.state.test_session_factory)
+        stats = await execute_pipeline_run(
+            project_id, legacy_run["id"], app.state.test_session_factory
+        )
 
     assert stats["patients_completed"] == 2
-    async for session in app.dependency_overrides[get_session]():
+    async for session in app.dependency_overrides[get_project_db_session]():
         production_run = await session.get(ProductionRun, production_run_id)
         legacy_run_row = await session.get(PipelineRun, legacy_run["id"])
         predictions = list(

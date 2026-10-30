@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.schemas import AuditLogResponse, PatientActivityResponse
 from app.audit.service import get_patient_activity, query_audit_log
 from app.auth.models import User
-from app.common.database import get_session
-from app.dependencies import require_project_role
+from app.dependencies import get_project_db_session, require_project_role
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}",
@@ -27,7 +26,7 @@ async def query_audit_endpoint(
     until: datetime | None = Query(None),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin")),
 ):
     """Query audit log entries with filters. Admin only."""
@@ -48,7 +47,7 @@ async def patient_activity_endpoint(
     project_id: str,
     patient_id: str,
     limit: int = Query(100, le=500),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_project_db_session),
     _user: User = Depends(require_project_role("admin", "annotator")),
 ):
     """Get activity timeline for a patient."""

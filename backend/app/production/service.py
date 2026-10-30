@@ -18,7 +18,6 @@ from app.connectors.models import Note, Patient, PatientStatus
 from app.nlp.engine import parse_query, process_note
 from app.production.classifier import NoteClassification, classify_note
 from app.production.models import NotePrediction, ProductionResult, ProductionRun, ProductionState
-from app.projects.models import Project
 
 logger = logging.getLogger(__name__)
 
@@ -606,11 +605,9 @@ async def execute_run(
     await db.commit()
     config = _value(run.config_snapshot or {}, "config", default=run.config_snapshot or {})
     query_groups = parse_query(_query(config))
-    project = await db.scalar(
-        select(Project)
-        .where(col(Project.id) == run.project_id)
-        .execution_options(populate_existing=True)
-    )
+    from app.common.project_registry import load_project
+
+    project = await load_project(run.project_id)
     api_key = project.llm_api_key if project else None
     patients = {
         patient.id: patient
