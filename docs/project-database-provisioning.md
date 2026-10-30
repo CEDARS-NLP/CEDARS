@@ -128,6 +128,29 @@ not stamped blindly. This does not upgrade or split the old shared clinical
 database into tenants. Existing project references and compatible schemas are
 deployment prerequisites.
 
+### Local startup failures
+
+If the Compose `migrate` service fails with `operator does not exist: json = unknown`
+and a statement such as `SELECT '{}'::json = '{}'`, baseline validation is comparing
+PostgreSQL JSON server defaults. The migration runner compares those defaults as
+`jsonb` so PostgreSQL can check equality. Rebuild the backend image after updating
+the runner, then retry startup:
+
+```sh
+docker compose --file docker-compose.v2.yml up --build
+```
+
+An existing volume may then report `Refusing baseline adoption; schema differs
+from frozen baseline`. Missing columns such as `projects.Investigator`,
+`projects.database_secret_ref`, and `project_members.membership_revision` identify
+an older shared-database schema, not a JSON-default mismatch. Rebuilding images
+does not upgrade that schema or split its clinical data into tenant databases.
+Do not stamp the new baseline over it or delete the volume to bypass validation.
+Back up the database and retain the compatible application release until a
+reviewed data-conversion procedure is available. If the data is disposable, use
+a separate Compose project with fresh volumes for the new release; resetting
+the existing volumes permanently deletes their contents.
+
 ## Verification limits
 
 Tests exercise separate SQLite databases, frozen-baseline upgrades and roundtrips,

@@ -12,7 +12,8 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, inspect, select
+from sqlalchemy import JSON, Engine, cast, create_engine, inspect, literal, select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
@@ -93,6 +94,31 @@ def _migration_connection(database_url: str, lock_id: int) -> Iterator[tuple[Eng
         engine.dispose()
 
 
+def _compare_server_default(
+    context,
+    inspected_column,
+    metadata_column,
+    inspected_default,
+    metadata_default,
+    rendered_metadata_default,
+) -> bool | None:
+    if (
+        context.dialect.name == "postgresql"
+        and isinstance(metadata_column.type, JSON)
+        and inspected_default is not None
+        and rendered_metadata_default is not None
+    ):
+        default_expression = (
+            literal(metadata_default.arg)
+            if isinstance(metadata_default.arg, str)
+            else text(rendered_metadata_default)
+        )
+        return not context.connection.scalar(
+            select(cast(text(inspected_default), JSONB) == cast(default_expression, JSONB))
+        )
+    return None
+
+
 def _metadata_differences(connection, metadata) -> list[tuple[Any, ...]]:
     table_names = set(metadata.tables)
 
@@ -107,7 +133,9 @@ def _metadata_differences(connection, metadata) -> list[tuple[Any, ...]]:
             "target_metadata": metadata,
             "include_name": include_name,
             "compare_type": True,
-            "compare_server_default": connection.dialect.name == "postgresql",
+            "compare_server_default": (
+                _compare_server_default if connection.dialect.name == "postgresql" else False
+            ),
         },
     )
     return compare_metadata(migration_context, metadata)
