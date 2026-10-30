@@ -13,6 +13,7 @@ from app.production.models import (
     ProductionRun,
     ProductionState,
 )
+from app.projects.models import ProjectRole, ProjectUser
 
 
 async def _login_and_project(client: AsyncClient) -> tuple[str, str]:
@@ -258,6 +259,15 @@ async def test_manual_write_rejects_patient_locked_by_another_user(client):
             password_hash="x",
         )
         session.add(other)
+        session.add(
+            ProjectUser(
+                global_user_id=other.id,
+                project_id=project_id,
+                email=other.email,
+                name=other.name,
+                role=ProjectRole.ADMIN,
+            )
+        )
         await session.flush()
         patient.locked_by = other.id
         await session.commit()

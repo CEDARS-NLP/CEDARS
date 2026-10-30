@@ -32,6 +32,8 @@ def test_migration_check_script(tmp_path, scenario, allowed, expected_code, expe
     (backend_dir / ".alembic-drift-baseline").write_text(str(allowed), encoding="utf-8")
     command_log = tmp_path / "commands.log"
     script = Path(__file__).resolve().parents[2] / "scripts" / "migration_check.sh"
+    normalized_script = tmp_path / "migration_check.sh"
+    normalized_script.write_bytes(script.read_bytes().replace(b"\r\n", b"\n"))
     harness = r"""
 git() { printf '%s\n' "$CHECK_ROOT"; }
 uv() {
@@ -78,7 +80,7 @@ bash "$CHECK_SCRIPT"
             **os.environ,
             "CHECK_ROOT": tmp_path.as_posix(),
             "CHECK_LOG": command_log.as_posix(),
-            "CHECK_SCRIPT": script.as_posix(),
+            "CHECK_SCRIPT": normalized_script.as_posix(),
             "CHECK_SCENARIO": scenario,
             "CEDARS_DATABASE_URL": "postgresql+asyncpg://unused/unused",
         },

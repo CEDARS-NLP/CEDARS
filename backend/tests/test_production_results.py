@@ -32,6 +32,7 @@ async def test_refresh_and_export_production_results(session_factory):
             )
         )
         db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.ADMIN))
+        await db.flush()
 
         patient = Patient(
             project_id=project.id,

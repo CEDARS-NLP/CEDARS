@@ -61,6 +61,7 @@ async def _seed_project(
             is_investigator=True,
         )
     )
+    await session.flush()
     patient = Patient(
         id=patient_id,
         project_id=project_id,
