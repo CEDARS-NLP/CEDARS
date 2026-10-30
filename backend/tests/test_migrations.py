@@ -227,6 +227,15 @@ def test_baseline_postgresql_ddl_has_unique_enums_and_all_named_constraints(
         assert ddl.index("CREATE TABLE patients") < ddl.index(deferred_fk)
         assert ddl.index('CREATE TABLE "Annotations"') < ddl.index(deferred_fk)
 
+        output.seek(0)
+        output.truncate(0)
+        command.downgrade(config, "p0001_project_baseline:base", sql=True)
+        downgrade_ddl = output.getvalue()
+        dropped_enum_names = re.findall(
+            r"DROP TYPE ([A-Za-z_][A-Za-z0-9_]*)", downgrade_ddl
+        )
+        assert set(dropped_enum_names) == expected_enum_names
+
 
 def test_global_postgresql_downgrade_drops_enum_types_after_tables():
     output = StringIO()

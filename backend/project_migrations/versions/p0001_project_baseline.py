@@ -877,3 +877,18 @@ def downgrade() -> None:
         "ProjectUsers",
     ):
         op.drop_table(table_name)
+
+    if op.get_context().dialect.name == "postgresql":
+        for enum_name in (
+            "connectortype",
+            "ingestionstatus",
+            "nlpjobstatus",
+            "jobtype",
+            "jobstatus",
+            "patientstatus",
+            "pipelinerunstatus",
+            "predictortype",
+            "auditaction",
+            "patienttaskstatus",
+        ):
+            op.execute(f"DROP TYPE {enum_name}")
